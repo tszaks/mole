@@ -100,6 +100,9 @@ fix_broken_login_items() {
             program=$(plutil -extract ProgramArguments.0 raw "$plist_file" 2> /dev/null || echo "")
         fi
 
+        # Expand tilde in path if present
+        program="${program/#\~/$HOME}"
+
         # Skip if no program found or program exists
         [[ -z "$program" ]] && continue
         [[ -e "$program" ]] && continue
