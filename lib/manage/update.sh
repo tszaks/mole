@@ -289,6 +289,9 @@ _perform_appstore_update() {
     appstore_log=$(mktemp "${TMPDIR:-/tmp}/mole-appstore.XXXXXX" 2> /dev/null || echo "/tmp/mole-appstore.log")
 
     if [[ "$appstore_needs_fallback" == "true" ]]; then
+        # Ensure sudo session is active and valid before starting long-running operation
+        ensure_sudo_session "App Store updates require admin access" || return 1
+
         echo -e "  ${GRAY}Installing all available updates${NC}"
         echo -e "  ${GRAY}Contacting Apple servers (this may take a few minutes)...${NC}"
         if sudo softwareupdate -i -a 2>&1 | tee "$appstore_log" | grep -v "^$"; then
@@ -302,6 +305,9 @@ _perform_appstore_update() {
             echo -e "${RED}✗${NC} Software update failed"
         fi
     else
+        # Ensure sudo session is active and valid before starting long-running operation
+        ensure_sudo_session "App Store updates require admin access" || return 1
+
         echo -e "  ${GRAY}Contacting Apple servers (this may take a few minutes)...${NC}"
         if sudo softwareupdate -i "${appstore_labels[@]}" 2>&1 | tee "$appstore_log" | grep -v "^$"; then
             echo -e "${GREEN}✓${NC} App Store apps updated"
@@ -324,6 +330,9 @@ _perform_macos_update() {
     macos_log=$(mktemp "${TMPDIR:-/tmp}/mole-macos.XXXXXX" 2> /dev/null || echo "/tmp/mole-macos.log")
 
     if [[ "$macos_needs_fallback" == "true" ]]; then
+        # Ensure sudo session is active and valid before starting long-running operation
+        ensure_sudo_session "macOS update requires admin access" || return 1
+
         echo -e "  ${GRAY}Contacting Apple servers (this may take a few minutes)...${NC}"
         if sudo softwareupdate -i -r 2>&1 | tee "$macos_log" | grep -v "^$"; then
             echo -e "${GREEN}✓${NC} macOS updated"
@@ -332,6 +341,9 @@ _perform_macos_update() {
             echo -e "${RED}✗${NC} macOS update failed"
         fi
     else
+        # Ensure sudo session is active and valid before starting long-running operation
+        ensure_sudo_session "macOS update requires admin access" || return 1
+
         echo -e "  ${GRAY}Contacting Apple servers (this may take a few minutes)...${NC}"
         if sudo softwareupdate -i "${macos_labels[@]}" 2>&1 | tee "$macos_log" | grep -v "^$"; then
             echo -e "${GREEN}✓${NC} macOS updated"
