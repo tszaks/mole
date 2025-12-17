@@ -156,5 +156,3 @@ perform_updates() {
         return 1
     fi
 }
-
-

@@ -196,7 +196,7 @@ show_version() {
 
     local sip_status
     if command -v csrutil > /dev/null; then
-        sip_status=$(csrutil status 2>/dev/null | grep -o "enabled\|disabled" || echo "Unknown")
+        sip_status=$(csrutil status 2> /dev/null | grep -o "enabled\|disabled" || echo "Unknown")
         # Capitalize first letter
         sip_status="$(tr '[:lower:]' '[:upper:]' <<< ${sip_status:0:1})${sip_status:1}"
     else
@@ -204,7 +204,7 @@ show_version() {
     fi
 
     local disk_free
-    disk_free=$(df -h / 2>/dev/null | awk 'NR==2 {print $4}' || echo "Unknown")
+    disk_free=$(df -h / 2> /dev/null | awk 'NR==2 {print $4}' || echo "Unknown")
 
     local install_method="Manual"
     if is_homebrew_install; then

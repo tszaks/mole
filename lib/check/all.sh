@@ -280,9 +280,9 @@ get_software_updates() {
     pending_updates=$(defaults read /Library/Preferences/com.apple.SoftwareUpdate LastRecommendedUpdatesAvailable 2> /dev/null || echo "0")
 
     if [[ "$pending_updates" -gt 0 ]]; then
-         echo "Updates Available"
+        echo "Updates Available"
     else
-         echo ""
+        echo ""
     fi
 }
 
