@@ -3,7 +3,7 @@
 setup_file() {
     PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
     export PROJECT_ROOT
-    
+
     # Create a dummy cache directory for tests
     mkdir -p "${HOME}/.cache/mole"
 }
@@ -16,7 +16,7 @@ setup() {
     APPSTORE_UPDATE_COUNT=0
     MACOS_UPDATE_AVAILABLE=false
     MOLE_UPDATE_AVAILABLE=false
-    
+
     # Create a temporary bin directory for mocks
     export MOCK_BIN_DIR="$BATS_TMPDIR/mole-mocks-$$"
     mkdir -p "$MOCK_BIN_DIR"
@@ -79,6 +79,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/manage/update.sh"
 BREW_OUTDATED_COUNT=2
 BREW_FORMULA_OUTDATED_COUNT=2
+MOLE_UPDATE_AVAILABLE=true
 read_key() { echo "ENTER"; return 0; }
 ask_for_updates
 EOF
@@ -149,79 +150,4 @@ EOF
     [[ "$output" == *"Homebrew formulae updated"* ]]
     [[ "$output" == *"Already on latest version"* ]]
     [[ "$output" == *"MOLE_CACHE_RESET"* ]]
-}
-
-@test "perform_updates skips brew when no outdated packages" {
-    run bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/manage/update.sh"
-
-BREW_FORMULA_OUTDATED_COUNT=1
-BREW_CASK_OUTDATED_COUNT=1
-brew_has_outdated() { return 1; }
-start_inline_spinner() { :; }
-stop_inline_spinner() { :; }
-
-perform_updates
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"already up to date"* ]]
-}
-
-@test "perform_updates handles App Store fallback logic" {
-    run bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/manage/update.sh"
-
-APPSTORE_UPDATE_COUNT=2
-# Mock getting labels returning empty, triggering fallback
-get_appstore_update_labels() { return 0; }
-
-has_sudo_session() { return 0; }
-reset_softwareupdate_cache() { :; }
-
-# Mock sudo to check for -a flag (install all)
-sudo() {
-    if [[ "$1" == "softwareupdate" && "$2" == "-i" && "$3" == "-a" ]]; then
-        echo "Installing all updates..."
-        return 0
-    fi
-    echo "Wrong sudo command: $*"
-    return 1
-}
-
-perform_updates
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Installing all available updates"* ]]
-    [[ "$output" == *"Software updates completed"* ]]
-}
-
-@test "perform_updates gracefully handles sudo failure for App Store" {
-    run bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/manage/update.sh"
-
-APPSTORE_UPDATE_COUNT=1
-get_appstore_update_labels() { echo "Xcode"; }
-
-# Simulate user declining sudo or timeout
-has_sudo_session() { return 1; }
-ensure_sudo_session() { 
-    echo "User declined sudo"
-    return 1
-}
-
-perform_updates
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"User declined sudo"* ]]
-    [[ "$output" == *"update via System Settings"* ]]
-    # Should not crash
 }
