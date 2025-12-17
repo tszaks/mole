@@ -189,27 +189,18 @@ EOF
     [[ "$output" == *"2 formula"* ]]
 }
 
-@test "check_appstore_updates reports count from softwareupdate" {
+@test "check_appstore_updates is skipped for performance" {
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
 
-softwareupdate() {
-    echo "* Label: AppOne"
-    echo "* Label: AppTwo"
-    return 0
-}
-
-start_inline_spinner(){ :; }
-stop_inline_spinner(){ :; }
-
 check_appstore_updates
+echo "COUNT=$APPSTORE_UPDATE_COUNT"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"App Store"* ]]
-    [[ "$output" == *"2 apps"* ]]
+    [[ "$output" == *"COUNT=0"* ]]
 }
 
 @test "check_macos_update warns when update available" {
