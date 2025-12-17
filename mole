@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/core/common.sh"
 
 # Version info
-VERSION="1.13.5"
+VERSION="1.13.6"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
 # Check if Touch ID is already configured
@@ -241,6 +241,10 @@ show_help() {
     printf "  %s%-28s%s %s\n" "$GREEN" "mo clean --whitelist" "$NC" "Manage protected caches"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo uninstall --force-rescan" "$NC" "Rescan apps and refresh cache"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --whitelist" "$NC" "Manage protected items"
+    echo
+    printf "%s%s%s\n" "$BLUE" "ADVANCED" "$NC"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo purge" "$NC" "Remove old project artifacts"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --dry-run" "$NC" "Preview project cleanup"
     echo
     printf "%s%s%s\n" "$BLUE" "OPTIONS" "$NC"
     printf "  %s%-28s%s %s\n" "$GREEN" "--debug" "$NC" "Show detailed operation logs"
@@ -771,6 +775,9 @@ main() {
             ;;
         "status")
             exec "$SCRIPT_DIR/bin/status.sh" "${args[@]:1}"
+            ;;
+        "purge")
+            exec "$SCRIPT_DIR/bin/purge.sh" "${args[@]:1}"
             ;;
         "touchid")
             exec "$SCRIPT_DIR/bin/touchid.sh" "${args[@]:1}"

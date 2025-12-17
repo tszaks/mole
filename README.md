@@ -47,6 +47,7 @@ mo uninstall                 # Remove apps + leftovers
 mo optimize                  # Refresh caches & services
 mo analyze                   # Visual disk explorer
 mo status                    # Live system health dashboard
+mo purge                     # Clean project build artifacts
 
 mo touchid                   # Configure Touch ID for sudo
 mo update                    # Update Mole
@@ -180,6 +181,19 @@ Proxy   HTTP · 192.168.1.100             Terminal   ▮▯▯▯▯  12.5%
 ```
 
 Health score based on CPU, memory, disk, temperature, and I/O load. Color-coded by range.
+
+### Project Artifact Purge
+
+Remove build artifacts from old projects to reclaim disk space. Fast parallel scanning targets `node_modules`, `target`, `build`, `dist`, `.next`, `.gradle`, `venv`, and similar directories.
+
+```bash
+mo purge --dry-run    # Preview cleanup (recommended)
+mo purge              # Clean old project artifacts
+```
+
+**Safety:** Only scans common project directories, skips recently modified projects (7 days), and requires artifacts at least 2 levels deep to avoid system files.
+
+**Performance:** Uses macOS Spotlight index (mdfind) for lightning-fast scanning, with parallel search across multiple directories.
 
 ## Quick Launchers
 

@@ -477,7 +477,7 @@ start_cleanup() {
     echo ""
 
     if [[ "$DRY_RUN" != "true" && -t 0 ]]; then
-        echo -e "${YELLOW}☻${NC} First time? Run ${GRAY}mo clean --dry-run${NC} first to preview changes"
+        echo -e "${GRAY}${ICON_SOLID} Use --dry-run to preview, --whitelist to manage protected paths${NC}"
     fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
