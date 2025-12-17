@@ -18,7 +18,8 @@ format_app_display() {
     [[ "$size" != "0" && "$size" != "" && "$size" != "Unknown" ]] && size_str="$size"
 
     # Calculate available width for app name based on terminal width
-    local terminal_width=$(tput cols 2> /dev/null || echo 80)
+    # use passed width or calculate it (but calculation is slow in loops)
+    local terminal_width="${4:-$(tput cols 2> /dev/null || echo 80)}"
     local fixed_width=28
     local available_width=$((terminal_width - fixed_width))
 
@@ -58,7 +59,8 @@ select_apps_for_uninstall() {
     # Build menu options
     # Show loading for large lists (formatting can be slow due to width calculations)
     local app_count=${#apps_data[@]}
-    if [[ $app_count -gt 30 ]]; then
+    local terminal_width=$(tput cols 2> /dev/null || echo 80)
+    if [[ $app_count -gt 100 ]]; then
         if [[ -t 2 ]]; then
             printf "\rPreparing %d applications...    " "$app_count" >&2
         fi
@@ -72,7 +74,7 @@ select_apps_for_uninstall() {
     for app_data in "${apps_data[@]}"; do
         # Keep extended field 7 (size_kb) if present
         IFS='|' read -r epoch _ display_name _ size last_used size_kb <<< "$app_data"
-        menu_options+=("$(format_app_display "$display_name" "$size" "$last_used")")
+        menu_options+=("$(format_app_display "$display_name" "$size" "$last_used" "$terminal_width")")
         # Build csv lists (avoid trailing commas)
         if [[ $idx -eq 0 ]]; then
             epochs_csv="${epoch:-0}"
@@ -85,7 +87,7 @@ select_apps_for_uninstall() {
     done
 
     # Clear loading message
-    if [[ $app_count -gt 30 ]]; then
+    if [[ $app_count -gt 100 ]]; then
         if [[ -t 2 ]]; then
             printf "\r\033[K" >&2
         fi
