@@ -45,7 +45,7 @@ _request_password() {
     # Save original terminal settings and ensure they're restored on exit
     local stty_orig
     stty_orig=$(stty -g < "$tty_path" 2> /dev/null || echo "")
-    trap '[[ -n "$stty_orig" ]] && stty "$stty_orig" < "$tty_path" 2> /dev/null || true' RETURN
+    trap '[[ -n "${stty_orig:-}" ]] && stty "${stty_orig:-}" < "$tty_path" 2> /dev/null || true' RETURN
 
     while ((attempts < 3)); do
         local password=""

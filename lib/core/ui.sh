@@ -17,6 +17,158 @@ clear_screen() { printf '\033[2J\033[H'; }
 hide_cursor() { [[ -t 1 ]] && printf '\033[?25l' >&2 || true; }
 show_cursor() { [[ -t 1 ]] && printf '\033[?25h' >&2 || true; }
 
+# Calculate display width of a string (CJK characters count as 2)
+# Args: $1 - string to measure
+# Returns: display width
+# Note: Works correctly even when LC_ALL=C is set
+get_display_width() {
+    local str="$1"
+
+    # Check Python availability once and cache the result
+    # Use Python for accurate width calculation if available (cached check)
+    if [[ -z "${MOLE_PYTHON_AVAILABLE:-}" ]]; then
+        if command -v python3 > /dev/null 2>&1; then
+            export MOLE_PYTHON_AVAILABLE=1
+        else
+            export MOLE_PYTHON_AVAILABLE=0
+        fi
+    fi
+
+    if [[ "${MOLE_PYTHON_AVAILABLE:-0}" == "1" ]]; then
+        python3 -c "
+import sys
+import unicodedata
+
+s = sys.argv[1]
+width = 0
+for char in s:
+    # East Asian Width property
+    ea_width = unicodedata.east_asian_width(char)
+    if ea_width in ('F', 'W'):  # Fullwidth or Wide
+        width += 2
+    else:
+        width += 1
+print(width)
+" "$str" 2>/dev/null && return
+    fi
+
+    # Fallback: Use wc with UTF-8 locale temporarily
+    local saved_lc_all="${LC_ALL:-}"
+    local saved_lang="${LANG:-}"
+
+    export LC_ALL=en_US.UTF-8
+    export LANG=en_US.UTF-8
+
+    local char_count byte_count width
+    char_count=$(printf '%s' "$str" | wc -m 2>/dev/null | tr -d ' ')
+    byte_count=$(printf '%s' "$str" | wc -c 2>/dev/null | tr -d ' ')
+
+    # Restore locale
+    if [[ -n "$saved_lc_all" ]]; then
+        export LC_ALL="$saved_lc_all"
+    else
+        unset LC_ALL
+    fi
+    if [[ -n "$saved_lang" ]]; then
+        export LANG="$saved_lang"
+    else
+        unset LANG
+    fi
+
+    # Estimate: if byte_count > char_count, we have multibyte chars
+    # Rough approximation: each multibyte char (CJK) is ~3 bytes and width 2
+    # ASCII chars are 1 byte and width 1
+    if [[ $byte_count -gt $char_count ]]; then
+        local multibyte_chars=$((byte_count - char_count))
+        # Assume most multibyte chars are 2 bytes extra (3 bytes total for UTF-8 CJK)
+        local cjk_chars=$((multibyte_chars / 2))
+        local ascii_chars=$((char_count - cjk_chars))
+        width=$((ascii_chars + cjk_chars * 2))
+    else
+        width=$char_count
+    fi
+
+    echo "$width"
+}
+
+# Truncate string by display width (handles CJK correctly)
+# Args: $1 - string, $2 - max display width
+# Returns: truncated string with "..." if needed
+truncate_by_display_width() {
+    local str="$1"
+    local max_width="$2"
+    local current_width
+    current_width=$(get_display_width "$str")
+
+    if [[ $current_width -le $max_width ]]; then
+        echo "$str"
+        return
+    fi
+
+    # Use Python for accurate truncation if available (use cached check)
+    if [[ "${MOLE_PYTHON_AVAILABLE:-0}" == "1" ]]; then
+        python3 -c "
+import sys
+import unicodedata
+
+s = sys.argv[1]
+max_w = int(sys.argv[2])
+result = ''
+width = 0
+
+for char in s:
+    ea_width = unicodedata.east_asian_width(char)
+    char_width = 2 if ea_width in ('F', 'W') else 1
+
+    if width + char_width + 3 > max_w:  # +3 for '...'
+        break
+
+    result += char
+    width += char_width
+
+print(result + '...')
+" "$str" "$max_width" 2>/dev/null && return
+    fi
+
+    # Fallback: Use UTF-8 locale for proper string handling
+    local saved_lc_all="${LC_ALL:-}"
+    local saved_lang="${LANG:-}"
+    export LC_ALL=en_US.UTF-8
+    export LANG=en_US.UTF-8
+
+    local truncated=""
+    local width=0
+    local i=0
+    local char char_width
+
+    while [[ $i -lt ${#str} ]]; do
+        char="${str:$i:1}"
+        char_width=$(get_display_width "$char")
+
+        if ((width + char_width + 3 > max_width)); then
+            break
+        fi
+
+        truncated+="$char"
+        ((width += char_width))
+        ((i++))
+    done
+
+    # Restore locale
+    if [[ -n "$saved_lc_all" ]]; then
+        export LC_ALL="$saved_lc_all"
+    else
+        unset LC_ALL
+    fi
+    if [[ -n "$saved_lang" ]]; then
+        export LANG="$saved_lang"
+    else
+        unset LANG
+    fi
+
+    echo "${truncated}..."
+}
+
 # Keyboard input - read single keypress
 read_key() {
     local key rest read_status
