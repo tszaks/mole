@@ -86,13 +86,13 @@ perform_purge() {
 
     # Read stats
     if [[ -f "$SCRIPT_DIR/../.mole_cleanup_stats" ]]; then
-        total_size_cleaned=$(cat "$SCRIPT_DIR/../.mole_cleanup_stats" 2>/dev/null || echo "0")
+        total_size_cleaned=$(cat "$SCRIPT_DIR/../.mole_cleanup_stats" 2> /dev/null || echo "0")
         rm -f "$SCRIPT_DIR/../.mole_cleanup_stats"
     fi
 
     # Read count
     if [[ -f "$SCRIPT_DIR/../.mole_cleanup_count" ]]; then
-        total_items_cleaned=$(cat "$SCRIPT_DIR/../.mole_cleanup_count" 2>/dev/null || echo "0")
+        total_items_cleaned=$(cat "$SCRIPT_DIR/../.mole_cleanup_count" 2> /dev/null || echo "0")
         rm -f "$SCRIPT_DIR/../.mole_cleanup_count"
     fi
 

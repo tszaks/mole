@@ -7,19 +7,19 @@ set -euo pipefail
 # Targets to look for (heavy build artifacts)
 readonly PURGE_TARGETS=(
     "node_modules"
-    "target"       # Rust, Maven
-    "build"        # Gradle, various
-    "dist"         # JS builds
-    "venv"         # Python
-    ".venv"        # Python
-    ".gradle"      # Gradle local
-    "__pycache__"  # Python
-    ".next"        # Next.js
-    ".nuxt"        # Nuxt.js
-    ".output"      # Nuxt.js
-    "vendor"       # PHP Composer
-    "obj"          # C# / Unity
-    ".turbo"       # Turborepo cache
+    "target"        # Rust, Maven
+    "build"         # Gradle, various
+    "dist"          # JS builds
+    "venv"          # Python
+    ".venv"         # Python
+    ".gradle"       # Gradle local
+    "__pycache__"   # Python
+    ".next"         # Next.js
+    ".nuxt"         # Nuxt.js
+    ".output"       # Nuxt.js
+    "vendor"        # PHP Composer
+    "obj"           # C# / Unity
+    ".turbo"        # Turborepo cache
     ".parcel-cache" # Parcel bundler
 )
 
@@ -97,9 +97,9 @@ scan_purge_targets() {
         done
 
         # Run fd command
-        fd "${fd_args[@]}" . "$search_path" 2>/dev/null | while IFS= read -r item; do
+        fd "${fd_args[@]}" . "$search_path" 2> /dev/null | while IFS= read -r item; do
             if is_safe_project_artifact "$item" "$search_path"; then
-                 echo "$item"
+                echo "$item"
             fi
         done | filter_nested_artifacts > "$output_file"
     else
@@ -112,8 +112,8 @@ scan_purge_targets() {
         # 1. Directories to prune (ignore completely)
         local prune_dirs=(".git" "Library" ".Trash" "Applications")
         for dir in "${prune_dirs[@]}"; do
-             # -name "DIR" -prune -o
-             prune_args+=("-name" "$dir" "-prune" "-o")
+            # -name "DIR" -prune -o
+            prune_args+=("-name" "$dir" "-prune" "-o")
         done
 
         # 2. Targets to find (print AND prune)
@@ -137,7 +137,7 @@ scan_purge_targets() {
 
         # Excludes
         for dir in "${prune_dirs[@]}"; do
-             find_expr+=("-name" "$dir" "-prune" "-o")
+            find_expr+=("-name" "$dir" "-prune" "-o")
         done
 
         # Targets
@@ -153,7 +153,7 @@ scan_purge_targets() {
         done
 
         command find "$search_path" -mindepth 2 -maxdepth 5 -type d \
-            \( "${find_expr[@]}" \) 2>/dev/null | while IFS= read -r item; do
+            \( "${find_expr[@]}" \) 2> /dev/null | while IFS= read -r item; do
 
             if is_safe_project_artifact "$item" "$search_path"; then
                 echo "$item"
@@ -195,15 +195,15 @@ is_recently_modified() {
 
     # Check modification time (macOS compatible)
     local mod_time
-    mod_time=$(stat -f "%m" "$path" 2>/dev/null || stat -c "%Y" "$path" 2>/dev/null || echo "0")
+    mod_time=$(stat -f "%m" "$path" 2> /dev/null || stat -c "%Y" "$path" 2> /dev/null || echo "0")
     local current_time=$(date +%s)
     local age_seconds=$((current_time - mod_time))
     local age_in_days=$((age_seconds / 86400))
 
     if [[ $age_in_days -lt $age_days ]]; then
-        return 0  # Recently modified
+        return 0 # Recently modified
     else
-        return 1  # Old enough to clean
+        return 1 # Old enough to clean
     fi
 }
 
@@ -212,7 +212,7 @@ is_recently_modified() {
 get_dir_size_kb() {
     local path="$1"
     if [[ -d "$path" ]]; then
-        du -sk "$path" 2>/dev/null | awk '{print $1}' || echo "0"
+        du -sk "$path" 2> /dev/null | awk '{print $1}' || echo "0"
     else
         echo "0"
     fi
@@ -252,12 +252,12 @@ safe_clean() {
                 local original_prefix="${MOLE_SPINNER_PREFIX:-}"
                 MOLE_SPINNER_PREFIX="" start_inline_spinner "Cleaning $description (~${size_mb}MB)..."
 
-                rm -rf "$path" 2>/dev/null || true
+                rm -rf "$path" 2> /dev/null || true
 
                 stop_inline_spinner
                 MOLE_SPINNER_PREFIX="$original_prefix"
             else
-                rm -rf "$path" 2>/dev/null || true
+                rm -rf "$path" 2> /dev/null || true
             fi
 
             if [[ ! -e "$path" ]]; then
@@ -326,11 +326,11 @@ clean_project_artifacts() {
     cleanup_scan() {
         # Kill all background scans
         for pid in "${scan_pids[@]}"; do
-            kill "$pid" 2>/dev/null || true
+            kill "$pid" 2> /dev/null || true
         done
         # Clean up temp files
         for temp in "${scan_temps[@]}"; do
-            rm -f "$temp" 2>/dev/null || true
+            rm -f "$temp" 2> /dev/null || true
         done
         if [[ -t 1 ]]; then
             stop_inline_spinner
@@ -363,7 +363,7 @@ clean_project_artifacts() {
 
     # Wait for all scans to complete
     for pid in "${scan_pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
+        wait "$pid" 2> /dev/null || true
     done
 
     if [[ -t 1 ]]; then
