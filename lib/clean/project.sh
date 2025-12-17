@@ -51,7 +51,7 @@ is_safe_project_artifact() {
 
     # Must not be a direct child of HOME directory
     # e.g., ~/.gradle is NOT safe, but ~/Projects/foo/.gradle IS safe
-    local relative_path="${path#$search_path/}"
+    local relative_path="${path#"$search_path"/}"
     local depth=$(echo "$relative_path" | tr -cd '/' | wc -c)
 
     # Require at least 1 level deep (inside a project folder)
@@ -323,6 +323,7 @@ clean_project_artifacts() {
     # Set up cleanup on interrupt
     local scan_pids=()
     local scan_temps=()
+    # shellcheck disable=SC2329
     cleanup_scan() {
         # Kill all background scans
         for pid in "${scan_pids[@]}"; do

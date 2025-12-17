@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo "==============================="
-echo "  Mole Test Runner"
+echo "Mole Test Runner"
 echo "==============================="
 echo ""
 

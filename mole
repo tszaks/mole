@@ -198,7 +198,7 @@ show_version() {
     if command -v csrutil > /dev/null; then
         sip_status=$(csrutil status 2> /dev/null | grep -o "enabled\|disabled" || echo "Unknown")
         # Capitalize first letter
-        sip_status="$(tr '[:lower:]' '[:upper:]' <<< ${sip_status:0:1})${sip_status:1}"
+        sip_status="$(tr '[:lower:]' '[:upper:]' <<< "${sip_status:0:1}")${sip_status:1}"
     else
         sip_status="Unknown"
     fi
