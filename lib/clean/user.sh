@@ -118,7 +118,16 @@ clean_sandboxed_app_caches() {
 
         # Extract bundle ID and check protection status early
         local bundle_id=$(basename "$container_dir")
+        local bundle_id_lower=$(echo "$bundle_id" | tr '[:upper:]' '[:lower:]')
+
+        # Check explicit critical system components (case-insensitive regex)
+        if [[ "$bundle_id_lower" =~ backgroundtaskmanagement || "$bundle_id_lower" =~ loginitems ]]; then
+            continue
+        fi
+
         if should_protect_data "$bundle_id"; then
+            continue
+        elif should_protect_data "$bundle_id_lower"; then
             continue
         fi
 
