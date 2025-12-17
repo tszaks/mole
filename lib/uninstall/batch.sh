@@ -406,7 +406,12 @@ batch_uninstall_applications() {
         summary_details+=("No applications were uninstalled.")
     fi
 
-    print_summary_block "$summary_status" "Uninstall complete" "${summary_details[@]}"
+    local title="Uninstall complete"
+    if [[ "$summary_status" == "warn" ]]; then
+        title="Uninstall incomplete"
+    fi
+
+    print_summary_block "$title" "${summary_details[@]}"
     printf '\n'
 
     # Clean up Dock entries for uninstalled apps

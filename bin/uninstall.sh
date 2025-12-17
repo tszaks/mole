@@ -599,22 +599,20 @@ main() {
         rm -f "$apps_file"
 
         # Pause before looping back
-        echo -e "${GRAY}Press Enter to return to application list, ESC to exit...${NC}"
+        echo -e "${GRAY}Press Enter to return to application list, any other key to exit...${NC}"
         local key
         IFS= read -r -s -n1 key || key=""
-        drain_pending_input # Clean up any escape sequence remnants
-        case "$key" in
-            $'\e' | q | Q)
-                show_cursor
-                return 0
-                ;;
-            *)
-                # Continue loop
-                ;;
-        esac
+        drain_pending_input
 
-        # Reset force_rescan to false for subsequent loops,
-        # but relying on batch_uninstall's cache deletion for actual update
+        # Logic: Enter = continue loop, any other key = exit
+        if [[ -z "$key" ]]; then
+            : # Enter pressed, continue loop
+        else
+            show_cursor
+            return 0
+        fi
+
+        # Reset force_rescan to false for subsequent loops
         force_rescan=false
     done
 }
