@@ -96,25 +96,33 @@ opt_log_cleanup() {
 opt_recent_items() {
     echo -e "${BLUE}${ICON_ARROW}${NC} Clearing recent items lists..."
     local shared_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"
+
+    # Target only the global recent item lists to avoid touching per-app/System Settings SFL files (Issue #136)
+    local -a recent_lists=(
+        "$shared_dir/com.apple.LSSharedFileList.RecentApplications.sfl2"
+        "$shared_dir/com.apple.LSSharedFileList.RecentDocuments.sfl2"
+        "$shared_dir/com.apple.LSSharedFileList.RecentServers.sfl2"
+        "$shared_dir/com.apple.LSSharedFileList.RecentHosts.sfl2"
+        "$shared_dir/com.apple.LSSharedFileList.RecentApplications.sfl"
+        "$shared_dir/com.apple.LSSharedFileList.RecentDocuments.sfl"
+        "$shared_dir/com.apple.LSSharedFileList.RecentServers.sfl"
+        "$shared_dir/com.apple.LSSharedFileList.RecentHosts.sfl"
+    )
+
     if [[ -d "$shared_dir" ]]; then
-        # Use safe removal with protection checks instead of find -delete
-        # This prevents accidental deletion of System Settings files
         local deleted=0
-        while IFS= read -r -d '' sfl_file; do
-            # Check if file should be protected (System Settings, etc.)
+        for sfl_file in "${recent_lists[@]}"; do
+            # Skip missing files and any protected paths
+            [[ -e "$sfl_file" ]] || continue
             if should_protect_path "$sfl_file"; then
                 continue
             fi
             if safe_remove "$sfl_file" true; then
                 ((deleted++))
             fi
-        done < <(command find "$shared_dir" -maxdepth 5 -name "*.sfl2" -type f -print0 2> /dev/null)
+        done
 
-        if [[ $deleted -gt 0 ]]; then
-            echo -e "${GREEN}${ICON_SUCCESS}${NC} Shared file lists cleared ($deleted files)"
-        else
-            echo -e "${GREEN}${ICON_SUCCESS}${NC} Shared file lists cleared"
-        fi
+        echo -e "${GREEN}${ICON_SUCCESS}${NC} Shared file lists cleared${deleted:+ ($deleted files)}"
     fi
 
     rm -f "$HOME/Library/Preferences/com.apple.recentitems.plist" 2> /dev/null || true
