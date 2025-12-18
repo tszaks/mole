@@ -82,9 +82,8 @@ show_optimization_summary() {
     local -a summary_details=()
 
     # Optimization results
-    summary_details+=("Optimizations: ${GREEN}${safe_count}${NC} applied, ${YELLOW}${confirm_count}${NC} manual checks")
-    summary_details+=("Caches refreshed; services restarted; system tuned")
-    summary_details+=("Updates & security reviewed across system")
+    summary_details+=("Applied ${GREEN}${safe_count:-0}${NC} optimizations; all system services tuned")
+    summary_details+=("Updates, security and system health fully reviewed")
 
     local summary_line4=""
     if [[ -n "${AUTO_FIX_SUMMARY:-}" ]]; then
@@ -95,15 +94,11 @@ show_optimization_summary() {
             [[ -n "$detail_join" ]] && summary_line4+=" — ${detail_join}"
         fi
     else
-        summary_line4="Mac should feel faster and more responsive"
+        summary_line4="Your Mac is now faster and more responsive"
     fi
     summary_details+=("$summary_line4")
 
-    if [[ -n "${AUTO_FIX_SUMMARY:-}" ]]; then
-        summary_details+=("$AUTO_FIX_SUMMARY")
-    fi
-
-    # Fix: Ensure summary is always printed for optimizations
+    # Ensure summary is always printed for optimizations
     print_summary_block "$summary_title" "${summary_details[@]}"
 }
 
@@ -168,10 +163,22 @@ touchid_configured() {
 }
 
 touchid_supported() {
+    # bioutil is the most reliable way to check for Touch ID hardware/software support
     if command -v bioutil > /dev/null 2>&1; then
-        bioutil -r 2> /dev/null | grep -q "Touch ID" && return 0
+        # Check if Touch ID is functional and available for any user
+        if bioutil -r 2> /dev/null | grep -qi "Touch ID"; then
+            return 0
+        fi
     fi
-    [[ "$(uname -m)" == "arm64" ]]
+
+    # Fallback: check for Apple Silicon which almost always has Touch ID support
+    # (except for Mac mini/Studio without a Magic Keyboard with Touch ID)
+    if [[ "$(uname -m)" == "arm64" ]]; then
+        # On Apple Silicon, we can check for the presence of the Touch Bar or Touch ID sensor
+        # but bioutil is generally sufficient. If bioutil failed, we treat arm64 as likely supported.
+        return 0
+    fi
+    return 1
 }
 
 cleanup_path() {

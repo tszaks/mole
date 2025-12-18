@@ -188,7 +188,7 @@ safe_find_delete() {
             -maxdepth 5 \
             -name "$pattern" \
             -type "$type_filter" \
-            -delete 2> /dev/null || true
+            -delete 2> /dev/null || true # Suppress expected errors when files are removed or protected by other processes
     else
         # Delete files older than age_days
         command find "$base_dir" \
@@ -196,7 +196,7 @@ safe_find_delete() {
             -name "$pattern" \
             -type "$type_filter" \
             -mtime "+$age_days" \
-            -delete 2> /dev/null || true
+            -delete 2> /dev/null || true # Suppress expected errors when files are removed or protected by other processes
     fi
 
     return 0
@@ -237,14 +237,14 @@ safe_sudo_find_delete() {
             -maxdepth 5 \
             -name "$pattern" \
             -type "$type_filter" \
-            -delete 2> /dev/null || true
+            -delete 2> /dev/null || true # Ignore transient errors for system files that might be in use or protected
     else
         sudo find "$base_dir" \
             -maxdepth 5 \
             -name "$pattern" \
             -type "$type_filter" \
             -mtime "+$age_days" \
-            -delete 2> /dev/null || true
+            -delete 2> /dev/null || true # Ignore transient errors for system files that might be in use or protected
     fi
 
     return 0

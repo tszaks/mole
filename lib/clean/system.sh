@@ -29,14 +29,16 @@ clean_deep_system() {
     # Clean Library Updates safely - skip if SIP is enabled to avoid error messages
     # SIP-protected files in /Library/Updates cannot be deleted even with sudo
     if [[ -d "/Library/Updates" && ! -L "/Library/Updates" ]]; then
-        if is_sip_enabled; then
-            # SIP is enabled, skip /Library/Updates entirely to avoid error messages
-            # These files are system-protected and cannot be removed
-            : # No-op, silently skip
-        else
+        if ! is_sip_enabled; then
             # SIP is disabled, attempt cleanup with restricted flag check
             local updates_cleaned=0
             while IFS= read -r -d '' item; do
+                # Validate path format (must be direct child of /Library/Updates)
+                if [[ -z "$item" ]] || [[ ! "$item" =~ ^/Library/Updates/[^/]+$ ]]; then
+                    debug_log "Skipping malformed path: $item"
+                    continue
+                fi
+
                 # Skip system-protected files (restricted flag)
                 local item_flags
                 item_flags=$(command stat -f%Sf "$item" 2> /dev/null || echo "")
@@ -81,12 +83,22 @@ clean_deep_system() {
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning system caches..."
     fi
     local code_sign_cleaned=0
+    local found_count=0
+
+    # Stream processing with progress updates (efficient for large directories)
+    # Reduce timeout to 5s for faster completion when no caches exist
     while IFS= read -r -d '' cache_dir; do
-        debug_log "Found code sign cache: $cache_dir"
         if safe_remove "$cache_dir" true; then
             ((code_sign_cleaned++))
         fi
-    done < <(find /private/var/folders -type d -name "*.code_sign_clone" -path "*/X/*" -print0 2> /dev/null || true)
+        ((found_count++))
+
+        # Update spinner every 50 items to show progress
+        if [[ -t 1 ]] && ((found_count % 50 == 0)); then
+            stop_inline_spinner
+            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning system caches... ($found_count found)"
+        fi
+    done < <(run_with_timeout 5 command find /private/var/folders -type d -name "*.code_sign_clone" -path "*/X/*" -print0 2> /dev/null || true)
 
     if [[ -t 1 ]]; then stop_inline_spinner; fi
 
@@ -103,52 +115,89 @@ clean_deep_system() {
     log_success "Power logs"
 }
 
-# Clean Time Machine failed backups
+# Clean Time Machine incomplete backups
 clean_time_machine_failed_backups() {
     local tm_cleaned=0
 
-    # Check if Time Machine is configured
-    if command -v tmutil > /dev/null 2>&1; then
-        if tmutil destinationinfo 2>&1 | grep -q "No destinations configured"; then
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No failed Time Machine backups found"
-            return 0
+    # Check if tmutil is available
+    if ! command -v tmutil > /dev/null 2>&1; then
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        return 0
+    fi
+
+    # Start spinner early (before potentially slow tmutil command)
+    if [[ -t 1 ]]; then
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking Time Machine configuration..."
+    fi
+    local spinner_active=true
+
+    # Check if Time Machine is configured (with short timeout for faster response)
+    local tm_info
+    tm_info=$(run_with_timeout 2 tmutil destinationinfo 2>&1 || echo "failed")
+    if [[ "$tm_info" == *"No destinations configured"* || "$tm_info" == "failed" ]]; then
+        if [[ "$spinner_active" == "true" && -t 1 ]]; then
+            stop_inline_spinner
         fi
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        return 0
     fi
 
     if [[ ! -d "/Volumes" ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No failed Time Machine backups found"
+        if [[ "$spinner_active" == "true" && -t 1 ]]; then
+            stop_inline_spinner
+        fi
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
 
     # Skip if backup is running
     if pgrep -x "backupd" > /dev/null 2>&1; then
+        if [[ "$spinner_active" == "true" && -t 1 ]]; then
+            stop_inline_spinner
+        fi
         echo -e "  ${YELLOW}!${NC} Time Machine backup in progress, skipping cleanup"
         return 0
     fi
 
+    # Update spinner message for volume scanning
+    if [[ "$spinner_active" == "true" && -t 1 ]]; then
+        stop_inline_spinner
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking backup volumes..."
+    fi
+
+    # Fast pre-scan: check which volumes have Backups.backupdb (avoid expensive tmutil checks)
+    local -a backup_volumes=()
     for volume in /Volumes/*; do
         [[ -d "$volume" ]] || continue
-
-        # Skip system and network volumes
         [[ "$volume" == "/Volumes/MacintoshHD" || "$volume" == "/" ]] && continue
-
-        if [[ -t 1 ]]; then
-            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning backup volumes..."
-        fi
-
-        # Skip if volume is a symlink (security check)
         [[ -L "$volume" ]] && continue
 
-        # Check if this is a Time Machine destination
-        if command -v tmutil > /dev/null 2>&1; then
-            if ! tmutil destinationinfo 2> /dev/null | grep -q "$(basename "$volume")"; then
-                continue
-            fi
+        # Quick check: does this volume have backup directories?
+        if [[ -d "$volume/Backups.backupdb" ]] || [[ -d "$volume/.MobileBackups" ]]; then
+            backup_volumes+=("$volume")
         fi
+    done
 
-        local fs_type=$(command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}')
+    # If no backup volumes found, stop spinner and return
+    if [[ ${#backup_volumes[@]} -eq 0 ]]; then
+        if [[ "$spinner_active" == "true" && -t 1 ]]; then
+            stop_inline_spinner
+        fi
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        return 0
+    fi
+
+    # Update spinner message: we have potential backup volumes, now scan them
+    if [[ "$spinner_active" == "true" && -t 1 ]]; then
+        stop_inline_spinner
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning backup volumes..."
+    fi
+    for volume in "${backup_volumes[@]}"; do
+        # Skip network volumes (quick check)
+        local fs_type
+        fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "unknown")
         case "$fs_type" in
-            nfs | smbfs | afpfs | cifs | webdav) continue ;;
+            nfs | smbfs | afpfs | cifs | webdav | unknown) continue ;;
         esac
 
         # HFS+ style backups (Backups.backupdb)
@@ -157,7 +206,7 @@ clean_time_machine_failed_backups() {
             while IFS= read -r inprogress_file; do
                 [[ -d "$inprogress_file" ]] || continue
 
-                # Only delete old failed backups (safety window)
+                # Only delete old incomplete backups (safety window)
                 local file_mtime=$(get_file_mtime "$inprogress_file")
                 local current_time=$(date +%s)
                 local hours_old=$(((current_time - file_mtime) / 3600))
@@ -169,11 +218,17 @@ clean_time_machine_failed_backups() {
                 local size_kb=$(get_path_size_kb "$inprogress_file")
                 [[ "$size_kb" -le 0 ]] && continue
 
+                # Stop spinner before first output
+                if [[ "$spinner_active" == "true" ]]; then
+                    if [[ -t 1 ]]; then stop_inline_spinner; fi
+                    spinner_active=false
+                fi
+
                 local backup_name=$(basename "$inprogress_file")
                 local size_human=$(bytes_to_human "$((size_kb * 1024))")
 
                 if [[ "$DRY_RUN" == "true" ]]; then
-                    echo -e "  ${YELLOW}→${NC} Failed backup: $backup_name ${YELLOW}($size_human dry)${NC}"
+                    echo -e "  ${YELLOW}→${NC} Incomplete backup: $backup_name ${YELLOW}($size_human dry)${NC}"
                     ((tm_cleaned++))
                     note_activity
                     continue
@@ -186,7 +241,7 @@ clean_time_machine_failed_backups() {
                 fi
 
                 if tmutil delete "$inprogress_file" 2> /dev/null; then
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Failed backup: $backup_name ${GREEN}($size_human)${NC}"
+                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Incomplete backup: $backup_name ${GREEN}($size_human)${NC}"
                     ((tm_cleaned++))
                     ((files_cleaned++))
                     ((total_size_cleaned += size_kb))
@@ -211,7 +266,7 @@ clean_time_machine_failed_backups() {
                 while IFS= read -r inprogress_file; do
                     [[ -d "$inprogress_file" ]] || continue
 
-                    # Only delete old failed backups (safety window)
+                    # Only delete old incomplete backups (safety window)
                     local file_mtime=$(get_file_mtime "$inprogress_file")
                     local current_time=$(date +%s)
                     local hours_old=$(((current_time - file_mtime) / 3600))
@@ -223,11 +278,17 @@ clean_time_machine_failed_backups() {
                     local size_kb=$(get_path_size_kb "$inprogress_file")
                     [[ "$size_kb" -le 0 ]] && continue
 
+                    # Stop spinner before first output
+                    if [[ "$spinner_active" == "true" ]]; then
+                        if [[ -t 1 ]]; then stop_inline_spinner; fi
+                        spinner_active=false
+                    fi
+
                     local backup_name=$(basename "$inprogress_file")
                     local size_human=$(bytes_to_human "$((size_kb * 1024))")
 
                     if [[ "$DRY_RUN" == "true" ]]; then
-                        echo -e "  ${YELLOW}→${NC} Failed APFS backup in $bundle_name: $backup_name ${YELLOW}($size_human dry)${NC}"
+                        echo -e "  ${YELLOW}→${NC} Incomplete APFS backup in $bundle_name: $backup_name ${YELLOW}($size_human dry)${NC}"
                         ((tm_cleaned++))
                         note_activity
                         continue
@@ -239,7 +300,7 @@ clean_time_machine_failed_backups() {
                     fi
 
                     if tmutil delete "$inprogress_file" 2> /dev/null; then
-                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Failed APFS backup in $bundle_name: $backup_name ${GREEN}($size_human)${NC}"
+                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Incomplete APFS backup in $bundle_name: $backup_name ${GREEN}($size_human)${NC}"
                         ((tm_cleaned++))
                         ((files_cleaned++))
                         ((total_size_cleaned += size_kb))
@@ -251,11 +312,15 @@ clean_time_machine_failed_backups() {
                 done < <(run_with_timeout 15 find "$mounted_path" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2> /dev/null || true)
             fi
         done
-        if [[ -t 1 ]]; then stop_inline_spinner; fi
     done
 
+    # Stop spinner if still active (no backups found)
+    if [[ "$spinner_active" == "true" ]]; then
+        if [[ -t 1 ]]; then stop_inline_spinner; fi
+    fi
+
     if [[ $tm_cleaned -eq 0 ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No failed Time Machine backups found"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
     fi
 }
 

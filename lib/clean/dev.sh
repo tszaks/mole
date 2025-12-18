@@ -245,7 +245,6 @@ clean_dev_api_tools() {
 # Clean misc dev tools
 clean_dev_misc() {
     safe_clean ~/Library/Caches/com.unity3d.*/* "Unity cache"
-    # safe_clean ~/Library/Caches/com.jetbrains.toolbox/* "JetBrains Toolbox cache"
     safe_clean ~/Library/Caches/com.mongodb.compass/* "MongoDB Compass cache"
     safe_clean ~/Library/Caches/com.figma.Desktop/* "Figma cache"
     safe_clean ~/Library/Caches/com.github.GitHubDesktop/* "GitHub Desktop cache"
@@ -314,7 +313,7 @@ clean_developer_tools() {
             safe_clean "$lock_dir"/* "Homebrew lock files"
         elif [[ -d "$lock_dir" ]]; then
             # Directory exists but not writable. Check if empty to avoid noise.
-            if [[ -n "$(ls -A "$lock_dir" 2> /dev/null)" ]]; then
+            if find "$lock_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
                 # Only try sudo ONCE if we really need to, or just skip to avoid spam
                 # Decision: Skip strict system/root owned locks to avoid nag.
                 debug_log "Skipping read-only Homebrew locks in $lock_dir"

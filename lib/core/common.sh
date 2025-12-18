@@ -71,7 +71,7 @@ update_via_homebrew() {
         echo ""
     fi
 
-    # Clear update cache
+    # Clear update cache (suppress errors if cache doesn't exist or is locked)
     rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message" 2> /dev/null || true
 }
 

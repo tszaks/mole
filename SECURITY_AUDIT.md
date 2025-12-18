@@ -1,8 +1,8 @@
 # Mole Security Audit Report
 
-**Date:** December 14, 2025
+**Date:** December 18, 2025
 
-**Audited Version:** Current `main` branch (V1.12.25)
+**Audited Version:** Current `main` branch (V1.13.9)
 
 **Status:** Passed
 
@@ -19,6 +19,7 @@ Mole's automated shell-based operations (Clean, Optimize, Uninstall) do not exec
   - **Absolute Path Enforcement**: Relative paths (e.g., `../foo`) are strictly rejected to prevent path traversal attacks.
   - **Control Character Filtering**: Paths containing hidden control characters or newlines are blocked.
   - **Empty Variable Protection**: Guards against shell scripting errors where an empty variable could result in `rm -rf /`.
+  - **Secure Temporary Workspaces**: Temporary directories are created using `mktemp -d` with restricted permissions (700) to ensure process isolation and prevent data leakage.
 
 - **Layer 2: The "Iron Dome" (Path Validation)**
     A centralized validation logic explicitly blocks operations on critical system hierarchies within the shell core, even with `sudo` privileges:
@@ -59,6 +60,9 @@ Mole's "Smart Uninstall" and orphan detection (`lib/clean/apps.sh`) are intentio
 - **System Integrity Protection (SIP) Awareness**
     Mole respects macOS SIP. It detects if SIP is enabled and automatically skips protected directories (like `/Library/Updates`) to avoid triggering permission errors.
 
+- **Spotlight Preservation (Critical Fix)**
+    User-level Spotlight caches (`~/Library/Metadata/CoreSpotlight`) are strictly excluded from automated cleaning. This prevents corruption of System Settings and ensures stable UI performance for indexed searches.
+
 - **Time Machine Preservation**
     Before cleaning failed backups, Mole checks for the `backupd` process. If a backup is currently running, the cleanup task is strictly **aborted** to prevent data corruption.
 
@@ -77,6 +81,7 @@ We anticipate that scripts can be interrupted (e.g., power loss, `Ctrl+C`).
 
 - **Network Interface Reset**: Wi-Fi and AirDrop resets use **atomic execution blocks**.
 - **Swap Clearing**: Swap files are reset by securely restarting the `dynamic_pager` daemon. We intentionally avoid manual `rm` operations on swap files to prevent instability during high memory pressure.
+- **Unresponsive Volume Protection**: During volume scanning, Mole uses `run_with_timeout` and filesystem type validation (`nfs`, `smbfs`, etc.) to prevent the script from hanging on unresponsive or slow network mounts.
 
 ## 5. User Control & Transparency
 
@@ -90,6 +95,7 @@ We anticipate that scripts can be interrupted (e.g., power loss, `Ctrl+C`).
   - `plutil`: Used to validate `.plist` integrity.
   - `tmutil`: Used for safe interaction with Time Machine.
   - `dscacheutil`: Used for system-compliant cache rebuilding.
+  - `bioutil`: Used for reliable and hardware-correct Touch ID status detection.
 
 - **Go Dependencies (Interactive Tools)**
     The compiled Go binary (`analyze-go`) includes the following libraries:

@@ -97,7 +97,7 @@ clean_time_machine_failed_backups
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"No failed Time Machine backups found"* ]]
+    [[ "$output" == *"No incomplete backups found"* ]]
 }
 
 

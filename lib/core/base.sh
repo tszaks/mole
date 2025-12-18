@@ -48,6 +48,7 @@ readonly MOLE_TEMP_FILE_AGE_DAYS=7       # Temp file cleanup threshold
 readonly MOLE_ORPHAN_AGE_DAYS=60         # Orphaned data threshold
 readonly MOLE_MAX_PARALLEL_JOBS=15       # Parallel job limit
 readonly MOLE_MAIL_DOWNLOADS_MIN_KB=5120 # Mail attachments size threshold
+readonly MOLE_MAIL_AGE_DAYS=30           # Mail attachment cleanup threshold (30+ days)
 readonly MOLE_LOG_AGE_DAYS=7             # System log retention
 readonly MOLE_CRASH_REPORT_AGE_DAYS=7    # Crash report retention
 readonly MOLE_SAVED_STATE_AGE_DAYS=7     # App saved state retention

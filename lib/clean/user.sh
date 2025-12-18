@@ -3,38 +3,90 @@
 
 set -euo pipefail
 
-# Clean user essentials (caches, logs, trash, crash reports)
+# Clean user essentials (caches, logs, trash)
 clean_user_essentials() {
     safe_clean ~/Library/Caches/* "User app cache"
     safe_clean ~/Library/Logs/* "User app logs"
     safe_clean ~/.Trash/* "Trash"
+}
 
-    # Empty trash on mounted volumes
-    if [[ -d "/Volumes" && "$DRY_RUN" != "true" ]]; then
-        if [[ -t 1 ]]; then
-            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning external volumes..."
-        fi
-        for volume in /Volumes/*; do
-            [[ -d "$volume" && -d "$volume/.Trashes" && -w "$volume" ]] || continue
+# Helper: Scan external volumes for cleanup (Trash & DS_Store)
+scan_external_volumes() {
+    [[ -d "/Volumes" ]] || return 0
 
-            # Skip network volumes
-            local fs_type=$(command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}')
-            case "$fs_type" in
-                nfs | smbfs | afpfs | cifs | webdav) continue ;;
-            esac
+    # Fast pre-check: count non-system external volumes without expensive operations
+    local -a candidate_volumes=()
+    for volume in /Volumes/*; do
+        # Basic checks (directory, writable, not a symlink)
+        [[ -d "$volume" && -w "$volume" && ! -L "$volume" ]] || continue
 
-            # Verify volume is mounted and not a symlink
-            mount | grep -q "on $volume " || continue
-            [[ -L "$volume/.Trashes" ]] && continue
+        # Skip system root if it appears in /Volumes
+        [[ "$volume" == "/" || "$volume" == "/Volumes/Macintosh HD" ]] && continue
 
+        candidate_volumes+=("$volume")
+    done
+
+    # If no external volumes found, return immediately (zero overhead)
+    local volume_count=${#candidate_volumes[@]}
+    [[ $volume_count -eq 0 ]] && return 0
+
+    # We have external volumes, now perform full scan
+    if [[ -t 1 ]]; then
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning $volume_count external volume(s)..."
+    fi
+
+    for volume in "${candidate_volumes[@]}"; do
+        # Skip network volumes with short timeout (reduced from 2s to 1s)
+        local fs_type=""
+        fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "unknown")
+        case "$fs_type" in
+            nfs | smbfs | afpfs | cifs | webdav | unknown) continue ;;
+        esac
+
+        # Verify volume is actually mounted (reduced timeout from 2s to 1s)
+        run_with_timeout 1 mount | grep -q "on $volume " || continue
+
+        # 1. Clean Trash on volume
+        if [[ -d "$volume/.Trashes" && "$DRY_RUN" != "true" ]]; then
             # Safely iterate and remove each item
             while IFS= read -r -d '' item; do
                 safe_remove "$item" true || true
             done < <(command find "$volume/.Trashes" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
-        done
-        if [[ -t 1 ]]; then stop_inline_spinner; fi
+        fi
+
+        # 2. Clean .DS_Store
+        if [[ "$PROTECT_FINDER_METADATA" != "true" ]]; then
+            clean_ds_store_tree "$volume" "$(basename "$volume") volume (.DS_Store)"
+        fi
+    done
+
+    if [[ -t 1 ]]; then stop_inline_spinner; fi
+}
+
+# Clean Finder metadata (.DS_Store files)
+clean_finder_metadata() {
+    if [[ "$PROTECT_FINDER_METADATA" == "true" ]]; then
+        note_activity
+        echo -e "  ${GRAY}⊘${NC} Finder metadata (protected)"
+        return
     fi
 
+    clean_ds_store_tree "$HOME" "Home directory (.DS_Store)"
+}
+
+# Clean macOS system caches
+clean_macos_system_caches() {
+    safe_clean ~/Library/Saved\ Application\ State/* "Saved application states"
+
+    # REMOVED: Spotlight cache cleanup can cause system UI issues
+    # Spotlight indexes should be managed by macOS automatically
+    # safe_clean ~/Library/Caches/com.apple.spotlight "Spotlight cache"
+
+    safe_clean ~/Library/Caches/com.apple.photoanalysisd "Photo analysis cache"
+    safe_clean ~/Library/Caches/com.apple.akd "Apple ID cache"
+    safe_clean ~/Library/Caches/com.apple.WebKit.Networking/* "WebKit network cache"
+
+    # Extra user items
     safe_clean ~/Library/DiagnosticReports/* "Diagnostic reports"
     safe_clean ~/Library/Caches/com.apple.QuickLook.thumbnailcache "QuickLook thumbnails"
     safe_clean ~/Library/Caches/Quick\ Look/* "QuickLook cache"
@@ -52,47 +104,6 @@ clean_user_essentials() {
     safe_clean ~/Library/Suggestions/* "Suggestions cache (Siri)"
     safe_clean ~/Library/Calendars/Calendar\ Cache "Calendar cache"
     safe_clean ~/Library/Application\ Support/AddressBook/Sources/*/Photos.cache "Address Book photo cache"
-}
-
-# Clean Finder metadata (.DS_Store files)
-clean_finder_metadata() {
-    if [[ "$PROTECT_FINDER_METADATA" == "true" ]]; then
-        note_activity
-        echo -e "  ${GRAY}${ICON_SUCCESS}${NC} Finder metadata (whitelisted)"
-    else
-        clean_ds_store_tree "$HOME" "Home directory (.DS_Store)"
-
-        if [[ -d "/Volumes" ]]; then
-            for volume in /Volumes/*; do
-                [[ -d "$volume" && -w "$volume" ]] || continue
-
-                local fs_type=""
-                fs_type=$(command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}')
-                case "$fs_type" in
-                    nfs | smbfs | afpfs | cifs | webdav) continue ;;
-                esac
-
-                clean_ds_store_tree "$volume" "$(basename "$volume") volume (.DS_Store)"
-            done
-        fi
-    fi
-}
-
-# Clean macOS system caches
-clean_macos_system_caches() {
-    safe_clean ~/Library/Saved\ Application\ State/* "Saved application states"
-
-    # REMOVED: Spotlight cache cleanup can cause system UI issues
-    # Spotlight indexes should be managed by macOS automatically
-    # safe_clean ~/Library/Caches/com.apple.spotlight "Spotlight cache"
-
-    safe_clean ~/Library/Caches/com.apple.photoanalysisd "Photo analysis cache"
-    safe_clean ~/Library/Caches/com.apple.akd "Apple ID cache"
-    safe_clean ~/Library/Caches/com.apple.Safari/Webpage\ Previews/* "Safari webpage previews"
-    safe_clean ~/Library/Application\ Support/CloudDocs/session/db/* "iCloud session cache"
-    safe_clean ~/Library/Caches/com.apple.Safari/fsCachedData/* "Safari cached data"
-    safe_clean ~/Library/Caches/com.apple.WebKit.WebContent/* "WebKit content cache"
-    safe_clean ~/Library/Caches/com.apple.WebKit.Networking/* "WebKit network cache"
 }
 
 # Clean sandboxed app caches
@@ -115,44 +126,7 @@ clean_sandboxed_app_caches() {
     local found_any=false
 
     for container_dir in "$containers_dir"/*; do
-        [[ -d "$container_dir" ]] || continue
-
-        # Extract bundle ID and check protection status early
-        local bundle_id=$(basename "$container_dir")
-        local bundle_id_lower=$(echo "$bundle_id" | tr '[:upper:]' '[:lower:]')
-
-        # Check explicit critical system components (case-insensitive regex)
-        if [[ "$bundle_id_lower" =~ backgroundtaskmanagement || "$bundle_id_lower" =~ loginitems || "$bundle_id_lower" =~ systempreferences || "$bundle_id_lower" =~ systemsettings || "$bundle_id_lower" =~ settings || "$bundle_id_lower" =~ preferences || "$bundle_id_lower" =~ controlcenter || "$bundle_id_lower" =~ biometrickit || "$bundle_id_lower" =~ sfl || "$bundle_id_lower" =~ tcc ]]; then
-            continue
-        fi
-
-        if should_protect_data "$bundle_id"; then
-            continue
-        elif should_protect_data "$bundle_id_lower"; then
-            continue
-        fi
-
-        local cache_dir="$container_dir/Data/Library/Caches"
-        # Check if dir exists and has content
-        if [[ -d "$cache_dir" ]]; then
-            # Fast check if empty (avoid expensive size calc on empty dirs)
-            if [[ -n "$(ls -A "$cache_dir" 2> /dev/null)" ]]; then
-                # Get size
-                local size=$(get_path_size_kb "$cache_dir")
-                ((total_size += size))
-                found_any=true
-                ((cleaned_count++))
-
-                if [[ "$DRY_RUN" != "true" ]]; then
-                    # Clean contents safely
-                    # We know this is a user cache path, so rm -rf is acceptable here
-                    # provided we keep the Cache directory itself
-                    for item in "${cache_dir:?}"/*; do
-                        safe_remove "$item" true || true
-                    done
-                fi
-            fi
-        fi
+        process_container_cache "$container_dir"
     done
 
     if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -169,6 +143,46 @@ clean_sandboxed_app_caches() {
         ((total_size_cleaned += total_size))
         ((total_items++))
         note_activity
+    fi
+}
+
+# Process a single container cache directory (reduces nesting)
+process_container_cache() {
+    local container_dir="$1"
+    [[ -d "$container_dir" ]] || return 0
+
+    # Extract bundle ID and check protection status early
+    local bundle_id=$(basename "$container_dir")
+    local bundle_id_lower=$(echo "$bundle_id" | tr '[:upper:]' '[:lower:]')
+
+    # Check explicit critical system components (case-insensitive regex)
+    if [[ "$bundle_id_lower" =~ backgroundtaskmanagement || "$bundle_id_lower" =~ loginitems || "$bundle_id_lower" =~ systempreferences || "$bundle_id_lower" =~ systemsettings || "$bundle_id_lower" =~ settings || "$bundle_id_lower" =~ preferences || "$bundle_id_lower" =~ controlcenter || "$bundle_id_lower" =~ biometrickit || "$bundle_id_lower" =~ sfl || "$bundle_id_lower" =~ tcc ]]; then
+        return 0
+    fi
+
+    if should_protect_data "$bundle_id" || should_protect_data "$bundle_id_lower"; then
+        return 0
+    fi
+
+    local cache_dir="$container_dir/Data/Library/Caches"
+    # Check if dir exists and has content
+    [[ -d "$cache_dir" ]] || return 0
+
+    # Fast check if empty using find (more efficient than ls)
+    if find "$cache_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
+        # Use global variables from caller for tracking
+        local size=$(get_path_size_kb "$cache_dir")
+        ((total_size += size))
+        found_any=true
+        ((cleaned_count++))
+
+        if [[ "$DRY_RUN" != "true" ]]; then
+            # Clean contents safely (rm -rf is restricted by safe_remove)
+            for item in "$cache_dir"/*; do
+                [[ -e "$item" ]] || continue
+                safe_remove "$item" true || true
+            done
+        fi
     fi
 }
 
@@ -193,9 +207,6 @@ clean_browsers() {
     safe_clean ~/Library/Caches/com.kagi.kagimacOS/* "Orion cache"
     safe_clean ~/Library/Caches/zen/* "Zen cache"
     safe_clean ~/Library/Application\ Support/Firefox/Profiles/*/cache2/* "Firefox profile cache"
-
-    # DISABLED: Service Worker CacheStorage scanning (find can hang on large browser profiles)
-    # Browser caches are already cleaned by the safe_clean calls above
 }
 
 # Clean cloud storage app caches
@@ -271,14 +282,17 @@ clean_application_support_logs() {
 
         for candidate in "${start_candidates[@]}"; do
             if [[ -d "$candidate" ]]; then
-                if [[ -n "$(ls -A "$candidate" 2> /dev/null)" ]]; then
+                if find "$candidate" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
                     local size=$(get_path_size_kb "$candidate")
                     ((total_size += size))
                     ((cleaned_count++))
                     found_any=true
 
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        safe_remove "$candidate"/* true > /dev/null 2>&1 || true
+                        for item in "$candidate"/*; do
+                            [[ -e "$item" ]] || continue
+                            safe_remove "$item" true > /dev/null 2>&1 || true
+                        done
                     fi
                 fi
             fi
@@ -296,14 +310,17 @@ clean_application_support_logs() {
 
         for candidate in "${gc_candidates[@]}"; do
             if [[ -d "$candidate" ]]; then
-                if [[ -n "$(ls -A "$candidate" 2> /dev/null)" ]]; then
+                if find "$candidate" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
                     local size=$(get_path_size_kb "$candidate")
                     ((total_size += size))
                     ((cleaned_count++))
                     found_any=true
 
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        safe_remove "$candidate"/* true > /dev/null 2>&1 || true
+                        for item in "$candidate"/*; do
+                            [[ -e "$item" ]] || continue
+                            safe_remove "$item" true > /dev/null 2>&1 || true
+                        done
                     fi
                 fi
             fi

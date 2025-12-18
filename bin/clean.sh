@@ -261,6 +261,7 @@ safe_clean() {
         local total_paths=${#existing_paths[@]}
         if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning $total_paths items..."; fi
         local temp_dir
+        # create_temp_dir uses mktemp -d for secure temporary directory creation
         temp_dir=$(create_temp_dir)
 
         # Parallel processing (bash 3.2 compatible)
@@ -498,6 +499,7 @@ EOF
 
         # Check for cancel (ESC or Q)
         if [[ "$choice" == "QUIT" ]]; then
+            echo -e " ${GRAY}Canceled${NC}"
             exit 0
         fi
 
@@ -521,6 +523,8 @@ EOF
         else
             # Other keys (including arrow keys) = skip, no message needed
             SYSTEM_CLEAN=false
+            echo -e " ${GRAY}Skipped${NC}"
+            echo ""
         fi
     else
         SYSTEM_CLEAN=false
@@ -598,6 +602,7 @@ perform_cleanup() {
     start_section "User essentials"
     # User essentials cleanup (delegated to clean_user_data module)
     clean_user_essentials
+    scan_external_volumes
     end_section
 
     start_section "Finder metadata"
@@ -683,9 +688,9 @@ perform_cleanup() {
     check_ios_device_backups
     end_section
 
-    # ===== 15. Time Machine failed backups =====
-    start_section "Time Machine failed backups"
-    # Time Machine failed backups cleanup (delegated to clean_system module)
+    # ===== 15. Time Machine incomplete backups =====
+    start_section "Time Machine incomplete backups"
+    # Time Machine incomplete backups cleanup (delegated to clean_system module)
     clean_time_machine_failed_backups
     end_section
 
@@ -729,22 +734,21 @@ perform_cleanup() {
             summary_details+=("Detailed file list: ${GRAY}$EXPORT_LIST_FILE${NC}")
             summary_details+=("Use ${GRAY}mo clean --whitelist${NC} to add protection rules")
         else
-            summary_details+=("Space freed: ${GREEN}${freed_gb}GB${NC}")
-            summary_details+=("Free space now: $(get_free_space)")
+            # Build summary line: Space freed + Items cleaned
+            local summary_line="Space freed: ${GREEN}${freed_gb}GB${NC}"
 
             if [[ $files_cleaned -gt 0 && $total_items -gt 0 ]]; then
-                local stats="Items cleaned: $files_cleaned | Categories: $total_items"
-                [[ $whitelist_skipped_count -gt 0 ]] && stats+=" | Protected: $whitelist_skipped_count"
-                summary_details+=("$stats")
+                summary_line+=" | Items cleaned: $files_cleaned | Categories: $total_items"
+                [[ $whitelist_skipped_count -gt 0 ]] && summary_line+=" | Protected: $whitelist_skipped_count"
             elif [[ $files_cleaned -gt 0 ]]; then
-                local stats="Items cleaned: $files_cleaned"
-                [[ $whitelist_skipped_count -gt 0 ]] && stats+=" | Protected: $whitelist_skipped_count"
-                summary_details+=("$stats")
+                summary_line+=" | Items cleaned: $files_cleaned"
+                [[ $whitelist_skipped_count -gt 0 ]] && summary_line+=" | Protected: $whitelist_skipped_count"
             elif [[ $total_items -gt 0 ]]; then
-                local stats="Categories: $total_items"
-                [[ $whitelist_skipped_count -gt 0 ]] && stats+=" | Protected: $whitelist_skipped_count"
-                summary_details+=("$stats")
+                summary_line+=" | Categories: $total_items"
+                [[ $whitelist_skipped_count -gt 0 ]] && summary_line+=" | Protected: $whitelist_skipped_count"
             fi
+
+            summary_details+=("$summary_line")
 
             if [[ $(echo "$freed_gb" | awk '{print ($1 >= 1) ? 1 : 0}') -eq 1 ]]; then
                 local movies
@@ -753,6 +757,9 @@ perform_cleanup() {
                     summary_details+=("Equivalent to ~$movies 4K movies of storage.")
                 fi
             fi
+
+            # Free space now at the end
+            summary_details+=("Free space now: $(get_free_space)")
         fi
     else
         summary_status="info"

@@ -29,7 +29,7 @@ setup() {
     mkdir -p "$HOME/.cache/mole"
 
     # Clean any previous test artifacts
-    rm -rf "$HOME/www"/* "$HOME/dev"/*
+    rm -rf "${HOME:?}/www"/* "${HOME:?}/dev"/*
 }
 
 # =================================================================
@@ -151,7 +151,8 @@ setup() {
         source '$PROJECT_ROOT/lib/clean/project.sh'
         is_recently_modified '$HOME/www/old-project/node_modules' || true
     "
-    [ "$?" -eq 0 ] || [ "$?" -eq 1 ]  # Allow both true/false, just check no crash
+    local exit_code=$?
+    [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 1 ]  # Allow both true/false, just check no crash
 }
 
 # =================================================================

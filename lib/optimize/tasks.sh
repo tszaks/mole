@@ -3,6 +3,19 @@
 
 set -euo pipefail
 
+# Configuration constants
+# MOLE_TM_THIN_TIMEOUT: Max seconds to wait for tmutil thinning (default: 180)
+# MOLE_TM_THIN_VALUE: Bytes to thin for local snapshots (default: 9999999999)
+# MOLE_MAIL_DOWNLOADS_MIN_KB: Minimum size in KB before cleaning Mail attachments (default: 5120)
+# MOLE_MAIL_AGE_DAYS: Minimum age in days for Mail attachments to be cleaned (default: 30)
+readonly MOLE_TM_THIN_TIMEOUT=180
+readonly MOLE_TM_THIN_VALUE=9999999999
+
+# Helper function: Flush DNS cache
+flush_dns_cache() {
+    sudo dscacheutil -flushcache 2> /dev/null && sudo killall -HUP mDNSResponder 2> /dev/null
+}
+
 # System maintenance: rebuild databases and flush caches
 opt_system_maintenance() {
     echo -e "${BLUE}${ICON_ARROW}${NC} Rebuilding LaunchServices database..."
@@ -10,24 +23,20 @@ opt_system_maintenance() {
     echo -e "${GREEN}${ICON_SUCCESS}${NC} LaunchServices database rebuilt"
 
     echo -e "${BLUE}${ICON_ARROW}${NC} Clearing DNS cache..."
-    if sudo dscacheutil -flushcache 2> /dev/null && sudo killall -HUP mDNSResponder 2> /dev/null; then
+    if flush_dns_cache; then
         echo -e "${GREEN}${ICON_SUCCESS}${NC} DNS cache cleared"
     else
         echo -e "${RED}${ICON_ERROR}${NC} Failed to clear DNS cache"
     fi
 
     echo -e "${BLUE}${ICON_ARROW}${NC} Checking Spotlight index..."
-    local md_status
-    md_status=$(mdutil -s / 2> /dev/null || echo "")
-    if echo "$md_status" | grep -qi "Indexing disabled"; then
+    local spotlight_status
+    spotlight_status=$(mdutil -s / 2> /dev/null || echo "")
+    if echo "$spotlight_status" | grep -qi "Indexing disabled"; then
         echo -e "${GRAY}-${NC} Spotlight indexing disabled"
     else
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Spotlight index functioning"
     fi
-
-    echo -e "${BLUE}${ICON_ARROW}${NC} Refreshing Bluetooth services..."
-    sudo pkill -f blued 2> /dev/null || true
-    echo -e "${GREEN}${ICON_SUCCESS}${NC} Bluetooth controller refreshed"
 
 }
 
@@ -131,19 +140,47 @@ opt_radio_refresh() {
 
 # Mail downloads: clear OLD Mail attachment cache (30+ days)
 opt_mail_downloads() {
-    echo -e "${BLUE}${ICON_ARROW}${NC} Clearing old Mail attachment downloads (30+ days)..."
+    # Validate configuration parameters
+    # Validate configuration parameters
+    local min_size_kb=${MOLE_MAIL_DOWNLOADS_MIN_KB:-5120}
+    local mail_age_days=${MOLE_MAIL_AGE_DAYS:-30}
+    if ! [[ "$min_size_kb" =~ ^[0-9]+$ ]]; then
+        min_size_kb=5120
+    fi
+    if ! [[ "$mail_age_days" =~ ^[0-9]+$ ]]; then
+        mail_age_days=30
+    fi
+
+    echo -e "${BLUE}${ICON_ARROW}${NC} Clearing old Mail attachment downloads (${mail_age_days}+ days)..."
     local -a mail_dirs=(
         "$HOME/Library/Mail Downloads"
         "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
     )
 
-    local total_kb=0
+    local total_size_kb=0
+    local temp_dir
+    temp_dir=$(create_temp_dir)
+
+    # Parallel size calculation
+    local idx=0
     for target_path in "${mail_dirs[@]}"; do
-        total_kb=$((total_kb + $(get_path_size_kb "$target_path")))
+        (
+            local size
+            size=$(get_path_size_kb "$target_path")
+            echo "$size" > "$temp_dir/size_$idx"
+        ) &
+        ((idx++))
+    done
+    wait
+
+    for i in $(seq 0 $((idx - 1))); do
+        local size=0
+        [[ -f "$temp_dir/size_$i" ]] && size=$(cat "$temp_dir/size_$i")
+        ((total_size_kb += size))
     done
 
-    if [[ $total_kb -lt $MOLE_MAIL_DOWNLOADS_MIN_KB ]]; then
-        echo -e "${GRAY}-${NC} Only $(bytes_to_human $((total_kb * 1024))) detected, skipping cleanup"
+    if [[ $total_size_kb -lt $min_size_kb ]]; then
+        echo -e "${GRAY}-${NC} Only $(bytes_to_human $((total_size_kb * 1024))) detected, skipping cleanup"
         return
     fi
 
@@ -151,13 +188,13 @@ opt_mail_downloads() {
     local cleaned=false
     for target_path in "${mail_dirs[@]}"; do
         if [[ -d "$target_path" ]]; then
-            safe_find_delete "$target_path" "*" "$MOLE_LOG_AGE_DAYS" "f"
+            safe_find_delete "$target_path" "*" "$mail_age_days" "f"
             cleaned=true
         fi
     done
 
     if [[ "$cleaned" == "true" ]]; then
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} Cleaned old attachments (> ${MOLE_LOG_AGE_DAYS} days)"
+        echo -e "${GREEN}${ICON_SUCCESS}${NC} Cleaned old attachments (> ${mail_age_days} days)"
     else
         echo -e "${GRAY}-${NC} No old attachments found"
     fi
@@ -230,7 +267,13 @@ opt_local_snapshots() {
     fi
 
     local success=false
-    if run_with_timeout 180 sudo tmutil thinlocalsnapshots / 9999999999 4 > /dev/null 2>&1; then
+    local exit_code=0
+    set +e
+    run_with_timeout "$MOLE_TM_THIN_TIMEOUT" sudo tmutil thinlocalsnapshots / "$MOLE_TM_THIN_VALUE" 4 > /dev/null 2>&1
+    exit_code=$?
+    set -e
+
+    if [[ "$exit_code" -eq 0 ]]; then
         success=true
     fi
 
@@ -244,8 +287,10 @@ opt_local_snapshots() {
 
     if [[ "$success" == "true" ]]; then
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Removed $removed snapshots (remaining: $after)"
+    elif [[ "$exit_code" -eq 124 ]]; then
+        echo -e "${YELLOW}!${NC} Timed out after ${MOLE_TM_THIN_TIMEOUT}s"
     else
-        echo -e "${YELLOW}!${NC} Timed out or failed"
+        echo -e "${YELLOW}!${NC} Failed with exit code $exit_code"
     fi
 }
 
@@ -310,7 +355,7 @@ opt_network_optimization() {
     local steps=0
 
     # 1. Flush DNS cache
-    if sudo dscacheutil -flushcache 2> /dev/null && sudo killall -HUP mDNSResponder 2> /dev/null; then
+    if flush_dns_cache; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} DNS cache flushed"
         ((steps++))
     fi

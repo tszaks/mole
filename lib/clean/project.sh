@@ -487,7 +487,7 @@ clean_project_artifacts() {
         for root in "${search_roots[@]}"; do
             if [[ "$path" == "$root/"* ]]; then
                 # Remove root prefix and get first directory component
-                local relative_path="${path#$root/}"
+                local relative_path="${path#"$root"/}"
                 # Extract first directory name
                 echo "$relative_path" | cut -d'/' -f1
                 return 0

@@ -533,12 +533,23 @@ should_protect_path() {
 
     # 4. Check for specific hardcoded critical patterns
     case "$path" in
-        *com.apple.Settings* | *com.apple.SystemSettings* | *com.apple.controlcenter* | *com.apple.finder*)
+        *com.apple.Settings* | *com.apple.SystemSettings* | *com.apple.controlcenter* | *com.apple.finder* | *com.apple.dock*)
             return 0
             ;;
     esac
 
-    # 5. Check the full path against protected patterns (Broad Glob Match)
+    # 5. Protect critical preference files
+    case "$path" in
+        */Library/Preferences/com.apple.dock.plist | */Library/Preferences/com.apple.finder.plist)
+            return 0
+            ;;
+        # Bluetooth and WiFi configurations
+        */ByHost/com.apple.bluetooth.* | */ByHost/com.apple.wifi.*)
+            return 0
+            ;;
+    esac
+
+    # 6. Check the full path against protected patterns (Broad Glob Match)
     # This catches things like /Users/tw93/Library/Caches/Claude when pattern is *Claude*
     for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}"; do
         if bundle_matches_pattern "$path" "$pattern"; then
@@ -546,7 +557,7 @@ should_protect_path() {
         fi
     done
 
-    # 6. Check if the filename itself matches any protected patterns
+    # 7. Check if the filename itself matches any protected patterns
     local filename
     filename=$(basename "$path")
     if should_protect_data "$filename"; then
@@ -562,203 +573,124 @@ find_app_files() {
     local app_name="$2"
     local -a files_to_clean=()
 
-    # ============================================================================
-    # User-level files (no sudo required)
-    # ============================================================================
+    # Sanitized App Name (remove spaces)
+    local nospace_name="${app_name// /}"
+    local underscore_name="${app_name// /_}"
 
-    # Application Support
-    [[ -d ~/Library/Application\ Support/"$app_name" ]] && files_to_clean+=("$HOME/Library/Application Support/$app_name")
-    [[ -d ~/Library/Application\ Support/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/Application Support/$bundle_id")
+    # Standard path patterns for user-level files
+    local -a user_patterns=(
+        "$HOME/Library/Application Support/$app_name"
+        "$HOME/Library/Application Support/$bundle_id"
+        "$HOME/Library/Caches/$bundle_id"
+        "$HOME/Library/Caches/$app_name"
+        "$HOME/Library/Logs/$app_name"
+        "$HOME/Library/Logs/$bundle_id"
+        "$HOME/Library/Application Support/CrashReporter/$app_name"
+        "$HOME/Library/Saved Application State/$bundle_id.savedState"
+        "$HOME/Library/Containers/$bundle_id"
+        "$HOME/Library/WebKit/$bundle_id"
+        "$HOME/Library/WebKit/com.apple.WebKit.WebContent/$bundle_id"
+        "$HOME/Library/HTTPStorages/$bundle_id"
+        "$HOME/Library/Cookies/$bundle_id.binarycookies"
+        "$HOME/Library/LaunchAgents/$bundle_id.plist"
+        "$HOME/Library/Application Scripts/$bundle_id"
+        "$HOME/Library/Services/$app_name.workflow"
+        "$HOME/Library/QuickLook/$app_name.qlgenerator"
+        "$HOME/Library/Internet Plug-Ins/$app_name.plugin"
+        "$HOME/Library/Audio/Plug-Ins/Components/$app_name.component"
+        "$HOME/Library/Audio/Plug-Ins/VST/$app_name.vst"
+        "$HOME/Library/Audio/Plug-Ins/VST3/$app_name.vst3"
+        "$HOME/Library/Audio/Plug-Ins/Digidesign/$app_name.dpm"
+        "$HOME/Library/PreferencePanes/$app_name.prefPane"
+        "$HOME/Library/Screen Savers/$app_name.saver"
+        "$HOME/Library/Frameworks/$app_name.framework"
+        "$HOME/Library/Autosave Information/$bundle_id"
+        "$HOME/Library/Contextual Menu Items/$app_name.plugin"
+        "$HOME/Library/Spotlight/$app_name.mdimporter"
+        "$HOME/Library/ColorPickers/$app_name.colorPicker"
+        "$HOME/Library/Workflows/$app_name.workflow"
+        "$HOME/.config/$app_name"
+        "$HOME/.local/share/$app_name"
+        "$HOME/.$app_name"
+        "$HOME/.$app_name"rc
+    )
 
-    # Sanitized App Name (remove spaces) - e.g. "Visual Studio Code" -> "VisualStudioCode"
+    # Add sanitized name variants if unique enough
     if [[ ${#app_name} -gt 3 && "$app_name" =~ [[:space:]] ]]; then
-        local nospace_name="${app_name// /}"
-        [[ -d ~/Library/Application\ Support/"$nospace_name" ]] && files_to_clean+=("$HOME/Library/Application Support/$nospace_name")
-        [[ -d ~/Library/Caches/"$nospace_name" ]] && files_to_clean+=("$HOME/Library/Caches/$nospace_name")
-        [[ -d ~/Library/Logs/"$nospace_name" ]] && files_to_clean+=("$HOME/Library/Logs/$nospace_name")
-
-        local underscore_name="${app_name// /_}"
-        [[ -d ~/Library/Application\ Support/"$underscore_name" ]] && files_to_clean+=("$HOME/Library/Application Support/$underscore_name")
+        user_patterns+=(
+            "$HOME/Library/Application Support/$nospace_name"
+            "$HOME/Library/Caches/$nospace_name"
+            "$HOME/Library/Logs/$nospace_name"
+            "$HOME/Library/Application Support/$underscore_name"
+        )
     fi
 
-    # Caches
-    [[ -d ~/Library/Caches/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/Caches/$bundle_id")
-    [[ -d ~/Library/Caches/"$app_name" ]] && files_to_clean+=("$HOME/Library/Caches/$app_name")
+    # Process standard patterns
+    for p in "${user_patterns[@]}"; do
+        local expanded_path="${p/#\~/$HOME}"
+        [[ -e "$expanded_path" ]] && files_to_clean+=("$expanded_path")
+    done
 
-    # Preferences
+    # Preferences and ByHost (special handling)
     [[ -f ~/Library/Preferences/"$bundle_id".plist ]] && files_to_clean+=("$HOME/Library/Preferences/$bundle_id.plist")
     [[ -d ~/Library/Preferences/ByHost ]] && while IFS= read -r -d '' pref; do
         files_to_clean+=("$pref")
-    done < <(find ~/Library/Preferences/ByHost \( -name "$bundle_id*.plist" \) -print0 2> /dev/null)
+    done < <(command find ~/Library/Preferences/ByHost -maxdepth 1 \( -name "$bundle_id*.plist" \) -print0 2> /dev/null)
 
-    # Logs
-    [[ -d ~/Library/Logs/"$app_name" ]] && files_to_clean+=("$HOME/Library/Logs/$app_name")
-    [[ -d ~/Library/Logs/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/Logs/$bundle_id")
-    # CrashReporter
-    [[ -d ~/Library/Application\ Support/CrashReporter/"$app_name" ]] && files_to_clean+=("$HOME/Library/Application Support/CrashReporter/$app_name")
+    # Group Containers (special handling)
+    if [[ -d ~/Library/Group\ Containers ]]; then
+        while IFS= read -r -d '' container; do
+            files_to_clean+=("$container")
+        done < <(command find ~/Library/Group\ Containers -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+    fi
 
-    # Saved Application State
-    [[ -d ~/Library/Saved\ Application\ State/"$bundle_id".savedState ]] && files_to_clean+=("$HOME/Library/Saved Application State/$bundle_id.savedState")
-
-    # Containers (sandboxed apps)
-    [[ -d ~/Library/Containers/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/Containers/$bundle_id")
-
-    # Group Containers
-    [[ -d ~/Library/Group\ Containers ]] && while IFS= read -r -d '' container; do
-        files_to_clean+=("$container")
-    done < <(find ~/Library/Group\ Containers -type d \( -name "*$bundle_id*" \) -print0 2> /dev/null)
-
-    # WebKit data
-    [[ -d ~/Library/WebKit/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/WebKit/$bundle_id")
-    [[ -d ~/Library/WebKit/com.apple.WebKit.WebContent/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/WebKit/com.apple.WebKit.WebContent/$bundle_id")
-
-    # HTTP Storage
-    [[ -d ~/Library/HTTPStorages/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/HTTPStorages/$bundle_id")
-
-    # Cookies
-    [[ -f ~/Library/Cookies/"$bundle_id".binarycookies ]] && files_to_clean+=("$HOME/Library/Cookies/$bundle_id.binarycookies")
-
-    # Launch Agents (user-level)
-    [[ -f ~/Library/LaunchAgents/"$bundle_id".plist ]] && files_to_clean+=("$HOME/Library/LaunchAgents/$bundle_id.plist")
-    # Search for LaunchAgents by app name if unique enough
-    if [[ ${#app_name} -gt 3 ]]; then
+    # Launch Agents by name (special handling)
+    if [[ ${#app_name} -gt 3 ]] && [[ -d ~/Library/LaunchAgents ]]; then
         while IFS= read -r -d '' plist; do
             files_to_clean+=("$plist")
-        done < <(find ~/Library/LaunchAgents -name "*$app_name*.plist" -print0 2> /dev/null)
+        done < <(command find ~/Library/LaunchAgents -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
     fi
 
-    # Application Scripts
-    [[ -d ~/Library/Application\ Scripts/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/Application Scripts/$bundle_id")
-
-    # Services
-    [[ -d ~/Library/Services/"$app_name".workflow ]] && files_to_clean+=("$HOME/Library/Services/$app_name.workflow")
-
-    # QuickLook Plugins
-    [[ -d ~/Library/QuickLook/"$app_name".qlgenerator ]] && files_to_clean+=("$HOME/Library/QuickLook/$app_name.qlgenerator")
-
-    # Internet Plug-Ins
-    [[ -d ~/Library/Internet\ Plug-Ins/"$app_name".plugin ]] && files_to_clean+=("$HOME/Library/Internet Plug-Ins/$app_name.plugin")
-
-    # Audio Plug-Ins (Components, VST, VST3)
-    [[ -d ~/Library/Audio/Plug-Ins/Components/"$app_name".component ]] && files_to_clean+=("$HOME/Library/Audio/Plug-Ins/Components/$app_name.component")
-    [[ -d ~/Library/Audio/Plug-Ins/VST/"$app_name".vst ]] && files_to_clean+=("$HOME/Library/Audio/Plug-Ins/VST/$app_name.vst")
-    [[ -d ~/Library/Audio/Plug-Ins/VST3/"$app_name".vst3 ]] && files_to_clean+=("$HOME/Library/Audio/Plug-Ins/VST3/$app_name.vst3")
-    [[ -d ~/Library/Audio/Plug-Ins/Digidesign/"$app_name".dpm ]] && files_to_clean+=("$HOME/Library/Audio/Plug-Ins/Digidesign/$app_name.dpm")
-
-    # Preference Panes
-    [[ -d ~/Library/PreferencePanes/"$app_name".prefPane ]] && files_to_clean+=("$HOME/Library/PreferencePanes/$app_name.prefPane")
-
-    # Screen Savers
-    [[ -d ~/Library/Screen\ Savers/"$app_name".saver ]] && files_to_clean+=("$HOME/Library/Screen Savers/$app_name.saver")
-
-    # Frameworks
-    [[ -d ~/Library/Frameworks/"$app_name".framework ]] && files_to_clean+=("$HOME/Library/Frameworks/$app_name.framework")
-
-    # Autosave Information
-    [[ -d ~/Library/Autosave\ Information/"$bundle_id" ]] && files_to_clean+=("$HOME/Library/Autosave Information/$bundle_id")
-
-    # Contextual Menu Items
-    [[ -d ~/Library/Contextual\ Menu\ Items/"$app_name".plugin ]] && files_to_clean+=("$HOME/Library/Contextual Menu Items/$app_name.plugin")
-
-    # Spotlight Plugins
-    [[ -d ~/Library/Spotlight/"$app_name".mdimporter ]] && files_to_clean+=("$HOME/Library/Spotlight/$app_name.mdimporter")
-
-    # Color Pickers
-    [[ -d ~/Library/ColorPickers/"$app_name".colorPicker ]] && files_to_clean+=("$HOME/Library/ColorPickers/$app_name.colorPicker")
-
-    # Workflows
-    [[ -d ~/Library/Workflows/"$app_name".workflow ]] && files_to_clean+=("$HOME/Library/Workflows/$app_name.workflow")
-
-    # Unix-style configuration directories and files (cross-platform apps)
-    [[ -d ~/.config/"$app_name" ]] && files_to_clean+=("$HOME/.config/$app_name")
-    [[ -d ~/.local/share/"$app_name" ]] && files_to_clean+=("$HOME/.local/share/$app_name")
-    [[ -d ~/."$app_name" ]] && files_to_clean+=("$HOME/.$app_name")
-    [[ -f ~/."${app_name}rc" ]] && files_to_clean+=("$HOME/.${app_name}rc")
-
-    # ============================================================================
-    # IDE-specific SDK and Toolchain directories
-    # ============================================================================
-
-    # DevEco-Studio (HarmonyOS/OpenHarmony IDE by Huawei)
+    # Specialized toolchain cleanup (non-loopable or highly specific)
+    # 1. DevEco-Studio (Huawei)
     if [[ "$app_name" =~ DevEco|deveco ]] || [[ "$bundle_id" =~ huawei.*deveco ]]; then
-        [[ -d ~/DevEcoStudioProjects ]] && files_to_clean+=("$HOME/DevEcoStudioProjects")
-        [[ -d ~/DevEco-Studio ]] && files_to_clean+=("$HOME/DevEco-Studio")
-        [[ -d ~/Library/Application\ Support/Huawei ]] && files_to_clean+=("$HOME/Library/Application Support/Huawei")
-        [[ -d ~/Library/Caches/Huawei ]] && files_to_clean+=("$HOME/Library/Caches/Huawei")
-        [[ -d ~/Library/Logs/Huawei ]] && files_to_clean+=("$HOME/Library/Logs/Huawei")
-        [[ -d ~/Library/Huawei ]] && files_to_clean+=("$HOME/Library/Huawei")
-        [[ -d ~/Huawei ]] && files_to_clean+=("$HOME/Huawei")
-        [[ -d ~/HarmonyOS ]] && files_to_clean+=("$HOME/HarmonyOS")
-        [[ -d ~/.huawei ]] && files_to_clean+=("$HOME/.huawei")
-        [[ -d ~/.ohos ]] && files_to_clean+=("$HOME/.ohos")
+        for d in ~/DevEcoStudioProjects ~/DevEco-Studio ~/Library/Application\ Support/Huawei ~/Library/Caches/Huawei ~/Library/Logs/Huawei ~/Library/Huawei ~/Huawei ~/HarmonyOS ~/.huawei ~/.ohos; do
+            [[ -d "$d" ]] && files_to_clean+=("$d")
+        done
     fi
 
-    # Android Studio
+    # 2. Android Studio (Google)
     if [[ "$app_name" =~ Android.*Studio|android.*studio ]] || [[ "$bundle_id" =~ google.*android.*studio|jetbrains.*android ]]; then
-        [[ -d ~/AndroidStudioProjects ]] && files_to_clean+=("$HOME/AndroidStudioProjects")
-        [[ -d ~/Library/Android ]] && files_to_clean+=("$HOME/Library/Android")
-        [[ -d ~/.android ]] && files_to_clean+=("$HOME/.android")
-        [[ -d ~/.gradle ]] && files_to_clean+=("$HOME/.gradle")
-        [[ -d ~/Library/Application\ Support/Google ]] &&
-            while IFS= read -r -d '' dir; do files_to_clean+=("$dir"); done < <(find ~/Library/Application\ Support/Google -maxdepth 1 -name "AndroidStudio*" -print0 2> /dev/null)
+        for d in ~/AndroidStudioProjects ~/Library/Android ~/.android ~/.gradle; do
+            [[ -d "$d" ]] && files_to_clean+=("$d")
+        done
+        [[ -d ~/Library/Application\ Support/Google ]] && while IFS= read -r -d '' d; do files_to_clean+=("$d"); done < <(command find ~/Library/Application\ Support/Google -maxdepth 1 -name "AndroidStudio*" -print0 2> /dev/null)
     fi
 
-    # Xcode
+    # 3. Xcode (Apple)
     if [[ "$app_name" =~ Xcode|xcode ]] || [[ "$bundle_id" =~ apple.*xcode ]]; then
         [[ -d ~/Library/Developer ]] && files_to_clean+=("$HOME/Library/Developer")
         [[ -d ~/.Xcode ]] && files_to_clean+=("$HOME/.Xcode")
     fi
 
-    # IntelliJ IDEA, PyCharm, WebStorm, etc. (JetBrains IDEs)
+    # 4. JetBrains (IDE settings)
     if [[ "$bundle_id" =~ jetbrains ]] || [[ "$app_name" =~ IntelliJ|PyCharm|WebStorm|GoLand|RubyMine|PhpStorm|CLion|DataGrip|Rider ]]; then
-        local ide_name="$app_name"
-        [[ -d ~/Library/Application\ Support/JetBrains ]] &&
-            while IFS= read -r -d '' dir; do files_to_clean+=("$dir"); done < <(find ~/Library/Application\ Support/JetBrains -maxdepth 1 -name "${ide_name}*" -print0 2> /dev/null)
-        [[ -d ~/Library/Caches/JetBrains ]] &&
-            while IFS= read -r -d '' dir; do files_to_clean+=("$dir"); done < <(find ~/Library/Caches/JetBrains -maxdepth 1 -name "${ide_name}*" -print0 2> /dev/null)
-        [[ -d ~/Library/Logs/JetBrains ]] &&
-            while IFS= read -r -d '' dir; do files_to_clean+=("$dir"); done < <(find ~/Library/Logs/JetBrains -maxdepth 1 -name "${ide_name}*" -print0 2> /dev/null)
+        for base in ~/Library/Application\ Support/JetBrains ~/Library/Caches/JetBrains ~/Library/Logs/JetBrains; do
+            [[ -d "$base" ]] && while IFS= read -r -d '' d; do files_to_clean+=("$d"); done < <(command find "$base" -maxdepth 1 -name "${app_name}*" -print0 2> /dev/null)
+        done
     fi
 
-    # Unity
-    if [[ "$app_name" =~ Unity|unity ]] || [[ "$bundle_id" =~ unity ]]; then
-        [[ -d ~/.local/share/unity3d ]] && files_to_clean+=("$HOME/.local/share/unity3d")
-        [[ -d ~/Library/Unity ]] && files_to_clean+=("$HOME/Library/Unity")
-    fi
+    # 5. Unity / Unreal / Godot
+    [[ "$app_name" =~ Unity|unity ]] && [[ -d ~/Library/Unity ]] && files_to_clean+=("$HOME/Library/Unity")
+    [[ "$app_name" =~ Unreal|unreal ]] && [[ -d ~/Library/Application\ Support/Epic ]] && files_to_clean+=("$HOME/Library/Application Support/Epic")
+    [[ "$app_name" =~ Godot|godot ]] && [[ -d ~/Library/Application\ Support/Godot ]] && files_to_clean+=("$HOME/Library/Application Support/Godot")
 
-    # Unreal Engine
-    if [[ "$app_name" =~ Unreal|unreal ]] || [[ "$bundle_id" =~ unrealengine|epicgames ]]; then
-        [[ -d ~/Library/Application\ Support/Epic ]] && files_to_clean+=("$HOME/Library/Application Support/Epic")
-        [[ -d ~/Documents/Unreal\ Projects ]] && files_to_clean+=("$HOME/Documents/Unreal Projects")
-    fi
+    # 6. Tools
+    [[ "$bundle_id" =~ microsoft.*vscode ]] && [[ -d ~/.vscode ]] && files_to_clean+=("$HOME/.vscode")
+    [[ "$app_name" =~ Docker ]] && [[ -d ~/.docker ]] && files_to_clean+=("$HOME/.docker")
 
-    # Visual Studio Code
-    if [[ "$bundle_id" =~ microsoft.*vscode|visualstudio.*code ]]; then
-        [[ -d ~/.vscode ]] && files_to_clean+=("$HOME/.vscode")
-        [[ -d ~/.vscode-insiders ]] && files_to_clean+=("$HOME/.vscode-insiders")
-    fi
-
-    # Flutter
-    if [[ "$app_name" =~ Flutter|flutter ]] || [[ "$bundle_id" =~ flutter ]]; then
-        [[ -d ~/.pub-cache ]] && files_to_clean+=("$HOME/.pub-cache")
-        [[ -d ~/flutter ]] && files_to_clean+=("$HOME/flutter")
-    fi
-
-    # Godot
-    if [[ "$app_name" =~ Godot|godot ]] || [[ "$bundle_id" =~ godot ]]; then
-        [[ -d ~/.local/share/godot ]] && files_to_clean+=("$HOME/.local/share/godot")
-        [[ -d ~/Library/Application\ Support/Godot ]] && files_to_clean+=("$HOME/Library/Application Support/Godot")
-    fi
-
-    # Docker Desktop
-    if [[ "$app_name" =~ Docker ]] || [[ "$bundle_id" =~ docker ]]; then
-        [[ -d ~/.docker ]] && files_to_clean+=("$HOME/.docker")
-    fi
-
-    # Only print if array has elements to avoid unbound variable error
-    if [[ ${#files_to_clean[@]} -gt 0 ]]; then
-        printf '%s\n' "${files_to_clean[@]}"
-    fi
+    # Output results
+    [[ ${#files_to_clean[@]} -gt 0 ]] && printf '%s\n' "${files_to_clean[@]}"
 }
 
 # Find system-level app files (requires sudo)
@@ -767,82 +699,63 @@ find_app_system_files() {
     local app_name="$2"
     local -a system_files=()
 
-    # System Application Support
-    [[ -d /Library/Application\ Support/"$app_name" ]] && system_files+=("/Library/Application Support/$app_name")
-    [[ -d /Library/Application\ Support/"$bundle_id" ]] && system_files+=("/Library/Application Support/$bundle_id")
-
     # Sanitized App Name (remove spaces)
+    local nospace_name="${app_name// /}"
+
+    # Standard system path patterns
+    local -a system_patterns=(
+        "/Library/Application Support/$app_name"
+        "/Library/Application Support/$bundle_id"
+        "/Library/LaunchAgents/$bundle_id.plist"
+        "/Library/LaunchDaemons/$bundle_id.plist"
+        "/Library/Preferences/$bundle_id.plist"
+        "/Library/Receipts/$bundle_id.bom"
+        "/Library/Receipts/$bundle_id.plist"
+        "/Library/Frameworks/$app_name.framework"
+        "/Library/Internet Plug-Ins/$app_name.plugin"
+        "/Library/Audio/Plug-Ins/Components/$app_name.component"
+        "/Library/Audio/Plug-Ins/VST/$app_name.vst"
+        "/Library/Audio/Plug-Ins/VST3/$app_name.vst3"
+        "/Library/Audio/Plug-Ins/Digidesign/$app_name.dpm"
+        "/Library/QuickLook/$app_name.qlgenerator"
+        "/Library/PreferencePanes/$app_name.prefPane"
+        "/Library/Screen Savers/$app_name.saver"
+        "/Library/Caches/$bundle_id"
+        "/Library/Caches/$app_name"
+    )
+
     if [[ ${#app_name} -gt 3 && "$app_name" =~ [[:space:]] ]]; then
-        local nospace_name="${app_name// /}"
-        [[ -d /Library/Application\ Support/"$nospace_name" ]] && system_files+=("/Library/Application Support/$nospace_name")
-        [[ -d /Library/Caches/"$nospace_name" ]] && system_files+=("/Library/Caches/$nospace_name")
-        [[ -d /Library/Logs/"$nospace_name" ]] && system_files+=("/Library/Logs/$nospace_name")
+        system_patterns+=(
+            "/Library/Application Support/$nospace_name"
+            "/Library/Caches/$nospace_name"
+            "/Library/Logs/$nospace_name"
+        )
     fi
 
-    # System Launch Agents
-    [[ -f /Library/LaunchAgents/"$bundle_id".plist ]] && system_files+=("/Library/LaunchAgents/$bundle_id.plist")
-    # Search for LaunchAgents by app name if unique enough
+    # Process patterns
+    for p in "${system_patterns[@]}"; do
+        [[ -e "$p" ]] && system_files+=("$p")
+    done
+
+    # System LaunchAgents/LaunchDaemons by name
     if [[ ${#app_name} -gt 3 ]]; then
-        while IFS= read -r -d '' plist; do
-            system_files+=("$plist")
-        done < <(find /Library/LaunchAgents -name "*$app_name*.plist" -print0 2> /dev/null)
+        for base in /Library/LaunchAgents /Library/LaunchDaemons; do
+            [[ -d "$base" ]] && while IFS= read -r -d '' plist; do
+                system_files+=("$plist")
+            done < <(command find "$base" -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
+        done
     fi
 
-    # System Launch Daemons
-    [[ -f /Library/LaunchDaemons/"$bundle_id".plist ]] && system_files+=("/Library/LaunchDaemons/$bundle_id.plist")
-    # Search for LaunchDaemons by app name if unique enough
-    if [[ ${#app_name} -gt 3 ]]; then
-        while IFS= read -r -d '' plist; do
-            system_files+=("$plist")
-        done < <(find /Library/LaunchDaemons -name "*$app_name*.plist" -print0 2> /dev/null)
-    fi
-
-    # Privileged Helper Tools
+    # Privileged Helper Tools and Receipts (special handling)
     [[ -d /Library/PrivilegedHelperTools ]] && while IFS= read -r -d '' helper; do
         system_files+=("$helper")
-    done < <(find /Library/PrivilegedHelperTools \( -name "$bundle_id*" \) -print0 2> /dev/null)
+    done < <(command find /Library/PrivilegedHelperTools -maxdepth 1 \( -name "$bundle_id*" \) -print0 2> /dev/null)
 
-    # System Preferences
-    [[ -f /Library/Preferences/"$bundle_id".plist ]] && system_files+=("/Library/Preferences/$bundle_id.plist")
-
-    # Installation Receipts
     [[ -d /private/var/db/receipts ]] && while IFS= read -r -d '' receipt; do
         system_files+=("$receipt")
-    done < <(find /private/var/db/receipts \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+    done < <(command find /private/var/db/receipts -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
 
-    # System Logs
-    [[ -d /Library/Logs/"$app_name" ]] && system_files+=("/Library/Logs/$app_name")
-    [[ -d /Library/Logs/"$bundle_id" ]] && system_files+=("/Library/Logs/$bundle_id")
-
-    # System Frameworks
-    [[ -d /Library/Frameworks/"$app_name".framework ]] && system_files+=("/Library/Frameworks/$app_name.framework")
-
-    # System Internet Plug-Ins
-    [[ -d /Library/Internet\ Plug-Ins/"$app_name".plugin ]] && system_files+=("/Library/Internet Plug-Ins/$app_name.plugin")
-
-    # System Audio Plug-Ins
-    [[ -d /Library/Audio/Plug-Ins/Components/"$app_name".component ]] && system_files+=("/Library/Audio/Plug-Ins/Components/$app_name.component")
-    [[ -d /Library/Audio/Plug-Ins/VST/"$app_name".vst ]] && system_files+=("/Library/Audio/Plug-Ins/VST/$app_name.vst")
-    [[ -d /Library/Audio/Plug-Ins/VST3/"$app_name".vst3 ]] && system_files+=("/Library/Audio/Plug-Ins/VST3/$app_name.vst3")
-    [[ -d /Library/Audio/Plug-Ins/Digidesign/"$app_name".dpm ]] && system_files+=("/Library/Audio/Plug-Ins/Digidesign/$app_name.dpm")
-
-    # System QuickLook Plugins
-    [[ -d /Library/QuickLook/"$app_name".qlgenerator ]] && system_files+=("/Library/QuickLook/$app_name.qlgenerator")
-
-    # System Preference Panes
-    [[ -d /Library/PreferencePanes/"$app_name".prefPane ]] && system_files+=("/Library/PreferencePanes/$app_name.prefPane")
-
-    # System Screen Savers
-    [[ -d /Library/Screen\ Savers/"$app_name".saver ]] && system_files+=("/Library/Screen Savers/$app_name.saver")
-
-    # System Caches
-    [[ -d /Library/Caches/"$bundle_id" ]] && system_files+=("/Library/Caches/$bundle_id")
-    [[ -d /Library/Caches/"$app_name" ]] && system_files+=("/Library/Caches/$app_name")
-
-    # Only print if array has elements
-    if [[ ${#system_files[@]} -gt 0 ]]; then
-        printf '%s\n' "${system_files[@]}"
-    fi
+    [[ ${#system_files[@]} -gt 0 ]] && printf '%s\n' "${system_files[@]}"
 
     # Find files from receipts (Deep Scan)
     find_app_receipt_files "$bundle_id"
@@ -863,7 +776,7 @@ find_app_receipt_files() {
     if [[ -d /private/var/db/receipts ]]; then
         while IFS= read -r -d '' bom; do
             bom_files+=("$bom")
-        done < <(find /private/var/db/receipts -name "${bundle_id}*.bom" -print0 2> /dev/null)
+        done < <(find /private/var/db/receipts -maxdepth 1 -name "${bundle_id}*.bom" -print0 2> /dev/null)
     fi
 
     # Process bom files if any found

@@ -38,7 +38,6 @@ clean_code_editors() {
     safe_clean ~/Library/Application\ Support/Code/Cache/* "VS Code cache"
     safe_clean ~/Library/Application\ Support/Code/CachedExtensions/* "VS Code extension cache"
     safe_clean ~/Library/Application\ Support/Code/CachedData/* "VS Code data cache"
-    # safe_clean ~/Library/Caches/JetBrains/* "JetBrains cache"
     safe_clean ~/Library/Caches/com.sublimetext.*/* "Sublime Text cache"
 }
 
