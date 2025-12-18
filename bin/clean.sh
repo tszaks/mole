@@ -221,23 +221,10 @@ safe_clean() {
     for path in "${targets[@]}"; do
         local skip=false
 
-        # Hard-coded protection for critical apps (cannot be disabled by user)
-        case "$path" in
-            *clash* | *Clash* | *surge* | *Surge* | *mihomo* | *openvpn* | *OpenVPN* | *verge* | *Verge* | *shadowsocks* | *Shadowsocks* | *v2ray* | *V2Ray* | *sing-box* | *tailscale* | *nordvpn* | *NordVPN* | *expressvpn* | *ExpressVPN* | *protonvpn* | *ProtonVPN* | *mullvad* | *Mullvad* | *hiddify* | *Hiddify* | *loon* | *Loon* | *Cursor* | *cursor* | *Claude* | *claude* | *ChatGPT* | *chatgpt* | *Ollama* | *ollama* | *lmstudio* | *Chatbox* | *Gemini* | *gemini* | *Perplexity* | *perplexity* | *Windsurf* | *windsurf* | *Poe* | *poe* | *DiffusionBee* | *diffusionbee* | *DrawThings* | *drawthings* | *Aerial* | *aerial* | *Fliqlo* | *fliqlo* | *com.apple.finder* | *com.apple.Settings* | *com.apple.SystemSettings* | *com.apple.controlcenter*)
-                skip=true
-                ((skipped_count++))
-                ;;
-        esac
-
-        # Protect system app containers from accidental cleanup
-        # Extract bundle ID from ~/Library/Containers/<bundle_id>/... paths
-        if [[ "$path" == */Library/Containers/* ]] && [[ "$path" =~ /Library/Containers/([^/]+)/ ]]; then
-            local container_bundle_id="${BASH_REMATCH[1]}"
-            if should_protect_data "$container_bundle_id"; then
-                debug_log "Protecting system container: $container_bundle_id"
-                skip=true
-                ((skipped_count++))
-            fi
+        # Centralized protection for critical apps and system components
+        if should_protect_path "$path"; then
+            skip=true
+            ((skipped_count++))
         fi
 
         [[ "$skip" == "true" ]] && continue

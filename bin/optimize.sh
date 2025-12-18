@@ -184,6 +184,12 @@ cleanup_path() {
         return
     fi
 
+    # Centralized protection check
+    if should_protect_path "$expanded_path"; then
+        echo -e "${YELLOW}${ICON_WARNING}${NC} Protected $label"
+        return
+    fi
+
     local size_kb
     size_kb=$(get_path_size_kb "$expanded_path")
     local size_display=""

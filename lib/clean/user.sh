@@ -81,9 +81,10 @@ clean_finder_metadata() {
 # Clean macOS system caches
 clean_macos_system_caches() {
     safe_clean ~/Library/Saved\ Application\ State/* "Saved application states"
-    safe_clean ~/Library/Caches/com.apple.spotlight "Spotlight cache"
 
-    # MOVED: Spotlight cache cleanup moved to optimize command
+    # REMOVED: Spotlight cache cleanup can cause system UI issues
+    # Spotlight indexes should be managed by macOS automatically
+    # safe_clean ~/Library/Caches/com.apple.spotlight "Spotlight cache"
 
     safe_clean ~/Library/Caches/com.apple.photoanalysisd "Photo analysis cache"
     safe_clean ~/Library/Caches/com.apple.akd "Apple ID cache"

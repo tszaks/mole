@@ -164,16 +164,19 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.telerik.Fiddler"      # Fiddler
     "com.usebruno.app"         # Bruno (API client)
 
-    # Network Proxy & VPN Tools (protect all variants)
+    # ============================================================================
+    # Network Proxy & VPN Tools (Broad Glob Protection)
+    # ============================================================================
+    # Clash variants
     "*clash*"               # All Clash variants (ClashX, ClashX Pro, Clash Verge, etc)
     "*Clash*"               # Capitalized variants
-    "*clash-verge*"         # Explicit Clash Verge protection
-    "*verge*"               # Verge variants (lowercase)
-    "*Verge*"               # Verge variants (capitalized)
     "com.nssurge.surge-mac" # Surge
+    "*surge*"               # Surge variants
+    "*Surge*"               # Surge variants
     "mihomo*"               # Mihomo Party and variants
     "*openvpn*"             # OpenVPN Connect and variants
     "*OpenVPN*"             # OpenVPN capitalized variants
+    "net.openvpn.*"         # OpenVPN bundle IDs
 
     # Proxy Clients (Shadowsocks, V2Ray, etc)
     "*ShadowsocksX-NG*" # ShadowsocksX-NG
@@ -207,7 +210,12 @@ readonly DATA_PROTECTED_BUNDLES=(
     "*windscribe*"            # Windscribe
     "*mullvad*"               # Mullvad
     "*privateinternetaccess*" # PIA
-    "net.openvpn.*"           # OpenVPN bundle IDs
+
+    # Screensaver & Dynamic Wallpaper
+    "*Aerial*" # Aerial screensaver (all case variants)
+    "*aerial*" # Aerial lowercase
+    "*Fliqlo*" # Fliqlo screensaver (all case variants)
+    "*fliqlo*" # Fliqlo lowercase
 
     # ============================================================================
     # Development Tools - Git & Version Control
@@ -466,6 +474,79 @@ should_protect_data() {
             return 0
         fi
     done
+    return 1
+}
+
+# Check if a specific path should be protected from deletion
+# Centralized logic to protect system settings, control center, and critical apps
+#
+# Args: $1 - path to check
+# Returns: 0 if protected, 1 if safe to delete
+should_protect_path() {
+    local path="$1"
+    [[ -z "$path" ]] && return 1
+
+    local path_lower
+    path_lower=$(echo "$path" | tr '[:upper:]' '[:lower:]')
+
+    # 1. Check for explicit critical system keywords in path (case-insensitive)
+    # Protect System Settings, Preferences, Control Center, and related XPC services
+    if [[ "$path_lower" =~ systemsettings || "$path_lower" =~ systempreferences || "$path_lower" =~ controlcenter ]]; then
+        return 0
+    fi
+
+    # 2. Protect system-critical cache directories that cause UI corruption
+    # These caches are essential for modern macOS (Sonoma/Sequoia) system UI rendering
+    case "$path" in
+        # System Settings and Control Center caches (CRITICAL - prevents blank panel bug)
+        *com.apple.systempreferences.cache* | *com.apple.Settings.cache* | *com.apple.controlcenter.cache*)
+            return 0
+            ;;
+        # Finder and Dock (system essential)
+        *com.apple.finder.cache* | *com.apple.dock.cache*)
+            return 0
+            ;;
+        # System XPC services and sandboxed containers
+        */Library/Containers/com.apple.Settings* | */Library/Containers/com.apple.SystemSettings* | */Library/Containers/com.apple.controlcenter*)
+            return 0
+            ;;
+        */Library/Group\ Containers/com.apple.systempreferences* | */Library/Group\ Containers/com.apple.Settings*)
+            return 0
+            ;;
+    esac
+
+    # 3. Extract bundle ID from app container/group container paths
+    # Matches: .../Library/Containers/bundle.id/...
+    # Matches: .../Library/Group Containers/group.id/...
+    if [[ "$path" =~ /Library/Containers/([^/]+) ]] || [[ "$path" =~ /Library/Group\ Containers/([^/]+) ]]; then
+        local bundle_id="${BASH_REMATCH[1]}"
+        if should_protect_data "$bundle_id"; then
+            return 0
+        fi
+    fi
+
+    # 4. Check for specific hardcoded critical patterns
+    case "$path" in
+        *com.apple.Settings* | *com.apple.SystemSettings* | *com.apple.controlcenter* | *com.apple.finder*)
+            return 0
+            ;;
+    esac
+
+    # 5. Check the full path against protected patterns (Broad Glob Match)
+    # This catches things like /Users/tw93/Library/Caches/Claude when pattern is *Claude*
+    for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}"; do
+        if bundle_matches_pattern "$path" "$pattern"; then
+            return 0
+        fi
+    done
+
+    # 6. Check if the filename itself matches any protected patterns
+    local filename
+    filename=$(basename "$path")
+    if should_protect_data "$filename"; then
+        return 0
+    fi
+
     return 1
 }
 

@@ -176,6 +176,10 @@ opt_saved_state_cleanup() {
     # Only delete old saved states (safety window)
     local deleted=0
     while IFS= read -r -d '' state_path; do
+        # Protect system critical components
+        if should_protect_path "$state_path"; then
+            continue
+        fi
         if safe_remove "$state_path" true; then
             ((deleted++))
         fi
@@ -186,31 +190,6 @@ opt_saved_state_cleanup() {
     else
         echo -e "${GRAY}-${NC} No old saved states found"
     fi
-}
-
-# Finder and Dock: refresh interface caches
-# REMOVED: Deleting Finder cache causes user configuration loss
-# Including window positions, sidebar settings, view preferences, icon sizes
-# Users reported losing Finder settings even with .DS_Store whitelist protection
-# Keep this function for reference but do not use in default optimizations
-opt_finder_dock_refresh() {
-    echo -e "${BLUE}${ICON_ARROW}${NC} Resetting Finder & Dock caches..."
-    local -a interface_targets=(
-        "$HOME/Library/Caches/com.apple.finder|Finder cache"
-        "$HOME/Library/Caches/com.apple.dock.iconcache|Dock icon cache"
-    )
-    for target in "${interface_targets[@]}"; do
-        IFS='|' read -r target_path label <<< "$target"
-        cleanup_path "$target_path" "$label"
-    done
-
-    # Warn user before restarting Finder (may lose unsaved work)
-    echo -e "${YELLOW}${ICON_WARNING}${NC} About to restart Finder & Dock (save any work in Finder windows)"
-    sleep 2
-
-    killall Finder > /dev/null 2>&1 || true
-    killall Dock > /dev/null 2>&1 || true
-    echo -e "${GREEN}${ICON_SUCCESS}${NC} Finder & Dock relaunched"
 }
 
 # Swap cleanup: reset swap files
@@ -352,54 +331,6 @@ opt_network_optimization() {
 }
 
 # Clean Spotlight user caches
-opt_spotlight_cache_cleanup() {
-    # Check whitelist
-    if is_whitelisted "spotlight_cache"; then
-        echo -e "${GRAY}${ICON_SUCCESS}${NC} Spotlight cache cleanup (whitelisted)"
-        return 0
-    fi
-
-    echo -e "${BLUE}${ICON_ARROW}${NC} Cleaning Spotlight user caches..."
-
-    local cleaned_count=0
-    local total_size_kb=0
-
-    # CoreSpotlight user cache (can grow very large)
-    local spotlight_cache="$HOME/Library/Metadata/CoreSpotlight"
-    if [[ -d "$spotlight_cache" ]]; then
-        local size_kb=$(get_path_size_kb "$spotlight_cache")
-        if [[ "$size_kb" -gt 0 ]]; then
-            local size_human=$(bytes_to_human "$((size_kb * 1024))")
-            if safe_remove "$spotlight_cache" true; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} CoreSpotlight cache ${GREEN}($size_human)${NC}"
-                ((cleaned_count++))
-                ((total_size_kb += size_kb))
-            fi
-        fi
-    fi
-
-    # Spotlight saved application state
-    local spotlight_state="$HOME/Library/Saved Application State/com.apple.spotlight.Spotlight.savedState"
-    if [[ -d "$spotlight_state" ]]; then
-        local size_kb=$(get_path_size_kb "$spotlight_state")
-        if [[ "$size_kb" -gt 0 ]]; then
-            local size_human=$(bytes_to_human "$((size_kb * 1024))")
-            if safe_remove "$spotlight_state" true; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Spotlight state ${GREEN}($size_human)${NC}"
-                ((cleaned_count++))
-                ((total_size_kb += size_kb))
-            fi
-        fi
-    fi
-
-    if [[ $cleaned_count -gt 0 ]]; then
-        local total_human=$(bytes_to_human "$((total_size_kb * 1024))")
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} Cleaned $cleaned_count items ${GREEN}($total_human)${NC}"
-        echo -e "${YELLOW}${ICON_WARNING}${NC} System settings may require logout/restart to display correctly"
-    else
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} No Spotlight caches to clean"
-    fi
-}
 
 # Execute optimization by action name
 execute_optimization() {
@@ -415,13 +346,11 @@ execute_optimization() {
         radio_refresh) opt_radio_refresh ;;
         mail_downloads) opt_mail_downloads ;;
         saved_state_cleanup) opt_saved_state_cleanup ;;
-        finder_dock_refresh) opt_finder_dock_refresh ;;
         swap_cleanup) opt_swap_cleanup ;;
         startup_cache) opt_startup_cache ;;
         local_snapshots) opt_local_snapshots ;;
         developer_cleanup) opt_developer_cleanup ;;
         fix_broken_configs) opt_fix_broken_configs ;;
-        spotlight_cache_cleanup) opt_spotlight_cache_cleanup ;;
         network_optimization) opt_network_optimization ;;
         *)
             echo -e "${RED}${ICON_ERROR}${NC} Unknown action: $action"

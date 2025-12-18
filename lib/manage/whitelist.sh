@@ -163,7 +163,6 @@ TouchID sudo check|check_touchid|config_check
 Rosetta 2 check|check_rosetta|config_check
 Git configuration check|check_git_config|config_check
 Login items check|check_login_items|config_check
-Spotlight cache cleanup|spotlight_cache|system_optimization
 EOF
 }
 
