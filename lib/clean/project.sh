@@ -342,12 +342,12 @@ select_purge_categories() {
                     selected[cursor_pos]=true
                 fi
                 ;;
-            "a"|"A") # Select all
+            "a" | "A") # Select all
                 for ((i = 0; i < total_items; i++)); do
                     selected[i]=true
                 done
                 ;;
-            "i"|"I") # Invert selection
+            "i" | "I") # Invert selection
                 for ((i = 0; i < total_items; i++)); do
                     if [[ ${selected[i]} == true ]]; then
                         selected[i]=false
@@ -356,11 +356,11 @@ select_purge_categories() {
                     fi
                 done
                 ;;
-            "q"|"Q"|$'\x03') # Quit or Ctrl-C
+            "q" | "Q" | $'\x03') # Quit or Ctrl-C
                 restore_terminal
                 return 1
                 ;;
-            ""|$'\n'|$'\r') # Enter - confirm
+            "" | $'\n' | $'\r') # Enter - confirm
                 # Build result
                 PURGE_SELECTION_RESULT=""
                 for ((i = 0; i < total_items; i++)); do
@@ -453,7 +453,7 @@ clean_project_artifacts() {
         echo ""
         echo -e "${GREEN}✓${NC} Great! No old project artifacts to clean"
         printf '\n'
-        return 2  # Special code: nothing to clean
+        return 2 # Special code: nothing to clean
     fi
 
     # Mark recently modified items (for default selection state)
@@ -505,8 +505,8 @@ clean_project_artifacts() {
         local size_str="$3"
 
         # Terminal width for alignment
-        local terminal_width=$(tput cols 2>/dev/null || echo 80)
-        local fixed_width=28  # Reserve for type and size
+        local terminal_width=$(tput cols 2> /dev/null || echo 80)
+        local fixed_width=28 # Reserve for type and size
         local available_width=$((terminal_width - fixed_width))
 
         # Bounds: 24-35 chars for project name
@@ -551,8 +551,14 @@ clean_project_artifacts() {
     fi
 
     # Set global vars for selector
-    export PURGE_CATEGORY_SIZES=$(IFS=,; echo "${item_sizes[*]}")
-    export PURGE_RECENT_CATEGORIES=$(IFS=,; echo "${item_recent_flags[*]}")
+    export PURGE_CATEGORY_SIZES=$(
+        IFS=,
+        echo "${item_sizes[*]}"
+    )
+    export PURGE_RECENT_CATEGORIES=$(
+        IFS=,
+        echo "${item_recent_flags[*]}"
+    )
 
     # Interactive selection (only if terminal is available)
     PURGE_SELECTION_RESULT=""
@@ -609,7 +615,7 @@ clean_project_artifacts() {
 
             # Update stats
             if [[ ! -e "$item_path" ]]; then
-                local current_total=$(cat "$stats_dir/purge_stats" 2>/dev/null || echo "0")
+                local current_total=$(cat "$stats_dir/purge_stats" 2> /dev/null || echo "0")
                 echo "$((current_total + size_kb))" > "$stats_dir/purge_stats"
                 ((cleaned_count++))
             fi
