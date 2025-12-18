@@ -207,68 +207,6 @@ is_cache_valid() {
     [[ $cache_age -lt $ttl ]]
 }
 
-check_homebrew_updates() {
-    # Check whitelist
-    if command -v is_whitelisted > /dev/null && is_whitelisted "check_brew_updates"; then return; fi
-    if ! command -v brew > /dev/null 2>&1; then
-        return
-    fi
-
-    local cache_file="$CACHE_DIR/brew_updates"
-    local formula_count=0
-    local cask_count=0
-
-    if is_cache_valid "$cache_file"; then
-        read -r formula_count cask_count < "$cache_file" 2> /dev/null || true
-        formula_count=${formula_count:-0}
-        cask_count=${cask_count:-0}
-    else
-        # Show spinner while checking
-        if [[ -t 1 ]]; then
-            start_inline_spinner "Checking Homebrew..."
-        fi
-
-        local outdated_list=""
-        outdated_list=$(brew outdated --quiet 2> /dev/null || echo "")
-        if [[ -n "$outdated_list" ]]; then
-            formula_count=$(echo "$outdated_list" | wc -l | tr -d ' ')
-        fi
-
-        local cask_list=""
-        cask_list=$(brew outdated --cask --quiet 2> /dev/null || echo "")
-        if [[ -n "$cask_list" ]]; then
-            cask_count=$(echo "$cask_list" | wc -l | tr -d ' ')
-        fi
-
-        echo "$formula_count $cask_count" > "$cache_file" 2> /dev/null || true
-
-        # Stop spinner before output
-        if [[ -t 1 ]]; then
-            stop_inline_spinner
-        fi
-    fi
-
-    local total_count=$((formula_count + cask_count))
-    export BREW_FORMULA_OUTDATED_COUNT=$formula_count
-    export BREW_CASK_OUTDATED_COUNT=$cask_count
-    export BREW_OUTDATED_COUNT=$total_count
-
-    if [[ $total_count -gt 0 ]]; then
-        local breakdown=""
-        if [[ $formula_count -gt 0 && $cask_count -gt 0 ]]; then
-            breakdown=" (${formula_count} formula, ${cask_count} cask)"
-        elif [[ $formula_count -gt 0 ]]; then
-            breakdown=" (${formula_count} formula)"
-        elif [[ $cask_count -gt 0 ]]; then
-            breakdown=" (${cask_count} cask)"
-        fi
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Homebrew     ${YELLOW}${total_count} updates${NC}${breakdown}"
-        echo -e "    ${GRAY}Run: ${GREEN}brew upgrade${NC} ${GRAY}and/or${NC} ${GREEN}brew upgrade --cask${NC}"
-    else
-        echo -e "  ${GREEN}✓${NC} Homebrew     Up to date"
-    fi
-}
-
 # Cache software update list to avoid calling softwareupdate twice
 SOFTWARE_UPDATE_LIST=""
 
@@ -300,13 +238,36 @@ check_macos_update() {
     local updates_available="false"
     if [[ $(get_software_updates) == "Updates Available" ]]; then
         updates_available="true"
+
+        # Verify with softwareupdate -l (short timeout) to reduce false positives
+        local sw_output=""
+        local sw_status=0
+        local spinner_started=false
+        if [[ -t 1 ]]; then
+            start_inline_spinner "Checking macOS updates..."
+            spinner_started=true
+        fi
+
+        if ! sw_output=$(run_with_timeout 5 softwareupdate -l 2> /dev/null); then
+            sw_status=$?
+        fi
+
+        if [[ "$spinner_started" == "true" ]]; then
+            stop_inline_spinner
+        fi
+
+        # If command failed, timed out, or returned empty, treat as no updates to avoid false positives
+        if [[ $sw_status -ne 0 || -z "$sw_output" ]]; then
+            updates_available="false"
+        elif echo "$sw_output" | grep -q "No new software available"; then
+            updates_available="false"
+        fi
     fi
 
     export MACOS_UPDATE_AVAILABLE="$updates_available"
 
     if [[ "$updates_available" == "true" ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} macOS        ${YELLOW}Update available${NC}"
-        echo -e "    ${GRAY}update available in final step${NC}"
     else
         echo -e "  ${GREEN}✓${NC} macOS        Up to date"
     fi
@@ -374,8 +335,6 @@ check_mole_update() {
 check_all_updates() {
     # Reset spinner flag for softwareupdate
     unset SOFTWAREUPDATE_SPINNER_SHOWN
-
-    check_homebrew_updates
 
     # Preload software update data to avoid delays between subsequent checks
     # Only redirect stdout, keep stderr for spinner display
@@ -601,11 +560,6 @@ check_swap_usage() {
 check_brew_health() {
     # Check whitelist
     if command -v is_whitelisted > /dev/null && is_whitelisted "check_brew_health"; then return; fi
-    # Check Homebrew status (fast)
-    if command -v brew > /dev/null 2>&1; then
-        # Skip slow 'brew doctor' check by default
-        echo -e "  ${GREEN}✓${NC} Homebrew     Installed"
-    fi
 }
 
 check_system_health() {
@@ -615,5 +569,4 @@ check_system_health() {
     check_login_items
     check_cache_size
     # Time Machine check is optional; skip by default to avoid noise on systems without backups
-    check_brew_health
 }

@@ -156,39 +156,6 @@ EOF
     [[ "$output" == *"Homebrew cleanup"* ]]
 }
 
-@test "check_homebrew_updates reports counts and uses cache" {
-    run bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/check/all.sh"
-
-brew() {
-    if [[ "$1" == "outdated" && "$2" == "--quiet" ]]; then
-        echo "pkg1"
-        echo "pkg2"
-        return 0
-    fi
-    if [[ "$1" == "outdated" && "$2" == "--cask" ]]; then
-        echo "cask1"
-        return 0
-    fi
-    return 0
-}
-
-start_inline_spinner(){ :; }
-stop_inline_spinner(){ :; }
-
-check_homebrew_updates
-
-# second call should read cache (no spinner)
-check_homebrew_updates
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Homebrew"* ]]
-    [[ "$output" == *"2 formula"* ]]
-}
-
 @test "check_appstore_updates is skipped for performance" {
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail

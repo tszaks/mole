@@ -160,23 +160,20 @@ safe_find_delete() {
 
     debug_log "Finding in $base_dir: $pattern (age: ${age_days}d, type: $type_filter)"
 
-    # Execute find with safety limits (maxdepth 5 covers most app cache structures)
-    if [[ "$age_days" -eq 0 ]]; then
-        # Delete all matching files without time restriction
-        command find "$base_dir" \
-            -maxdepth 5 \
-            -name "$pattern" \
-            -type "$type_filter" \
-            -delete 2> /dev/null || true # Suppress expected errors when files are removed or protected by other processes
-    else
-        # Delete files older than age_days
-        command find "$base_dir" \
-            -maxdepth 5 \
-            -name "$pattern" \
-            -type "$type_filter" \
-            -mtime "+$age_days" \
-            -delete 2> /dev/null || true # Suppress expected errors when files are removed or protected by other processes
+    local find_args=("-maxdepth" "5" "-name" "$pattern" "-type" "$type_filter")
+    if [[ "$age_days" -gt 0 ]]; then
+        find_args+=("-mtime" "+$age_days")
     fi
+
+    # Iterate results to respect should_protect_path when available
+    while IFS= read -r -d '' match; do
+        if command -v should_protect_path > /dev/null 2>&1; then
+            if should_protect_path "$match"; then
+                continue
+            fi
+        fi
+        safe_remove "$match" true || true
+    done < <(command find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
 
     return 0
 }
@@ -207,21 +204,20 @@ safe_sudo_find_delete() {
 
     debug_log "Finding (sudo) in $base_dir: $pattern (age: ${age_days}d, type: $type_filter)"
 
-    # Execute find with sudo
-    if [[ "$age_days" -eq 0 ]]; then
-        sudo find "$base_dir" \
-            -maxdepth 5 \
-            -name "$pattern" \
-            -type "$type_filter" \
-            -delete 2> /dev/null || true # Ignore transient errors for system files that might be in use or protected
-    else
-        sudo find "$base_dir" \
-            -maxdepth 5 \
-            -name "$pattern" \
-            -type "$type_filter" \
-            -mtime "+$age_days" \
-            -delete 2> /dev/null || true # Ignore transient errors for system files that might be in use or protected
+    local find_args=("-maxdepth" "5" "-name" "$pattern" "-type" "$type_filter")
+    if [[ "$age_days" -gt 0 ]]; then
+        find_args+=("-mtime" "+$age_days")
     fi
+
+    # Iterate results to respect should_protect_path when available
+    while IFS= read -r -d '' match; do
+        if command -v should_protect_path > /dev/null 2>&1; then
+            if should_protect_path "$match"; then
+                continue
+            fi
+        fi
+        safe_sudo_remove "$match" || true
+    done < <(sudo find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
 
     return 0
 }
