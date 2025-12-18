@@ -9,9 +9,7 @@ set -euo pipefail
 # Find and remove corrupted .plist files
 # ============================================================================
 
-# Clean broken preference files
-# Uses plutil -lint to validate plist files
-# Returns: count of broken files fixed
+# Clean corrupted preference files
 fix_broken_preferences() {
     local prefs_dir="$HOME/Library/Preferences"
     [[ -d "$prefs_dir" ]] || return 0
@@ -68,8 +66,7 @@ fix_broken_preferences() {
 # Find and remove login items pointing to non-existent files
 # ============================================================================
 
-# Clean broken login items (LaunchAgents pointing to missing executables)
-# Returns: count of broken items fixed
+# Clean login items with missing executables
 fix_broken_login_items() {
     local launch_agents_dir="$HOME/Library/LaunchAgents"
     [[ -d "$launch_agents_dir" ]] || return 0

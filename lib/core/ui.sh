@@ -17,10 +17,7 @@ clear_screen() { printf '\033[2J\033[H'; }
 hide_cursor() { [[ -t 1 ]] && printf '\033[?25l' >&2 || true; }
 show_cursor() { [[ -t 1 ]] && printf '\033[?25h' >&2 || true; }
 
-# Calculate display width of a string (CJK characters count as 2)
-# Args: $1 - string to measure
-# Returns: display width
-# Note: Works correctly even when LC_ALL=C is set
+# Calculate display width (CJK characters count as 2)
 get_display_width() {
     local str="$1"
 
@@ -66,8 +63,7 @@ get_display_width() {
     echo "$width"
 }
 
-# Truncate string by display width (handles CJK correctly)
-# Args: $1 - string, $2 - max display width
+# Truncate string by display width (handles CJK)
 truncate_by_display_width() {
     local str="$1"
     local max_width="$2"
@@ -140,7 +136,7 @@ truncate_by_display_width() {
     echo "${truncated}..."
 }
 
-# Keyboard input - read single keypress
+# Read single keyboard input
 read_key() {
     local key rest read_status
     IFS= read -r -s -n 1 key
@@ -222,7 +218,7 @@ drain_pending_input() {
     done
 }
 
-# Menu display
+# Format menu option display
 show_menu_option() {
     local number="$1"
     local text="$2"
@@ -235,7 +231,7 @@ show_menu_option() {
     fi
 }
 
-# Inline spinner
+# Background spinner implementation
 INLINE_SPINNER_PID=""
 start_inline_spinner() {
     stop_inline_spinner 2> /dev/null || true
@@ -281,7 +277,7 @@ stop_inline_spinner() {
     fi
 }
 
-# Wrapper for running commands with spinner
+# Run command with a terminal spinner
 with_spinner() {
     local msg="$1"
     shift || true
@@ -302,9 +298,7 @@ mo_spinner_chars() {
     printf "%s" "$chars"
 }
 
-# Format last used time for display
-# Args: $1 = last used string (e.g., "3 days ago", "Today", "Never")
-# Returns: Compact version (e.g., "3d ago", "Today", "Never")
+# Format relative time for compact display (e.g., 3d ago)
 format_last_used_summary() {
     local value="$1"
 

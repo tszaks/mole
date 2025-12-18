@@ -25,7 +25,7 @@ source "$SCRIPT_DIR/lib/core/common.sh"
 VERSION="1.13.10"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
-# Check if Touch ID is already configured
+# Check TouchID configuration
 is_touchid_configured() {
     local pam_sudo_file="/etc/pam.d/sudo"
     [[ -f "$pam_sudo_file" ]] && grep -q "pam_tid.so" "$pam_sudo_file" 2> /dev/null
@@ -38,8 +38,7 @@ get_latest_version() {
         grep '^VERSION=' | head -1 | sed 's/VERSION="\(.*\)"/\1/'
 }
 
-# Get latest version from GitHub API
-# This works for both Homebrew and manual installs since versions are synced
+# Get latest version from GitHub API (works for both Homebrew and manual installations)
 get_latest_version_from_github() {
     local version
     version=$(curl -fsSL --connect-timeout 2 --max-time 3 \
@@ -61,7 +60,7 @@ check_for_updates() {
     local msg_cache="$HOME/.cache/mole/update_message"
     mkdir -p "$(dirname "$msg_cache")" 2> /dev/null
 
-    # Background version check (save to file, don't output)
+    # Background version check
     # Always check in background, display result from previous check
     (
         local latest
@@ -104,7 +103,7 @@ EOF
 }
 
 animate_mole_intro() {
-    # Skip animation if stdout isn't a TTY (non-interactive)
+    # Non-interactive: skip animation
     if [[ ! -t 1 ]]; then
         return
     fi
@@ -481,7 +480,7 @@ remove_mole() {
         exit 0
     fi
 
-    # Show what will be removed
+    # List items for removal
     echo -e "${YELLOW}Remove Mole${NC} - will delete the following:"
     if [[ "$is_homebrew" == "true" ]]; then
         echo "  - Mole via Homebrew"

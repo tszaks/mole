@@ -18,11 +18,11 @@
 
 ## Features
 
-- **All-in-one toolkit** combining CleanMyMac, AppCleaner, DaisyDisk, Sensei, and iStat in one **trusted binary**
-- **Deep cleanup** scans and removes caches, logs, browser leftovers, and junk to **reclaim tens of gigabytes**
-- **Smart uninstall** completely removes apps including launch agents, preferences, caches, and **hidden leftovers**
-- **Disk insight + optimization** visualizes usage, handles large files, **rebuilds caches**, and refreshes services
-- **Live status** monitors CPU, GPU, memory, disk, network, battery, and proxy stats to **diagnose issues**
+- **Unified toolkit**: Consolidated features of CleanMyMac, AppCleaner, DaisyDisk, and iStat into a **single binary**
+- **Deep cleaning**: Scans and removes caches, logs, and browser leftovers to **reclaim gigabytes of space**
+- **Smart uninstaller**: Thoroughly removes apps along with launch agents, preferences, and **hidden remnants**
+- **Disk insights**: Visualizes usage, manages large files, **rebuilds caches**, and refreshes system services
+- **Live monitoring**: Real-time stats for CPU, GPU, memory, disk, and network to **diagnose performance issues**
 
 ## Quick Start
 
@@ -55,10 +55,10 @@ mo remove                    # Remove Mole from system
 mo --help                    # Show help
 mo --version                 # Show installed version
 
-mo clean --dry-run           # Preview cleanup plan
-mo clean --whitelist         # Adjust protected caches
-mo uninstall --force-rescan  # Rescan apps and refresh cache
-mo optimize --whitelist      # Adjust protected optimization items
+mo clean --dry-run           # Preview the cleanup plan
+mo clean --whitelist         # Manage protected caches
+mo uninstall --force-rescan  # Rescan applications and refresh cache
+mo optimize --whitelist      # Manage protected optimization rules
 ```
 
 ## Tips
@@ -210,7 +210,7 @@ Launch Mole commands instantly from Raycast or Alfred:
 curl -fsSL https://raw.githubusercontent.com/tw93/Mole/main/scripts/setup-quick-launchers.sh | bash
 ```
 
-Adds 5 commands: `clean`, `uninstall`, `optimize`, `analyze`, `status`. Finds your terminal automatically or set `MO_LAUNCHER_APP=<name>` to override. For Raycast, search "Reload Script Directories" to load new commands.
+Adds 5 commands: `clean`, `uninstall`, `optimize`, `analyze`, `status`. Mole automatically detects your terminal, or you can set `MO_LAUNCHER_APP=<name>` to override. For Raycast, run "Reload Script Directories" to load the new commands.
 
 ## Support
 

@@ -44,15 +44,15 @@ readonly ICON_NAV_RIGHT="→"
 # ============================================================================
 # Global Configuration Constants
 # ============================================================================
-readonly MOLE_TEMP_FILE_AGE_DAYS=7       # Temp file cleanup threshold
-readonly MOLE_ORPHAN_AGE_DAYS=60         # Orphaned data threshold
+readonly MOLE_TEMP_FILE_AGE_DAYS=7       # Temp file retention (days)
+readonly MOLE_ORPHAN_AGE_DAYS=60         # Orphaned data retention (days)
 readonly MOLE_MAX_PARALLEL_JOBS=15       # Parallel job limit
-readonly MOLE_MAIL_DOWNLOADS_MIN_KB=5120 # Mail attachments size threshold
-readonly MOLE_MAIL_AGE_DAYS=30           # Mail attachment cleanup threshold (30+ days)
-readonly MOLE_LOG_AGE_DAYS=7             # System log retention
-readonly MOLE_CRASH_REPORT_AGE_DAYS=7    # Crash report retention
-readonly MOLE_SAVED_STATE_AGE_DAYS=7     # App saved state retention
-readonly MOLE_TM_BACKUP_SAFE_HOURS=48    # Time Machine failed backup safety window
+readonly MOLE_MAIL_DOWNLOADS_MIN_KB=5120 # Mail attachment size threshold
+readonly MOLE_MAIL_AGE_DAYS=30           # Mail attachment retention (days)
+readonly MOLE_LOG_AGE_DAYS=7             # Log retention (days)
+readonly MOLE_CRASH_REPORT_AGE_DAYS=7    # Crash report retention (days)
+readonly MOLE_SAVED_STATE_AGE_DAYS=7     # Saved state retention (days)
+readonly MOLE_TM_BACKUP_SAFE_HOURS=48    # TM backup safety window (hours)
 
 # ============================================================================
 # Seasonal Functions
@@ -99,7 +99,7 @@ declare -a DEFAULT_OPTIMIZE_WHITELIST_PATTERNS=(
 # ============================================================================
 readonly STAT_BSD="/usr/bin/stat"
 
-# Get file size in bytes using BSD stat
+# Get file size in bytes
 get_file_size() {
     local file="$1"
     local result
@@ -107,8 +107,7 @@ get_file_size() {
     echo "${result:-0}"
 }
 
-# Get file modification time using BSD stat
-# Returns: epoch seconds
+# Get file modification time in epoch seconds
 get_file_mtime() {
     local file="$1"
     [[ -z "$file" ]] && {
@@ -120,7 +119,7 @@ get_file_mtime() {
     echo "${result:-0}"
 }
 
-# Get file owner username using BSD stat
+# Get file owner username
 get_file_owner() {
     local file="$1"
     $STAT_BSD -f%Su "$file" 2> /dev/null || echo ""
@@ -147,8 +146,7 @@ is_sip_enabled() {
     fi
 }
 
-# Check if running in interactive terminal
-# Returns: 0 if interactive, 1 otherwise
+# Check if running in an interactive terminal
 is_interactive() {
     [[ -t 1 ]]
 }
@@ -169,9 +167,7 @@ get_free_space() {
     command df -h / | awk 'NR==2 {print $4}'
 }
 
-# Get optimal number of parallel jobs for a given operation type
-# Args: $1 - operation type (scan|io|compute|default)
-# Returns: number of jobs
+# Get optimal parallel jobs for operation type (scan|io|compute|default)
 get_optimal_parallel_jobs() {
     local operation_type="${1:-default}"
     local cpu_cores
@@ -193,9 +189,7 @@ get_optimal_parallel_jobs() {
 # Formatting Utilities
 # ============================================================================
 
-# Convert bytes to human-readable format
-# Args: $1 - size in bytes
-# Returns: formatted string (e.g., "1.50GB", "256MB", "4KB")
+# Convert bytes to human-readable format (e.g., 1.5GB)
 bytes_to_human() {
     local bytes="$1"
     if [[ ! "$bytes" =~ ^[0-9]+$ ]]; then
@@ -245,9 +239,7 @@ bytes_to_human_kb() {
     bytes_to_human "$((${1:-0} * 1024))"
 }
 
-# Get brand-friendly name for an application
-# Args: $1 - application name
-# Returns: localized name based on system language preference
+# Get brand-friendly localized name for an application
 get_brand_name() {
     local name="$1"
 
@@ -305,7 +297,6 @@ declare -a MOLE_TEMP_FILES=()
 declare -a MOLE_TEMP_DIRS=()
 
 # Create tracked temporary file
-# Returns: temp file path
 create_temp_file() {
     local temp
     temp=$(mktemp) || return 1
@@ -314,7 +305,6 @@ create_temp_file() {
 }
 
 # Create tracked temporary directory
-# Returns: temp directory path
 create_temp_dir() {
     local temp
     temp=$(mktemp -d) || return 1

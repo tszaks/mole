@@ -13,10 +13,10 @@ _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "${MOLE_BASE_LOADED:-}" ]] && source "$_MOLE_CORE_DIR/base.sh"
 
 # ============================================================================
-# App Management Functions
+# Application Management
 # ============================================================================
 
-# System critical components that should NEVER be uninstalled
+# Critical system components protected from uninstallation
 readonly SYSTEM_CRITICAL_BUNDLES=(
     "com.apple.*" # System essentials
     "loginwindow"
@@ -68,7 +68,7 @@ readonly SYSTEM_CRITICAL_BUNDLES=(
     "com.apple.TextInputSwitcher"
 )
 
-# Apps with important data/licenses - protect during cleanup but allow uninstall
+# Applications with sensitive data; protected during cleanup but removable
 readonly DATA_PROTECTED_BUNDLES=(
     # ============================================================================
     # System Utilities & Cleanup Tools
@@ -165,7 +165,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.usebruno.app"         # Bruno (API client)
 
     # ============================================================================
-    # Network Proxy & VPN Tools (Broad Glob Protection)
+    # Network Proxy & VPN Tools (pattern-based protection)
     # ============================================================================
     # Clash variants
     "*clash*"               # All Clash variants (ClashX, ClashX Pro, Clash Verge, etc)
@@ -439,7 +439,7 @@ readonly DATA_PROTECTED_BUNDLES=(
 # Use should_protect_from_uninstall() or should_protect_data() instead
 readonly PRESERVED_BUNDLE_PATTERNS=("${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}")
 
-# Check whether a bundle ID matches a pattern (supports globs)
+# Check if bundle ID matches pattern (glob support)
 bundle_matches_pattern() {
     local bundle_id="$1"
     local pattern="$2"
@@ -454,7 +454,7 @@ bundle_matches_pattern() {
     return 1
 }
 
-# Check if app is a system component that should never be uninstalled
+# Check if application is a protected system component
 should_protect_from_uninstall() {
     local bundle_id="$1"
     for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}"; do
@@ -465,7 +465,7 @@ should_protect_from_uninstall() {
     return 1
 }
 
-# Check if app data should be protected during cleanup (but app can be uninstalled)
+# Check if application data should be protected during cleanup
 should_protect_data() {
     local bundle_id="$1"
     # Protect both system critical and data protected bundles during cleanup
@@ -477,7 +477,7 @@ should_protect_data() {
     return 1
 }
 
-# Check if a specific path should be protected from deletion
+# Check if a path is protected from deletion
 # Centralized logic to protect system settings, control center, and critical apps
 #
 # Args: $1 - path to check
@@ -489,7 +489,7 @@ should_protect_path() {
     local path_lower
     path_lower=$(echo "$path" | tr '[:upper:]' '[:lower:]')
 
-    # 1. Check for explicit critical system keywords in path (case-insensitive)
+    # 1. Keyword-based matching for system components
     # Protect System Settings, Preferences, Control Center, and related XPC services
     # Also protect "Settings" (used in macOS Sequoia) and savedState files
     if [[ "$path_lower" =~ systemsettings || "$path_lower" =~ systempreferences || "$path_lower" =~ controlcenter ]]; then
@@ -501,7 +501,7 @@ should_protect_path() {
         return 0
     fi
 
-    # 2. Protect system-critical cache directories that cause UI corruption
+    # 2. Protect caches critical for system UI rendering
     # These caches are essential for modern macOS (Sonoma/Sequoia) system UI rendering
     case "$path" in
         # System Settings and Control Center caches (CRITICAL - prevents blank panel bug)
@@ -525,7 +525,7 @@ should_protect_path() {
             ;;
     esac
 
-    # 3. Extract bundle ID from app container/group container paths
+    # 3. Extract bundle ID from sandbox paths
     # Matches: .../Library/Containers/bundle.id/...
     # Matches: .../Library/Group Containers/group.id/...
     if [[ "$path" =~ /Library/Containers/([^/]+) ]] || [[ "$path" =~ /Library/Group\ Containers/([^/]+) ]]; then
@@ -553,7 +553,7 @@ should_protect_path() {
             ;;
     esac
 
-    # 6. Check the full path against protected patterns (Broad Glob Match)
+    # 6. Match full path against protected patterns
     # This catches things like /Users/tw93/Library/Caches/Claude when pattern is *Claude*
     for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}"; do
         if bundle_matches_pattern "$path" "$pattern"; then
@@ -571,13 +571,13 @@ should_protect_path() {
     return 1
 }
 
-# Find and list app-related files (consolidated from duplicates)
+# Locate files associated with an application
 find_app_files() {
     local bundle_id="$1"
     local app_name="$2"
     local -a files_to_clean=()
 
-    # Sanitized App Name (remove spaces)
+    # Normalize app name for matching
     local nospace_name="${app_name// /}"
     local underscore_name="${app_name// /_}"
 
@@ -635,7 +635,7 @@ find_app_files() {
         [[ -e "$expanded_path" ]] && files_to_clean+=("$expanded_path")
     done
 
-    # Preferences and ByHost (special handling)
+    # Handle Preferences and ByHost variants
     [[ -f ~/Library/Preferences/"$bundle_id".plist ]] && files_to_clean+=("$HOME/Library/Preferences/$bundle_id.plist")
     [[ -d ~/Library/Preferences/ByHost ]] && while IFS= read -r -d '' pref; do
         files_to_clean+=("$pref")
@@ -655,7 +655,7 @@ find_app_files() {
         done < <(command find ~/Library/LaunchAgents -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
     fi
 
-    # Specialized toolchain cleanup (non-loopable or highly specific)
+    # Handle specialized toolchains and development environments
     # 1. DevEco-Studio (Huawei)
     if [[ "$app_name" =~ DevEco|deveco ]] || [[ "$bundle_id" =~ huawei.*deveco ]]; then
         for d in ~/DevEcoStudioProjects ~/DevEco-Studio ~/Library/Application\ Support/Huawei ~/Library/Caches/Huawei ~/Library/Logs/Huawei ~/Library/Huawei ~/Huawei ~/HarmonyOS ~/.huawei ~/.ohos; do
@@ -697,7 +697,7 @@ find_app_files() {
     [[ ${#files_to_clean[@]} -gt 0 ]] && printf '%s\n' "${files_to_clean[@]}"
 }
 
-# Find system-level app files (requires sudo)
+# Locate system-level application files
 find_app_system_files() {
     local bundle_id="$1"
     local app_name="$2"
@@ -765,7 +765,7 @@ find_app_system_files() {
     find_app_receipt_files "$bundle_id"
 }
 
-# Find files from installation receipts (Bom files)
+# Locate files using installation receipts (BOM)
 find_app_receipt_files() {
     local bundle_id="$1"
 
@@ -798,13 +798,13 @@ find_app_receipt_files() {
                 # Standardize path (remove leading dot)
                 local clean_path="${file_path#.}"
 
-                # Ensure it starts with /
+                # Ensure absolute path
                 if [[ "$clean_path" != /* ]]; then
                     clean_path="/$clean_path"
                 fi
 
                 # ------------------------------------------------------------------------
-                # SAFETY FILTER: Only allow specific removal paths
+                # Safety check: restrict removal to trusted paths
                 # ------------------------------------------------------------------------
                 local is_safe=false
 
@@ -839,15 +839,7 @@ find_app_receipt_files() {
                 esac
 
                 if [[ "$is_safe" == "true" && -e "$clean_path" ]]; then
-                    # Only valid files
-                    # Don't delete directories if they are non-empty parents?
-                    # lsbom lists directories too.
-                    # If we return a directory, `safe_remove` logic handles it.
-                    # `uninstall.sh` uses `remove_file_list`.
-                    # If `lsbom` lists `/Applications` (it shouldn't, only contents), we must be careful.
-                    # `lsbom` usually lists `./Applications/MyApp.app`.
-                    # If it lists `./Applications`, we must skip it.
-
+                    # If lsbom lists /Applications, skip to avoid system damage.
                     # Extra check: path must be deep enough?
                     # If path is just "/Applications", skip.
                     if [[ "$clean_path" == "/Applications" || "$clean_path" == "/Library" || "$clean_path" == "/usr/local" ]]; then
@@ -865,9 +857,9 @@ find_app_receipt_files() {
     fi
 }
 
-# Force quit an application
+# Terminate a running application
 force_kill_app() {
-    # Args: app_name [app_path]; tries graceful then force kill; returns 0 if stopped, 1 otherwise
+    # Gracefully terminates or force-kills an application
     local app_name="$1"
     local app_path="${2:-""}"
 

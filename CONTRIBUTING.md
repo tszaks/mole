@@ -54,8 +54,8 @@ Config: `.editorconfig` and `.shellcheckrc`
 # Single file/directory
 safe_remove "/path/to/file"
 
-# Batch delete with find
-safe_find_delete "$dir" "*.log" 7 "f"  # files older than 7 days
+# Purge files older than 7 days
+safe_find_delete "$dir" "*.log" 7 "f"
 
 # With sudo
 safe_sudo_remove "/Library/Caches/com.example"
@@ -137,7 +137,7 @@ Format: `[MODULE_NAME] message` output to stderr.
 - macOS 10.14 or newer, works on Intel and Apple Silicon
 - Default macOS Bash 3.2+ plus administrator privileges for cleanup tasks
 - Install Command Line Tools with `xcode-select --install` for curl, tar, and related utilities
-- Go 1.24+ required when building the `mo status` or `mo analyze` TUI binaries locally
+- Go 1.24+ is required to build the `mo status` or `mo analyze` TUI binaries locally.
 
 ## Go Components
 
@@ -161,7 +161,7 @@ Format: `[MODULE_NAME] message` output to stderr.
 - Keep files focused on single responsibility
 - Extract constants instead of magic numbers
 - Use context for timeout control on external commands
-- Add comments explaining why, not what
+- Add comments explaining **why** something is done, not just **what** is being done.
 
 ## Pull Requests
 

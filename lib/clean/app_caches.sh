@@ -5,9 +5,6 @@
 set -euo pipefail
 
 # Clean Xcode and iOS development tools
-# Archives can be significant in size (app packaging files)
-# DeviceSupport files for old iOS versions can accumulate
-# Note: Skips critical files if Xcode is running
 clean_xcode_tools() {
     # Check if Xcode is running for safer cleanup of critical resources
     local xcode_running=false
@@ -107,9 +104,7 @@ clean_productivity_apps() {
     safe_clean ~/Library/Caches/com.flomoapp.mac/* "Flomo cache"
 }
 
-# Clean music and media players
-# Note: Spotify cache is protected by default (may contain offline music)
-# Users can override via whitelist settings
+# Clean music and media players (protects Spotify offline music)
 clean_media_players() {
     # Spotify cache protection: check for offline music indicators
     local spotify_cache="$HOME/Library/Caches/com.spotify.client"

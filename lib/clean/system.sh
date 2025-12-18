@@ -11,7 +11,7 @@ clean_deep_system() {
     safe_sudo_find_delete "/Library/Caches" "*.tmp" "$MOLE_TEMP_FILE_AGE_DAYS" "f" || true
     safe_sudo_find_delete "/Library/Caches" "*.log" "$MOLE_LOG_AGE_DAYS" "f" || true
 
-    # Clean temp files - use real paths (macOS /tmp is symlink to /private/tmp)
+    # Clean temporary files (macOS /tmp is a symlink to /private/tmp)
     local tmp_cleaned=0
     safe_sudo_find_delete "/private/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
     safe_sudo_find_delete "/private/var/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
@@ -21,13 +21,12 @@ clean_deep_system() {
     safe_sudo_find_delete "/Library/Logs/DiagnosticReports" "*" "$MOLE_CRASH_REPORT_AGE_DAYS" "f" || true
     log_success "System crash reports"
 
-    # Clean system logs - use real path (macOS /var is symlink to /private/var)
+    # Clean system logs (macOS /var is a symlink to /private/var)
     safe_sudo_find_delete "/private/var/log" "*.log" "$MOLE_LOG_AGE_DAYS" "f" || true
     safe_sudo_find_delete "/private/var/log" "*.gz" "$MOLE_LOG_AGE_DAYS" "f" || true
     log_success "System logs"
 
-    # Clean Library Updates safely - skip if SIP is enabled to avoid error messages
-    # SIP-protected files in /Library/Updates cannot be deleted even with sudo
+    # Clean Library Updates safely (skip if SIP is enabled)
     if [[ -d "/Library/Updates" && ! -L "/Library/Updates" ]]; then
         if ! is_sip_enabled; then
             # SIP is disabled, attempt cleanup with restricted flag check
@@ -54,8 +53,7 @@ clean_deep_system() {
         fi
     fi
 
-    # Clean macOS Install Data (system upgrade leftovers)
-    # Only remove if older than 30 days to ensure system stability
+    # Clean macOS Install Data (legacy upgrade leftovers)
     if [[ -d "/macOS Install Data" ]]; then
         local mtime=$(get_file_mtime "/macOS Install Data")
         local age_days=$((($(date +%s) - mtime) / 86400))
@@ -78,22 +76,20 @@ clean_deep_system() {
     fi
 
     # Clean browser code signature caches
-    # These are regenerated automatically when needed
     if [[ -t 1 ]]; then
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning system caches..."
     fi
     local code_sign_cleaned=0
     local found_count=0
 
-    # Stream processing with progress updates (efficient for large directories)
-    # Reduce timeout to 5s for faster completion when no caches exist
+    # Efficient stream processing for large directories
     while IFS= read -r -d '' cache_dir; do
         if safe_remove "$cache_dir" true; then
             ((code_sign_cleaned++))
         fi
         ((found_count++))
 
-        # Update spinner every 50 items to show progress
+        # Update progress spinner periodically
         if [[ -t 1 ]] && ((found_count % 50 == 0)); then
             stop_inline_spinner
             MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning system caches... ($found_count found)"
@@ -115,7 +111,7 @@ clean_deep_system() {
     log_success "Power logs"
 }
 
-# Clean Time Machine incomplete backups
+# Clean incomplete Time Machine backups
 clean_time_machine_failed_backups() {
     local tm_cleaned=0
 
@@ -324,7 +320,7 @@ clean_time_machine_failed_backups() {
     fi
 }
 
-# Clean local APFS snapshots (older than 24h)
+# Clean local APFS snapshots (older than 24 hours)
 clean_local_snapshots() {
     # Check if tmutil is available
     if ! command -v tmutil > /dev/null 2>&1; then

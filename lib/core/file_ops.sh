@@ -29,11 +29,7 @@ fi
 # Path Validation
 # ============================================================================
 
-# Validate path for deletion operations
-# Checks: non-empty, absolute, no traversal, no control chars, not system dir
-#
-# Args: $1 - path to validate
-# Returns: 0 if safe, 1 if unsafe
+# Validate path for deletion (absolute, no traversal, not system dir)
 validate_path_for_deletion() {
     local path="$1"
 
@@ -76,13 +72,7 @@ validate_path_for_deletion() {
 # Safe Removal Operations
 # ============================================================================
 
-# Safe wrapper around rm -rf with path validation
-#
-# Args:
-#   $1 - path to remove
-#   $2 - silent mode (optional, default: false)
-#
-# Returns: 0 on success, 1 on failure
+# Safe wrapper around rm -rf with validation
 safe_remove() {
     local path="$1"
     local silent="${2:-false}"
@@ -108,10 +98,7 @@ safe_remove() {
     fi
 }
 
-# Safe sudo remove with additional symlink protection
-#
-# Args: $1 - path to remove
-# Returns: 0 on success, 1 on failure
+# Safe sudo removal with symlink protection
 safe_sudo_remove() {
     local path="$1"
 
@@ -147,15 +134,7 @@ safe_sudo_remove() {
 # Safe Find and Delete Operations
 # ============================================================================
 
-# Safe find delete with depth limit and validation
-#
-# Args:
-#   $1 - base directory
-#   $2 - file pattern (e.g., "*.log")
-#   $3 - age in days (0 = all files, default: 7)
-#   $4 - type filter ("f" or "d", default: "f")
-#
-# Returns: 0 on success, 1 on failure
+# Safe file discovery and deletion with depth and age limits
 safe_find_delete() {
     local base_dir="$1"
     local pattern="$2"
@@ -202,10 +181,7 @@ safe_find_delete() {
     return 0
 }
 
-# Safe sudo find delete (same as safe_find_delete but with sudo)
-#
-# Args: same as safe_find_delete
-# Returns: 0 on success, 1 on failure
+# Safe sudo discovery and deletion
 safe_sudo_find_delete() {
     local base_dir="$1"
     local pattern="$2"
@@ -254,11 +230,7 @@ safe_sudo_find_delete() {
 # Size Calculation
 # ============================================================================
 
-# Get path size in kilobytes
-# Uses timeout protection to prevent du from hanging on large directories
-#
-# Args: $1 - path
-# Returns: size in KB (0 if path doesn't exist)
+# Get path size in KB (returns 0 if not found)
 get_path_size_kb() {
     local path="$1"
     [[ -z "$path" || ! -e "$path" ]] && {
@@ -271,10 +243,7 @@ get_path_size_kb() {
     echo "${size:-0}"
 }
 
-# Calculate total size of multiple paths
-#
-# Args: $1 - newline-separated list of paths
-# Returns: total size in KB
+# Calculate total size for multiple paths
 calculate_total_size() {
     local files="$1"
     local total_kb=0

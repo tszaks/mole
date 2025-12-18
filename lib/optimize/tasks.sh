@@ -15,7 +15,7 @@ flush_dns_cache() {
     sudo dscacheutil -flushcache 2> /dev/null && sudo killall -HUP mDNSResponder 2> /dev/null
 }
 
-# System maintenance: rebuild databases and flush caches
+# Rebuild databases and flush caches
 opt_system_maintenance() {
     echo -e "${BLUE}${ICON_ARROW}${NC} Rebuilding LaunchServices database..."
     run_with_timeout 10 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -kill -r -domain local -domain system -domain user > /dev/null 2>&1 || true
@@ -39,7 +39,7 @@ opt_system_maintenance() {
 
 }
 
-# Cache refresh: update Finder/Safari caches
+# Reset Finder and Safari caches
 opt_cache_refresh() {
     echo -e "${BLUE}${ICON_ARROW}${NC} Resetting Quick Look cache..."
     qlmanage -r cache > /dev/null 2>&1 || true
@@ -61,7 +61,7 @@ opt_cache_refresh() {
     echo -e "${GREEN}${ICON_SUCCESS}${NC} Finder and Safari caches updated"
 }
 
-# Maintenance scripts: run periodic tasks
+# Run periodic maintenance scripts
 opt_maintenance_scripts() {
     # Run newsyslog to rotate system logs
     echo -e "${BLUE}${ICON_ARROW}${NC} Rotating system logs..."
@@ -72,7 +72,7 @@ opt_maintenance_scripts() {
     fi
 }
 
-# Log cleanup: remove diagnostic and crash logs
+# Remove diagnostic and crash logs
 opt_log_cleanup() {
     echo -e "${BLUE}${ICON_ARROW}${NC} Clearing diagnostic & crash logs..."
     local -a user_logs=(
@@ -92,7 +92,7 @@ opt_log_cleanup() {
     fi
 }
 
-# Recent items: clear recent file lists
+# Clear recent file lists
 opt_recent_items() {
     echo -e "${BLUE}${ICON_ARROW}${NC} Clearing recent items lists..."
     local shared_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"

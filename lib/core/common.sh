@@ -12,7 +12,7 @@ readonly MOLE_COMMON_LOADED=1
 
 _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load core modules in dependency order
+# Load core modules
 source "$_MOLE_CORE_DIR/base.sh"
 source "$_MOLE_CORE_DIR/log.sh"
 
@@ -26,8 +26,7 @@ if [[ -f "$_MOLE_CORE_DIR/sudo.sh" ]]; then
     source "$_MOLE_CORE_DIR/sudo.sh"
 fi
 
-# Update Mole via Homebrew
-# Args: $1 = current version
+# Update via Homebrew
 update_via_homebrew() {
     local current_version="$1"
 
@@ -75,8 +74,7 @@ update_via_homebrew() {
     rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message" 2> /dev/null || true
 }
 
-# Remove apps from Dock
-# Args: app paths to remove
+# Remove applications from Dock
 remove_apps_from_dock() {
     if [[ $# -eq 0 ]]; then
         return 0
@@ -89,7 +87,7 @@ remove_apps_from_dock() {
         return 0
     fi
 
-    # Execute Python helper to prune dock entries for the given app paths
+    # Prune dock entries using Python helper
     python3 - "$@" << 'PY' 2> /dev/null || return 0
 import os
 import plistlib

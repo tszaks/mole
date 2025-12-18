@@ -32,8 +32,7 @@ mkdir -p "$(dirname "$LOG_FILE")" 2> /dev/null || true
 # Log Rotation
 # ============================================================================
 
-# Rotate log file if it exceeds max size
-# Called once at module load, not per log entry
+# Rotate log file if it exceeds maximum size
 rotate_log_once() {
     # Skip if already checked this session
     [[ -n "${MOLE_LOG_ROTATED:-}" ]] && return 0
@@ -51,7 +50,6 @@ rotate_log_once() {
 # ============================================================================
 
 # Log informational message
-# Args: $1 - message
 log_info() {
     echo -e "${BLUE}$1${NC}"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
@@ -62,7 +60,6 @@ log_info() {
 }
 
 # Log success message
-# Args: $1 - message
 log_success() {
     echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $1"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
@@ -73,7 +70,6 @@ log_success() {
 }
 
 # Log warning message
-# Args: $1 - message
 log_warning() {
     echo -e "${YELLOW}$1${NC}"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
@@ -84,7 +80,6 @@ log_warning() {
 }
 
 # Log error message
-# Args: $1 - message
 log_error() {
     echo -e "${RED}${ICON_ERROR}${NC} $1" >&2
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
@@ -94,8 +89,7 @@ log_error() {
     fi
 }
 
-# Debug logging - only shown when MO_DEBUG=1
-# Args: $@ - debug message components
+# Debug logging (active when MO_DEBUG=1)
 debug_log() {
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
         echo -e "${GRAY}[DEBUG]${NC} $*" >&2
@@ -143,15 +137,12 @@ log_system_info() {
 # Command Execution Wrappers
 # ============================================================================
 
-# Run command silently, ignore errors
-# Args: $@ - command and arguments
+# Run command silently (ignore errors)
 run_silent() {
     "$@" > /dev/null 2>&1 || true
 }
 
 # Run command with error logging
-# Args: $@ - command and arguments
-# Returns: command exit code
 run_logged() {
     local cmd="$1"
     # Log to main file, and also to debug file if enabled
@@ -173,8 +164,7 @@ run_logged() {
 # Formatted Output
 # ============================================================================
 
-# Print formatted summary block with heading and details
-# Args: $1=status (ignored), $2=heading, $@=details
+# Print formatted summary block
 print_summary_block() {
     local heading=""
     local -a details=()
