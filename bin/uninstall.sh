@@ -354,7 +354,6 @@ scan_applications() {
     fi
 }
 
-# Load applications into arrays
 load_applications() {
     local apps_file="$1"
 
@@ -403,9 +402,7 @@ cleanup() {
 # Set trap for cleanup on exit
 trap cleanup EXIT INT TERM
 
-# Main function
 main() {
-    # Parse args
     local force_rescan=false
     for arg in "$@"; do
         case "$arg" in

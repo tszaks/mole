@@ -11,7 +11,6 @@ set -euo pipefail
 readonly MOLE_TM_THIN_TIMEOUT=180
 readonly MOLE_TM_THIN_VALUE=9999999999
 
-# Helper function: Flush DNS cache
 flush_dns_cache() {
     sudo dscacheutil -flushcache 2> /dev/null && sudo killall -HUP mDNSResponder 2> /dev/null
 }
@@ -98,8 +97,24 @@ opt_recent_items() {
     echo -e "${BLUE}${ICON_ARROW}${NC} Clearing recent items lists..."
     local shared_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"
     if [[ -d "$shared_dir" ]]; then
-        safe_find_delete "$shared_dir" "*.sfl2" 0 "f"
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} Shared file lists cleared"
+        # Use safe removal with protection checks instead of find -delete
+        # This prevents accidental deletion of System Settings files
+        local deleted=0
+        while IFS= read -r -d '' sfl_file; do
+            # Check if file should be protected (System Settings, etc.)
+            if should_protect_path "$sfl_file"; then
+                continue
+            fi
+            if safe_remove "$sfl_file" true; then
+                ((deleted++))
+            fi
+        done < <(command find "$shared_dir" -maxdepth 5 -name "*.sfl2" -type f -print0 2> /dev/null)
+
+        if [[ $deleted -gt 0 ]]; then
+            echo -e "${GREEN}${ICON_SUCCESS}${NC} Shared file lists cleared ($deleted files)"
+        else
+            echo -e "${GREEN}${ICON_SUCCESS}${NC} Shared file lists cleared"
+        fi
     fi
 
     rm -f "$HOME/Library/Preferences/com.apple.recentitems.plist" 2> /dev/null || true
@@ -116,13 +131,9 @@ opt_radio_refresh() {
     echo -e "${GREEN}${ICON_SUCCESS}${NC} Bluetooth controller refreshed"
 
     echo -e "${BLUE}${ICON_ARROW}${NC} Refreshing Wi-Fi service..."
-    # Only restart Wi-Fi service, do NOT delete saved networks
-
-    # Safe alternative: just restart the Wi-Fi interface
     local wifi_interface
     wifi_interface=$(networksetup -listallhardwareports | awk '/Wi-Fi/{getline; print $2}' | head -1)
     if [[ -n "$wifi_interface" ]]; then
-        # Use atomic execution to ensure interface comes back up even if interrupted
         if sudo bash -c "trap '' INT TERM; ifconfig '$wifi_interface' down; sleep 1; ifconfig '$wifi_interface' up" 2> /dev/null; then
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Wi-Fi interface restarted"
         else
@@ -140,8 +151,6 @@ opt_radio_refresh() {
 
 # Mail downloads: clear OLD Mail attachment cache (30+ days)
 opt_mail_downloads() {
-    # Validate configuration parameters
-    # Validate configuration parameters
     local min_size_kb=${MOLE_MAIL_DOWNLOADS_MIN_KB:-5120}
     local mail_age_days=${MOLE_MAIL_AGE_DAYS:-30}
     if ! [[ "$min_size_kb" =~ ^[0-9]+$ ]]; then
@@ -183,8 +192,6 @@ opt_mail_downloads() {
         echo -e "${GRAY}-${NC} Only $(bytes_to_human $((total_size_kb * 1024))) detected, skipping cleanup"
         return
     fi
-
-    # Only delete old attachments (safety window)
     local cleaned=false
     for target_path in "${mail_dirs[@]}"; do
         if [[ -d "$target_path" ]]; then
@@ -210,10 +217,8 @@ opt_saved_state_cleanup() {
         return
     fi
 
-    # Only delete old saved states (safety window)
     local deleted=0
     while IFS= read -r -d '' state_path; do
-        # Protect system critical components
         if should_protect_path "$state_path"; then
             continue
         fi
@@ -233,7 +238,6 @@ opt_saved_state_cleanup() {
 opt_swap_cleanup() {
     echo -e "${BLUE}${ICON_ARROW}${NC} Removing swapfiles and resetting dynamic pager..."
     if sudo launchctl unload /System/Library/LaunchDaemons/com.apple.dynamic_pager.plist > /dev/null 2>&1; then
-        # Safe swap reset: just restart the pager, don't manually rm files
         sudo launchctl load /System/Library/LaunchDaemons/com.apple.dynamic_pager.plist > /dev/null 2>&1 || true
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Swap cache rebuilt"
     else
@@ -241,10 +245,8 @@ opt_swap_cleanup() {
     fi
 }
 
-# Startup cache: rebuild kernel caches
+# Startup cache: rebuild kernel caches (handled automatically by modern macOS)
 opt_startup_cache() {
-    # kextcache/PrelinkedKernel rebuilds are legacy and heavy.
-    # Modern macOS (Big Sur+) handles this automatically and securely (SSV).
     echo -e "${GRAY}-${NC} Startup cache rebuild skipped (handled by macOS)"
 }
 

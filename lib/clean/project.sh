@@ -258,6 +258,7 @@ select_purge_categories() {
         fi
     }
 
+    # shellcheck disable=SC2329
     handle_interrupt() {
         restore_terminal
         exit 130

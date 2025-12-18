@@ -6,7 +6,6 @@ set -euo pipefail
 export LC_ALL=C
 export LANG=C
 
-# Load common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/core/common.sh"
 source "$SCRIPT_DIR/lib/core/sudo.sh"
@@ -15,36 +14,28 @@ source "$SCRIPT_DIR/lib/manage/autofix.sh"
 source "$SCRIPT_DIR/lib/optimize/maintenance.sh"
 source "$SCRIPT_DIR/lib/optimize/tasks.sh"
 source "$SCRIPT_DIR/lib/check/health_json.sh"
-
-# Load check modules
 source "$SCRIPT_DIR/lib/check/all.sh"
 source "$SCRIPT_DIR/lib/manage/whitelist.sh"
-
-# Colors and icons from common.sh
 
 print_header() {
     printf '\n'
     echo -e "${PURPLE_BOLD}Optimize and Check${NC}"
 }
 
-# System check functions (real-time display)
 run_system_checks() {
     unset AUTO_FIX_SUMMARY AUTO_FIX_DETAILS
     echo ""
     echo -e "${PURPLE_BOLD}System Check${NC}"
     echo ""
 
-    # Check updates - real-time display
     echo -e "${BLUE}${ICON_ARROW}${NC} System updates"
     check_all_updates
     echo ""
 
-    # Check health - real-time display
     echo -e "${BLUE}${ICON_ARROW}${NC} System health"
     check_system_health
     echo ""
 
-    # Check security - real-time display
     echo -e "${BLUE}${ICON_ARROW}${NC} Security posture"
     check_all_security
     if ask_for_security_fixes; then
@@ -52,21 +43,16 @@ run_system_checks() {
     fi
     echo ""
 
-    # Check configuration - real-time display
     echo -e "${BLUE}${ICON_ARROW}${NC} Configuration"
     check_all_config
     echo ""
 
-    # Show suggestions
     show_suggestions
     echo ""
 
-    # Ask about updates first
     if ask_for_updates; then
         perform_updates
     fi
-
-    # Ask about auto-fix
     if ask_for_auto_fix; then
         perform_auto_fix
     fi
@@ -81,7 +67,6 @@ show_optimization_summary() {
     local summary_title="Optimization and Check Complete"
     local -a summary_details=()
 
-    # Optimization results
     summary_details+=("Applied ${GREEN}${safe_count:-0}${NC} optimizations; all system services tuned")
     summary_details+=("Updates, security and system health fully reviewed")
 
@@ -98,14 +83,12 @@ show_optimization_summary() {
     fi
     summary_details+=("$summary_line4")
 
-    # Ensure summary is always printed for optimizations
     print_summary_block "$summary_title" "${summary_details[@]}"
 }
 
 show_system_health() {
     local health_json="$1"
 
-    # Parse system health using jq with fallback to 0
     local mem_used=$(echo "$health_json" | jq -r '.memory_used_gb // 0' 2> /dev/null || echo "0")
     local mem_total=$(echo "$health_json" | jq -r '.memory_total_gb // 0' 2> /dev/null || echo "0")
     local disk_used=$(echo "$health_json" | jq -r '.disk_used_gb // 0' 2> /dev/null || echo "0")
@@ -113,7 +96,6 @@ show_system_health() {
     local disk_percent=$(echo "$health_json" | jq -r '.disk_used_percent // 0' 2> /dev/null || echo "0")
     local uptime=$(echo "$health_json" | jq -r '.uptime_days // 0' 2> /dev/null || echo "0")
 
-    # Ensure all values are numeric (fallback to 0)
     mem_used=${mem_used:-0}
     mem_total=${mem_total:-0}
     disk_used=${disk_used:-0}
@@ -121,15 +103,12 @@ show_system_health() {
     disk_percent=${disk_percent:-0}
     uptime=${uptime:-0}
 
-    # Compact one-line format with icon
     printf "${ICON_ADMIN} System  %.0f/%.0f GB RAM | %.0f/%.0f GB Disk | Uptime %.0fd\n" \
         "$mem_used" "$mem_total" "$disk_used" "$disk_total" "$uptime"
 }
 
 parse_optimizations() {
     local health_json="$1"
-
-    # Extract optimizations array
     echo "$health_json" | jq -c '.optimizations[]' 2> /dev/null
 }
 
@@ -163,19 +142,14 @@ touchid_configured() {
 }
 
 touchid_supported() {
-    # bioutil is the most reliable way to check for Touch ID hardware/software support
     if command -v bioutil > /dev/null 2>&1; then
-        # Check if Touch ID is functional and available for any user
         if bioutil -r 2> /dev/null | grep -qi "Touch ID"; then
             return 0
         fi
     fi
 
-    # Fallback: check for Apple Silicon which almost always has Touch ID support
-    # (except for Mac mini/Studio without a Magic Keyboard with Touch ID)
+    # Fallback: Apple Silicon Macs usually have Touch ID
     if [[ "$(uname -m)" == "arm64" ]]; then
-        # On Apple Silicon, we can check for the presence of the Touch Bar or Touch ID sensor
-        # but bioutil is generally sufficient. If bioutil failed, we treat arm64 as likely supported.
         return 0
     fi
     return 1
@@ -190,8 +164,6 @@ cleanup_path() {
         echo -e "${GREEN}${ICON_SUCCESS}${NC} $label"
         return
     fi
-
-    # Centralized protection check
     if should_protect_path "$expanded_path"; then
         echo -e "${YELLOW}${ICON_WARNING}${NC} Protected $label"
         return
@@ -362,8 +334,7 @@ cleanup_all() {
 }
 
 main() {
-    local health_json # Declare health_json at the top of main scope
-    # Parse args
+    local health_json
     for arg in "$@"; do
         case "$arg" in
             "--debug")
@@ -376,15 +347,12 @@ main() {
         esac
     done
 
-    # Register unified cleanup handler
     trap cleanup_all EXIT INT TERM
 
     if [[ -t 1 ]]; then
         clear
     fi
-    print_header # Outputs "Optimize and Check"
-
-    # Check dependencies
+    print_header
     if ! command -v jq > /dev/null 2>&1; then
         echo -e "${RED}${ICON_ERROR}${NC} Missing dependency: jq"
         echo -e "${GRAY}Install with: ${GREEN}brew install jq${NC}"
@@ -397,7 +365,6 @@ main() {
         exit 1
     fi
 
-    # Collect system health data (doesn't require sudo)
     if [[ -t 1 ]]; then
         start_inline_spinner "Collecting system info..."
     fi
@@ -411,7 +378,6 @@ main() {
         exit 1
     fi
 
-    # Validate JSON before proceeding
     if ! echo "$health_json" | jq empty 2> /dev/null; then
         if [[ -t 1 ]]; then
             stop_inline_spinner
@@ -426,13 +392,9 @@ main() {
         stop_inline_spinner
     fi
 
-    # Show system health
-    show_system_health "$health_json" # Outputs "⚙ System ..."
+    show_system_health "$health_json"
 
-    # Load whitelist patterns for checks
     load_whitelist "optimize"
-
-    # Display active whitelist patterns
     if [[ ${#CURRENT_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
         local count=${#CURRENT_WHITELIST_PATTERNS[@]}
         if [[ $count -le 3 ]]; then
@@ -445,9 +407,8 @@ main() {
             echo -e "${ICON_ADMIN} Active Whitelist: ${GRAY}${count} items${NC}"
         fi
     fi
-    echo "" # Empty line before sudo prompt
+    echo ""
 
-    # Simple confirmation
     echo -ne "${PURPLE}${ICON_ARROW}${NC} Optimization needs sudo — ${GREEN}Enter${NC} continue, ${GRAY}ESC${NC} cancel: "
 
     local key
@@ -465,11 +426,8 @@ main() {
         stop_inline_spinner
     fi
 
-    # Parse and display optimizations
     local -a safe_items=()
     local -a confirm_items=()
-
-    # Use temp file instead of process substitution to avoid hanging
     local opts_file
     opts_file=$(mktemp_file)
     parse_optimizations "$health_json" > "$opts_file"
@@ -492,12 +450,9 @@ main() {
         fi
     done < "$opts_file"
 
-    # Execute all optimizations
     local first_heading=true
 
     ensure_sudo_session "System optimization requires admin access" || true
-
-    # Run safe optimizations
     if [[ ${#safe_items[@]} -gt 0 ]]; then
         for item in "${safe_items[@]}"; do
             IFS='|' read -r name desc action path <<< "$item"
@@ -506,7 +461,6 @@ main() {
         done
     fi
 
-    # Run confirm items
     if [[ ${#confirm_items[@]} -gt 0 ]]; then
         for item in "${confirm_items[@]}"; do
             IFS='|' read -r name desc action path <<< "$item"
@@ -515,17 +469,14 @@ main() {
         done
     fi
 
-    # Prepare optimization summary data (to show at the end)
     local safe_count=${#safe_items[@]}
     local confirm_count=${#confirm_items[@]}
 
-    # Run system checks first
     run_system_checks
 
     export OPTIMIZE_SAFE_COUNT=$safe_count
     export OPTIMIZE_CONFIRM_COUNT=$confirm_count
 
-    # Show optimization summary at the end
     show_optimization_summary
 
     printf '\n'

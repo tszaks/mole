@@ -4,11 +4,9 @@
 
 set -euo pipefail
 
-# Fix locale issues (avoid Perl warnings on non-English systems)
 export LC_ALL=C
 export LANG=C
 
-# Get script directory and source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/core/common.sh"
 source "$SCRIPT_DIR/../lib/core/sudo.sh"
@@ -20,72 +18,52 @@ source "$SCRIPT_DIR/../lib/clean/app_caches.sh"
 source "$SCRIPT_DIR/../lib/clean/system.sh"
 source "$SCRIPT_DIR/../lib/clean/user.sh"
 
-# Configuration
 SYSTEM_CLEAN=false
 DRY_RUN=false
 PROTECT_FINDER_METADATA=false
 IS_M_SERIES=$([[ "$(uname -m)" == "arm64" ]] && echo "true" || echo "false")
 
-# Export list configuration
 EXPORT_LIST_FILE="$HOME/.config/mole/clean-list.txt"
 CURRENT_SECTION=""
-
-# Protected Service Worker domains (web-based editing tools)
 readonly PROTECTED_SW_DOMAINS=(
     "capcut.com"
     "photopea.com"
     "pixlr.com"
 )
 
-# Whitelist patterns (loaded from common.sh)
-# FINDER_METADATA_SENTINEL and DEFAULT_WHITELIST_PATTERNS defined in lib/core/common.sh
 declare -a WHITELIST_PATTERNS=()
 WHITELIST_WARNINGS=()
-
-# Load user-defined whitelist
 if [[ -f "$HOME/.config/mole/whitelist" ]]; then
     while IFS= read -r line; do
-        # Trim whitespace
         # shellcheck disable=SC2295
         line="${line#"${line%%[![:space:]]*}"}"
         # shellcheck disable=SC2295
         line="${line%"${line##*[![:space:]]}"}"
-
-        # Skip empty lines and comments
         [[ -z "$line" || "$line" =~ ^# ]] && continue
 
-        # Expand tilde to home directory
         [[ "$line" == ~* ]] && line="${line/#~/$HOME}"
-
-        # Security: reject path traversal attempts
         if [[ "$line" =~ \.\. ]]; then
             WHITELIST_WARNINGS+=("Path traversal not allowed: $line")
             continue
         fi
 
-        # Skip validation for special sentinel values
         if [[ "$line" != "$FINDER_METADATA_SENTINEL" ]]; then
-            # Path validation with support for spaces and wildcards
-            # Allow: letters, numbers, /, _, ., -, @, spaces, and * anywhere in path
             if [[ ! "$line" =~ ^[a-zA-Z0-9/_.@\ *-]+$ ]]; then
                 WHITELIST_WARNINGS+=("Invalid path format: $line")
                 continue
             fi
 
-            # Require absolute paths (must start with /)
             if [[ "$line" != /* ]]; then
                 WHITELIST_WARNINGS+=("Must be absolute path: $line")
                 continue
             fi
         fi
 
-        # Reject paths with consecutive slashes (e.g., //)
         if [[ "$line" =~ // ]]; then
             WHITELIST_WARNINGS+=("Consecutive slashes: $line")
             continue
         fi
 
-        # Prevent critical system directories
         case "$line" in
             / | /System | /System/* | /bin | /bin/* | /sbin | /sbin/* | /usr/bin | /usr/bin/* | /usr/sbin | /usr/sbin/* | /etc | /etc/* | /var/db | /var/db/*)
                 WHITELIST_WARNINGS+=("Protected system path: $line")
@@ -776,7 +754,6 @@ perform_cleanup() {
 }
 
 main() {
-    # Parse args
     for arg in "$@"; do
         case "$arg" in
             "--debug")

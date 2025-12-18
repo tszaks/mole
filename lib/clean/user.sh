@@ -76,6 +76,8 @@ clean_finder_metadata() {
 
 # Clean macOS system caches
 clean_macos_system_caches() {
+    # Clean saved application states with protection for System Settings
+    # Note: safe_clean already calls should_protect_path for each file
     safe_clean ~/Library/Saved\ Application\ State/* "Saved application states"
 
     # REMOVED: Spotlight cache cleanup can cause system UI issues

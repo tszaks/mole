@@ -519,6 +519,10 @@ should_protect_path() {
         */Library/Group\ Containers/com.apple.systempreferences* | */Library/Group\ Containers/com.apple.Settings*)
             return 0
             ;;
+        # Shared file lists for System Settings (macOS Sequoia) - Issue #136
+        */com.apple.sharedfilelist/*com.apple.Settings* | */com.apple.sharedfilelist/*com.apple.SystemSettings* | */com.apple.sharedfilelist/*systempreferences*)
+            return 0
+            ;;
     esac
 
     # 3. Extract bundle ID from app container/group container paths
