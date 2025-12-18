@@ -214,7 +214,7 @@ is_bundle_orphaned() {
 
     # Extra check for specific system bundles not covered by patterns
     case "$bundle_id" in
-        loginwindow | dock | systempreferences | finder | safari)
+        loginwindow | dock | systempreferences | systemsettings | settings | controlcenter | finder | safari)
             return 1
             ;;
     esac

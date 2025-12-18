@@ -121,7 +121,7 @@ clean_sandboxed_app_caches() {
         local bundle_id_lower=$(echo "$bundle_id" | tr '[:upper:]' '[:lower:]')
 
         # Check explicit critical system components (case-insensitive regex)
-        if [[ "$bundle_id_lower" =~ backgroundtaskmanagement || "$bundle_id_lower" =~ loginitems || "$bundle_id_lower" =~ systempreferences || "$bundle_id_lower" =~ controlcenter || "$bundle_id_lower" =~ biometrickit || "$bundle_id_lower" =~ sfl || "$bundle_id_lower" =~ tcc ]]; then
+        if [[ "$bundle_id_lower" =~ backgroundtaskmanagement || "$bundle_id_lower" =~ loginitems || "$bundle_id_lower" =~ systempreferences || "$bundle_id_lower" =~ systemsettings || "$bundle_id_lower" =~ settings || "$bundle_id_lower" =~ preferences || "$bundle_id_lower" =~ controlcenter || "$bundle_id_lower" =~ biometrickit || "$bundle_id_lower" =~ sfl || "$bundle_id_lower" =~ tcc ]]; then
             continue
         fi
 
@@ -262,7 +262,7 @@ clean_application_support_logs() {
             continue
         fi
 
-        if [[ "$app_name_lower" =~ backgroundtaskmanagement || "$app_name_lower" =~ loginitems || "$app_name_lower" =~ systempreferences || "$app_name_lower" =~ controlcenter || "$app_name_lower" =~ biometrickit || "$app_name_lower" =~ sfl || "$app_name_lower" =~ tcc ]]; then
+        if [[ "$app_name_lower" =~ backgroundtaskmanagement || "$app_name_lower" =~ loginitems || "$app_name_lower" =~ systempreferences || "$app_name_lower" =~ systemsettings || "$app_name_lower" =~ settings || "$app_name_lower" =~ preferences || "$app_name_lower" =~ controlcenter || "$app_name_lower" =~ biometrickit || "$app_name_lower" =~ sfl || "$app_name_lower" =~ tcc ]]; then
             continue
         fi
 
