@@ -52,4 +52,3 @@ cmd/status/status
 /status
 mole-analyze
 # Note: bin/analyze-go and bin/status-go are released binaries and should be tracked
-.mole_cleanup_stats

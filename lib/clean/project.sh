@@ -55,8 +55,8 @@ is_safe_project_artifact() {
     local depth=$(echo "$relative_path" | tr -cd '/' | wc -c)
 
     # Require at least 1 level deep (inside a project folder)
-    # e.g., ~/www/MyProject/node_modules is OK (depth >= 1)
-    # but ~/www/node_modules is NOT OK (depth = 0)
+    # e.g., ~/www/weekly/node_modules is OK (depth >= 1)
+    # but ~/www/node_modules is NOT OK (depth < 1)
     if [[ $depth -lt 1 ]]; then
         return 1
     fi
@@ -171,7 +171,8 @@ filter_nested_artifacts() {
         for target in "${PURGE_TARGETS[@]}"; do
             # Check if parent directory IS a target or IS INSIDE a target
             # e.g. .../node_modules/foo/node_modules -> parent has node_modules
-            if [[ "$parent_dir" == *"/$target"* || "$parent_dir" == *"/$target" ]]; then
+            # Use more strict matching to avoid false positives like "my_node_modules_backup"
+            if [[ "$parent_dir" == *"/$target/"* || "$parent_dir" == *"/$target" ]]; then
                 is_nested=true
                 break
             fi
@@ -218,107 +219,169 @@ get_dir_size_kb() {
     fi
 }
 
-# Simplified clean function for project artifacts
-# Args: $1 - path, $2 - description
-safe_clean() {
-    local path="$1"
-    local description="$2"
+# Simple category selector (for purge only)
+# Args: category names and metadata as arrays (passed via global vars)
+# Returns: selected indices in PURGE_SELECTION_RESULT (comma-separated)
+# Uses PURGE_RECENT_CATEGORIES to mark categories with recent items (default unselected)
+select_purge_categories() {
+    local -a categories=("$@")
+    local total_items=${#categories[@]}
 
-    if [[ ! -e "$path" ]]; then
-        return 0
+    if [[ $total_items -eq 0 ]]; then
+        return 1
     fi
 
-    # Get size before deletion
-    local size_kb=$(get_dir_size_kb "$path")
-
-    if [[ "$DRY_RUN" == "true" ]]; then
-        if [[ $size_kb -gt 0 ]]; then
-            local size_mb=$((size_kb / 1024))
-            echo -e "${GRAY}Would remove:${NC} $description (~${size_mb}MB)"
+    # Initialize selection (all selected by default, except recent ones)
+    local -a selected=()
+    IFS=',' read -r -a recent_flags <<< "${PURGE_RECENT_CATEGORIES:-}"
+    for ((i = 0; i < total_items; i++)); do
+        # Default unselected if category has recent items
+        if [[ ${recent_flags[i]:-false} == "true" ]]; then
+            selected[i]=false
+        else
+            selected[i]=true
         fi
-    else
-        if [[ $size_kb -gt 0 ]]; then
-            local size_mb=$((size_kb / 1024))
+    done
 
-            # Show cleaning status (transient) with spinner
-            if [[ -t 1 ]]; then
-                # Use standard spinner prefix or none as requested?
-                # User asked for "no indentation". MOLE_SPINNER_PREFIX controls indentation in ui.sh.
-                # But ui.sh often adds "  |".
-                # Let's use start_inline_spinner which uses MOLE_SPINNER_PREFIX.
-                # We can temporarily clear prefix to avoid indentation if needed,
-                # but standard UI guidelines might suggest some alignment.
-                # The user specifically said "不要缩进".
-                local original_prefix="${MOLE_SPINNER_PREFIX:-}"
-                MOLE_SPINNER_PREFIX="" start_inline_spinner "Cleaning $description (~${size_mb}MB)..."
-
-                rm -rf "$path" 2> /dev/null || true
-
-                stop_inline_spinner
-                MOLE_SPINNER_PREFIX="$original_prefix"
-            else
-                rm -rf "$path" 2> /dev/null || true
-            fi
-
-            if [[ ! -e "$path" ]]; then
-                echo -e "${GREEN}${ICON_SUCCESS}${NC} Removed $description (~${size_mb}MB)"
-
-                # Update stats file
-                if [[ -f "$SCRIPT_DIR/../.mole_cleanup_stats" ]]; then
-                    local current_total=$(cat "$SCRIPT_DIR/../.mole_cleanup_stats")
-                    local new_total=$((current_total + size_kb))
-                    echo "$new_total" > "$SCRIPT_DIR/../.mole_cleanup_stats"
-                fi
-
-                # Update count file
-                local count_file="$SCRIPT_DIR/../.mole_cleanup_count"
-                local current_count=0
-                if [[ -f "$count_file" ]]; then
-                    current_count=$(cat "$count_file")
-                fi
-                echo $((current_count + 1)) > "$count_file"
-            else
-                echo -e "${RED}${ICON_CROSS}${NC} Failed to remove $description"
-            fi
-        fi
+    local cursor_pos=0
+    local original_stty=""
+    if [[ -t 0 ]] && command -v stty > /dev/null 2>&1; then
+        original_stty=$(stty -g 2> /dev/null || echo "")
     fi
+
+    # Terminal control functions
+    restore_terminal() {
+        trap - EXIT INT TERM
+        show_cursor
+        if [[ -n "${original_stty:-}" ]]; then
+            stty "${original_stty}" 2> /dev/null || stty sane 2> /dev/null || true
+        fi
+    }
+
+    handle_interrupt() {
+        restore_terminal
+        exit 130
+    }
+
+    draw_menu() {
+        printf "\033[H\033[2J"
+        # Calculate total size of selected items for header
+        local selected_size=0
+        local selected_count=0
+        IFS=',' read -r -a sizes <<< "${PURGE_CATEGORY_SIZES:-}"
+        for ((i = 0; i < total_items; i++)); do
+            if [[ ${selected[i]} == true ]]; then
+                selected_size=$((selected_size + ${sizes[i]:-0}))
+                ((selected_count++))
+            fi
+        done
+        local selected_gb=$(echo "scale=1; $selected_size/1024/1024" | bc)
+
+        printf '\n'
+        echo -e "${PURPLE_BOLD}Select Categories to Clean${NC} ${GRAY}- ${selected_gb}GB ($selected_count selected)${NC}"
+        echo ""
+
+        IFS=',' read -r -a recent_flags <<< "${PURGE_RECENT_CATEGORIES:-}"
+        for ((i = 0; i < total_items; i++)); do
+            local checkbox="$ICON_EMPTY"
+            [[ ${selected[i]} == true ]] && checkbox="$ICON_SOLID"
+
+            local recent_marker=""
+            [[ ${recent_flags[i]:-false} == "true" ]] && recent_marker=" ${GRAY}| Recent${NC}"
+
+            if [[ $i -eq $cursor_pos ]]; then
+                printf "\r\033[2K${CYAN}${ICON_ARROW} %s %s%s${NC}\n" "$checkbox" "${categories[i]}" "$recent_marker"
+            else
+                printf "\r\033[2K  %s %s%s\n" "$checkbox" "${categories[i]}" "$recent_marker"
+            fi
+        done
+
+        echo ""
+        echo -e "${GRAY}↑↓  |  Space Select  |  Enter Confirm  |  A All  |  I Invert  |  Q Quit${NC}"
+    }
+
+    trap restore_terminal EXIT
+    trap handle_interrupt INT TERM
+
+    # Preserve interrupt character for Ctrl-C
+    stty -echo -icanon intr ^C 2> /dev/null || true
+    hide_cursor
+
+    # Main loop
+    while true; do
+        draw_menu
+
+        # Read key
+        IFS= read -r -s -n1 key || key=""
+
+        case "$key" in
+            $'\x1b')
+                # Arrow keys or ESC
+                # Read next 2 chars with timeout (bash 3.2 needs integer)
+                IFS= read -r -s -n1 -t 1 key2 || key2=""
+                if [[ "$key2" == "[" ]]; then
+                    IFS= read -r -s -n1 -t 1 key3 || key3=""
+                    case "$key3" in
+                        A) # Up arrow
+                            ((cursor_pos > 0)) && ((cursor_pos--))
+                            ;;
+                        B) # Down arrow
+                            ((cursor_pos < total_items - 1)) && ((cursor_pos++))
+                            ;;
+                    esac
+                else
+                    # ESC alone (no following chars)
+                    restore_terminal
+                    return 1
+                fi
+                ;;
+            " ") # Space - toggle current item
+                if [[ ${selected[cursor_pos]} == true ]]; then
+                    selected[cursor_pos]=false
+                else
+                    selected[cursor_pos]=true
+                fi
+                ;;
+            "a"|"A") # Select all
+                for ((i = 0; i < total_items; i++)); do
+                    selected[i]=true
+                done
+                ;;
+            "i"|"I") # Invert selection
+                for ((i = 0; i < total_items; i++)); do
+                    if [[ ${selected[i]} == true ]]; then
+                        selected[i]=false
+                    else
+                        selected[i]=true
+                    fi
+                done
+                ;;
+            "q"|"Q"|$'\x03') # Quit or Ctrl-C
+                restore_terminal
+                return 1
+                ;;
+            ""|$'\n'|$'\r') # Enter - confirm
+                # Build result
+                PURGE_SELECTION_RESULT=""
+                for ((i = 0; i < total_items; i++)); do
+                    if [[ ${selected[i]} == true ]]; then
+                        [[ -n "$PURGE_SELECTION_RESULT" ]] && PURGE_SELECTION_RESULT+=","
+                        PURGE_SELECTION_RESULT+="$i"
+                    fi
+                done
+
+                restore_terminal
+                return 0
+                ;;
+        esac
+    done
 }
 
-# Main cleanup function
-# Env: DRY_RUN
+# Main cleanup function - scans and prompts user to select artifacts to clean
 clean_project_artifacts() {
     local -a all_found_items=()
     local -a safe_to_clean=()
     local -a recently_modified=()
-    local total_found_size=0 # in KB
-
-    # Show warning and ask for confirmation (not in dry-run mode)
-    if [[ "$DRY_RUN" != "true" && -t 0 ]]; then
-        echo -e "${GRAY}${ICON_SOLID}${NC} Will remove old project build artifacts, use --dry-run to preview"
-        echo -ne "${PURPLE}${ICON_ARROW}${NC} Press ${GREEN}Enter${NC} to continue, ${GRAY}ESC${NC} to cancel: "
-
-        # Read single key
-        IFS= read -r -s -n1 key || key=""
-        drain_pending_input
-        case "$key" in
-            $'\e')
-                echo ""
-                echo -e "${GRAY}Cancelled${NC}"
-                printf '\n'
-                exit 0
-                ;;
-            "" | $'\n' | $'\r')
-                printf "\r\033[K"
-                # Continue with scan
-                ;;
-            *)
-                echo ""
-                echo -e "${GRAY}Cancelled${NC}"
-                printf '\n'
-                exit 0
-                ;;
-        esac
-    fi
 
     # Set up cleanup on interrupt
     local scan_pids=()
@@ -345,7 +408,7 @@ clean_project_artifacts() {
 
     # Start parallel scanning of all paths at once
     if [[ -t 1 ]]; then
-        start_inline_spinner "Scanning project directories (please wait)..."
+        start_inline_spinner "Scanning projects..."
     fi
 
     # Launch all scans in parallel
@@ -387,50 +450,179 @@ clean_project_artifacts() {
     trap - INT TERM
 
     if [[ ${#all_found_items[@]} -eq 0 ]]; then
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} No project artifacts found."
-        note_activity
-        return
+        echo ""
+        echo -e "${GREEN}✓${NC} Great! No old project artifacts to clean"
+        printf '\n'
+        return 2  # Special code: nothing to clean
     fi
 
-    # Filter items based on modification time
-    if [[ -t 1 ]]; then
-        start_inline_spinner "Analyzing artifacts..."
-    fi
-
+    # Mark recently modified items (for default selection state)
     for item in "${all_found_items[@]}"; do
         if is_recently_modified "$item"; then
             recently_modified+=("$item")
-        else
-            safe_to_clean+=("$item")
-            local item_size=$(get_dir_size_kb "$item")
-            total_found_size=$((total_found_size + item_size))
         fi
+        # Add all items to safe_to_clean, let user choose
+        safe_to_clean+=("$item")
+    done
+
+    # Build menu options - one per artifact
+    if [[ -t 1 ]]; then
+        start_inline_spinner "Calculating sizes..."
+    fi
+
+    local -a menu_options=()
+    local -a item_paths=()
+    local -a item_sizes=()
+    local -a item_recent_flags=()
+
+    # Helper to get project name from path
+    # For ~/www/pake/src-tauri/target -> returns "pake"
+    # For ~/www/project/node_modules/xxx/node_modules -> returns "project"
+    get_project_name() {
+        local path="$1"
+
+        # Find the project root by looking for direct child of search paths
+        local search_roots=("$HOME/www" "$HOME/dev" "$HOME/Projects")
+
+        for root in "${search_roots[@]}"; do
+            if [[ "$path" == "$root/"* ]]; then
+                # Remove root prefix and get first directory component
+                local relative_path="${path#$root/}"
+                # Extract first directory name
+                echo "$relative_path" | cut -d'/' -f1
+                return 0
+            fi
+        done
+
+        # Fallback: use grandparent directory
+        dirname "$(dirname "$path")" | xargs basename
+    }
+
+    # Format display with alignment (like app_selector)
+    format_purge_display() {
+        local project_name="$1"
+        local artifact_type="$2"
+        local size_str="$3"
+
+        # Terminal width for alignment
+        local terminal_width=$(tput cols 2>/dev/null || echo 80)
+        local fixed_width=28  # Reserve for type and size
+        local available_width=$((terminal_width - fixed_width))
+
+        # Bounds: 24-35 chars for project name
+        [[ $available_width -lt 24 ]] && available_width=24
+        [[ $available_width -gt 35 ]] && available_width=35
+
+        # Truncate project name if needed
+        local truncated_name=$(truncate_by_display_width "$project_name" "$available_width")
+        local current_width=$(get_display_width "$truncated_name")
+        local char_count=${#truncated_name}
+        local padding=$((available_width - current_width))
+        local printf_width=$((char_count + padding))
+
+        # Format: "project_name  size | artifact_type"
+        printf "%-*s %9s | %-13s" "$printf_width" "$truncated_name" "$size_str" "$artifact_type"
+    }
+
+    # Build menu options - one line per artifact
+    for item in "${safe_to_clean[@]}"; do
+        local project_name=$(get_project_name "$item")
+        local artifact_type=$(basename "$item")
+        local size_kb=$(get_dir_size_kb "$item")
+        local size_human=$(bytes_to_human "$((size_kb * 1024))")
+
+        # Check if recent
+        local is_recent=false
+        for recent_item in "${recently_modified[@]}"; do
+            if [[ "$item" == "$recent_item" ]]; then
+                is_recent=true
+                break
+            fi
+        done
+
+        menu_options+=("$(format_purge_display "$project_name" "$artifact_type" "$size_human")")
+        item_paths+=("$item")
+        item_sizes+=("$size_kb")
+        item_recent_flags+=("$is_recent")
     done
 
     if [[ -t 1 ]]; then
         stop_inline_spinner
     fi
 
-    echo -e "${BLUE}●${NC} Found ${#all_found_items[@]} artifacts (${#safe_to_clean[@]} older than $MIN_AGE_DAYS days)"
+    # Set global vars for selector
+    export PURGE_CATEGORY_SIZES=$(IFS=,; echo "${item_sizes[*]}")
+    export PURGE_RECENT_CATEGORIES=$(IFS=,; echo "${item_recent_flags[*]}")
 
-    if [[ ${#recently_modified[@]} -gt 0 ]]; then
-        echo -e "${YELLOW}${ICON_WARNING}${NC} Skipping ${#recently_modified[@]} recently modified items (active projects)"
+    # Interactive selection (only if terminal is available)
+    PURGE_SELECTION_RESULT=""
+    if [[ -t 0 ]]; then
+        if ! select_purge_categories "${menu_options[@]}"; then
+            unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_SELECTION_RESULT
+            return 1
+        fi
+    else
+        # Non-interactive: select all non-recent items
+        for ((i = 0; i < ${#menu_options[@]}; i++)); do
+            if [[ ${item_recent_flags[i]} != "true" ]]; then
+                [[ -n "$PURGE_SELECTION_RESULT" ]] && PURGE_SELECTION_RESULT+=","
+                PURGE_SELECTION_RESULT+="$i"
+            fi
+        done
     fi
 
-    if [[ ${#safe_to_clean[@]} -eq 0 ]]; then
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} No old artifacts to clean."
-        note_activity
-        return
+    if [[ -z "$PURGE_SELECTION_RESULT" ]]; then
+        echo ""
+        echo -e "${GRAY}No items selected${NC}"
+        printf '\n'
+        unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_SELECTION_RESULT
+        return 0
     fi
 
-    # Show total size estimate
-    local total_size_mb=$((total_found_size / 1024))
-    if [[ $total_size_mb -gt 0 ]]; then
-        echo -e "${GRAY}Estimated space to reclaim: ~${total_size_mb} MB${NC}"
-    fi
+    # Clean selected items
+    echo ""
+    IFS=',' read -r -a selected_indices <<< "$PURGE_SELECTION_RESULT"
 
-    # Clean safe items
-    for item in "${safe_to_clean[@]}"; do
-        safe_clean "$item" "$(basename "$(dirname "$item")")/$(basename "$item")"
+    local stats_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mole"
+    local cleaned_count=0
+
+    for idx in "${selected_indices[@]}"; do
+        local item_path="${item_paths[idx]}"
+        local artifact_type=$(basename "$item_path")
+        local project_name=$(get_project_name "$item_path")
+        local size_kb="${item_sizes[idx]}"
+        local size_human=$(bytes_to_human "$((size_kb * 1024))")
+
+        # Safety checks
+        if [[ -z "$item_path" || "$item_path" == "/" || "$item_path" == "$HOME" || "$item_path" != "$HOME/"* ]]; then
+            continue
+        fi
+
+        # Show progress
+        if [[ -t 1 ]]; then
+            start_inline_spinner "Cleaning $project_name/$artifact_type..."
+        fi
+
+        # Clean the item
+        if [[ -e "$item_path" ]]; then
+            rm -rf "$item_path" 2> /dev/null || true
+
+            # Update stats
+            if [[ ! -e "$item_path" ]]; then
+                local current_total=$(cat "$stats_dir/purge_stats" 2>/dev/null || echo "0")
+                echo "$((current_total + size_kb))" > "$stats_dir/purge_stats"
+                ((cleaned_count++))
+            fi
+        fi
+
+        if [[ -t 1 ]]; then
+            stop_inline_spinner
+            echo -e "${GREEN}✓${NC} $project_name - $artifact_type ${GREEN}($size_human)${NC}"
+        fi
     done
+
+    # Update count
+    echo "$cleaned_count" > "$stats_dir/purge_count"
+
+    unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_SELECTION_RESULT
 }

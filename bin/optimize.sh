@@ -445,14 +445,12 @@ main() {
 
     local key
     if ! key=$(read_key); then
-        echo -e " ${GRAY}Cancelled${NC}"
         exit 0
     fi
 
     if [[ "$key" == "ENTER" ]]; then
         printf "\r\033[K"
     else
-        echo -e " ${GRAY}Cancelled${NC}"
         exit 0
     fi
 

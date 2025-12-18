@@ -118,7 +118,6 @@ select_apps_for_uninstall() {
     fi
 
     if [[ $exit_code -ne 0 ]]; then
-        echo "Cancelled"
         return 1
     fi
 

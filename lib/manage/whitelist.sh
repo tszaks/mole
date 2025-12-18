@@ -366,8 +366,6 @@ manage_whitelist_categories() {
     local exit_code=$?
 
     if [[ $exit_code -ne 0 ]]; then
-        echo ""
-        echo -e "${YELLOW}Cancelled${NC}"
         return 1
     fi
 

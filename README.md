@@ -18,10 +18,10 @@
 
 ## Features
 
-- **All-in-one toolkit** combining the power of CleanMyMac, AppCleaner, DaisyDisk, Sensei, and iStat in one **trusted binary**
+- **All-in-one toolkit** combining CleanMyMac, AppCleaner, DaisyDisk, Sensei, and iStat in one **trusted binary**
 - **Deep cleanup** scans and removes caches, logs, browser leftovers, and junk to **reclaim tens of gigabytes**
 - **Smart uninstall** completely removes apps including launch agents, preferences, caches, and **hidden leftovers**
-- **Disk insight + optimization** visualizes usage, handles large files, **rebuilds caches**, cleans swap, and refreshes services
+- **Disk insight + optimization** visualizes usage, handles large files, **rebuilds caches**, and refreshes services
 - **Live status** monitors CPU, GPU, memory, disk, network, battery, and proxy stats to **diagnose issues**
 
 ## Quick Start
@@ -59,7 +59,6 @@ mo clean --dry-run           # Preview cleanup plan
 mo clean --whitelist         # Adjust protected caches
 mo uninstall --force-rescan  # Rescan apps and refresh cache
 mo optimize --whitelist      # Adjust protected optimization items
-
 ```
 
 ## Tips
@@ -184,16 +183,24 @@ Health score based on CPU, memory, disk, temperature, and I/O load. Color-coded 
 
 ### Project Artifact Purge
 
-Remove build artifacts from old projects to reclaim disk space. Fast parallel scanning targets `node_modules`, `target`, `build`, `dist`, `.next`, `.gradle`, `venv`, and similar directories.
+Clean old build artifacts (`node_modules`, `target`, `build`, `dist`, etc.) from your projects to free up disk space.
 
 ```bash
-mo purge --dry-run    # Preview cleanup (recommended)
-mo purge              # Clean old project artifacts
+mo purge
+
+Select Categories to Clean - 18.5GB (8 selected)
+
+➤ ● my-react-app       3.2GB | node_modules
+  ● old-project        2.8GB | node_modules
+  ● rust-app           4.1GB | target
+  ● next-blog          1.9GB | node_modules
+  ○ current-work       856MB | node_modules  | Recent
+  ● django-api         2.3GB | venv
+  ● vue-dashboard      1.7GB | node_modules
+  ● backend-service    2.5GB | node_modules
 ```
 
-**Safety:** Only scans common project directories, skips recently modified projects (7 days), and requires artifacts at least 2 levels deep to avoid system files.
-
-**Performance:** Uses macOS Spotlight index (mdfind) for lightning-fast scanning, with parallel search across multiple directories.
+> **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects (< 7 days) are marked and unselected by default.
 
 ## Quick Launchers
 

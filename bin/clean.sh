@@ -498,7 +498,6 @@ EOF
 
         # Check for cancel (ESC or Q)
         if [[ "$choice" == "QUIT" ]]; then
-            echo -e " ${GRAY}Cancelled${NC}"
             exit 0
         fi
 

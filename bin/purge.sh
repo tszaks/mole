@@ -15,10 +15,6 @@ source "$SCRIPT_DIR/../lib/core/log.sh"
 source "$SCRIPT_DIR/../lib/clean/project.sh"
 
 # Configuration
-DRY_RUN=false
-
-# Export list configuration
-EXPORT_LIST_FILE="$HOME/.config/mole/purge-list.txt"
 CURRENT_SECTION=""
 
 # Section management
@@ -48,75 +44,61 @@ start_purge() {
     fi
     printf '\n'
     echo -e "${PURPLE_BOLD}Purge Project Artifacts${NC}"
-    echo ""
 
-    if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${GRAY}${ICON_SOLID}${NC} Dry run mode - previewing what would be cleaned"
-        echo ""
-    fi
-
-    # Prepare export list
-    if [[ "$DRY_RUN" != "true" ]]; then
-        mkdir -p "$(dirname "$EXPORT_LIST_FILE")"
-        : > "$EXPORT_LIST_FILE"
-    fi
-
-    # Initialize stats file
-    echo "0" > "$SCRIPT_DIR/../.mole_cleanup_stats"
-    echo "0" > "$SCRIPT_DIR/../.mole_cleanup_count"
+    # Initialize stats file in user cache directory
+    local stats_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mole"
+    mkdir -p "$stats_dir"
+    echo "0" > "$stats_dir/purge_stats"
+    echo "0" > "$stats_dir/purge_count"
 }
 
 # Perform the purge
 perform_purge() {
     clean_project_artifacts
+    local exit_code=$?
+
+    # Exit codes:
+    # 0 = success, show summary
+    # 1 = user cancelled
+    # 2 = nothing to clean
+    if [[ $exit_code -ne 0 ]]; then
+        return 0
+    fi
 
     # Final summary (matching clean.sh format)
     echo ""
 
-    local summary_heading=""
-    if [[ "$DRY_RUN" == "true" ]]; then
-        summary_heading="Purge complete - dry run"
-    else
-        summary_heading="Purge complete"
-    fi
-
+    local summary_heading="Purge complete"
     local -a summary_details=()
     local total_size_cleaned=0
     local total_items_cleaned=0
 
-    # Read stats
-    if [[ -f "$SCRIPT_DIR/../.mole_cleanup_stats" ]]; then
-        total_size_cleaned=$(cat "$SCRIPT_DIR/../.mole_cleanup_stats" 2> /dev/null || echo "0")
-        rm -f "$SCRIPT_DIR/../.mole_cleanup_stats"
+    # Read stats from user cache directory
+    local stats_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mole"
+
+    if [[ -f "$stats_dir/purge_stats" ]]; then
+        total_size_cleaned=$(cat "$stats_dir/purge_stats" 2> /dev/null || echo "0")
+        rm -f "$stats_dir/purge_stats"
     fi
 
     # Read count
-    if [[ -f "$SCRIPT_DIR/../.mole_cleanup_count" ]]; then
-        total_items_cleaned=$(cat "$SCRIPT_DIR/../.mole_cleanup_count" 2> /dev/null || echo "0")
-        rm -f "$SCRIPT_DIR/../.mole_cleanup_count"
+    if [[ -f "$stats_dir/purge_count" ]]; then
+        total_items_cleaned=$(cat "$stats_dir/purge_count" 2> /dev/null || echo "0")
+        rm -f "$stats_dir/purge_count"
     fi
 
     if [[ $total_size_cleaned -gt 0 ]]; then
         local freed_gb
         freed_gb=$(echo "$total_size_cleaned" | awk '{printf "%.2f", $1/1024/1024}')
 
-        if [[ "$DRY_RUN" == "true" ]]; then
-            summary_details+=("Potential space: ${GREEN}${freed_gb}GB${NC}")
-        else
-            summary_details+=("Space freed: ${GREEN}${freed_gb}GB${NC}")
+        summary_details+=("Space freed: ${GREEN}${freed_gb}GB${NC}")
+        summary_details+=("Free space now: $(get_free_space)")
 
-            if [[ $total_items_cleaned -gt 0 ]]; then
-                summary_details+=("Items cleaned: $total_items_cleaned")
-            fi
-
-            summary_details+=("Free space now: $(get_free_space)")
+        if [[ $total_items_cleaned -gt 0 ]]; then
+            summary_details+=("Items cleaned: $total_items_cleaned")
         fi
     else
-        if [[ "$DRY_RUN" == "true" ]]; then
-            summary_details+=("No old project artifacts found.")
-        else
-            summary_details+=("No old project artifacts to clean.")
-        fi
+        summary_details+=("No old project artifacts to clean.")
         summary_details+=("Free space now: $(get_free_space)")
     fi
 
@@ -134,9 +116,6 @@ main() {
         case "$arg" in
             "--debug")
                 export MO_DEBUG=1
-                ;;
-            "--dry-run" | "-n")
-                DRY_RUN=true
                 ;;
             *)
                 echo "Unknown option: $arg"

@@ -231,6 +231,7 @@ show_help() {
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize" "$NC" "Check and maintain system"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo analyze" "$NC" "Explore disk usage"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo status" "$NC" "Monitor system health"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo purge" "$NC" "Remove old project artifacts"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo touchid" "$NC" "Configure Touch ID for sudo"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo update" "$NC" "Update to latest version"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo remove" "$NC" "Remove Mole from system"
@@ -241,10 +242,6 @@ show_help() {
     printf "  %s%-28s%s %s\n" "$GREEN" "mo clean --whitelist" "$NC" "Manage protected caches"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo uninstall --force-rescan" "$NC" "Rescan apps and refresh cache"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --whitelist" "$NC" "Manage protected items"
-    echo
-    printf "%s%s%s\n" "$BLUE" "ADVANCED" "$NC"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo purge" "$NC" "Remove old project artifacts"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --dry-run" "$NC" "Preview project cleanup"
     echo
     printf "%s%s%s\n" "$BLUE" "OPTIONS" "$NC"
     printf "  %s%-28s%s %s\n" "$GREEN" "--debug" "$NC" "Show detailed operation logs"
@@ -501,8 +498,6 @@ remove_mole() {
     drain_pending_input # Clean up any escape sequence remnants
     case "$key" in
         $'\e')
-            echo -e "${GRAY}Cancelled${NC}"
-            echo ""
             exit 0
             ;;
         "" | $'\n' | $'\r')
@@ -510,8 +505,6 @@ remove_mole() {
             # Continue with removal
             ;;
         *)
-            echo -e "${GRAY}Cancelled${NC}"
-            echo ""
             exit 0
             ;;
     esac
