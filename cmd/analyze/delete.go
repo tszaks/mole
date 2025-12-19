@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,6 +20,54 @@ func deletePathCmd(path string, counter *int64) tea.Cmd {
 			path:  path,
 		}
 	}
+}
+
+// deleteMultiplePathsCmd deletes multiple paths and returns combined results
+func deleteMultiplePathsCmd(paths []string, counter *int64) tea.Cmd {
+	return func() tea.Msg {
+		var totalCount int64
+		var errors []string
+
+		for _, path := range paths {
+			count, err := deletePathWithProgress(path, counter)
+			totalCount += count
+			if err != nil {
+				errors = append(errors, err.Error())
+			}
+		}
+
+		var resultErr error
+		if len(errors) > 0 {
+			resultErr = &multiDeleteError{errors: errors}
+		}
+
+		// Return empty path to trigger full refresh since multiple items were deleted
+		return deleteProgressMsg{
+			done:  true,
+			err:   resultErr,
+			count: totalCount,
+			path:  "", // Empty path signals multiple deletions
+		}
+	}
+}
+
+// multiDeleteError holds multiple deletion errors
+type multiDeleteError struct {
+	errors []string
+}
+
+func (e *multiDeleteError) Error() string {
+	if len(e.errors) == 1 {
+		return e.errors[0]
+	}
+	return strings.Join(e.errors[:min(3, len(e.errors))], "; ")
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func deletePathWithProgress(root string, counter *int64) (int64, error) {

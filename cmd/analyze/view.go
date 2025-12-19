@@ -128,16 +128,27 @@ func (m model) View() string {
 				nameColor := ""
 				sizeColor := colorGray
 				numColor := ""
+
+				// Check if this item is multi-selected
+				isMultiSelected := m.largeMultiSelected != nil && m.largeMultiSelected[idx]
+				selectIcon := "○"
+				if isMultiSelected {
+					selectIcon = fmt.Sprintf("%s●%s", colorGreen, colorReset)
+					nameColor = colorGreen
+				}
+
 				if idx == m.largeSelected {
 					entryPrefix = fmt.Sprintf(" %s%s▶%s ", colorCyan, colorBold, colorReset)
-					nameColor = colorCyan
+					if !isMultiSelected {
+						nameColor = colorCyan
+					}
 					sizeColor = colorCyan
 					numColor = colorCyan
 				}
 				size := humanizeBytes(file.Size)
 				bar := coloredProgressBar(file.Size, maxLargeSize, 0)
-				fmt.Fprintf(&b, "%s%s%2d.%s %s  |  📄 %s%s%s  %s%10s%s\n",
-					entryPrefix, numColor, idx+1, colorReset, bar, nameColor, paddedPath, colorReset, sizeColor, size, colorReset)
+				fmt.Fprintf(&b, "%s%s %s%2d.%s %s  |  📄 %s%s%s  %s%10s%s\n",
+					entryPrefix, selectIcon, numColor, idx+1, colorReset, bar, nameColor, paddedPath, colorReset, sizeColor, size, colorReset)
 			}
 		}
 	} else {
@@ -275,14 +286,28 @@ func (m model) View() string {
 						sizeColor = colorGray
 					}
 
+					// Check if this item is multi-selected
+					isMultiSelected := m.multiSelected != nil && m.multiSelected[idx]
+					selectIcon := "○"
+					nameColor := ""
+					if isMultiSelected {
+						selectIcon = fmt.Sprintf("%s●%s", colorGreen, colorReset)
+						nameColor = colorGreen
+					}
+
 					// Keep chart columns aligned even when arrow is shown
 					entryPrefix := "   "
 					nameSegment := fmt.Sprintf("%s %s", icon, paddedName)
+					if nameColor != "" {
+						nameSegment = fmt.Sprintf("%s%s %s%s", nameColor, icon, paddedName, colorReset)
+					}
 					numColor := ""
 					percentColor := ""
 					if idx == m.selected {
 						entryPrefix = fmt.Sprintf(" %s%s▶%s ", colorCyan, colorBold, colorReset)
-						nameSegment = fmt.Sprintf("%s%s %s%s", colorCyan, icon, paddedName, colorReset)
+						if !isMultiSelected {
+							nameSegment = fmt.Sprintf("%s%s %s%s", colorCyan, icon, paddedName, colorReset)
+						}
 						numColor = colorCyan
 						percentColor = colorCyan
 						sizeColor = colorCyan
@@ -306,12 +331,12 @@ func (m model) View() string {
 					}
 
 					if hintLabel == "" {
-						fmt.Fprintf(&b, "%s%s%2d.%s %s %s%s%s  |  %s %s%10s%s\n",
-							entryPrefix, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
+						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  |  %s %s%10s%s\n",
+							entryPrefix, selectIcon, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
 							nameSegment, sizeColor, size, colorReset)
 					} else {
-						fmt.Fprintf(&b, "%s%s%2d.%s %s %s%s%s  |  %s %s%10s%s  %s\n",
-							entryPrefix, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
+						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  |  %s %s%10s%s  %s\n",
+							entryPrefix, selectIcon, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
 							nameSegment, sizeColor, size, colorReset, hintLabel)
 					}
 				}
@@ -328,21 +353,61 @@ func (m model) View() string {
 			fmt.Fprintf(&b, "%s↑↓→ | Enter | R Refresh | O Open | F File | Q Quit%s\n", colorGray, colorReset)
 		}
 	} else if m.showLargeFiles {
-		fmt.Fprintf(&b, "%s↑↓← | R Refresh | O Open | F File | ⌫ Del | ← Back | Q Quit%s\n", colorGray, colorReset)
+		selectCount := len(m.largeMultiSelected)
+		if selectCount > 0 {
+			fmt.Fprintf(&b, "%s↑↓← | Space Select | R Refresh | O Open | F File | ⌫ Del(%d) | ← Back | Q Quit%s\n", colorGray, selectCount, colorReset)
+		} else {
+			fmt.Fprintf(&b, "%s↑↓← | Space Select | R Refresh | O Open | F File | ⌫ Del | ← Back | Q Quit%s\n", colorGray, colorReset)
+		}
 	} else {
 		largeFileCount := len(m.largeFiles)
-		if largeFileCount > 0 {
-			fmt.Fprintf(&b, "%s↑↓←→ | Enter | R Refresh | O Open | F File | ⌫ Del | T Top(%d) | Q Quit%s\n", colorGray, largeFileCount, colorReset)
+		selectCount := len(m.multiSelected)
+		if selectCount > 0 {
+			if largeFileCount > 0 {
+				fmt.Fprintf(&b, "%s↑↓←→ | Space Select | Enter | R Refresh | O Open | F File | ⌫ Del(%d) | T Top(%d) | Q Quit%s\n", colorGray, selectCount, largeFileCount, colorReset)
+			} else {
+				fmt.Fprintf(&b, "%s↑↓←→ | Space Select | Enter | R Refresh | O Open | F File | ⌫ Del(%d) | Q Quit%s\n", colorGray, selectCount, colorReset)
+			}
 		} else {
-			fmt.Fprintf(&b, "%s↑↓←→ | Enter | R Refresh | O Open | F File | ⌫ Del | Q Quit%s\n", colorGray, colorReset)
+			if largeFileCount > 0 {
+				fmt.Fprintf(&b, "%s↑↓←→ | Space Select | Enter | R Refresh | O Open | F File | ⌫ Del | T Top(%d) | Q Quit%s\n", colorGray, largeFileCount, colorReset)
+			} else {
+				fmt.Fprintf(&b, "%s↑↓←→ | Space Select | Enter | R Refresh | O Open | F File | ⌫ Del | Q Quit%s\n", colorGray, colorReset)
+			}
 		}
 	}
 	if m.deleteConfirm && m.deleteTarget != nil {
 		fmt.Fprintln(&b)
-		fmt.Fprintf(&b, "%sDelete:%s %s (%s)  %sPress ⌫ again  |  ESC cancel%s\n",
-			colorRed, colorReset,
-			m.deleteTarget.Name, humanizeBytes(m.deleteTarget.Size),
-			colorGray, colorReset)
+		// Show multi-selection delete info if applicable
+		var deleteCount int
+		var totalDeleteSize int64
+		if m.showLargeFiles && len(m.largeMultiSelected) > 0 {
+			deleteCount = len(m.largeMultiSelected)
+			for idx := range m.largeMultiSelected {
+				if idx < len(m.largeFiles) {
+					totalDeleteSize += m.largeFiles[idx].Size
+				}
+			}
+		} else if !m.showLargeFiles && len(m.multiSelected) > 0 {
+			deleteCount = len(m.multiSelected)
+			for idx := range m.multiSelected {
+				if idx < len(m.entries) {
+					totalDeleteSize += m.entries[idx].Size
+				}
+			}
+		}
+
+		if deleteCount > 1 {
+			fmt.Fprintf(&b, "%sDelete:%s %d items (%s)  %sPress ⌫ again  |  ESC cancel%s\n",
+				colorRed, colorReset,
+				deleteCount, humanizeBytes(totalDeleteSize),
+				colorGray, colorReset)
+		} else {
+			fmt.Fprintf(&b, "%sDelete:%s %s (%s)  %sPress ⌫ again  |  ESC cancel%s\n",
+				colorRed, colorReset,
+				m.deleteTarget.Name, humanizeBytes(m.deleteTarget.Size),
+				colorGray, colorReset)
+		}
 	}
 	return b.String()
 }
