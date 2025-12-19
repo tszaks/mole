@@ -86,9 +86,9 @@ func isZeroLoad(avg load.AvgStat) bool {
 
 var (
 	// Package-level cache for core topology
-	lastTopologyAt time.Time
+	lastTopologyAt   time.Time
 	cachedP, cachedE int
-	topologyTTL    = 10 * time.Minute
+	topologyTTL      = 10 * time.Minute
 )
 
 // getCoreTopology returns P-core and E-core counts on Apple Silicon.
