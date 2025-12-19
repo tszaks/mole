@@ -67,7 +67,8 @@ show_optimization_summary() {
     local summary_title="Optimization and Check Complete"
     local -a summary_details=()
 
-    summary_details+=("Applied ${GREEN}${safe_count:-0}${NC} optimizations; all system services tuned")
+    local total_applied=$((safe_count + confirm_count))
+    summary_details+=("Applied ${GREEN}${total_applied:-0}${NC} optimizations; all system services tuned")
     summary_details+=("Updates, security and system health fully reviewed")
 
     local summary_line4=""

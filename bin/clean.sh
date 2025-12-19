@@ -650,15 +650,7 @@ perform_cleanup() {
     end_section
 
     # ===== 13. Apple Silicon optimizations =====
-    if [[ "$IS_M_SERIES" == "true" ]]; then
-        start_section "Apple Silicon updates"
-        safe_clean /Library/Apple/usr/share/rosetta/rosetta_update_bundle "Rosetta 2 cache"
-        safe_clean ~/Library/Caches/com.apple.rosetta.update "Rosetta 2 user cache"
-        safe_clean ~/Library/Caches/com.apple.amp.mediasevicesd "Apple Silicon media service cache"
-        # Skip: iCloud sync cache, may affect device pairing
-        # safe_clean ~/Library/Caches/com.apple.bird.lsuseractivity "User activity cache"
-        end_section
-    fi
+    clean_apple_silicon_caches
 
     # ===== 14. iOS device backups =====
     start_section "iOS device backups"

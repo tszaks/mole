@@ -6,10 +6,11 @@ set -euo pipefail
 # Helper function to clean tool caches using their built-in commands
 # Args: $1 - description, $@ - command to execute
 # Env: DRY_RUN
+# Note: Try to estimate potential savings (many tool caches don't have a direct path,
+#       so we just report the action if we can't easily find a path)
 clean_tool_cache() {
     local description="$1"
     shift
-
     if [[ "$DRY_RUN" != "true" ]]; then
         if "$@" > /dev/null 2>&1; then
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $description"

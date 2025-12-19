@@ -366,11 +366,13 @@ check_ios_device_backups() {
 # Clean Apple Silicon specific caches
 # Env: IS_M_SERIES
 clean_apple_silicon_caches() {
-    if [[ "$IS_M_SERIES" != "true" ]]; then
+    if [[ "${IS_M_SERIES:-false}" != "true" ]]; then
         return 0
     fi
 
+    start_section "Apple Silicon updates"
     safe_clean /Library/Apple/usr/share/rosetta/rosetta_update_bundle "Rosetta 2 cache"
     safe_clean ~/Library/Caches/com.apple.rosetta.update "Rosetta 2 user cache"
     safe_clean ~/Library/Caches/com.apple.amp.mediasevicesd "Apple Silicon media service cache"
+    end_section
 }
