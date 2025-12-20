@@ -17,9 +17,9 @@ flush_dns_cache() {
 
 # Rebuild databases and flush caches
 opt_system_maintenance() {
-    echo -e "${BLUE}${ICON_ARROW}${NC} Rebuilding LaunchServices database..."
-    run_with_timeout 10 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -kill -r -domain local -domain system -domain user > /dev/null 2>&1 || true
-    echo -e "${GREEN}${ICON_SUCCESS}${NC} LaunchServices database rebuilt"
+    # DISABLED: Causes System Settings corruption - Issue #136
+    echo -e "${GRAY}⊘${NC} LaunchServices rebuild disabled"
+    # run_with_timeout 10 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -kill -r -domain local -domain system -domain user > /dev/null 2>&1 || true
 
     echo -e "${BLUE}${ICON_ARROW}${NC} Clearing DNS cache..."
     if flush_dns_cache; then
