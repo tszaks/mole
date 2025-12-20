@@ -139,13 +139,13 @@ type BluetoothDevice struct {
 
 type Collector struct {
 	// Static Cache (Collected once at startup)
-	cachedHW   HardwareInfo
-	lastHWAt   time.Time
-	hasStatic  bool
+	cachedHW  HardwareInfo
+	lastHWAt  time.Time
+	hasStatic bool
 
 	// Slow Cache (Collected every 30s-1m)
-	lastBTAt   time.Time
-	lastBT     []BluetoothDevice
+	lastBTAt time.Time
+	lastBT   []BluetoothDevice
 
 	// Fast Metrics (Collected every 1 second)
 	prevNet    map[string]net.IOCountersStat
