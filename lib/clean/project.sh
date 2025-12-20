@@ -385,8 +385,9 @@ clean_project_artifacts() {
     local -a recently_modified=()
 
     # Set up cleanup on interrupt
-    local scan_pids=()
-    local scan_temps=()
+    # Note: Declared without 'local' so cleanup_scan trap can access them
+    scan_pids=()
+    scan_temps=()
     # shellcheck disable=SC2329
     cleanup_scan() {
         # Kill all background scans
