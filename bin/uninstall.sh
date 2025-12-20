@@ -562,7 +562,7 @@ main() {
 
         # Calculate name width: use actual max, but constrain by terminal width
         # Fixed elements: "99. " (4) + "  " (2) + "  |  Last: " (11) = 17
-        local term_width=$(tput cols 2>/dev/null || echo 100)
+        local term_width=$(tput cols 2> /dev/null || echo 100)
         local available_for_name=$((term_width - 17 - max_size_width - max_last_width))
 
         # Dynamic minimum for better spacing on wide terminals
