@@ -508,7 +508,7 @@ paginated_multi_select() {
                     # Normal: show full controls (without O ↑/↓ to save space)
                     # Dynamically reduce controls if they won't fit
                     local term_width="${COLUMNS:-}"
-                    [[ -z "$term_width" ]] && term_width=$(tput cols 2>/dev/null || echo 80)
+                    [[ -z "$term_width" ]] && term_width=$(tput cols 2> /dev/null || echo 80)
 
                     # Helper to calculate display length without ANSI codes
                     _calc_len() {

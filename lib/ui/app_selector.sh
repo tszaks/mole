@@ -99,11 +99,11 @@ select_apps_for_uninstall() {
     # Dynamic minimum: wider terminals get larger minimum for better spacing
     local min_width=18
     if [[ $terminal_width -ge 120 ]]; then
-        min_width=48  # Wide terminals: very generous spacing
+        min_width=48 # Wide terminals: very generous spacing
     elif [[ $terminal_width -ge 100 ]]; then
-        min_width=38  # Medium-wide terminals: generous spacing
+        min_width=38 # Medium-wide terminals: generous spacing
     elif [[ $terminal_width -ge 80 ]]; then
-        min_width=25  # Standard terminals
+        min_width=25 # Standard terminals
     fi
 
     [[ $max_name_width -lt $min_width ]] && max_name_width=$min_width
