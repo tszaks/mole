@@ -545,7 +545,44 @@ main() {
         local -a summary_rows=()
         local max_name_display_width=0
         local max_size_width=0
-        local name_trunc_limit=30
+        local max_last_width=0
+        # First pass: get actual max widths for all columns
+        for selected_app in "${selected_apps[@]}"; do
+            IFS='|' read -r _ _ app_name _ size last_used _ <<< "$selected_app"
+            local name_width=$(get_display_width "$app_name")
+            [[ $name_width -gt $max_name_display_width ]] && max_name_display_width=$name_width
+            local size_display="$size"
+            [[ -z "$size_display" || "$size_display" == "0" || "$size_display" == "N/A" ]] && size_display="Unknown"
+            [[ ${#size_display} -gt $max_size_width ]] && max_size_width=${#size_display}
+            local last_display=$(format_last_used_summary "$last_used")
+            [[ ${#last_display} -gt $max_last_width ]] && max_last_width=${#last_display}
+        done
+        ((max_size_width < 5)) && max_size_width=5
+        ((max_last_width < 5)) && max_last_width=5
+
+        # Calculate name width: use actual max, but constrain by terminal width
+        # Fixed elements: "99. " (4) + "  " (2) + "  |  Last: " (11) = 17
+        local term_width=$(tput cols 2>/dev/null || echo 100)
+        local available_for_name=$((term_width - 17 - max_size_width - max_last_width))
+
+        # Dynamic minimum for better spacing on wide terminals
+        local min_name_width=24
+        if [[ $term_width -ge 120 ]]; then
+            min_name_width=50
+        elif [[ $term_width -ge 100 ]]; then
+            min_name_width=42
+        elif [[ $term_width -ge 80 ]]; then
+            min_name_width=30
+        fi
+
+        # Constrain name width: dynamic min, max min(actual_max, available, 60)
+        local name_trunc_limit=$max_name_display_width
+        [[ $name_trunc_limit -lt $min_name_width ]] && name_trunc_limit=$min_name_width
+        [[ $name_trunc_limit -gt $available_for_name ]] && name_trunc_limit=$available_for_name
+        [[ $name_trunc_limit -gt 60 ]] && name_trunc_limit=60
+
+        # Reset for second pass
+        max_name_display_width=0
 
         for selected_app in "${selected_apps[@]}"; do
             IFS='|' read -r epoch app_path app_name bundle_id size last_used size_kb <<< "$selected_app"
@@ -554,17 +591,15 @@ main() {
             local display_name
             display_name=$(truncate_by_display_width "$app_name" "$name_trunc_limit")
 
-            # Get actual display width
+            # Track actual max width after truncation
             local current_width
             current_width=$(get_display_width "$display_name")
-
             [[ $current_width -gt $max_name_display_width ]] && max_name_display_width=$current_width
 
             local size_display="$size"
             if [[ -z "$size_display" || "$size_display" == "0" || "$size_display" == "N/A" ]]; then
                 size_display="Unknown"
             fi
-            [[ ${#size_display} -gt $max_size_width ]] && max_size_width=${#size_display}
 
             local last_display
             last_display=$(format_last_used_summary "$last_used")
@@ -573,7 +608,6 @@ main() {
         done
 
         ((max_name_display_width < 16)) && max_name_display_width=16
-        ((max_size_width < 5)) && max_size_width=5
 
         local index=1
         for row in "${summary_rows[@]}"; do

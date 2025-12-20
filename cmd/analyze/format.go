@@ -161,9 +161,28 @@ func displayWidth(s string) int {
 	return width
 }
 
+// calculateNameWidth computes the optimal name column width based on terminal width.
+// Fixed elements: prefix(3) + num(3) + bar(24) + percent(7) + sep(5) + icon(3) + size(12) + hint(4) = 61
+func calculateNameWidth(termWidth int) int {
+	const fixedWidth = 61
+	available := termWidth - fixedWidth
+
+	// Constrain to reasonable bounds
+	if available < 24 {
+		return 24 // Minimum for readability
+	}
+	if available > 60 {
+		return 60 // Maximum to avoid overly wide columns
+	}
+	return available
+}
+
 func trimName(name string) string {
+	return trimNameWithWidth(name, 45) // Default width for backward compatibility
+}
+
+func trimNameWithWidth(name string, maxWidth int) string {
 	const (
-		maxWidth      = 28
 		ellipsis      = "..."
 		ellipsisWidth = 3
 	)

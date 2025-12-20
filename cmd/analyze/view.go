@@ -119,11 +119,12 @@ func (m model) View() string {
 					maxLargeSize = file.Size
 				}
 			}
+			nameWidth := calculateNameWidth(m.width)
 			for idx := start; idx < end; idx++ {
 				file := m.largeFiles[idx]
 				shortPath := displayPath(file.Path)
-				shortPath = truncateMiddle(shortPath, 35)
-				paddedPath := padName(shortPath, 35)
+				shortPath = truncateMiddle(shortPath, nameWidth)
+				paddedPath := padName(shortPath, nameWidth)
 				entryPrefix := "   "
 				nameColor := ""
 				sizeColor := colorGray
@@ -152,6 +153,7 @@ func (m model) View() string {
 					}
 				}
 				totalSize := m.totalSize
+				nameWidth := calculateNameWidth(m.width)
 				for idx, entry := range m.entries {
 					icon := "📁"
 					sizeVal := entry.Size
@@ -188,8 +190,8 @@ func (m model) View() string {
 						}
 					}
 					entryPrefix := "   "
-					name := trimName(entry.Name)
-					paddedName := padName(name, 28)
+					name := trimNameWithWidth(entry.Name, nameWidth)
+					paddedName := padName(name, nameWidth)
 					nameSegment := fmt.Sprintf("%s %s", icon, paddedName)
 					numColor := ""
 					percentColor := ""
@@ -237,6 +239,7 @@ func (m model) View() string {
 				}
 
 				viewport := calculateViewport(m.height, false)
+				nameWidth := calculateNameWidth(m.width)
 				start := m.offset
 				if start < 0 {
 					start = 0
@@ -253,8 +256,8 @@ func (m model) View() string {
 						icon = "📁"
 					}
 					size := humanizeBytes(entry.Size)
-					name := trimName(entry.Name)
-					paddedName := padName(name, 28)
+					name := trimNameWithWidth(entry.Name, nameWidth)
+					paddedName := padName(name, nameWidth)
 
 					// Calculate percentage
 					percent := float64(entry.Size) / float64(m.totalSize) * 100
