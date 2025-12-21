@@ -681,6 +681,10 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scanning = false
 		return m, nil
 	case "r":
+		// Clear multi-selection on refresh
+		m.multiSelected = make(map[int]bool)
+		m.largeMultiSelected = make(map[int]bool)
+
 		if m.inOverviewMode() {
 			// In overview mode, clear cache and re-scan known entries
 			m.overviewSizeCache = make(map[string]int64)

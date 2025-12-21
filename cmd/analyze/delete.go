@@ -63,13 +63,6 @@ func (e *multiDeleteError) Error() string {
 	return strings.Join(e.errors[:min(3, len(e.errors))], "; ")
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func deletePathWithProgress(root string, counter *int64) (int64, error) {
 	var count int64
 	var firstErr error
