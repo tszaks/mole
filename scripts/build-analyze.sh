@@ -4,6 +4,8 @@
 
 set -euo pipefail
 
+export CGO_ENABLED=0
+
 cd "$(dirname "$0")/.."
 
 # Check if Go is installed
