@@ -41,7 +41,7 @@ save_whitelist_patterns() {
         header_text="# Mole Optimization Whitelist - These checks will be skipped during optimization"
     else
         config_file="$WHITELIST_CONFIG_CLEAN"
-        header_text="# Mole Whitelist - Protected paths won't be deleted\n# Default protections: Playwright browsers, HuggingFace models, Maven repo, Ollama models, Surge Mac, R renv, Finder metadata\n# Add one pattern per line to keep items safe."
+        header_text="# Mole Whitelist - Protected paths won't be deleted\n# Default protections: Playwright browsers, HuggingFace models, Maven repo, Ollama models, Surge Mac, R renv, Finder metadata\n#\n# Add one pattern per line to keep items safe.\n#\n# You can also add custom paths to protect (e.g., ~/important-project, /opt/myapp):\n# ~/my-project\n# ~/.config/important-app"
     fi
 
     mkdir -p "$(dirname "$config_file")"
@@ -279,12 +279,16 @@ manage_whitelist_categories() {
 
     if [[ "$mode" == "optimize" ]]; then
         items_source=$(get_optimize_whitelist_items)
-        menu_title="Whitelist Manager – Select system checks to ignore"
         active_config_file="$WHITELIST_CONFIG_OPTIMIZE"
+        local display_config="${active_config_file/#$HOME/~}"
+        menu_title="Whitelist Manager – Select system checks to ignore
+${GRAY}Edit: ${display_config}${NC}"
     else
         items_source=$(get_all_cache_items)
-        menu_title="Whitelist Manager – Select caches to protect"
         active_config_file="$WHITELIST_CONFIG_CLEAN"
+        local display_config="${active_config_file/#$HOME/~}"
+        menu_title="Whitelist Manager – Select caches to protect
+${GRAY}Edit: ${display_config}${NC}"
     fi
 
     while IFS='|' read -r display_name pattern _; do
@@ -365,6 +369,7 @@ manage_whitelist_categories() {
     unset MOLE_PRESELECTED_INDICES
     local exit_code=$?
 
+    # Normal exit or cancel
     if [[ $exit_code -ne 0 ]]; then
         return 1
     fi
@@ -410,7 +415,8 @@ manage_whitelist_categories() {
     else
         summary_lines+=("Protected ${total_protected} cache(s)")
     fi
-    summary_lines+=("Saved to ${active_config_file}")
+    local display_config="${active_config_file/#$HOME/~}"
+    summary_lines+=("Config: ${GRAY}${display_config}${NC}")
 
     print_summary_block "${summary_lines[@]}"
     printf '\n'
