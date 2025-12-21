@@ -42,6 +42,7 @@ temp/
 # AI Assistant Instructions
 .claude/
 .gemini/
+.kiro/
 CLAUDE.md
 GEMINI.md
 .cursorrules
