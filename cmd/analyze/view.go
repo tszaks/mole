@@ -164,7 +164,9 @@ func (m model) View() string {
 					}
 				}
 				totalSize := m.totalSize
-				nameWidth := calculateNameWidth(m.width)
+				// For overview mode, use a fixed small width since path names are short
+				// (~/Downloads, ~/Library, etc. - max ~15 chars)
+				nameWidth := 20
 				for idx, entry := range m.entries {
 					icon := "📁"
 					sizeVal := entry.Size

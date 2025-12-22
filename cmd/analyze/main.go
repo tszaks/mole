@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -204,11 +205,16 @@ func createOverviewEntries() []dirEntry {
 	home := os.Getenv("HOME")
 	entries := []dirEntry{}
 
+	// Separate Home and ~/Library for better visibility and performance
+	// Home excludes Library to avoid duplicate scanning
 	if home != "" {
-		entries = append(entries,
-			dirEntry{Name: "Home (~)", Path: home, IsDir: true, Size: -1},
-			dirEntry{Name: "Library (~/Library)", Path: filepath.Join(home, "Library"), IsDir: true, Size: -1},
-		)
+		entries = append(entries, dirEntry{Name: "Home", Path: home, IsDir: true, Size: -1})
+
+		// Add ~/Library separately so users can see app data usage
+		userLibrary := filepath.Join(home, "Library")
+		if _, err := os.Stat(userLibrary); err == nil {
+			entries = append(entries, dirEntry{Name: "App Library", Path: userLibrary, IsDir: true, Size: -1})
+		}
 	}
 
 	entries = append(entries,
@@ -269,6 +275,14 @@ func (m *model) hydrateOverviewEntries() {
 	m.totalSize = sumKnownEntrySizes(m.entries)
 }
 
+func (m *model) sortOverviewEntriesBySize() {
+	// Sort entries by size (largest first)
+	// Use stable sort to maintain order when sizes are equal
+	sort.SliceStable(m.entries, func(i, j int) bool {
+		return m.entries[i].Size > m.entries[j].Size
+	})
+}
+
 func (m *model) scheduleOverviewScans() tea.Cmd {
 	if !m.inOverviewMode() {
 		return nil
@@ -289,6 +303,8 @@ func (m *model) scheduleOverviewScans() tea.Cmd {
 	if len(pendingIndices) == 0 {
 		m.overviewScanning = false
 		if !hasPendingOverviewEntries(m.entries) {
+			// All scans complete - sort entries by size (largest first)
+			m.sortOverviewEntriesBySize()
 			m.status = "Ready"
 		}
 		return nil
