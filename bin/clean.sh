@@ -686,7 +686,6 @@ perform_cleanup() {
             local stats="Potential space: ${GREEN}${freed_gb}GB${NC}"
             [[ $files_cleaned -gt 0 ]] && stats+=" | Items: $files_cleaned"
             [[ $total_items -gt 0 ]] && stats+=" | Categories: $total_items"
-            [[ $whitelist_skipped_count -gt 0 ]] && stats+=" | Protected: $whitelist_skipped_count"
             summary_details+=("$stats")
 
             # Add summary to export file
@@ -698,7 +697,6 @@ perform_cleanup() {
                 echo "# Potential cleanup: ${freed_gb}GB"
                 echo "# Items: $files_cleaned"
                 echo "# Categories: $total_items"
-                [[ $whitelist_skipped_count -gt 0 ]] && echo "# Protected by whitelist: $whitelist_skipped_count"
             } >> "$EXPORT_LIST_FILE"
 
             summary_details+=("Detailed file list: ${GRAY}$EXPORT_LIST_FILE${NC}")
@@ -709,13 +707,10 @@ perform_cleanup() {
 
             if [[ $files_cleaned -gt 0 && $total_items -gt 0 ]]; then
                 summary_line+=" | Items cleaned: $files_cleaned | Categories: $total_items"
-                [[ $whitelist_skipped_count -gt 0 ]] && summary_line+=" | Protected: $whitelist_skipped_count"
             elif [[ $files_cleaned -gt 0 ]]; then
                 summary_line+=" | Items cleaned: $files_cleaned"
-                [[ $whitelist_skipped_count -gt 0 ]] && summary_line+=" | Protected: $whitelist_skipped_count"
             elif [[ $total_items -gt 0 ]]; then
                 summary_line+=" | Categories: $total_items"
-                [[ $whitelist_skipped_count -gt 0 ]] && summary_line+=" | Protected: $whitelist_skipped_count"
             fi
 
             summary_details+=("$summary_line")
