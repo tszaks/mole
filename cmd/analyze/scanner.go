@@ -665,7 +665,6 @@ func getDirectorySizeFromDuWithExclude(path string, excludePath string) (int64, 
 	return runDuSize(path)
 }
 
-
 func getDirectoryLogicalSizeWithExclude(path string, excludePath string) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {

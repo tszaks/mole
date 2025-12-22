@@ -444,7 +444,7 @@ is_critical_system_component() {
     lower=$(echo "$token" | tr '[:upper:]' '[:lower:]')
 
     case "$lower" in
-        *backgroundtaskmanagement* | *loginitems* | *systempreferences* | *systemsettings* | *settings* | *preferences* | *controlcenter* | *biometrickit* | *sfl* | *tcc* )
+        *backgroundtaskmanagement* | *loginitems* | *systempreferences* | *systemsettings* | *settings* | *preferences* | *controlcenter* | *biometrickit* | *sfl* | *tcc*)
             return 0
             ;;
         *)
