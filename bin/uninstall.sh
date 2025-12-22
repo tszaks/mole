@@ -71,7 +71,7 @@ scan_applications() {
     # This speeds up repeated scans significantly by caching app metadata
     local cache_dir="$HOME/.cache/mole"
     local cache_file="$cache_dir/app_scan_cache"
-    local cache_ttl=86400  # 24 hours
+    local cache_ttl=86400 # 24 hours
     local force_rescan="${1:-false}"
 
     mkdir -p "$cache_dir" 2> /dev/null
@@ -79,12 +79,12 @@ scan_applications() {
     # Check if cache exists and is fresh
     if [[ $force_rescan == false && -f "$cache_file" ]]; then
         local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
-        [[ $cache_age -eq $(date +%s) ]] && cache_age=86401  # Handle mtime read failure
+        [[ $cache_age -eq $(date +%s) ]] && cache_age=86401 # Handle mtime read failure
         if [[ $cache_age -lt $cache_ttl ]]; then
             # Cache hit - show brief feedback and return cached results
             if [[ -t 2 ]]; then
                 echo -e "${GREEN}Loading from cache...${NC}" >&2
-                sleep 0.3  # Brief pause so user sees the message
+                sleep 0.3 # Brief pause so user sees the message
             fi
             echo "$cache_file"
             return 0
@@ -95,7 +95,7 @@ scan_applications() {
     local inline_loading=false
     if [[ -t 1 && -t 2 ]]; then
         inline_loading=true
-        printf "\033[2J\033[H" >&2  # Clear screen for inline loading
+        printf "\033[2J\033[H" >&2 # Clear screen for inline loading
     fi
 
     local temp_file
@@ -156,9 +156,9 @@ scan_applications() {
     local max_parallel
     max_parallel=$(get_optimal_parallel_jobs "io")
     if [[ $max_parallel -lt 8 ]]; then
-        max_parallel=8   # At least 8 for good performance
+        max_parallel=8 # At least 8 for good performance
     elif [[ $max_parallel -gt 32 ]]; then
-        max_parallel=32  # Cap at 32 to avoid too many processes
+        max_parallel=32 # Cap at 32 to avoid too many processes
     fi
     local pids=()
 
