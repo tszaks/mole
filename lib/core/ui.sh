@@ -62,8 +62,8 @@ get_display_width() {
 
     # Adjust for zero-width joiners and emoji variation selectors (common in filenames/emojis)
     # These characters add bytes but no visible width; subtract their count if present.
-    local zwj=$'\u200d'   # zero-width joiner
-    local vs16=$'\ufe0f'  # emoji variation selector
+    local zwj=$'\u200d'  # zero-width joiner
+    local vs16=$'\ufe0f' # emoji variation selector
     local zero_width=0
 
     local without_zwj=${str//$zwj/}
