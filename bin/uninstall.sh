@@ -149,6 +149,17 @@ scan_applications() {
             local bundle_name
             bundle_name=$(plutil -extract CFBundleName raw "$app_path/Contents/Info.plist" 2> /dev/null)
 
+            # Sanitize metadata values (prevent paths, pipes, and newlines)
+            if [[ "$md_display_name" == /* ]]; then md_display_name=""; fi
+            md_display_name="${md_display_name//|/-}"
+            md_display_name="${md_display_name//[$'\t\r\n']/}"
+
+            bundle_display_name="${bundle_display_name//|/-}"
+            bundle_display_name="${bundle_display_name//[$'\t\r\n']/}"
+
+            bundle_name="${bundle_name//|/-}"
+            bundle_name="${bundle_name//[$'\t\r\n']/}"
+
             # Select best available name
             if [[ -n "$md_display_name" && "$md_display_name" != "(null)" && "$md_display_name" != "$app_name" ]]; then
                 display_name="$md_display_name"
@@ -158,6 +169,14 @@ scan_applications() {
                 display_name="$bundle_name"
             fi
         fi
+
+        # Final safety check: if display_name looks like a path, revert to app_name
+        if [[ "$display_name" == /* ]]; then
+            display_name="$app_name"
+        fi
+        # Ensure no pipes or newlines in final display name
+        display_name="${display_name//|/-}"
+        display_name="${display_name//[$'\t\r\n']/}"
 
         # Calculate app size (in parallel for performance)
         local app_size="N/A"

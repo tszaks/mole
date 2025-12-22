@@ -26,6 +26,10 @@ readonly PURGE_TARGETS=(
 # Minimum age in days before considering for cleanup
 readonly MIN_AGE_DAYS=7
 
+# Scan depth defaults (relative to search root)
+readonly PURGE_MIN_DEPTH_DEFAULT=2
+readonly PURGE_MAX_DEPTH_DEFAULT=8
+
 # Search paths (only project directories)
 readonly PURGE_SEARCH_PATHS=(
     "$HOME/www"
@@ -71,6 +75,18 @@ is_safe_project_artifact() {
 scan_purge_targets() {
     local search_path="$1"
     local output_file="$2"
+    local min_depth="${MOLE_PURGE_MIN_DEPTH:-$PURGE_MIN_DEPTH_DEFAULT}"
+    local max_depth="${MOLE_PURGE_MAX_DEPTH:-$PURGE_MAX_DEPTH_DEFAULT}"
+
+    if [[ ! "$min_depth" =~ ^[0-9]+$ ]]; then
+        min_depth="$PURGE_MIN_DEPTH_DEFAULT"
+    fi
+    if [[ ! "$max_depth" =~ ^[0-9]+$ ]]; then
+        max_depth="$PURGE_MAX_DEPTH_DEFAULT"
+    fi
+    if [[ "$max_depth" -lt "$min_depth" ]]; then
+        max_depth="$min_depth"
+    fi
 
     if [[ ! -d "$search_path" ]]; then
         return
@@ -83,8 +99,8 @@ scan_purge_targets() {
             "--hidden"
             "--no-ignore"
             "--type" "d"
-            "--min-depth" "2"
-            "--max-depth" "5"
+            "--min-depth" "$min_depth"
+            "--max-depth" "$max_depth"
             "--threads" "4"
             "--exclude" ".git"
             "--exclude" "Library"
@@ -152,7 +168,7 @@ scan_purge_targets() {
             ((i++))
         done
 
-        command find "$search_path" -mindepth 2 -maxdepth 5 -type d \
+        command find "$search_path" -mindepth "$min_depth" -maxdepth "$max_depth" -type d \
             \( "${find_expr[@]}" \) 2> /dev/null | while IFS= read -r item; do
 
             if is_safe_project_artifact "$item" "$search_path"; then
@@ -226,6 +242,7 @@ get_dir_size_kb() {
 select_purge_categories() {
     local -a categories=("$@")
     local total_items=${#categories[@]}
+    local clear_line=$'\r\033[2K'
 
     if [[ $total_items -eq 0 ]]; then
         return 1
@@ -265,7 +282,7 @@ select_purge_categories() {
     }
 
     draw_menu() {
-        printf "\033[H\033[2J"
+        printf "\033[H"
         # Calculate total size of selected items for header
         local selected_size=0
         local selected_count=0
@@ -276,11 +293,12 @@ select_purge_categories() {
                 ((selected_count++))
             fi
         done
-        local selected_gb=$(echo "scale=1; $selected_size/1024/1024" | bc)
+        local selected_gb
+        selected_gb=$(echo "scale=1; $selected_size/1024/1024" | bc)
 
-        printf '\n'
-        echo -e "${PURPLE_BOLD}Select Categories to Clean${NC} ${GRAY}- ${selected_gb}GB ($selected_count selected)${NC}"
-        echo ""
+        printf "%s\n" "$clear_line"
+        printf "%s${PURPLE_BOLD}Select Categories to Clean${NC} ${GRAY}- ${selected_gb}GB ($selected_count selected)${NC}\n" "$clear_line"
+        printf "%s\n" "$clear_line"
 
         IFS=',' read -r -a recent_flags <<< "${PURGE_RECENT_CATEGORIES:-}"
         for ((i = 0; i < total_items; i++)); do
@@ -291,14 +309,14 @@ select_purge_categories() {
             [[ ${recent_flags[i]:-false} == "true" ]] && recent_marker=" ${GRAY}| Recent${NC}"
 
             if [[ $i -eq $cursor_pos ]]; then
-                printf "\r\033[2K${CYAN}${ICON_ARROW} %s %s%s${NC}\n" "$checkbox" "${categories[i]}" "$recent_marker"
+                printf "%s${CYAN}${ICON_ARROW} %s %s%s${NC}\n" "$clear_line" "$checkbox" "${categories[i]}" "$recent_marker"
             else
-                printf "\r\033[2K  %s %s%s\n" "$checkbox" "${categories[i]}" "$recent_marker"
+                printf "%s  %s %s%s\n" "$clear_line" "$checkbox" "${categories[i]}" "$recent_marker"
             fi
         done
 
-        echo ""
-        echo -e "${GRAY}↑↓  |  Space Select  |  Enter Confirm  |  A All  |  I Invert  |  Q Quit${NC}"
+        printf "%s\n" "$clear_line"
+        printf "%s${GRAY}↑↓  |  Space Select  |  Enter Confirm  |  A All  |  I Invert  |  Q Quit${NC}\n" "$clear_line"
     }
 
     trap restore_terminal EXIT
@@ -307,6 +325,10 @@ select_purge_categories() {
     # Preserve interrupt character for Ctrl-C
     stty -echo -icanon intr ^C 2> /dev/null || true
     hide_cursor
+
+    if [[ -t 1 ]]; then
+        clear_screen
+    fi
 
     # Main loop
     while true; do
