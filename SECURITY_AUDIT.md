@@ -1,8 +1,8 @@
 # Mole Security Audit Report
 
-**Date:** December 18, 2025
+**Date:** December 22, 2025
 
-**Audited Version:** Current `main` branch (V1.13.10)
+**Audited Version:** Current `main` branch (V1.14.0)
 
 **Status:** Passed
 
@@ -42,7 +42,7 @@ The interactive analyzer (`mo analyze`) operates on a different security model f
 - **Manual Confirmation**: Deletions are not automated; they require explicit user selection and confirmation.
 - **OS-Level Enforcement**: Unlike the automated scripts, the analyzer relies on the operating system's built-in protections (e.g., inability to delete `/System` due to Read-Only Volume or SIP) rather than a hardcoded application-level blocklist.
 
-## 3. Conservative Cleaning Logic
+## 3. Conservative Cleaning Logic (Updated)
 
 Mole's "Smart Uninstall" and orphan detection (`lib/clean/apps.sh`) are intentionally conservative:
 
@@ -60,20 +60,20 @@ Mole's "Smart Uninstall" and orphan detection (`lib/clean/apps.sh`) are intentio
 - **System Integrity Protection (SIP) Awareness**
     Mole respects macOS SIP. It detects if SIP is enabled and automatically skips protected directories (like `/Library/Updates`) to avoid triggering permission errors.
 
-- **Spotlight Preservation (Critical Fix)**
-    User-level Spotlight caches (`~/Library/Metadata/CoreSpotlight`) are strictly excluded from automated cleaning. This prevents corruption of System Settings and ensures stable UI performance for indexed searches.
+- **Spotlight & System Settings Preservation**
+    User-level Spotlight caches (`~/Library/Metadata/CoreSpotlight`) remain excluded to prevent UI corruption. New centralized `is_critical_system_component` guarding System Settings / Control Center / Background Task Management / SFL / TCC prevents accidental cleanup even when names change across macOS versions.
 
 - **Time Machine Preservation**
-    Before cleaning failed backups, Mole checks for the `backupd` process. If a backup is currently running, the cleanup task is strictly **aborted** to prevent data corruption.
+    Before cleaning failed backups, Mole checks for the `backupd` process and uses strict timeouts to avoid hangs. Cleanup is **aborted** if a backup is running or the destination is unresponsive.
 
 - **VPN & Proxy Protection**
     Mole includes a comprehensive protection layer for VPN and Proxy applications (e.g., Shadowsocks, V2Ray, Tailscale). It protects both their application bundles and data directories from automated cleanup to prevent network configuration loss.
 
-- **AI & LLM Data Protection (New in v1.12.25)**
-    Mole now explicitly protects data for AI tools (Cursor, Claude, ChatGPT, Ollama, LM Studio, etc.). Both the automated cleaning logic (`bin/clean.sh`) and orphan detection (`lib/core/app_protection.sh`) exclude these applications to prevent loss of:
-  - Local LLM models (which can be gigabytes in size).
-  - Authentication tokens and session states.
-  - Chat history and local configurations.
+- **AI & LLM Data Protection**
+    Mole explicitly protects data for AI tools (Cursor, Claude, ChatGPT, Ollama, LM Studio, etc.). Automated cleaning and orphan detection exclude these apps to prevent loss of models, tokens, sessions, and configs.
+
+- **Safer Globbing**
+    Automated cleanup loops now use scoped `nullglob` to avoid unintended literal patterns when directories are empty, reducing edge-case surprises.
 
 ## 4. Atomic Operations & Crash Safety
 

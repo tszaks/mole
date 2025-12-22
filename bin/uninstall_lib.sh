@@ -210,9 +210,9 @@ scan_applications() {
         local last_used_epoch=0
 
         if [[ -d "$app_path" ]]; then
-            # Try mdls first with short timeout (0.05s) for accuracy, fallback to mtime for speed
+            # Try mdls first with short timeout (0.1s) for accuracy, fallback to mtime for speed
             local metadata_date
-            metadata_date=$(run_with_timeout 0.05 mdls -name kMDItemLastUsedDate -raw "$app_path" 2> /dev/null || echo "")
+            metadata_date=$(run_with_timeout 0.1 mdls -name kMDItemLastUsedDate -raw "$app_path" 2> /dev/null || echo "")
 
             if [[ "$metadata_date" != "(null)" && -n "$metadata_date" ]]; then
                 last_used_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$metadata_date" "+%s" 2> /dev/null || echo "0")

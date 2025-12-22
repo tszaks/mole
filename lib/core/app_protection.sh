@@ -435,6 +435,24 @@ readonly DATA_PROTECTED_BUNDLES=(
     "org.sparkle-project.Sparkle" # Sparkle (update framework)
 )
 
+# Centralized check for critical system components (case-insensitive)
+is_critical_system_component() {
+    local token="$1"
+    [[ -z "$token" ]] && return 1
+
+    local lower
+    lower=$(echo "$token" | tr '[:upper:]' '[:lower:]')
+
+    case "$lower" in
+        *backgroundtaskmanagement* | *loginitems* | *systempreferences* | *systemsettings* | *settings* | *preferences* | *controlcenter* | *biometrickit* | *sfl* | *tcc* )
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 # Legacy function - preserved for backward compatibility
 # Use should_protect_from_uninstall() or should_protect_data() instead
 readonly PRESERVED_BUNDLE_PATTERNS=("${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}")

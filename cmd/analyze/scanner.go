@@ -607,49 +607,64 @@ func getDirectorySizeFromDu(path string) (int64, error) {
 }
 
 func getDirectorySizeFromDuWithExclude(path string, excludePath string) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), duTimeout)
-	defer cancel()
+	runDuSize := func(target string) (int64, error) {
+		if _, err := os.Stat(target); err != nil {
+			return 0, err
+		}
 
-	args := []string{"-sk"}
-	// macOS du uses -I to ignore files/directories matching a pattern
+		ctx, cancel := context.WithTimeout(context.Background(), duTimeout)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, "du", "-sk", target)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return 0, fmt.Errorf("du timeout after %v", duTimeout)
+			}
+			if stderr.Len() > 0 {
+				return 0, fmt.Errorf("du failed: %v (%s)", err, stderr.String())
+			}
+			return 0, fmt.Errorf("du failed: %v", err)
+		}
+		fields := strings.Fields(stdout.String())
+		if len(fields) == 0 {
+			return 0, fmt.Errorf("du output empty")
+		}
+		kb, err := strconv.ParseInt(fields[0], 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse du output: %v", err)
+		}
+		if kb <= 0 {
+			return 0, fmt.Errorf("du size invalid: %d", kb)
+		}
+		return kb * 1024, nil
+	}
+
+	// When excluding a path (e.g., ~/Library), subtract only that exact directory instead of ignoring every "Library"
 	if excludePath != "" {
-		// Extract just the directory name from the full path
-		excludeName := filepath.Base(excludePath)
-		args = append(args, "-I", excludeName)
-	}
-	args = append(args, path)
-
-	cmd := exec.CommandContext(ctx, "du", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return 0, fmt.Errorf("du timeout after %v", duTimeout)
+		totalSize, err := runDuSize(path)
+		if err != nil {
+			return 0, err
 		}
-		if stderr.Len() > 0 {
-			return 0, fmt.Errorf("du failed: %v (%s)", err, stderr.String())
+		excludeSize, err := runDuSize(excludePath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return 0, err
+			}
+			excludeSize = 0
 		}
-		return 0, fmt.Errorf("du failed: %v", err)
+		if excludeSize > totalSize {
+			excludeSize = 0
+		}
+		return totalSize - excludeSize, nil
 	}
-	fields := strings.Fields(stdout.String())
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("du output empty")
-	}
-	kb, err := strconv.ParseInt(fields[0], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse du output: %v", err)
-	}
-	if kb <= 0 {
-		return 0, fmt.Errorf("du size invalid: %d", kb)
-	}
-	return kb * 1024, nil
+
+	return runDuSize(path)
 }
 
-func getDirectoryLogicalSize(path string) (int64, error) {
-	return getDirectoryLogicalSizeWithExclude(path, "")
-}
 
 func getDirectoryLogicalSizeWithExclude(path string, excludePath string) (int64, error) {
 	var total int64

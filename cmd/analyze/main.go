@@ -579,10 +579,12 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 
 			if len(pathsToDelete) == 1 {
-				m.status = fmt.Sprintf("Deleting %s...", filepath.Base(pathsToDelete[0]))
-			} else {
-				m.status = fmt.Sprintf("Deleting %d items...", len(pathsToDelete))
+				targetPath := pathsToDelete[0]
+				m.status = fmt.Sprintf("Deleting %s...", filepath.Base(targetPath))
+				return m, tea.Batch(deletePathCmd(targetPath, m.deleteCount), tickCmd())
 			}
+
+			m.status = fmt.Sprintf("Deleting %d items...", len(pathsToDelete))
 			return m, tea.Batch(deleteMultiplePathsCmd(pathsToDelete, m.deleteCount), tickCmd())
 		case "esc", "q":
 			// Cancel delete with ESC or Q

@@ -60,6 +60,22 @@ get_display_width() {
     local padding=$((extra_bytes / 2))
     width=$((char_count + padding))
 
+    # Adjust for zero-width joiners and emoji variation selectors (common in filenames/emojis)
+    # These characters add bytes but no visible width; subtract their count if present.
+    local zwj=$'\u200d'   # zero-width joiner
+    local vs16=$'\ufe0f'  # emoji variation selector
+    local zero_width=0
+
+    local without_zwj=${str//$zwj/}
+    zero_width=$((zero_width + (char_count - ${#without_zwj})))
+
+    local without_vs=${str//$vs16/}
+    zero_width=$((zero_width + (char_count - ${#without_vs})))
+
+    if ((zero_width > 0 && width > zero_width)); then
+        width=$((width - zero_width))
+    fi
+
     echo "$width"
 }
 

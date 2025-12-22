@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -28,10 +29,19 @@ func deleteMultiplePathsCmd(paths []string, counter *int64) tea.Cmd {
 		var totalCount int64
 		var errors []string
 
-		for _, path := range paths {
+		// Delete deeper paths first to avoid parent removal triggering child not-exist errors
+		pathsToDelete := append([]string(nil), paths...)
+		sort.Slice(pathsToDelete, func(i, j int) bool {
+			return strings.Count(pathsToDelete[i], string(filepath.Separator)) > strings.Count(pathsToDelete[j], string(filepath.Separator))
+		})
+
+		for _, path := range pathsToDelete {
 			count, err := deletePathWithProgress(path, counter)
 			totalCount += count
 			if err != nil {
+				if os.IsNotExist(err) {
+					continue // Parent already removed - not an actionable error
+				}
 				errors = append(errors, err.Error())
 			}
 		}

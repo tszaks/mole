@@ -27,44 +27,6 @@ total_items=0
 files_cleaned=0
 total_size_cleaned=0
 
-# Compact the "last used" descriptor for aligned summaries
-format_last_used_summary() {
-    local value="$1"
-
-    case "$value" in
-        "" | "Unknown")
-            echo "Unknown"
-            return 0
-            ;;
-        "Never" | "Recent" | "Today" | "Yesterday" | "This year" | "Old")
-            echo "$value"
-            return 0
-            ;;
-    esac
-
-    if [[ $value =~ ^([0-9]+)[[:space:]]+days?\ ago$ ]]; then
-        echo "${BASH_REMATCH[1]}d ago"
-        return 0
-    fi
-    if [[ $value =~ ^([0-9]+)[[:space:]]+weeks?\ ago$ ]]; then
-        echo "${BASH_REMATCH[1]}w ago"
-        return 0
-    fi
-    if [[ $value =~ ^([0-9]+)[[:space:]]+months?\ ago$ ]]; then
-        echo "${BASH_REMATCH[1]}m ago"
-        return 0
-    fi
-    if [[ $value =~ ^([0-9]+)[[:space:]]+month\(s\)\ ago$ ]]; then
-        echo "${BASH_REMATCH[1]}m ago"
-        return 0
-    fi
-    if [[ $value =~ ^([0-9]+)[[:space:]]+years?\ ago$ ]]; then
-        echo "${BASH_REMATCH[1]}y ago"
-        return 0
-    fi
-    echo "$value"
-}
-
 # Scan applications and collect information
 scan_applications() {
     # Application scan with intelligent caching (24h TTL)
@@ -211,9 +173,9 @@ scan_applications() {
         local last_used_epoch=0
 
         if [[ -d "$app_path" ]]; then
-            # Try mdls first with short timeout (0.05s) for accuracy, fallback to mtime for speed
+            # Try mdls first with short timeout (0.1s) for accuracy, fallback to mtime for speed
             local metadata_date
-            metadata_date=$(run_with_timeout 0.05 mdls -name kMDItemLastUsedDate -raw "$app_path" 2> /dev/null || echo "")
+            metadata_date=$(run_with_timeout 0.1 mdls -name kMDItemLastUsedDate -raw "$app_path" 2> /dev/null || echo "")
 
             if [[ "$metadata_date" != "(null)" && -n "$metadata_date" ]]; then
                 last_used_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$metadata_date" "+%s" 2> /dev/null || echo "0")

@@ -484,10 +484,17 @@ clean_project_artifacts() {
         local path="$1"
 
         # Find the project root by looking for direct child of search paths
-        local search_roots=("$HOME/www" "$HOME/dev" "$HOME/Projects")
+        local search_roots=()
+        if [[ ${#PURGE_SEARCH_PATHS[@]} -gt 0 ]]; then
+            search_roots=("${PURGE_SEARCH_PATHS[@]}")
+        else
+            search_roots=("$HOME/www" "$HOME/dev" "$HOME/Projects")
+        fi
 
         for root in "${search_roots[@]}"; do
-            if [[ "$path" == "$root/"* ]]; then
+            # Normalize trailing slash for consistent matching
+            root="${root%/}"
+            if [[ -n "$root" && "$path" == "$root/"* ]]; then
                 # Remove root prefix and get first directory component
                 local relative_path="${path#"$root"/}"
                 # Extract first directory name

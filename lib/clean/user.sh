@@ -119,6 +119,11 @@ clean_sandboxed_app_caches() {
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
 
+    # Enable nullglob for safe globbing; restore afterwards
+    local _ng_state
+    _ng_state=$(shopt -p nullglob || true)
+    shopt -s nullglob
+
     if [[ -t 1 ]]; then
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning sandboxed apps..."
     fi
@@ -146,6 +151,9 @@ clean_sandboxed_app_caches() {
         ((total_items++))
         note_activity
     fi
+
+    # Restore nullglob to previous state
+    eval "$_ng_state"
 }
 
 # Process a single container cache directory (reduces nesting)
@@ -155,14 +163,10 @@ process_container_cache() {
 
     # Extract bundle ID and check protection status early
     local bundle_id=$(basename "$container_dir")
-    local bundle_id_lower=$(echo "$bundle_id" | tr '[:upper:]' '[:lower:]')
-
-    # Check explicit critical system components (case-insensitive regex)
-    if [[ "$bundle_id_lower" =~ backgroundtaskmanagement || "$bundle_id_lower" =~ loginitems || "$bundle_id_lower" =~ systempreferences || "$bundle_id_lower" =~ systemsettings || "$bundle_id_lower" =~ settings || "$bundle_id_lower" =~ preferences || "$bundle_id_lower" =~ controlcenter || "$bundle_id_lower" =~ biometrickit || "$bundle_id_lower" =~ sfl || "$bundle_id_lower" =~ tcc ]]; then
+    if is_critical_system_component "$bundle_id"; then
         return 0
     fi
-
-    if should_protect_data "$bundle_id" || should_protect_data "$bundle_id_lower"; then
+    if should_protect_data "$bundle_id" || should_protect_data "$(echo "$bundle_id" | tr '[:upper:]' '[:lower:]')"; then
         return 0
     fi
 
@@ -180,10 +184,14 @@ process_container_cache() {
 
         if [[ "$DRY_RUN" != "true" ]]; then
             # Clean contents safely (rm -rf is restricted by safe_remove)
+            local _ng_item_state
+            _ng_item_state=$(shopt -p nullglob || true)
+            shopt -s nullglob
             for item in "$cache_dir"/*; do
                 [[ -e "$item" ]] || continue
                 safe_remove "$item" true || true
             done
+            eval "$_ng_item_state"
         fi
     fi
 }
@@ -259,6 +267,9 @@ clean_application_support_logs() {
     local found_any=false
 
     # Clean log directories and cache patterns
+    local _ng_app_state
+    _ng_app_state=$(shopt -p nullglob || true)
+    shopt -s nullglob
     for app_dir in ~/Library/Application\ Support/*; do
         [[ -d "$app_dir" ]] || continue
 
@@ -276,7 +287,7 @@ clean_application_support_logs() {
             continue
         fi
 
-        if [[ "$app_name_lower" =~ backgroundtaskmanagement || "$app_name_lower" =~ loginitems || "$app_name_lower" =~ systempreferences || "$app_name_lower" =~ systemsettings || "$app_name_lower" =~ settings || "$app_name_lower" =~ preferences || "$app_name_lower" =~ controlcenter || "$app_name_lower" =~ biometrickit || "$app_name_lower" =~ sfl || "$app_name_lower" =~ tcc ]]; then
+        if is_critical_system_component "$app_name"; then
             continue
         fi
 
@@ -291,15 +302,20 @@ clean_application_support_logs() {
                     found_any=true
 
                     if [[ "$DRY_RUN" != "true" ]]; then
+                        local _ng_candidate_state
+                        _ng_candidate_state=$(shopt -p nullglob || true)
+                        shopt -s nullglob
                         for item in "$candidate"/*; do
                             [[ -e "$item" ]] || continue
                             safe_remove "$item" true > /dev/null 2>&1 || true
                         done
+                        eval "$_ng_candidate_state"
                     fi
                 fi
             fi
         done
     done
+    eval "$_ng_app_state"
 
     # Clean Group Containers logs
     local known_group_containers=(
