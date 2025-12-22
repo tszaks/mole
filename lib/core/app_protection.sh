@@ -486,28 +486,6 @@ should_protect_path() {
     local path="$1"
     [[ -z "$path" ]] && return 1
 
-    # 0. Check custom protected paths first
-    local custom_config="$HOME/.config/mole/protected_paths"
-    if [[ -f "$custom_config" ]]; then
-        while IFS= read -r protected_path; do
-            # Trim whitespace
-            protected_path="${protected_path#"${protected_path%%[![:space:]]*}"}"
-            protected_path="${protected_path%"${protected_path##*[![:space:]]}"}"
-
-            # Skip empty lines and comments
-            [[ -z "$protected_path" || "$protected_path" =~ ^# ]] && continue
-
-            # Expand ~ to $HOME in protected path
-            protected_path="${protected_path/#\~/$HOME}"
-
-            # Check if path starts with protected path (prefix match)
-            # This protects both the directory and everything under it
-            if [[ "$path" == "$protected_path" || "$path" == "$protected_path"/* ]]; then
-                return 0
-            fi
-        done < "$custom_config"
-    fi
-
     local path_lower
     path_lower=$(echo "$path" | tr '[:upper:]' '[:lower:]')
 

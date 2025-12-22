@@ -67,10 +67,11 @@ format_last_used_summary() {
 
 # Scan applications and collect information
 scan_applications() {
-    # Simplified cache: only check timestamp (24h TTL)
+    # Application scan with intelligent caching (24h TTL)
+    # This speeds up repeated scans significantly by caching app metadata
     local cache_dir="$HOME/.cache/mole"
     local cache_file="$cache_dir/app_scan_cache"
-    local cache_ttl=86400
+    local cache_ttl=86400  # 24 hours
     local force_rescan="${1:-false}"
 
     mkdir -p "$cache_dir" 2> /dev/null
@@ -78,30 +79,34 @@ scan_applications() {
     # Check if cache exists and is fresh
     if [[ $force_rescan == false && -f "$cache_file" ]]; then
         local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
-        [[ $cache_age -eq $(date +%s) ]] && cache_age=86401
+        [[ $cache_age -eq $(date +%s) ]] && cache_age=86401  # Handle mtime read failure
         if [[ $cache_age -lt $cache_ttl ]]; then
+            # Cache hit - show brief feedback and return cached results
             if [[ -t 2 ]]; then
                 echo -e "${GREEN}Loading from cache...${NC}" >&2
-                sleep 0.3
+                sleep 0.3  # Brief pause so user sees the message
             fi
             echo "$cache_file"
             return 0
         fi
     fi
 
+    # Cache miss - perform full scan
     local inline_loading=false
     if [[ -t 1 && -t 2 ]]; then
         inline_loading=true
-        printf "\033[2J\033[H" >&2
+        printf "\033[2J\033[H" >&2  # Clear screen for inline loading
     fi
 
     local temp_file
     temp_file=$(create_temp_file)
 
+    # Pre-cache current epoch to avoid repeated date calls
     local current_epoch
     current_epoch=$(date "+%s")
 
     # First pass: quickly collect all valid app paths and bundle IDs
+    # This pass does NOT call mdls (slow) - only reads plists (fast)
     local -a app_data_tuples=()
     local -a app_dirs=(
         "/Applications"
@@ -118,35 +123,42 @@ scan_applications() {
             app_name=$(basename "$app_path" .app)
 
             # Skip nested apps (e.g. inside Wrapper/ or Frameworks/ of another app)
+            # Check if parent path component ends in .app (e.g. /Foo.app/Bar.app or /Foo.app/Contents/Bar.app)
+            # This prevents false positives like /Old.apps/Target.app
             local parent_dir
             parent_dir=$(dirname "$app_path")
             if [[ "$parent_dir" == *".app" || "$parent_dir" == *".app/"* ]]; then
                 continue
             fi
 
+            # Get bundle ID (fast plist read, no mdls call yet)
             local bundle_id="unknown"
             if [[ -f "$app_path/Contents/Info.plist" ]]; then
                 bundle_id=$(defaults read "$app_path/Contents/Info.plist" CFBundleIdentifier 2> /dev/null || echo "unknown")
             fi
 
-            # Skip system critical apps
+            # Skip system critical apps (input methods, system components, etc.)
             if should_protect_from_uninstall "$bundle_id"; then
                 continue
             fi
 
+            # Store tuple: app_path|app_name|bundle_id
+            # Display name and metadata will be resolved in parallel later (second pass)
             app_data_tuples+=("${app_path}|${app_name}|${bundle_id}")
         done < <(command find "$app_dir" -name "*.app" -maxdepth 3 -print0 2> /dev/null)
     done
 
-    # Second pass: process each app with parallel size calculation
+    # Second pass: process each app with parallel metadata extraction
+    # This pass calls mdls (slow) and calculates sizes, but does so in parallel
     local app_count=0
     local total_apps=${#app_data_tuples[@]}
+    # Bound parallelism - for metadata queries, can go higher since it's mostly waiting
     local max_parallel
     max_parallel=$(get_optimal_parallel_jobs "io")
     if [[ $max_parallel -lt 8 ]]; then
-        max_parallel=8
+        max_parallel=8   # At least 8 for good performance
     elif [[ $max_parallel -gt 32 ]]; then
-        max_parallel=32
+        max_parallel=32  # Cap at 32 to avoid too many processes
     fi
     local pids=()
 
@@ -157,18 +169,25 @@ scan_applications() {
 
         IFS='|' read -r app_path app_name bundle_id <<< "$app_data_tuple"
 
-        # Get localized display name
+        # Get localized display name (moved from first pass for better performance)
+        # Priority order for name selection (prefer localized names):
+        # 1. System metadata display name (kMDItemDisplayName) - respects system language
+        # 2. CFBundleDisplayName - usually localized
+        # 3. CFBundleName - fallback
+        # 4. App folder name - last resort
         local display_name="$app_name"
         if [[ -f "$app_path/Contents/Info.plist" ]]; then
+            # Try to get localized name from system metadata (best for i18n)
             local md_display_name
             md_display_name=$(run_with_timeout 0.05 mdls -name kMDItemDisplayName -raw "$app_path" 2> /dev/null || echo "")
 
+            # Get bundle names from plist
             local bundle_display_name
             bundle_display_name=$(plutil -extract CFBundleDisplayName raw "$app_path/Contents/Info.plist" 2> /dev/null)
             local bundle_name
             bundle_name=$(plutil -extract CFBundleName raw "$app_path/Contents/Info.plist" 2> /dev/null)
 
-            # Priority order: MDItemDisplayName > CFBundleDisplayName > CFBundleName
+            # Select best available name
             if [[ -n "$md_display_name" && "$md_display_name" != "(null)" && "$md_display_name" != "$app_name" ]]; then
                 display_name="$md_display_name"
             elif [[ -n "$bundle_display_name" && "$bundle_display_name" != "(null)" ]]; then
@@ -178,19 +197,21 @@ scan_applications() {
             fi
         fi
 
-        # Parallel size calculation
+        # Calculate app size (in parallel for performance)
         local app_size="N/A"
         local app_size_kb="0"
         if [[ -d "$app_path" ]]; then
+            # Get size in KB, then format for display
             app_size_kb=$(get_path_size_kb "$app_path")
             app_size=$(bytes_to_human "$((app_size_kb * 1024))")
         fi
 
-        # Get last used date
+        # Get last used date with fallback strategy
         local last_used="Never"
         local last_used_epoch=0
 
         if [[ -d "$app_path" ]]; then
+            # Try mdls first with short timeout (0.05s) for accuracy, fallback to mtime for speed
             local metadata_date
             metadata_date=$(run_with_timeout 0.05 mdls -name kMDItemLastUsedDate -raw "$app_path" 2> /dev/null || echo "")
 
@@ -198,6 +219,7 @@ scan_applications() {
                 last_used_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$metadata_date" "+%s" 2> /dev/null || echo "0")
             fi
 
+            # Fallback if mdls failed or returned nothing
             if [[ "$last_used_epoch" -eq 0 ]]; then
                 last_used_epoch=$(get_file_mtime "$app_path")
             fi

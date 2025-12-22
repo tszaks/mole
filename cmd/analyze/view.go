@@ -130,8 +130,8 @@ func (m model) View() string {
 				sizeColor := colorGray
 				numColor := ""
 
-				// Check if this item is multi-selected
-				isMultiSelected := m.largeMultiSelected != nil && m.largeMultiSelected[idx]
+				// Check if this item is multi-selected (by path, not index)
+				isMultiSelected := m.largeMultiSelected != nil && m.largeMultiSelected[file.Path]
 				selectIcon := "○"
 				if isMultiSelected {
 					selectIcon = fmt.Sprintf("%s●%s", colorGreen, colorReset)
@@ -289,8 +289,8 @@ func (m model) View() string {
 						sizeColor = colorGray
 					}
 
-					// Check if this item is multi-selected
-					isMultiSelected := m.multiSelected != nil && m.multiSelected[idx]
+					// Check if this item is multi-selected (by path, not index)
+					isMultiSelected := m.multiSelected != nil && m.multiSelected[entry.Path]
 					selectIcon := "○"
 					nameColor := ""
 					if isMultiSelected {
@@ -386,16 +386,24 @@ func (m model) View() string {
 		var totalDeleteSize int64
 		if m.showLargeFiles && len(m.largeMultiSelected) > 0 {
 			deleteCount = len(m.largeMultiSelected)
-			for idx := range m.largeMultiSelected {
-				if idx < len(m.largeFiles) {
-					totalDeleteSize += m.largeFiles[idx].Size
+			// Calculate total size by looking up each selected path
+			for path := range m.largeMultiSelected {
+				for _, file := range m.largeFiles {
+					if file.Path == path {
+						totalDeleteSize += file.Size
+						break
+					}
 				}
 			}
 		} else if !m.showLargeFiles && len(m.multiSelected) > 0 {
 			deleteCount = len(m.multiSelected)
-			for idx := range m.multiSelected {
-				if idx < len(m.entries) {
-					totalDeleteSize += m.entries[idx].Size
+			// Calculate total size by looking up each selected path
+			for path := range m.multiSelected {
+				for _, entry := range m.entries {
+					if entry.Path == path {
+						totalDeleteSize += entry.Size
+						break
+					}
 				}
 			}
 		}

@@ -41,7 +41,7 @@ save_whitelist_patterns() {
         header_text="# Mole Optimization Whitelist - These checks will be skipped during optimization"
     else
         config_file="$WHITELIST_CONFIG_CLEAN"
-        header_text="# Mole Whitelist - Protected paths won't be deleted\n# Default protections: Playwright browsers, HuggingFace models, Maven repo, Ollama models, Surge Mac, R renv, Finder metadata\n#\n# Add one pattern per line to keep items safe.\n#\n# You can also add custom paths to protect (e.g., ~/important-project, /opt/myapp):\n# ~/my-project\n# ~/.config/important-app"
+        header_text="# Mole Whitelist - Protected paths won't be deleted\n# Default protections: Playwright browsers, HuggingFace models, Maven repo, Ollama models, Surge Mac, R renv, Finder metadata\n# Add one pattern per line to keep items safe."
     fi
 
     mkdir -p "$(dirname "$config_file")"
