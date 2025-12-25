@@ -652,23 +652,23 @@ find_app_files() {
         local expanded_path="${p/#\~/$HOME}"
         # Skip if path doesn't exist
         [[ ! -e "$expanded_path" ]] && continue
-        
+
         # Safety check: Skip if path ends with a common directory name (indicates empty app_name/bundle_id)
         # This prevents deletion of entire Library subdirectories when bundle_id is empty
         case "$expanded_path" in
             */Library/Application\ Support | */Library/Application\ Support/ | \
-            */Library/Caches | */Library/Caches/ | \
-            */Library/Logs | */Library/Logs/ | \
-            */Library/Containers | */Library/Containers/ | \
-            */Library/WebKit | */Library/WebKit/ | \
-            */Library/HTTPStorages | */Library/HTTPStorages/ | \
-            */Library/Application\ Scripts | */Library/Application\ Scripts/ | \
-            */Library/Autosave\ Information | */Library/Autosave\ Information/ | \
-            */Library/Group\ Containers | */Library/Group\ Containers/)
+                */Library/Caches | */Library/Caches/ | \
+                */Library/Logs | */Library/Logs/ | \
+                */Library/Containers | */Library/Containers/ | \
+                */Library/WebKit | */Library/WebKit/ | \
+                */Library/HTTPStorages | */Library/HTTPStorages/ | \
+                */Library/Application\ Scripts | */Library/Application\ Scripts/ | \
+                */Library/Autosave\ Information | */Library/Autosave\ Information/ | \
+                */Library/Group\ Containers | */Library/Group\ Containers/)
                 continue
                 ;;
         esac
-        
+
         files_to_clean+=("$expanded_path")
     done
 
@@ -781,16 +781,16 @@ find_app_system_files() {
     # Process patterns
     for p in "${system_patterns[@]}"; do
         [[ ! -e "$p" ]] && continue
-        
+
         # Safety check: Skip if path ends with a common directory name (indicates empty app_name/bundle_id)
         case "$p" in
             /Library/Application\ Support | /Library/Application\ Support/ | \
-            /Library/Caches | /Library/Caches/ | \
-            /Library/Logs | /Library/Logs/)
+                /Library/Caches | /Library/Caches/ | \
+                /Library/Logs | /Library/Logs/)
                 continue
                 ;;
         esac
-        
+
         system_files+=("$p")
     done
 
