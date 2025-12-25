@@ -15,19 +15,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Directories that typically contain user-customized configurations, themes,
 # or personal data that users might want to backup before uninstalling
 readonly SENSITIVE_DATA_PATTERNS=(
-    "\.warp"                                    # Warp terminal configs/themes
-    "/\.config/"                                # Standard Unix config directory
-    "/themes/"                                  # Theme customizations
-    "/settings/"                                # Settings directories
-    "/Application Support/[^/]+/User Data"      # Chrome/Electron user data
-    "/Preferences/[^/]+\.plist"                 # User preference files
-    "/Documents/"                               # User documents
-    "/\.ssh/"                                   # SSH keys and configs (critical)
-    "/\.gnupg/"                                 # GPG keys (critical)
+    "\.warp"                               # Warp terminal configs/themes
+    "/\.config/"                           # Standard Unix config directory
+    "/themes/"                             # Theme customizations
+    "/settings/"                           # Settings directories
+    "/Application Support/[^/]+/User Data" # Chrome/Electron user data
+    "/Preferences/[^/]+\.plist"            # User preference files
+    "/Documents/"                          # User documents
+    "/\.ssh/"                              # SSH keys and configs (critical)
+    "/\.gnupg/"                            # GPG keys (critical)
 )
 
 # Join patterns into a single regex for grep
-SENSITIVE_DATA_REGEX=$(IFS='|'; echo "${SENSITIVE_DATA_PATTERNS[*]}")
+SENSITIVE_DATA_REGEX=$(
+    IFS='|'
+    echo "${SENSITIVE_DATA_PATTERNS[*]}"
+)
 
 # Decode and validate base64 encoded file list
 # Returns decoded string if valid, empty string otherwise
@@ -44,7 +47,7 @@ decode_file_list() {
         if ! decoded=$(printf '%s' "$encoded" | base64 -d 2> /dev/null); then
             log_error "Failed to decode file list for $app_name" >&2
             echo ""
-            return 0  # Return success with empty string
+            return 0 # Return success with empty string
         fi
     fi
 
@@ -52,7 +55,7 @@ decode_file_list() {
     if [[ "$decoded" =~ $'\0' ]]; then
         log_warning "File list for $app_name contains null bytes, rejecting" >&2
         echo ""
-        return 0  # Return success with empty string
+        return 0 # Return success with empty string
     fi
 
     # Validate paths look reasonable (each line should be a path or empty)
@@ -60,7 +63,7 @@ decode_file_list() {
         if [[ -n "$line" && ! "$line" =~ ^/ ]]; then
             log_warning "Invalid path in file list for $app_name: $line" >&2
             echo ""
-            return 0  # Return success with empty string
+            return 0 # Return success with empty string
         fi
     done <<< "$decoded"
 
@@ -171,9 +174,9 @@ batch_uninstall_applications() {
         local needs_sudo=false
         local app_owner=$(get_file_owner "$app_path")
         local current_user=$(whoami)
-        if [[ ! -w "$(dirname "$app_path")" ]] || \
-           [[ "$app_owner" == "root" ]] || \
-           [[ -n "$app_owner" && "$app_owner" != "$current_user" ]]; then
+        if [[ ! -w "$(dirname "$app_path")" ]] ||
+            [[ "$app_owner" == "root" ]] ||
+            [[ -n "$app_owner" && "$app_owner" != "$current_user" ]]; then
             needs_sudo=true
         fi
 
@@ -401,7 +404,7 @@ batch_uninstall_applications() {
                 # These are often missed by standard cleanup tools
                 # Format: ~/Library/Preferences/ByHost/com.app.id.XXXX.plist
                 if [[ -d ~/Library/Preferences/ByHost ]]; then
-                    find ~/Library/Preferences/ByHost -maxdepth 1 -name "${bundle_id}.*.plist" -delete 2>/dev/null || true
+                    find ~/Library/Preferences/ByHost -maxdepth 1 -name "${bundle_id}.*.plist" -delete 2> /dev/null || true
                 fi
             fi
 
