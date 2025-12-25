@@ -650,20 +650,41 @@ find_app_files() {
     # Process standard patterns
     for p in "${user_patterns[@]}"; do
         local expanded_path="${p/#\~/$HOME}"
-        [[ -e "$expanded_path" ]] && files_to_clean+=("$expanded_path")
+        # Skip if path doesn't exist
+        [[ ! -e "$expanded_path" ]] && continue
+        
+        # Safety check: Skip if path ends with a common directory name (indicates empty app_name/bundle_id)
+        # This prevents deletion of entire Library subdirectories when bundle_id is empty
+        case "$expanded_path" in
+            */Library/Application\ Support | */Library/Application\ Support/ | \
+            */Library/Caches | */Library/Caches/ | \
+            */Library/Logs | */Library/Logs/ | \
+            */Library/Containers | */Library/Containers/ | \
+            */Library/WebKit | */Library/WebKit/ | \
+            */Library/HTTPStorages | */Library/HTTPStorages/ | \
+            */Library/Application\ Scripts | */Library/Application\ Scripts/ | \
+            */Library/Autosave\ Information | */Library/Autosave\ Information/ | \
+            */Library/Group\ Containers | */Library/Group\ Containers/)
+                continue
+                ;;
+        esac
+        
+        files_to_clean+=("$expanded_path")
     done
 
-    # Handle Preferences and ByHost variants
-    [[ -f ~/Library/Preferences/"$bundle_id".plist ]] && files_to_clean+=("$HOME/Library/Preferences/$bundle_id.plist")
-    [[ -d ~/Library/Preferences/ByHost ]] && while IFS= read -r -d '' pref; do
-        files_to_clean+=("$pref")
-    done < <(command find ~/Library/Preferences/ByHost -maxdepth 1 \( -name "$bundle_id*.plist" \) -print0 2> /dev/null)
+    # Handle Preferences and ByHost variants (only if bundle_id is valid)
+    if [[ -n "$bundle_id" && "$bundle_id" != "unknown" && ${#bundle_id} -gt 3 ]]; then
+        [[ -f ~/Library/Preferences/"$bundle_id".plist ]] && files_to_clean+=("$HOME/Library/Preferences/$bundle_id.plist")
+        [[ -d ~/Library/Preferences/ByHost ]] && while IFS= read -r -d '' pref; do
+            files_to_clean+=("$pref")
+        done < <(command find ~/Library/Preferences/ByHost -maxdepth 1 \( -name "$bundle_id*.plist" \) -print0 2> /dev/null)
 
-    # Group Containers (special handling)
-    if [[ -d ~/Library/Group\ Containers ]]; then
-        while IFS= read -r -d '' container; do
-            files_to_clean+=("$container")
-        done < <(command find ~/Library/Group\ Containers -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+        # Group Containers (special handling)
+        if [[ -d ~/Library/Group\ Containers ]]; then
+            while IFS= read -r -d '' container; do
+                files_to_clean+=("$container")
+            done < <(command find ~/Library/Group\ Containers -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+        fi
     fi
 
     # Launch Agents by name (special handling)
@@ -712,7 +733,10 @@ find_app_files() {
     [[ "$app_name" =~ Docker ]] && [[ -d ~/.docker ]] && files_to_clean+=("$HOME/.docker")
 
     # Output results
-    [[ ${#files_to_clean[@]} -gt 0 ]] && printf '%s\n' "${files_to_clean[@]}"
+    if [[ ${#files_to_clean[@]} -gt 0 ]]; then
+        printf '%s\n' "${files_to_clean[@]}"
+    fi
+    return 0
 }
 
 # Locate system-level application files
@@ -756,7 +780,18 @@ find_app_system_files() {
 
     # Process patterns
     for p in "${system_patterns[@]}"; do
-        [[ -e "$p" ]] && system_files+=("$p")
+        [[ ! -e "$p" ]] && continue
+        
+        # Safety check: Skip if path ends with a common directory name (indicates empty app_name/bundle_id)
+        case "$p" in
+            /Library/Application\ Support | /Library/Application\ Support/ | \
+            /Library/Caches | /Library/Caches/ | \
+            /Library/Logs | /Library/Logs/)
+                continue
+                ;;
+        esac
+        
+        system_files+=("$p")
     done
 
     # System LaunchAgents/LaunchDaemons by name
@@ -769,15 +804,20 @@ find_app_system_files() {
     fi
 
     # Privileged Helper Tools and Receipts (special handling)
-    [[ -d /Library/PrivilegedHelperTools ]] && while IFS= read -r -d '' helper; do
-        system_files+=("$helper")
-    done < <(command find /Library/PrivilegedHelperTools -maxdepth 1 \( -name "$bundle_id*" \) -print0 2> /dev/null)
+    # Only search with bundle_id if it's valid (not empty and not "unknown")
+    if [[ -n "$bundle_id" && "$bundle_id" != "unknown" && ${#bundle_id} -gt 3 ]]; then
+        [[ -d /Library/PrivilegedHelperTools ]] && while IFS= read -r -d '' helper; do
+            system_files+=("$helper")
+        done < <(command find /Library/PrivilegedHelperTools -maxdepth 1 \( -name "$bundle_id*" \) -print0 2> /dev/null)
 
-    [[ -d /private/var/db/receipts ]] && while IFS= read -r -d '' receipt; do
-        system_files+=("$receipt")
-    done < <(command find /private/var/db/receipts -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+        [[ -d /private/var/db/receipts ]] && while IFS= read -r -d '' receipt; do
+            system_files+=("$receipt")
+        done < <(command find /private/var/db/receipts -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+    fi
 
-    [[ ${#system_files[@]} -gt 0 ]] && printf '%s\n' "${system_files[@]}"
+    if [[ ${#system_files[@]} -gt 0 ]]; then
+        printf '%s\n' "${system_files[@]}"
+    fi
 
     # Find files from receipts (Deep Scan)
     find_app_receipt_files "$bundle_id"
