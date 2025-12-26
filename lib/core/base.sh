@@ -168,12 +168,14 @@ get_free_space() {
 }
 
 # Get Darwin kernel major version (e.g., 24 for 24.2.0)
+# Returns 999 on failure to adopt conservative behavior (assume modern system)
 get_darwin_major() {
     local kernel
     kernel=$(uname -r 2> /dev/null || true)
     local major="${kernel%%.*}"
     if [[ ! "$major" =~ ^[0-9]+$ ]]; then
-        major=0
+        # Return high number to skip potentially dangerous operations on unknown systems
+        major=999
     fi
     echo "$major"
 }
@@ -321,7 +323,17 @@ ensure_user_dir() {
 
     local dir="$target_path"
     while [[ -n "$dir" && "$dir" != "/" ]]; do
+        # Early stop: if ownership is already correct, no need to continue up the tree
+        if [[ -d "$dir" ]]; then
+            local current_uid
+            current_uid=$("$STAT_BSD" -f%u "$dir" 2> /dev/null || echo "")
+            if [[ "$current_uid" == "$owner_uid" ]]; then
+                break
+            fi
+        fi
+
         chown "$owner_uid:$owner_gid" "$dir" 2> /dev/null || true
+
         if [[ "$dir" == "$user_home" ]]; then
             break
         fi
