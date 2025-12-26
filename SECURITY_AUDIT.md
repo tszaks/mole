@@ -1,8 +1,8 @@
 # Mole Security Audit Report
 
-**Date:** December 22, 2025
+**Date:** December 26, 2025
 
-**Audited Version:** Current `main` branch (V1.14.0)
+**Audited Version:** Current `main` branch
 
 **Status:** Passed
 
@@ -33,6 +33,9 @@ Mole's automated shell-based operations (Clean, Optimize, Uninstall) do not exec
     For privileged (`sudo`) operations, Mole performs a pre-flight check to verify if the target is a **Symbolic Link**.
   - **Risk**: A malicious or accidental symlink could point from a cache folder to a system file.
   - **Defense**: Mole explicitly refuses to recursively delete symbolic links in privileged mode.
+
+- **Layer 4: User File Permission Management**
+    When Mole runs with `sudo`, it automatically corrects file ownership to prevent user files from becoming root-owned. All operations are restricted to the user's home directory with multiple validation checkpoints.
 
 ## 2. Interactive Analyzer Safety (Go Architecture)
 
@@ -82,6 +85,9 @@ We anticipate that scripts can be interrupted (e.g., power loss, `Ctrl+C`).
 - **Network Interface Reset**: Wi-Fi and AirDrop resets use **atomic execution blocks**.
 - **Swap Clearing**: Swap files are reset by securely restarting the `dynamic_pager` daemon. We intentionally avoid manual `rm` operations on swap files to prevent instability during high memory pressure.
 - **Unresponsive Volume Protection**: During volume scanning, Mole uses `run_with_timeout` and filesystem type validation (`nfs`, `smbfs`, etc.) to prevent the script from hanging on unresponsive or slow network mounts.
+- **Homebrew Cache Intelligence**: Pre-check using `run_with_timeout 3 du -sk` to skip cleanup when cache is <50MB, preventing unnecessary 30-120s delays.
+- **Smart Project Detection**: Two-tier detection (common dev directories + project markers) with timeout protection to avoid slow scans.
+- **Network Volume Recognition**: Uses `diskutil info` with timeout to detect network protocols (SMB/NFS/AFP/CIFS/WebDAV), preventing hangs on slow mounts.
 
 ## 5. User Control & Transparency
 
