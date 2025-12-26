@@ -155,7 +155,7 @@ paginated_multi_select() {
     }
 
     local -a selected=()
-    local selected_count=0  # Cache selection count to avoid O(n) loops on every draw
+    local selected_count=0 # Cache selection count to avoid O(n) loops on every draw
 
     # Initialize selection array
     for ((i = 0; i < total_items; i++)); do
@@ -655,12 +655,12 @@ paginated_multi_select() {
 
                     # Drain pending input for smoother fast scrolling
                     drain_pending_input
-                    continue  # Skip full redraw
+                    continue # Skip full redraw
                 elif [[ $top_index -gt 0 ]]; then
                     ((top_index--))
                     prev_cursor_pos=$cursor_pos
                     prev_top_index=$top_index
-                    need_full_redraw=true  # Scrolling requires full redraw
+                    need_full_redraw=true # Scrolling requires full redraw
                 fi
                 ;;
             "DOWN")
@@ -696,7 +696,7 @@ paginated_multi_select() {
 
                             # Drain pending input for smoother fast scrolling
                             drain_pending_input
-                            continue  # Skip full redraw
+                            continue # Skip full redraw
                         elif [[ $((top_index + visible_count)) -lt ${#view_indices[@]} ]]; then
                             ((top_index++))
                             visible_count=$((${#view_indices[@]} - top_index))
@@ -706,7 +706,7 @@ paginated_multi_select() {
                             fi
                             prev_cursor_pos=$cursor_pos
                             prev_top_index=$top_index
-                            need_full_redraw=true  # Scrolling requires full redraw
+                            need_full_redraw=true # Scrolling requires full redraw
                         fi
                     fi
                 fi
@@ -735,7 +735,7 @@ paginated_multi_select() {
                     # Move cursor to footer to avoid visual artifacts (items + header + 2 blanks)
                     printf "\033[%d;1H" "$((items_per_page + 4))" >&2
 
-                    continue  # Skip full redraw
+                    continue # Skip full redraw
                 fi
                 ;;
             "RETRY")

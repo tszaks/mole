@@ -27,7 +27,7 @@ scan_external_volumes() {
         # Use diskutil to intelligently detect network volumes (SMB/NFS/AFP)
         # Timeout protection: 1s per volume to avoid slow network responses
         local protocol=""
-        protocol=$(run_with_timeout 1 command diskutil info "$volume" 2>/dev/null | grep -i "Protocol:" | awk '{print $2}' || echo "")
+        protocol=$(run_with_timeout 1 command diskutil info "$volume" 2> /dev/null | grep -i "Protocol:" | awk '{print $2}' || echo "")
 
         case "$protocol" in
             SMB | NFS | AFP | CIFS | WebDAV)
@@ -38,7 +38,7 @@ scan_external_volumes() {
 
         # Fallback: Check filesystem type via df if diskutil didn't identify protocol
         local fs_type=""
-        fs_type=$(run_with_timeout 1 command df -T "$volume" 2>/dev/null | tail -1 | awk '{print $2}' || echo "")
+        fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "")
         case "$fs_type" in
             nfs | smbfs | afpfs | cifs | webdav)
                 network_volumes+=("$volume")
