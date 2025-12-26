@@ -38,7 +38,7 @@ clean_dev_npm() {
         note_activity
         # Get the actual store path to check if default is orphaned
         local pnpm_store_path
-        pnpm_store_path=$(run_with_timeout 5 pnpm store path 2>/dev/null) || pnpm_store_path=""
+        pnpm_store_path=$(run_with_timeout 5 pnpm store path 2> /dev/null) || pnpm_store_path=""
         # If store path is different from default, clean the orphaned default
         if [[ -n "$pnpm_store_path" && "$pnpm_store_path" != "$pnpm_default_store" ]]; then
             safe_clean "$pnpm_default_store"/* "pnpm store (orphaned)"
