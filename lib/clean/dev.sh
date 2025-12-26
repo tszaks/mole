@@ -30,6 +30,24 @@ clean_dev_npm() {
         note_activity
     fi
 
+    # Clean pnpm store cache
+    local pnpm_default_store=~/Library/pnpm/store
+    if command -v pnpm > /dev/null 2>&1; then
+        # Use pnpm's built-in prune command
+        clean_tool_cache "pnpm store prune" pnpm store prune
+        note_activity
+        # Get the actual store path to check if default is orphaned
+        local pnpm_store_path
+        pnpm_store_path=$(run_with_timeout 5 pnpm store path 2>/dev/null) || pnpm_store_path=""
+        # If store path is different from default, clean the orphaned default
+        if [[ -n "$pnpm_store_path" && "$pnpm_store_path" != "$pnpm_default_store" ]]; then
+            safe_clean "$pnpm_default_store"/* "pnpm store (orphaned)"
+        fi
+    else
+        # pnpm not installed, clean default location
+        safe_clean "$pnpm_default_store"/* "pnpm store"
+    fi
+
     # Clean alternative package manager caches
     safe_clean ~/.tnpm/_cacache/* "tnpm cache directory"
     safe_clean ~/.tnpm/_logs/* "tnpm logs"
