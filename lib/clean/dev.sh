@@ -34,8 +34,7 @@ clean_dev_npm() {
     local pnpm_default_store=~/Library/pnpm/store
     if command -v pnpm > /dev/null 2>&1; then
         # Use pnpm's built-in prune command
-        clean_tool_cache "pnpm store prune" pnpm store prune
-        note_activity
+        clean_tool_cache "pnpm cache" pnpm store prune
         # Get the actual store path to check if default is orphaned
         local pnpm_store_path
         pnpm_store_path=$(run_with_timeout 5 pnpm store path 2>/dev/null) || pnpm_store_path=""
@@ -47,6 +46,7 @@ clean_dev_npm() {
         # pnpm not installed, clean default location
         safe_clean "$pnpm_default_store"/* "pnpm store"
     fi
+    note_activity
 
     # Clean alternative package manager caches
     safe_clean ~/.tnpm/_cacache/* "tnpm cache directory"
@@ -144,8 +144,6 @@ clean_dev_cloud() {
 
 # Clean frontend build tool caches
 clean_dev_frontend() {
-    safe_clean ~/.pnpm-store/* "pnpm store cache"
-    safe_clean ~/.local/share/pnpm/store/* "pnpm global store"
     safe_clean ~/.cache/typescript/* "TypeScript cache"
     safe_clean ~/.cache/electron/* "Electron cache"
     safe_clean ~/.cache/node-gyp/* "node-gyp cache"
