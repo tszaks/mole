@@ -25,11 +25,8 @@ readonly LOG_FILE="${HOME}/.config/mole/mole.log"
 readonly DEBUG_LOG_FILE="${HOME}/.config/mole/mole_debug_session.log"
 readonly LOG_MAX_SIZE_DEFAULT=1048576 # 1MB
 
-# Ensure log directory exists
-ensure_user_dir "$(dirname "$LOG_FILE")"
-if is_root_user && [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
-    ensure_user_file "$LOG_FILE"
-fi
+# Ensure log directory and file exist with correct ownership
+ensure_user_file "$LOG_FILE"
 
 # ============================================================================
 # Log Rotation
