@@ -11,6 +11,9 @@ export LANG=C
 # Get script directory and source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/core/common.sh"
+
+# Set up cleanup trap for temporary files
+trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/../lib/core/log.sh"
 source "$SCRIPT_DIR/../lib/clean/project.sh"
 

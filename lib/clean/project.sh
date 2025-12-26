@@ -423,9 +423,7 @@ clean_project_artifacts() {
         if [[ -t 1 ]]; then
             stop_inline_spinner
         fi
-        printf '\n'
-        echo -e "${GRAY}Interrupted${NC}"
-        printf '\n'
+        echo ""
         exit 130
     }
     trap cleanup_scan INT TERM

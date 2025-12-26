@@ -21,8 +21,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source common functions
 source "$SCRIPT_DIR/lib/core/common.sh"
 
+# Set up cleanup trap for temporary files
+trap cleanup_temp_files EXIT INT TERM
+
 # Version info
-VERSION="1.14.5"
+VERSION="1.14.6"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
 # Check TouchID configuration
@@ -252,7 +255,7 @@ show_help() {
 update_mole() {
     # Set up cleanup trap for update process
     local update_interrupted=false
-    trap 'update_interrupted=true; echo ""; log_error "Update interrupted by user"; exit 130' INT TERM
+    trap 'update_interrupted=true; echo ""; exit 130' INT TERM
 
     # Check if installed via Homebrew
     if is_homebrew_install; then

@@ -9,6 +9,9 @@ export LANG=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/core/common.sh"
+
+# Set up cleanup trap for temporary files
+trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/../lib/core/sudo.sh"
 source "$SCRIPT_DIR/../lib/clean/brew.sh"
 source "$SCRIPT_DIR/../lib/clean/caches.sh"
@@ -138,12 +141,6 @@ cleanup() {
     stop_sudo_session
 
     show_cursor
-
-    # If interrupted, show message
-    if [[ "$signal" == "INT" ]] || [[ $exit_code -eq 130 ]]; then
-        printf "\r\033[K" >&2
-        echo -e "${YELLOW}Interrupted by user${NC}" >&2
-    fi
 }
 
 trap 'cleanup EXIT $?' EXIT

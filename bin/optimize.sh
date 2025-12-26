@@ -8,6 +8,9 @@ export LANG=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/core/common.sh"
+
+# Set up cleanup trap for temporary files
+trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/lib/core/sudo.sh"
 source "$SCRIPT_DIR/lib/manage/update.sh"
 source "$SCRIPT_DIR/lib/manage/autofix.sh"

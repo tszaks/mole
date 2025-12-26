@@ -29,27 +29,51 @@ fi
 # Update via Homebrew
 update_via_homebrew() {
     local current_version="$1"
+    local temp_update temp_upgrade
+    temp_update=$(mktemp_file "brew_update")
+    temp_upgrade=$(mktemp_file "brew_upgrade")
 
+    # Set up trap for interruption (Ctrl+C) with inline cleanup
+    trap 'stop_inline_spinner 2>/dev/null; rm -f "$temp_update" "$temp_upgrade" 2>/dev/null; echo ""; exit 130' INT TERM
+
+    # Update Homebrew
     if [[ -t 1 ]]; then
         start_inline_spinner "Updating Homebrew..."
     else
         echo "Updating Homebrew..."
     fi
-    brew update 2>&1 | grep -Ev "^(==>|Already up-to-date)" || true
+
+    brew update > "$temp_update" 2>&1 &
+    local update_pid=$!
+    wait $update_pid 2>/dev/null || true  # Continue even if brew update fails
+
     if [[ -t 1 ]]; then
         stop_inline_spinner
     fi
 
+    # Upgrade Mole
     if [[ -t 1 ]]; then
         start_inline_spinner "Upgrading Mole..."
     else
         echo "Upgrading Mole..."
     fi
+
+    brew upgrade mole > "$temp_upgrade" 2>&1 &
+    local upgrade_pid=$!
+    wait $upgrade_pid 2>/dev/null || true  # Continue even if brew upgrade fails
+
     local upgrade_output
-    upgrade_output=$(brew upgrade mole 2>&1) || true
+    upgrade_output=$(cat "$temp_upgrade")
+
     if [[ -t 1 ]]; then
         stop_inline_spinner
     fi
+
+    # Clear trap
+    trap - INT TERM
+
+    # Cleanup temp files
+    rm -f "$temp_update" "$temp_upgrade"
 
     if echo "$upgrade_output" | grep -q "already installed"; then
         local installed_version

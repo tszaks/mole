@@ -397,44 +397,20 @@ ensure_user_file() {
 # Convert bytes to human-readable format (e.g., 1.5GB)
 bytes_to_human() {
     local bytes="$1"
-    if [[ ! "$bytes" =~ ^[0-9]+$ ]]; then
-        echo "0B"
-        return 1
-    fi
+    [[ "$bytes" =~ ^[0-9]+$ ]] || { echo "0B"; return 1; }
 
-    if ((bytes >= 1073741824)); then # >= 1GB
-        local divisor=1073741824
-        local whole=$((bytes / divisor))
-        local remainder=$((bytes % divisor))
-        local frac=$(((remainder * 100 + divisor / 2) / divisor))
-        if ((frac >= 100)); then
-            frac=0
-            ((whole++))
-        fi
-        printf "%d.%02dGB\n" "$whole" "$frac"
-        return 0
+    # GB: >= 1073741824 bytes
+    if ((bytes >= 1073741824)); then
+        printf "%d.%02dGB\n" $((bytes / 1073741824)) $(((bytes % 1073741824) * 100 / 1073741824))
+    # MB: >= 1048576 bytes
+    elif ((bytes >= 1048576)); then
+        printf "%d.%01dMB\n" $((bytes / 1048576)) $(((bytes % 1048576) * 10 / 1048576))
+    # KB: >= 1024 bytes (round up)
+    elif ((bytes >= 1024)); then
+        printf "%dKB\n" $(((bytes + 512) / 1024))
+    else
+        printf "%dB\n" "$bytes"
     fi
-
-    if ((bytes >= 1048576)); then # >= 1MB
-        local divisor=1048576
-        local whole=$((bytes / divisor))
-        local remainder=$((bytes % divisor))
-        local frac=$(((remainder * 10 + divisor / 2) / divisor))
-        if ((frac >= 10)); then
-            frac=0
-            ((whole++))
-        fi
-        printf "%d.%01dMB\n" "$whole" "$frac"
-        return 0
-    fi
-
-    if ((bytes >= 1024)); then
-        local rounded_kb=$(((bytes + 512) / 1024))
-        printf "%dKB\n" "$rounded_kb"
-        return 0
-    fi
-
-    printf "%dB\n" "$bytes"
 }
 
 # Convert kilobytes to human-readable format
