@@ -45,7 +45,7 @@ update_via_homebrew() {
 
     brew update > "$temp_update" 2>&1 &
     local update_pid=$!
-    wait $update_pid 2>/dev/null || true  # Continue even if brew update fails
+    wait $update_pid 2> /dev/null || true # Continue even if brew update fails
 
     if [[ -t 1 ]]; then
         stop_inline_spinner
@@ -60,7 +60,7 @@ update_via_homebrew() {
 
     brew upgrade mole > "$temp_upgrade" 2>&1 &
     local upgrade_pid=$!
-    wait $upgrade_pid 2>/dev/null || true  # Continue even if brew upgrade fails
+    wait $upgrade_pid 2> /dev/null || true # Continue even if brew upgrade fails
 
     local upgrade_output
     upgrade_output=$(cat "$temp_upgrade")

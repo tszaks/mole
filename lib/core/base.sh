@@ -397,7 +397,10 @@ ensure_user_file() {
 # Convert bytes to human-readable format (e.g., 1.5GB)
 bytes_to_human() {
     local bytes="$1"
-    [[ "$bytes" =~ ^[0-9]+$ ]] || { echo "0B"; return 1; }
+    [[ "$bytes" =~ ^[0-9]+$ ]] || {
+        echo "0B"
+        return 1
+    }
 
     # GB: >= 1073741824 bytes
     if ((bytes >= 1073741824)); then
