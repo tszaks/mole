@@ -238,7 +238,7 @@ safe_clean() {
     # Show progress indicator for potentially slow operations
     if [[ ${#existing_paths[@]} -gt 3 ]]; then
         local total_paths=${#existing_paths[@]}
-        if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning $total_paths items..."; fi
+        if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items..."; fi
         local temp_dir
         # create_temp_dir uses mktemp -d for secure temporary directory creation
         temp_dir=$(create_temp_dir)
@@ -269,11 +269,6 @@ safe_clean() {
                 wait "${pids[0]}" 2> /dev/null || true
                 pids=("${pids[@]:1}")
                 ((completed++))
-                # Update progress less frequently to reduce overhead
-                if [[ -t 1 ]] && ((completed % 20 == 0)); then
-                    stop_inline_spinner
-                    MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items ($completed/$total_paths)..."
-                fi
             fi
         done
 
@@ -290,11 +285,6 @@ safe_clean() {
                 read -r size count < "$result_file" 2> /dev/null || true
                 if [[ "$count" -gt 0 && "$size" -gt 0 ]]; then
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        # Update spinner to show cleaning progress
-                        if [[ -t 1 ]] && ((idx % 5 == 0)); then
-                            stop_inline_spinner
-                            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Cleaning items ($idx/$total_paths)..."
-                        fi
                         # Handle symbolic links separately (only remove the link, not the target)
                         if [[ -L "$path" ]]; then
                             rm "$path" 2> /dev/null || true
@@ -314,7 +304,7 @@ safe_clean() {
     else
         # Show progress for small batches too (simpler jobs)
         local total_paths=${#existing_paths[@]}
-        if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning $total_paths items..."; fi
+        if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items..."; fi
 
         local idx=0
         for path in "${existing_paths[@]}"; do
@@ -324,11 +314,6 @@ safe_clean() {
             # Optimization: Skip expensive file counting
             if [[ "$size_bytes" -gt 0 ]]; then
                 if [[ "$DRY_RUN" != "true" ]]; then
-                    # Update spinner to show cleaning progress for slow operations
-                    if [[ -t 1 ]]; then
-                        stop_inline_spinner
-                        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Cleaning $description..."
-                    fi
                     # Handle symbolic links separately (only remove the link, not the target)
                     if [[ -L "$path" ]]; then
                         rm "$path" 2> /dev/null || true

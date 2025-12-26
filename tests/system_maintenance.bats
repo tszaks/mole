@@ -128,10 +128,15 @@ source "$PROJECT_ROOT/lib/clean/brew.sh"
 mkdir -p "$HOME/.cache/mole"
 rm -f "$HOME/.cache/mole/brew_last_cleanup"
 
+# Create a large enough Homebrew cache to pass pre-check (>50MB)
+mkdir -p "$HOME/Library/Caches/Homebrew"
+dd if=/dev/zero of="$HOME/Library/Caches/Homebrew/test.tar.gz" bs=1024 count=51200 2>/dev/null
+
 MO_BREW_TIMEOUT=2
 
 start_inline_spinner(){ :; }
 stop_inline_spinner(){ :; }
+note_activity(){ :; }
 
 brew() {
     case "$1" in
@@ -150,6 +155,9 @@ brew() {
 }
 
 clean_homebrew
+
+# Cleanup test files
+rm -rf "$HOME/Library/Caches/Homebrew"
 EOF
 
     [ "$status" -eq 0 ]

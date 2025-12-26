@@ -14,8 +14,9 @@ clean_user_essentials() {
 scan_external_volumes() {
     [[ -d "/Volumes" ]] || return 0
 
-    # Fast pre-check: count non-system external volumes without expensive operations
+    # Fast pre-check: collect non-system external volumes and detect network volumes
     local -a candidate_volumes=()
+    local -a network_volumes=()
     for volume in /Volumes/*; do
         # Basic checks (directory, writable, not a symlink)
         [[ -d "$volume" && -w "$volume" && ! -L "$volume" ]] || continue
@@ -23,26 +24,50 @@ scan_external_volumes() {
         # Skip system root if it appears in /Volumes
         [[ "$volume" == "/" || "$volume" == "/Volumes/Macintosh HD" ]] && continue
 
+        # Use diskutil to intelligently detect network volumes (SMB/NFS/AFP)
+        # Timeout protection: 1s per volume to avoid slow network responses
+        local protocol=""
+        protocol=$(run_with_timeout 1 command diskutil info "$volume" 2>/dev/null | grep -i "Protocol:" | awk '{print $2}' || echo "")
+
+        case "$protocol" in
+            SMB | NFS | AFP | CIFS | WebDAV)
+                network_volumes+=("$volume")
+                continue
+                ;;
+        esac
+
+        # Fallback: Check filesystem type via df if diskutil didn't identify protocol
+        local fs_type=""
+        fs_type=$(run_with_timeout 1 command df -T "$volume" 2>/dev/null | tail -1 | awk '{print $2}' || echo "")
+        case "$fs_type" in
+            nfs | smbfs | afpfs | cifs | webdav)
+                network_volumes+=("$volume")
+                continue
+                ;;
+        esac
+
         candidate_volumes+=("$volume")
     done
 
     # If no external volumes found, return immediately (zero overhead)
     local volume_count=${#candidate_volumes[@]}
-    [[ $volume_count -eq 0 ]] && return 0
+    local network_count=${#network_volumes[@]}
 
-    # We have external volumes, now perform full scan
+    if [[ $volume_count -eq 0 ]]; then
+        # Show info if network volumes were skipped
+        if [[ $network_count -gt 0 ]]; then
+            echo -e "  ${GRAY}→${NC} External volumes (${network_count} network volume(s) skipped)"
+            note_activity
+        fi
+        return 0
+    fi
+
+    # We have local external volumes, now perform full scan
     if [[ -t 1 ]]; then
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning $volume_count external volume(s)..."
     fi
 
     for volume in "${candidate_volumes[@]}"; do
-        # Skip network volumes with short timeout (reduced from 2s to 1s)
-        local fs_type=""
-        fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "unknown")
-        case "$fs_type" in
-            nfs | smbfs | afpfs | cifs | webdav | unknown) continue ;;
-        esac
-
         # Verify volume is actually mounted (reduced timeout from 2s to 1s)
         run_with_timeout 1 mount | grep -q "on $volume " || continue
 

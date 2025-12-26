@@ -125,6 +125,62 @@ clean_service_worker_cache() {
 # Clean Next.js (.next/cache) and Python (__pycache__) build caches
 # Uses maxdepth 3, excludes Library/.Trash/node_modules, 10s timeout per scan
 clean_project_caches() {
+    # Quick check: skip if user likely doesn't have development projects
+    local has_dev_projects=false
+    local -a common_dev_dirs=(
+        "$HOME/Code"
+        "$HOME/Projects"
+        "$HOME/workspace"
+        "$HOME/github"
+        "$HOME/dev"
+        "$HOME/work"
+        "$HOME/src"
+        "$HOME/repos"
+        "$HOME/Development"
+        "$HOME/www"
+        "$HOME/golang"
+        "$HOME/go"
+        "$HOME/rust"
+        "$HOME/python"
+        "$HOME/ruby"
+        "$HOME/java"
+        "$HOME/dotnet"
+        "$HOME/node"
+    )
+
+    for dir in "${common_dev_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            has_dev_projects=true
+            break
+        fi
+    done
+
+    # If no common dev directories found, perform feature-based detection
+    # Check for project markers in $HOME (node_modules, .git, target, etc.)
+    if [[ "$has_dev_projects" == "false" ]]; then
+        local -a project_markers=(
+            "node_modules"
+            ".git"
+            "target"
+            "go.mod"
+            "Cargo.toml"
+            "package.json"
+            "pom.xml"
+            "build.gradle"
+        )
+
+        for marker in "${project_markers[@]}"; do
+            # Quick check with maxdepth 2 and 3s timeout to avoid slow scans
+            if run_with_timeout 3 sh -c "find '$HOME' -maxdepth 2 -name '$marker' -not -path '*/Library/*' -not -path '*/.Trash/*' 2>/dev/null | head -1" | grep -q .; then
+                has_dev_projects=true
+                break
+            fi
+        done
+
+        # If still no dev projects found, skip scanning
+        [[ "$has_dev_projects" == "false" ]] && return 0
+    fi
+
     if [[ -t 1 ]]; then
         MOLE_SPINNER_PREFIX="  "
         start_inline_spinner "Searching project caches..."
