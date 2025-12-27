@@ -56,7 +56,7 @@ clean_communication_apps() {
 
 # Clean DingTalk
 clean_dingtalk() {
-    safe_clean ~/Library/Caches/dd.work.exclusive4aliding/* "DingTalk (iDingTalk) cache"
+    safe_clean ~/Library/Caches/dd.work.exclusive4aliding/* "DingTalk iDingTalk cache"
     safe_clean ~/Library/Caches/com.alibaba.AliLang.osx/* "AliLang security component"
     safe_clean ~/Library/Application\ Support/iDingTalk/log/* "DingTalk logs"
     safe_clean ~/Library/Application\ Support/iDingTalk/holmeslogs/* "DingTalk holmes logs"
@@ -126,7 +126,7 @@ clean_media_players() {
     fi
 
     if [[ "$has_offline_music" == "true" ]]; then
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Spotify cache protected (offline music detected)"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Spotify cache protected · offline music detected"
         note_activity
     else
         safe_clean ~/Library/Caches/com.spotify.client/* "Spotify cache"
@@ -241,7 +241,12 @@ clean_remote_desktop() {
 
 # Main function to clean all user GUI applications
 clean_user_gui_applications() {
+    start_section_spinner "Scanning app caches..."
+
     clean_xcode_tools
+
+    stop_section_spinner
+
     clean_code_editors
     clean_communication_apps
     clean_dingtalk
