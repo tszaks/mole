@@ -16,7 +16,7 @@ clean_tool_cache() {
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $description"
         fi
     else
-        echo -e "  ${YELLOW}→${NC} $description (would clean)"
+        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $description · would clean"
     fi
 }
 
@@ -35,12 +35,16 @@ clean_dev_npm() {
     if command -v pnpm > /dev/null 2>&1; then
         # Use pnpm's built-in prune command
         clean_tool_cache "pnpm cache" pnpm store prune
+
         # Get the actual store path to check if default is orphaned
         local pnpm_store_path
-        pnpm_store_path=$(run_with_timeout 5 pnpm store path 2> /dev/null) || pnpm_store_path=""
+        start_section_spinner "Checking store path..."
+        pnpm_store_path=$(run_with_timeout 2 pnpm store path 2> /dev/null) || pnpm_store_path=""
+        stop_section_spinner
+
         # If store path is different from default, clean the orphaned default
         if [[ -n "$pnpm_store_path" && "$pnpm_store_path" != "$pnpm_default_store" ]]; then
-            safe_clean "$pnpm_default_store"/* "pnpm store (orphaned)"
+            safe_clean "$pnpm_default_store"/* "Orphaned pnpm store"
         fi
     else
         # pnpm not installed, clean default location
@@ -105,7 +109,14 @@ clean_dev_docker() {
     if command -v docker > /dev/null 2>&1; then
         if [[ "$DRY_RUN" != "true" ]]; then
             # Check if Docker daemon is running (with timeout to prevent hanging)
+            start_section_spinner "Checking Docker daemon..."
+            local docker_running=false
             if run_with_timeout 3 docker info > /dev/null 2>&1; then
+                docker_running=true
+            fi
+            stop_section_spinner
+
+            if [[ "$docker_running" == "true" ]]; then
                 clean_tool_cache "Docker build cache" docker builder prune -af
             else
                 if [[ -t 0 ]]; then
@@ -114,22 +125,29 @@ clean_dev_docker() {
                     IFS= read -r -s -n1 key || key=""
                     printf "\r\033[2K"
                     if [[ -z "$key" || "$key" == $'\n' || "$key" == $'\r' ]]; then
+                        start_section_spinner "Retrying Docker connection..."
+                        local retry_success=false
                         if run_with_timeout 3 docker info > /dev/null 2>&1; then
+                            retry_success=true
+                        fi
+                        stop_section_spinner
+
+                        if [[ "$retry_success" == "true" ]]; then
                             clean_tool_cache "Docker build cache" docker builder prune -af
                         else
-                            echo -e "  ${GRAY}${ICON_SUCCESS}${NC} Docker build cache (still not running)"
+                            echo -e "  ${GRAY}${ICON_SUCCESS}${NC} Docker build cache · still not running"
                         fi
                     else
-                        echo -e "  ${GRAY}${ICON_SUCCESS}${NC} Docker build cache (skipped)"
+                        echo -e "  ${GRAY}${ICON_SUCCESS}${NC} Docker build cache · skipped"
                     fi
                 else
-                    echo -e "  ${GRAY}${ICON_SUCCESS}${NC} Docker build cache (daemon not running)"
+                    echo -e "  ${GRAY}${ICON_SUCCESS}${NC} Docker build cache · daemon not running"
                 fi
                 note_activity
             fi
         else
             note_activity
-            echo -e "  ${YELLOW}→${NC} Docker build cache (would clean)"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Docker build cache · would clean"
         fi
     fi
 
@@ -143,7 +161,7 @@ clean_dev_nix() {
         if [[ "$DRY_RUN" != "true" ]]; then
             clean_tool_cache "Nix garbage collection" nix-collect-garbage --delete-older-than 30d
         else
-            echo -e "  ${YELLOW}→${NC} Nix garbage collection (would clean)"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Nix garbage collection · would clean"
         fi
         note_activity
     fi
@@ -187,16 +205,14 @@ clean_dev_mobile() {
         if [[ "$DRY_RUN" == "true" ]]; then
             clean_tool_cache "Xcode unavailable simulators" xcrun simctl delete unavailable
         else
-            if [[ -t 1 ]]; then
-                MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking unavailable simulators..."
-            fi
+            start_section_spinner "Checking unavailable simulators..."
 
             # Run command manually to control UI output order
             if xcrun simctl delete unavailable > /dev/null 2>&1; then
-                if [[ -t 1 ]]; then stop_inline_spinner; fi
+                stop_section_spinner
                 echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators"
             else
-                if [[ -t 1 ]]; then stop_inline_spinner; fi
+                stop_section_spinner
                 # Silently fail or log error if needed, matching clean_tool_cache behavior
             fi
         fi
@@ -301,14 +317,16 @@ clean_dev_shell() {
 clean_dev_network() {
     safe_clean ~/.cache/curl/* "curl cache"
     safe_clean ~/.cache/wget/* "wget cache"
-    safe_clean ~/Library/Caches/curl/* "curl cache (macOS)"
-    safe_clean ~/Library/Caches/wget/* "wget cache (macOS)"
+    safe_clean ~/Library/Caches/curl/* "macOS curl cache"
+    safe_clean ~/Library/Caches/wget/* "macOS wget cache"
 }
 
 # Main developer tools cleanup function
 # Calls all specialized cleanup functions
 # Env: DRY_RUN
 clean_developer_tools() {
+    stop_section_spinner
+
     clean_dev_npm
     clean_dev_python
     clean_dev_go
