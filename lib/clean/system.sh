@@ -6,6 +6,8 @@ set -euo pipefail
 
 # Deep system cleanup (requires sudo)
 clean_deep_system() {
+    stop_section_spinner
+
     # Clean old system caches
     safe_sudo_find_delete "/Library/Caches" "*.cache" "$MOLE_TEMP_FILE_AGE_DAYS" "f" || true
     safe_sudo_find_delete "/Library/Caches" "*.tmp" "$MOLE_TEMP_FILE_AGE_DAYS" "f" || true
@@ -76,11 +78,11 @@ clean_deep_system() {
     fi
 
     # Clean browser code signature caches
-    if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning system caches..."
-    fi
+    start_section_spinner "Scanning system caches..."
     local code_sign_cleaned=0
     local found_count=0
+    local last_update_time=$(date +%s)
+    local update_interval=2 # Update spinner every 2 seconds instead of every 50 files
 
     # Efficient stream processing for large directories
     while IFS= read -r -d '' cache_dir; do
@@ -89,14 +91,15 @@ clean_deep_system() {
         fi
         ((found_count++))
 
-        # Update progress spinner periodically
-        if [[ -t 1 ]] && ((found_count % 50 == 0)); then
-            stop_inline_spinner
-            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning system caches... ($found_count found)"
+        # Update progress spinner periodically based on time, not count
+        local current_time=$(date +%s)
+        if [[ $((current_time - last_update_time)) -ge $update_interval ]]; then
+            start_section_spinner "Scanning system caches... ($found_count found)"
+            last_update_time=$current_time
         fi
     done < <(run_with_timeout 5 command find /private/var/folders -type d -name "*.code_sign_clone" -path "*/X/*" -print0 2> /dev/null || true)
 
-    if [[ -t 1 ]]; then stop_inline_spinner; fi
+    stop_section_spinner
 
     [[ $code_sign_cleaned -gt 0 ]] && log_success "Browser code signature caches ($code_sign_cleaned items)"
 
@@ -122,25 +125,23 @@ clean_time_machine_failed_backups() {
     fi
 
     # Start spinner early (before potentially slow tmutil command)
-    if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking Time Machine configuration..."
-    fi
+    start_section_spinner "Checking Time Machine configuration..."
     local spinner_active=true
 
     # Check if Time Machine is configured (with short timeout for faster response)
     local tm_info
     tm_info=$(run_with_timeout 2 tmutil destinationinfo 2>&1 || echo "failed")
     if [[ "$tm_info" == *"No destinations configured"* || "$tm_info" == "failed" ]]; then
-        if [[ "$spinner_active" == "true" && -t 1 ]]; then
-            stop_inline_spinner
+        if [[ "$spinner_active" == "true" ]]; then
+            stop_section_spinner
         fi
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
 
     if [[ ! -d "/Volumes" ]]; then
-        if [[ "$spinner_active" == "true" && -t 1 ]]; then
-            stop_inline_spinner
+        if [[ "$spinner_active" == "true" ]]; then
+            stop_section_spinner
         fi
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
@@ -148,17 +149,16 @@ clean_time_machine_failed_backups() {
 
     # Skip if backup is running
     if pgrep -x "backupd" > /dev/null 2>&1; then
-        if [[ "$spinner_active" == "true" && -t 1 ]]; then
-            stop_inline_spinner
+        if [[ "$spinner_active" == "true" ]]; then
+            stop_section_spinner
         fi
         echo -e "  ${YELLOW}!${NC} Time Machine backup in progress, skipping cleanup"
         return 0
     fi
 
     # Update spinner message for volume scanning
-    if [[ "$spinner_active" == "true" && -t 1 ]]; then
-        stop_inline_spinner
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking backup volumes..."
+    if [[ "$spinner_active" == "true" ]]; then
+        start_section_spinner "Checking backup volumes..."
     fi
 
     # Fast pre-scan: check which volumes have Backups.backupdb (avoid expensive tmutil checks)
@@ -176,17 +176,16 @@ clean_time_machine_failed_backups() {
 
     # If no backup volumes found, stop spinner and return
     if [[ ${#backup_volumes[@]} -eq 0 ]]; then
-        if [[ "$spinner_active" == "true" && -t 1 ]]; then
-            stop_inline_spinner
+        if [[ "$spinner_active" == "true" ]]; then
+            stop_section_spinner
         fi
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
 
     # Update spinner message: we have potential backup volumes, now scan them
-    if [[ "$spinner_active" == "true" && -t 1 ]]; then
-        stop_inline_spinner
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning backup volumes..."
+    if [[ "$spinner_active" == "true" ]]; then
+        start_section_spinner "Scanning backup volumes..."
     fi
     for volume in "${backup_volumes[@]}"; do
         # Skip network volumes (quick check)
@@ -216,7 +215,7 @@ clean_time_machine_failed_backups() {
 
                 # Stop spinner before first output
                 if [[ "$spinner_active" == "true" ]]; then
-                    if [[ -t 1 ]]; then stop_inline_spinner; fi
+                    stop_section_spinner
                     spinner_active=false
                 fi
 
@@ -224,7 +223,7 @@ clean_time_machine_failed_backups() {
                 local size_human=$(bytes_to_human "$((size_kb * 1024))")
 
                 if [[ "$DRY_RUN" == "true" ]]; then
-                    echo -e "  ${YELLOW}→${NC} Incomplete backup: $backup_name ${YELLOW}($size_human dry)${NC}"
+                    echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete backup: $backup_name ${YELLOW}($size_human dry)${NC}"
                     ((tm_cleaned++))
                     note_activity
                     continue
@@ -244,7 +243,7 @@ clean_time_machine_failed_backups() {
                     ((total_items++))
                     note_activity
                 else
-                    echo -e "  ${YELLOW}!${NC} Could not delete: $backup_name (try manually with sudo)"
+                    echo -e "  ${YELLOW}!${NC} Could not delete: $backup_name · try manually with sudo"
                 fi
             done < <(run_with_timeout 15 find "$backupdb_dir" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2> /dev/null || true)
         fi
@@ -276,7 +275,7 @@ clean_time_machine_failed_backups() {
 
                     # Stop spinner before first output
                     if [[ "$spinner_active" == "true" ]]; then
-                        if [[ -t 1 ]]; then stop_inline_spinner; fi
+                        stop_section_spinner
                         spinner_active=false
                     fi
 
@@ -284,7 +283,7 @@ clean_time_machine_failed_backups() {
                     local size_human=$(bytes_to_human "$((size_kb * 1024))")
 
                     if [[ "$DRY_RUN" == "true" ]]; then
-                        echo -e "  ${YELLOW}→${NC} Incomplete APFS backup in $bundle_name: $backup_name ${YELLOW}($size_human dry)${NC}"
+                        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete APFS backup in $bundle_name: $backup_name ${YELLOW}($size_human dry)${NC}"
                         ((tm_cleaned++))
                         note_activity
                         continue
@@ -312,7 +311,7 @@ clean_time_machine_failed_backups() {
 
     # Stop spinner if still active (no backups found)
     if [[ "$spinner_active" == "true" ]]; then
-        if [[ -t 1 ]]; then stop_inline_spinner; fi
+        stop_section_spinner
     fi
 
     if [[ $tm_cleaned -eq 0 ]]; then
@@ -327,15 +326,13 @@ clean_local_snapshots() {
         return 0
     fi
 
-    if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking local snapshots..."
-    fi
+    start_section_spinner "Checking local snapshots..."
 
     # Check for local snapshots
     local snapshot_list
     snapshot_list=$(tmutil listlocalsnapshots / 2> /dev/null)
 
-    if [[ -t 1 ]]; then stop_inline_spinner; fi
+    stop_section_spinner
 
     [[ -z "$snapshot_list" ]] && return 0
 
@@ -361,7 +358,7 @@ clean_local_snapshots() {
                 local snap_name="${BASH_REMATCH[0]}"
 
                 if [[ "$DRY_RUN" == "true" ]]; then
-                    echo -e "  ${YELLOW}→${NC} Old local snapshot: $snap_name ${YELLOW}(dry)${NC}"
+                    echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Old local snapshot: $snap_name ${YELLOW}(dry)${NC}"
                     ((cleaned_count++))
                     note_activity
                 else
