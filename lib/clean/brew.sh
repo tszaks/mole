@@ -8,7 +8,7 @@ clean_homebrew() {
 
     # Dry run mode - just indicate what would happen
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
-        echo -e "  ${YELLOW}→${NC} Homebrew (would cleanup and autoremove)"
+        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Homebrew · would cleanup and autoremove"
         return 0
     fi
 
@@ -28,7 +28,7 @@ clean_homebrew() {
 
         if [[ $days_diff -lt $cache_valid_days ]]; then
             should_skip=true
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew (cleaned ${days_diff}d ago, skipped)"
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew · cleaned ${days_diff}d ago, skipped"
         fi
     fi
 
@@ -115,7 +115,7 @@ clean_homebrew() {
     if [[ "$skip_cleanup" == "true" ]]; then
         # Cleanup was skipped due to small cache size
         local size_mb=$((brew_cache_size / 1024))
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew cleanup (cache ${size_mb}MB, skipped)"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew cleanup · cache ${size_mb}MB, skipped"
     elif [[ "$brew_success" == "true" && -f "$brew_tmp_file" ]]; then
         local brew_output
         brew_output=$(cat "$brew_tmp_file" 2> /dev/null || echo "")
@@ -131,7 +131,7 @@ clean_homebrew() {
             fi
         fi
     elif [[ $elapsed -ge $timeout_seconds ]]; then
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Homebrew cleanup timed out (run ${GRAY}brew cleanup${NC} manually)"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Homebrew cleanup timed out · run ${GRAY}brew cleanup${NC} manually"
     fi
 
     # Process autoremove output - only show if packages were removed
@@ -145,7 +145,7 @@ clean_homebrew() {
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Removed orphaned dependencies (${removed_packages} packages)"
         fi
     elif [[ $elapsed -ge $timeout_seconds ]]; then
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Autoremove timed out (run ${GRAY}brew autoremove${NC} manually)"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Autoremove timed out · run ${GRAY}brew autoremove${NC} manually"
     fi
 
     # Update cache timestamp on successful completion or when cleanup was intelligently skipped
