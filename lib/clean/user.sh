@@ -12,7 +12,34 @@ clean_user_essentials() {
     stop_section_spinner
 
     safe_clean ~/Library/Logs/* "User app logs"
-    safe_clean ~/.Trash/* "Trash"
+
+    # Check if Trash directory is whitelisted
+    local trash_protected=false
+    local trash_path="$HOME/.Trash"
+
+    if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+        for w in "${WHITELIST_PATTERNS[@]}"; do
+            # Expand tilde in whitelist pattern for comparison
+            local expanded_w="${w/#\~/$HOME}"
+
+            # Remove trailing slash for consistent comparison
+            expanded_w="${expanded_w%/}"
+
+            # Check for exact match or glob pattern match
+            # shellcheck disable=SC2053
+            if [[ "$trash_path" == "$expanded_w" ]] || [[ "$trash_path" == $expanded_w ]]; then
+                trash_protected=true
+                break
+            fi
+        done
+    fi
+
+    if [[ "$trash_protected" == "true" ]]; then
+        note_activity
+        echo -e "  ${GREEN}${ICON_EMPTY}${NC} Trash · whitelist protected"
+    else
+        safe_clean ~/.Trash/* "Trash"
+    fi
 }
 
 # Helper: Scan external volumes for cleanup (Trash & DS_Store)
@@ -75,11 +102,29 @@ scan_external_volumes() {
         run_with_timeout 1 mount | grep -q "on $volume " || continue
 
         # 1. Clean Trash on volume
-        if [[ -d "$volume/.Trashes" && "$DRY_RUN" != "true" ]]; then
+        local volume_trash="$volume/.Trashes"
+        local volume_trash_protected=false
+
+        # Check if external volume Trash is whitelisted
+        if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+            for w in "${WHITELIST_PATTERNS[@]}"; do
+                local expanded_w="${w/#\~/$HOME}"
+                expanded_w="${expanded_w%/}"
+
+                # Check for exact match or glob pattern match
+                # shellcheck disable=SC2053
+                if [[ "$volume_trash" == "$expanded_w" ]] || [[ "$volume_trash" == $expanded_w ]]; then
+                    volume_trash_protected=true
+                    break
+                fi
+            done
+        fi
+
+        if [[ -d "$volume_trash" && "$DRY_RUN" != "true" && "$volume_trash_protected" != "true" ]]; then
             # Safely iterate and remove each item
             while IFS= read -r -d '' item; do
                 safe_remove "$item" true || true
-            done < <(command find "$volume/.Trashes" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+            done < <(command find "$volume_trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
         fi
 
         # 2. Clean .DS_Store
