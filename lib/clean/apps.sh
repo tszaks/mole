@@ -84,7 +84,7 @@ scan_installed_apps() {
 
     # Performance optimization: cache results for 5 minutes
     local cache_file="$HOME/.cache/mole/installed_apps_cache"
-    local cache_age_seconds=300  # 5 minutes
+    local cache_age_seconds=300 # 5 minutes
 
     if [[ -f "$cache_file" ]]; then
         local cache_mtime=$(get_file_mtime "$cache_file")
@@ -95,7 +95,7 @@ scan_installed_apps() {
             debug_log "Using cached app list (age: ${age}s)"
             # Verify cache file is readable and not empty
             if [[ -r "$cache_file" ]] && [[ -s "$cache_file" ]]; then
-                if cat "$cache_file" > "$installed_bundles" 2>/dev/null; then
+                if cat "$cache_file" > "$installed_bundles" 2> /dev/null; then
                     return 0
                 else
                     debug_log "Warning: Failed to read cache, rebuilding"
@@ -180,9 +180,9 @@ scan_installed_apps() {
 
     # Cache the results
     ensure_user_dir "$(dirname "$cache_file")"
-    cp "$installed_bundles" "$cache_file" 2>/dev/null || true
+    cp "$installed_bundles" "$cache_file" 2> /dev/null || true
 
-    local app_count=$(wc -l < "$installed_bundles" 2>/dev/null | tr -d ' ')
+    local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')
     debug_log "Scanned $app_count unique applications"
 }
 

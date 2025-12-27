@@ -64,7 +64,7 @@ is_homebrew_install() {
         # Symlink looks good, but verify brew actually manages it
         if command -v brew > /dev/null 2>&1; then
             # Use fast brew list check
-            brew list --formula 2>/dev/null | grep -q "^mole$" && return 0
+            brew list --formula 2> /dev/null | grep -q "^mole$" && return 0
         else
             # brew not available - cannot update/remove via Homebrew
             return 1
@@ -74,14 +74,14 @@ is_homebrew_install() {
     # Fallback: check common Homebrew paths and verify with Cellar
     if [[ -f "$mole_path" ]]; then
         case "$mole_path" in
-            /opt/homebrew/bin/mole|/usr/local/bin/mole)
+            /opt/homebrew/bin/mole | /usr/local/bin/mole)
                 # Verify Cellar directory exists
                 if [[ -d /opt/homebrew/Cellar/mole ]] || [[ -d /usr/local/Cellar/mole ]]; then
                     # Double-check with brew if available
                     if command -v brew > /dev/null 2>&1; then
-                        brew list --formula 2>/dev/null | grep -q "^mole$" && return 0
+                        brew list --formula 2> /dev/null | grep -q "^mole$" && return 0
                     else
-                        return 0  # Cellar exists, probably Homebrew install
+                        return 0 # Cellar exists, probably Homebrew install
                     fi
                 fi
                 ;;
@@ -93,7 +93,7 @@ is_homebrew_install() {
         local brew_prefix
         brew_prefix=$(brew --prefix 2> /dev/null)
         if [[ -n "$brew_prefix" && "$mole_path" == "$brew_prefix/bin/mole" && -d "$brew_prefix/Cellar/mole" ]]; then
-            brew list --formula 2>/dev/null | grep -q "^mole$" && return 0
+            brew list --formula 2> /dev/null | grep -q "^mole$" && return 0
         fi
     fi
 

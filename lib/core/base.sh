@@ -596,12 +596,12 @@ safe_clear_lines() {
 
     # Use centralized ANSI support check (defined below)
     # Note: This forward reference works because functions are parsed before execution
-    is_ansi_supported 2>/dev/null || return 1
+    is_ansi_supported 2> /dev/null || return 1
 
     # Clear lines one by one (more reliable than multi-line sequences)
     local i
-    for ((i=0; i<lines; i++)); do
-        printf "\033[1A\r\033[K" > "$tty_device" 2>/dev/null || return 1
+    for ((i = 0; i < lines; i++)); do
+        printf "\033[1A\r\033[K" > "$tty_device" 2> /dev/null || return 1
     done
 
     return 0
@@ -613,9 +613,9 @@ safe_clear_line() {
     local tty_device="${1:-/dev/tty}"
 
     # Use centralized ANSI support check
-    is_ansi_supported 2>/dev/null || return 1
+    is_ansi_supported 2> /dev/null || return 1
 
-    printf "\r\033[K" > "$tty_device" 2>/dev/null || return 1
+    printf "\r\033[K" > "$tty_device" 2> /dev/null || return 1
     return 0
 }
 
@@ -626,8 +626,8 @@ safe_clear_line() {
 update_progress_if_needed() {
     local completed="$1"
     local total="$2"
-    local last_update_var="$3"  # Name of variable holding last update time
-    local interval="${4:-2}"     # Default: update every 2 seconds
+    local last_update_var="$3" # Name of variable holding last update time
+    local interval="${4:-2}"   # Default: update every 2 seconds
 
     # Get current time
     local current_time=$(date +%s)
@@ -663,7 +663,7 @@ push_spinner_state() {
     local current_state=""
 
     # Save current spinner PID if running
-    if [[ -n "${MOLE_SPINNER_PID:-}" ]] && kill -0 "$MOLE_SPINNER_PID" 2>/dev/null; then
+    if [[ -n "${MOLE_SPINNER_PID:-}" ]] && kill -0 "$MOLE_SPINNER_PID" 2> /dev/null; then
         current_state="running:$MOLE_SPINNER_PID"
     else
         current_state="stopped"
@@ -693,7 +693,7 @@ pop_spinner_state() {
     # Instead of unset, rebuild array without last element
     local -a new_stack=()
     local i
-    for ((i=0; i<last_idx; i++)); do
+    for ((i = 0; i < last_idx; i++)); do
         new_stack+=("${MOLE_SPINNER_STACK[$i]}")
     done
     MOLE_SPINNER_STACK=("${new_stack[@]}")
@@ -719,7 +719,7 @@ safe_start_spinner() {
     push_spinner_state
 
     # Stop any existing spinner
-    stop_section_spinner 2>/dev/null || true
+    stop_section_spinner 2> /dev/null || true
 
     # Start new spinner
     start_section_spinner "$message"
@@ -729,7 +729,7 @@ safe_start_spinner() {
 # Usage: safe_stop_spinner
 safe_stop_spinner() {
     # Stop current spinner
-    stop_section_spinner 2>/dev/null || true
+    stop_section_spinner 2> /dev/null || true
 
     # Pop previous state
     pop_spinner_state || true
@@ -751,17 +751,17 @@ is_ansi_supported() {
 
     # Check for known ANSI-compatible terminals
     case "$TERM" in
-        xterm*|vt100|vt220|screen*|tmux*|ansi|linux|rxvt*|konsole*)
+        xterm* | vt100 | vt220 | screen* | tmux* | ansi | linux | rxvt* | konsole*)
             return 0
             ;;
-        dumb|unknown)
+        dumb | unknown)
             return 1
             ;;
         *)
             # Check terminfo database if available
-            if command -v tput >/dev/null 2>&1; then
+            if command -v tput > /dev/null 2>&1; then
                 # Test if terminal supports colors (good proxy for ANSI support)
-                local colors=$(tput colors 2>/dev/null || echo "0")
+                local colors=$(tput colors 2> /dev/null || echo "0")
                 [[ "$colors" -ge 8 ]] && return 0
             fi
             return 1
@@ -777,10 +777,10 @@ get_terminal_info() {
     if is_ansi_supported; then
         info+=" (ANSI supported)"
 
-        if command -v tput >/dev/null 2>&1; then
-            local cols=$(tput cols 2>/dev/null || echo "?")
-            local lines=$(tput lines 2>/dev/null || echo "?")
-            local colors=$(tput colors 2>/dev/null || echo "?")
+        if command -v tput > /dev/null 2>&1; then
+            local cols=$(tput cols 2> /dev/null || echo "?")
+            local lines=$(tput lines 2> /dev/null || echo "?")
+            local colors=$(tput colors 2> /dev/null || echo "?")
             info+=" ${cols}x${lines}, ${colors} colors"
         fi
     else
@@ -815,8 +815,8 @@ validate_terminal_environment() {
     esac
 
     # Check terminal size if available
-    if command -v tput >/dev/null 2>&1; then
-        local cols=$(tput cols 2>/dev/null || echo "80")
+    if command -v tput > /dev/null 2>&1; then
+        local cols=$(tput cols 2> /dev/null || echo "80")
         if [[ "$cols" -lt 60 ]]; then
             log_warning "Terminal width ($cols cols) is narrow - output may wrap"
             ((warnings++))
