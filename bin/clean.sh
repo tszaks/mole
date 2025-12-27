@@ -98,9 +98,9 @@ if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
         fi
     done
 fi
-total_items=0
 
-# Tracking variables
+# Global tracking variables (initialized in perform_cleanup)
+total_items=0
 TRACK_SECTION=0
 SECTION_ACTIVITY=0
 files_cleaned=0
@@ -154,6 +154,10 @@ start_section() {
     echo ""
     echo -e "${PURPLE_BOLD}${ICON_ARROW} $1${NC}"
 
+    if [[ -t 1 ]]; then
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Preparing..."
+    fi
+
     # Write section header to export list in dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
         ensure_user_file "$EXPORT_LIST_FILE"
@@ -163,6 +167,8 @@ start_section() {
 }
 
 end_section() {
+    stop_section_spinner
+
     if [[ $TRACK_SECTION -eq 1 && $SECTION_ACTIVITY -eq 0 ]]; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Nothing to clean"
     fi
@@ -172,6 +178,10 @@ end_section() {
 safe_clean() {
     if [[ $# -eq 0 ]]; then
         return 0
+    fi
+
+    if [[ $TRACK_SECTION -eq 1 && $SECTION_ACTIVITY -eq 0 ]]; then
+        stop_section_spinner
     fi
 
     local description
@@ -191,6 +201,12 @@ safe_clean() {
     local total_size_bytes=0
     local total_count=0
     local skipped_count=0
+
+    local show_scan_feedback=false
+    if [[ ${#targets[@]} -gt 20 && -t 1 ]]; then
+        show_scan_feedback=true
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning ${#targets[@]} items..."
+    fi
 
     # Optimized parallel processing for better performance
     local -a existing_paths=()
@@ -221,6 +237,10 @@ safe_clean() {
         [[ -e "$path" ]] && existing_paths+=("$path")
     done
 
+    if [[ "$show_scan_feedback" == "true" ]]; then
+        stop_section_spinner
+    fi
+
     debug_log "Cleaning: $description (${#existing_paths[@]} items)"
 
     # Update global whitelist skip counter
@@ -232,10 +252,15 @@ safe_clean() {
         return 0
     fi
 
-    # Show progress indicator for potentially slow operations
-    if [[ ${#existing_paths[@]} -gt 3 ]]; then
+    # Only show spinner if we have enough items to justify it (>10 items)
+    local show_spinner=false
+    if [[ ${#existing_paths[@]} -gt 10 ]]; then
+        show_spinner=true
         local total_paths=${#existing_paths[@]}
         if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items..."; fi
+    fi
+
+    if [[ ${#existing_paths[@]} -gt 3 ]]; then
         local temp_dir
         # create_temp_dir uses mktemp -d for secure temporary directory creation
         temp_dir=$(create_temp_dir)
@@ -244,6 +269,9 @@ safe_clean() {
         local -a pids=()
         local idx=0
         local completed=0
+        local last_progress_update=$(date +%s)
+        local total_paths=${#existing_paths[@]}
+
         for path in "${existing_paths[@]}"; do
             (
                 local size
@@ -266,12 +294,22 @@ safe_clean() {
                 wait "${pids[0]}" 2> /dev/null || true
                 pids=("${pids[@]:1}")
                 ((completed++))
+
+                # Update progress using helper function
+                if [[ "$show_spinner" == "true" && -t 1 ]]; then
+                    update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
+                fi
             fi
         done
 
         for pid in "${pids[@]}"; do
             wait "$pid" 2> /dev/null || true
             ((completed++))
+
+            # Update progress using helper function
+            if [[ "$show_spinner" == "true" && -t 1 ]]; then
+                update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
+            fi
         done
 
         # Read results using same index
@@ -299,10 +337,6 @@ safe_clean() {
 
         # Temp dir will be auto-cleaned by cleanup_temp_files
     else
-        # Show progress for small batches too (simpler jobs)
-        local total_paths=${#existing_paths[@]}
-        if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items..."; fi
-
         local idx=0
         for path in "${existing_paths[@]}"; do
             local size_bytes
@@ -326,14 +360,11 @@ safe_clean() {
         done
     fi
 
-    # Clear progress / stop spinner before showing result
-    if [[ -t 1 ]]; then
-        stop_inline_spinner
-        echo -ne "\r\033[K"
+    if [[ "$show_spinner" == "true" ]]; then
+        stop_section_spinner
     fi
 
     if [[ $removed_any -eq 1 ]]; then
-        # Convert KB to bytes for bytes_to_human()
         local size_human=$(bytes_to_human "$((total_size_bytes * 1024))")
 
         local label="$description"
@@ -342,7 +373,7 @@ safe_clean() {
         fi
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}→${NC} $label ${YELLOW}($size_human dry)${NC}"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label ${YELLOW}($size_human dry)${NC}"
 
             # Group paths by parent directory for export (Bash 3.2 compatible)
             local paths_temp=$(create_temp_file)
@@ -351,11 +382,9 @@ safe_clean() {
             for path in "${existing_paths[@]}"; do
                 local size=0
 
-                # Get size from result file if it exists (parallel processing with temp_dir)
                 if [[ -n "${temp_dir:-}" && -f "$temp_dir/result_${idx}" ]]; then
                     read -r size count < "$temp_dir/result_${idx}" 2> /dev/null || true
                 else
-                    # Get size directly (small batch processing or no temp_dir)
                     size=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
                 fi
 
@@ -364,7 +393,6 @@ safe_clean() {
                     continue
                 }
 
-                # Write parent|size|path to temp file
                 echo "$(dirname "$path")|$size|$path" >> "$paths_temp"
                 ((idx++))
             done
@@ -491,8 +519,8 @@ EOF
         SYSTEM_CLEAN=false
         echo ""
         echo "Running in non-interactive mode"
-        echo "  • System-level cleanup skipped (requires interaction)"
-        echo "  • User-level cleanup will proceed automatically"
+        echo "  ${ICON_LIST} System-level cleanup skipped (requires interaction)"
+        echo "  ${ICON_LIST} User-level cleanup will proceed automatically"
         echo ""
     fi
 }
@@ -537,7 +565,6 @@ perform_cleanup() {
         fi
     fi
 
-    # Initialize counters
     total_items=0
     files_cleaned=0
     total_size_cleaned=0
@@ -575,6 +602,8 @@ perform_cleanup() {
     start_section "macOS system caches"
     # macOS system caches cleanup (delegated to clean_user_data module)
     clean_macos_system_caches
+    clean_recent_items
+    clean_mail_downloads
     end_section
 
     # ===== 4. Sandboxed app caches =====
