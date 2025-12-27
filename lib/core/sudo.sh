@@ -116,15 +116,23 @@ request_sudo_access() {
     # Check if in clamshell mode - if yes, skip Touch ID entirely
     if is_clamshell_mode; then
         echo -e "${PURPLE}${ICON_ARROW}${NC} ${prompt_msg}"
-        _request_password "$tty_path"
-        return $?
+        if _request_password "$tty_path"; then
+            # Clear all prompt lines (use safe clearing method)
+            safe_clear_lines 3 "$tty_path"
+            return 0
+        fi
+        return 1
     fi
 
     # Not in clamshell mode - try Touch ID if configured
     if ! check_touchid_support; then
         echo -e "${PURPLE}${ICON_ARROW}${NC} ${prompt_msg}"
-        _request_password "$tty_path"
-        return $?
+        if _request_password "$tty_path"; then
+            # Clear all prompt lines (use safe clearing method)
+            safe_clear_lines 3 "$tty_path"
+            return 0
+        fi
+        return 1
     fi
 
     # Touch ID is available and not in clamshell mode
@@ -143,7 +151,8 @@ request_sudo_access() {
             wait "$sudo_pid" 2> /dev/null
             local exit_code=$?
             if [[ $exit_code -eq 0 ]] && sudo -n true 2> /dev/null; then
-                # Touch ID succeeded
+                # Touch ID succeeded - clear the prompt line
+                safe_clear_lines 1 "$tty_path"
                 return 0
             fi
             # Touch ID failed or cancelled
@@ -169,10 +178,15 @@ request_sudo_access() {
     sleep 1
 
     # Clear any leftover prompts on the screen
-    printf "\r\033[2K" > "$tty_path"
+    safe_clear_line "$tty_path"
 
     # Now use our password input (this should not trigger Touch ID again)
-    _request_password "$tty_path"
+    if _request_password "$tty_path"; then
+        # Clear all prompt lines (use safe clearing method)
+        safe_clear_lines 3 "$tty_path"
+        return 0
+    fi
+    return 1
 }
 
 # ============================================================================
