@@ -28,30 +28,24 @@ print_header() {
 run_system_checks() {
     unset AUTO_FIX_SUMMARY AUTO_FIX_DETAILS
     echo ""
-    echo -e "${PURPLE_BOLD}System Check${NC}"
-    echo ""
 
-    echo -e "${BLUE}${ICON_ARROW}${NC} System updates"
+    # Run checks and display results directly without grouping
     check_all_updates
     echo ""
 
-    echo -e "${BLUE}${ICON_ARROW}${NC} System health"
     check_system_health
     echo ""
 
-    echo -e "${BLUE}${ICON_ARROW}${NC} Security posture"
     check_all_security
     if ask_for_security_fixes; then
         perform_security_fixes
     fi
     echo ""
 
-    echo -e "${BLUE}${ICON_ARROW}${NC} Configuration"
     check_all_config
     echo ""
 
     show_suggestions
-    echo ""
 
     if ask_for_updates; then
         perform_updates
@@ -121,23 +115,12 @@ announce_action() {
     local desc="$2"
     local kind="$3"
 
-    local badge=""
-    if [[ "$kind" == "confirm" ]]; then
-        badge="${YELLOW}[Confirm]${NC} "
-    fi
-
-    local line="${BLUE}${ICON_ARROW}${NC} ${badge}${name}"
-    if [[ -n "$desc" ]]; then
-        line+=" ${GRAY}- ${desc}${NC}"
-    fi
-
-    if ${first_heading:-true}; then
-        first_heading=false
+    if [[ "${FIRST_ACTION:-true}" == "true" ]]; then
+        export FIRST_ACTION=false
     else
         echo ""
     fi
-
-    echo -e "$line"
+    echo -e "${BLUE}${ICON_ARROW} ${name}${NC}"
 }
 
 touchid_configured() {
@@ -407,27 +390,7 @@ main() {
                 echo "${CURRENT_WHITELIST_PATTERNS[*]}"
             )
             echo -e "${ICON_ADMIN} Active Whitelist: ${patterns_list}"
-        else
-            echo -e "${ICON_ADMIN} Active Whitelist: ${GRAY}${count} items${NC}"
         fi
-    fi
-    echo ""
-
-    echo -ne "${PURPLE}${ICON_ARROW}${NC} Optimization needs sudo — ${GREEN}Enter${NC} continue, ${GRAY}ESC${NC} cancel: "
-
-    local key
-    if ! key=$(read_key); then
-        exit 0
-    fi
-
-    if [[ "$key" == "ENTER" ]]; then
-        printf "\r\033[K"
-    else
-        exit 0
-    fi
-
-    if [[ -t 1 ]]; then
-        stop_inline_spinner
     fi
 
     local -a safe_items=()
@@ -454,9 +417,10 @@ main() {
         fi
     done < "$opts_file"
 
-    local first_heading=true
+    echo ""
+    ensure_sudo_session "System optimization requires admin access (Touch ID or password)" || true
 
-    ensure_sudo_session "System optimization requires admin access" || true
+    export FIRST_ACTION=true
     if [[ ${#safe_items[@]} -gt 0 ]]; then
         for item in "${safe_items[@]}"; do
             IFS='|' read -r name desc action path <<< "$item"
