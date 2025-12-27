@@ -25,7 +25,7 @@ source "$SCRIPT_DIR/lib/core/common.sh"
 trap cleanup_temp_files EXIT INT TERM
 
 # Version info
-VERSION="1.14.6"
+VERSION="1.14.7"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
 # Check TouchID configuration
@@ -55,7 +55,49 @@ get_latest_version_from_github() {
 
 # Check if installed via Homebrew
 is_homebrew_install() {
-    command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1
+    # Fast path: check if mole binary is a Homebrew symlink
+    local mole_path
+    mole_path=$(command -v mole 2> /dev/null) || return 1
+
+    # Check if mole is a symlink pointing to Homebrew Cellar
+    if [[ -L "$mole_path" ]] && readlink "$mole_path" | grep -q "Cellar/mole"; then
+        # Symlink looks good, but verify brew actually manages it
+        if command -v brew > /dev/null 2>&1; then
+            # Use fast brew list check
+            brew list --formula 2>/dev/null | grep -q "^mole$" && return 0
+        else
+            # brew not available - cannot update/remove via Homebrew
+            return 1
+        fi
+    fi
+
+    # Fallback: check common Homebrew paths and verify with Cellar
+    if [[ -f "$mole_path" ]]; then
+        case "$mole_path" in
+            /opt/homebrew/bin/mole|/usr/local/bin/mole)
+                # Verify Cellar directory exists
+                if [[ -d /opt/homebrew/Cellar/mole ]] || [[ -d /usr/local/Cellar/mole ]]; then
+                    # Double-check with brew if available
+                    if command -v brew > /dev/null 2>&1; then
+                        brew list --formula 2>/dev/null | grep -q "^mole$" && return 0
+                    else
+                        return 0  # Cellar exists, probably Homebrew install
+                    fi
+                fi
+                ;;
+        esac
+    fi
+
+    # Last resort: check custom Homebrew prefix
+    if command -v brew > /dev/null 2>&1; then
+        local brew_prefix
+        brew_prefix=$(brew --prefix 2> /dev/null)
+        if [[ -n "$brew_prefix" && "$mole_path" == "$brew_prefix/bin/mole" && -d "$brew_prefix/Cellar/mole" ]]; then
+            brew list --formula 2>/dev/null | grep -q "^mole$" && return 0
+        fi
+    fi
+
+    return 1
 }
 
 # Check for updates (non-blocking, always check in background)
