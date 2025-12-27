@@ -123,14 +123,11 @@ EOF
     local -a items=()
 
     # Always-on items (no size checks - instant)
-    items+=('system_maintenance|System Maintenance|Rebuild system databases & flush caches|true')
-    items+=('maintenance_scripts|Maintenance Scripts|Rotate system logs|true')
-    items+=('recent_items|Recent Items|Clear recent apps/documents/servers lists|true')
-    items+=('log_cleanup|Diagnostics Cleanup|Purge old diagnostic & crash logs|true')
-    items+=('mail_downloads|Mail Downloads|Clear old mail attachments (> 30 days)|true')
-    items+=('swap_cleanup|Swap Refresh|Reset swap files and dynamic pager|true')
-    items+=('developer_cleanup|Developer Cleanup|Clear Xcode DerivedData & DeviceSupport|true')
-    items+=('network_optimization|Network Optimization|Flush DNS, ARP & reset mDNS|true')
+    items+=('system_maintenance|System Database Maintenance|Rebuild LaunchServices, refresh DNS & verify Spotlight|true')
+    items+=('cache_refresh|Finder & Safari Cache Refresh|Refresh QuickLook, icon services & Safari caches|true')
+    items+=('maintenance_scripts|System Log Rotation|Rotate and compress system logs with newsyslog|true')
+    items+=('swap_cleanup|Virtual Memory Refresh|Reset swap files and dynamic pager service|true')
+    items+=('network_optimization|Network Stack Optimization|Refresh DNS, rebuild ARP & restart mDNSResponder|true')
 
     # Output items as JSON
     local first=true
