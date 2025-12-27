@@ -316,7 +316,7 @@ select_purge_categories() {
         done
 
         printf "%s\n" "$clear_line"
-        printf "%s${GRAY}↑↓  |  Space Select  |  Enter Confirm  |  A All  |  I Invert  |  Q Quit${NC}\n" "$clear_line"
+        printf "%s${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}  |  Space Select  |  Enter Confirm  |  A All  |  I Invert  |  Q Quit${NC}\n" "$clear_line"
     }
 
     trap restore_terminal EXIT
@@ -473,7 +473,7 @@ clean_project_artifacts() {
 
     if [[ ${#all_found_items[@]} -eq 0 ]]; then
         echo ""
-        echo -e "${GREEN}✓${NC} Great! No old project artifacts to clean"
+        echo -e "${GREEN}${ICON_SUCCESS}${NC} Great! No old project artifacts to clean"
         printf '\n'
         return 2 # Special code: nothing to clean
     fi
@@ -633,16 +633,13 @@ clean_project_artifacts() {
             continue
         fi
 
-        # Show progress
         if [[ -t 1 ]]; then
             start_inline_spinner "Cleaning $project_name/$artifact_type..."
         fi
 
-        # Clean the item
         if [[ -e "$item_path" ]]; then
             safe_remove "$item_path" true
 
-            # Update stats
             if [[ ! -e "$item_path" ]]; then
                 local current_total=$(cat "$stats_dir/purge_stats" 2> /dev/null || echo "0")
                 echo "$((current_total + size_kb))" > "$stats_dir/purge_stats"
@@ -652,7 +649,7 @@ clean_project_artifacts() {
 
         if [[ -t 1 ]]; then
             stop_inline_spinner
-            echo -e "${GREEN}✓${NC} $project_name - $artifact_type ${GREEN}($size_human)${NC}"
+            echo -e "${GREEN}${ICON_SUCCESS}${NC} $project_name - $artifact_type ${GREEN}($size_human)${NC}"
         fi
     done
 
