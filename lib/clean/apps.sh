@@ -48,22 +48,20 @@ clean_ds_store_tree() {
             rm -f "$ds_file" 2> /dev/null || true
         fi
 
-        # Stop after 500 files to avoid hanging
-        if [[ $file_count -ge 500 ]]; then
+        if [[ $file_count -ge $MOLE_MAX_DS_STORE_FILES ]]; then
             break
         fi
     done < <("${find_cmd[@]}" 2> /dev/null || true)
 
     if [[ "$spinner_active" == "true" ]]; then
-        stop_inline_spinner
-        echo -ne "\r\033[K"
+        stop_section_spinner
     fi
 
     if [[ $file_count -gt 0 ]]; then
         local size_human
         size_human=$(bytes_to_human "$total_bytes")
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}→${NC} $label ${YELLOW}($file_count files, $size_human dry)${NC}"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label ${YELLOW}($file_count files, $size_human dry)${NC}"
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $label ${GREEN}($file_count files, $size_human)${NC}"
         fi
@@ -84,6 +82,32 @@ clean_ds_store_tree() {
 scan_installed_apps() {
     local installed_bundles="$1"
 
+    # Performance optimization: cache results for 5 minutes
+    local cache_file="$HOME/.cache/mole/installed_apps_cache"
+    local cache_age_seconds=300  # 5 minutes
+
+    if [[ -f "$cache_file" ]]; then
+        local cache_mtime=$(get_file_mtime "$cache_file")
+        local current_time=$(date +%s)
+        local age=$((current_time - cache_mtime))
+
+        if [[ $age -lt $cache_age_seconds ]]; then
+            debug_log "Using cached app list (age: ${age}s)"
+            # Verify cache file is readable and not empty
+            if [[ -r "$cache_file" ]] && [[ -s "$cache_file" ]]; then
+                if cat "$cache_file" > "$installed_bundles" 2>/dev/null; then
+                    return 0
+                else
+                    debug_log "Warning: Failed to read cache, rebuilding"
+                fi
+            else
+                debug_log "Warning: Cache file empty or unreadable, rebuilding"
+            fi
+        fi
+    fi
+
+    debug_log "Scanning installed applications (cache expired or missing)"
+
     # Scan all Applications directories
     local -a app_dirs=(
         "/Applications"
@@ -93,25 +117,6 @@ scan_installed_apps() {
 
     # Create a temp dir for parallel results to avoid write contention
     local scan_tmp_dir=$(create_temp_dir)
-
-    # Start progress indicator with real-time count
-    local progress_count_file="$scan_tmp_dir/progress_count"
-    echo "0" > "$progress_count_file"
-
-    # Background spinner that shows live progress
-    (
-        trap 'exit 0' TERM INT EXIT
-        local spinner_chars="|/-\\"
-        local i=0
-        while true; do
-            local count=$(cat "$progress_count_file" 2> /dev/null || echo "0")
-            local c="${spinner_chars:$((i % 4)):1}"
-            echo -ne "\r\033[K  $c Scanning installed apps... $count found" >&2
-            ((i++))
-            sleep 0.1
-        done
-    ) &
-    local spinner_pid=$!
 
     # Parallel scan for applications
     local pids=()
@@ -137,19 +142,9 @@ scan_installed_apps() {
                     echo "$bundle_id"
                     ((count++))
 
-                    # Batch update progress every 10 apps to reduce I/O
-                    if [[ $((count % 10)) -eq 0 ]]; then
-                        local current=$(cat "$progress_count_file" 2> /dev/null || echo "0")
-                        echo "$((current + 10))" > "$progress_count_file"
-                    fi
                 fi
             done
 
-            # Final progress update
-            if [[ $((count % 10)) -ne 0 ]]; then
-                local current=$(cat "$progress_count_file" 2> /dev/null || echo "0")
-                echo "$((current + count % 10))" > "$progress_count_file"
-            fi
         ) > "$scan_tmp_dir/apps_${dir_idx}.txt" &
         pids+=($!)
         ((dir_idx++))
@@ -170,24 +165,25 @@ scan_installed_apps() {
     pids+=($!)
 
     # Wait for all background scans to complete
+    debug_log "Waiting for ${#pids[@]} background processes: ${pids[*]}"
+
     for pid in "${pids[@]}"; do
         wait "$pid" 2> /dev/null || true
     done
 
-    # Stop the spinner
-    kill -TERM "$spinner_pid" 2> /dev/null || true
-    wait "$spinner_pid" 2> /dev/null || true
-    echo -ne "\r\033[K" >&2
+    debug_log "All background processes completed"
 
-    # Merge all results
     cat "$scan_tmp_dir"/*.txt >> "$installed_bundles" 2> /dev/null || true
     safe_remove "$scan_tmp_dir" true
 
-    # Deduplicate
     sort -u "$installed_bundles" -o "$installed_bundles"
 
-    local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')
-    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Found $app_count active/installed apps"
+    # Cache the results
+    ensure_user_dir "$(dirname "$cache_file")"
+    cp "$installed_bundles" "$cache_file" 2>/dev/null || true
+
+    local app_count=$(wc -l < "$installed_bundles" 2>/dev/null | tr -d ' ')
+    debug_log "Scanned $app_count unique applications"
 }
 
 # Check if bundle is orphaned
@@ -220,7 +216,6 @@ is_bundle_orphaned() {
     esac
 
     # Check file age - only clean if 60+ days inactive
-    # Use existing logic
     if [[ -e "$directory_path" ]]; then
         local last_modified_epoch=$(get_file_mtime "$directory_path")
         local current_epoch=$(date +%s)
@@ -240,20 +235,27 @@ is_bundle_orphaned() {
 clean_orphaned_app_data() {
     # Quick permission check - if we can't access Library folders, skip
     if ! ls "$HOME/Library/Caches" > /dev/null 2>&1; then
+        stop_section_spinner
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Skipped: No permission to access Library folders"
         return 0
     fi
 
     # Build list of installed/active apps
+    start_section_spinner "Scanning installed apps..."
     local installed_bundles=$(create_temp_file)
     scan_installed_apps "$installed_bundles"
+    stop_section_spinner
+
+    # Display scan results
+    local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')
+    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Found $app_count active/installed apps"
 
     # Track statistics
     local orphaned_count=0
     local total_orphaned_kb=0
 
     # Unified orphaned resource scanner (caches, logs, states, webkit, HTTP, cookies)
-    MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning orphaned app resources..."
+    start_section_spinner "Scanning orphaned app resources..."
 
     # Define resource types to scan
     # CRITICAL: NEVER add LaunchAgents or LaunchDaemons (breaks login items/startup apps)
@@ -293,14 +295,13 @@ clean_orphaned_app_data() {
             # Use shell glob (no ls needed)
             # Limit iterations to prevent hanging on directories with too many files
             local iteration_count=0
-            local max_iterations=100
 
             for match in $item_path; do
                 [[ -e "$match" ]] || continue
 
                 # Safety: limit iterations to prevent infinite loops on massive directories
                 ((iteration_count++))
-                if [[ $iteration_count -gt $max_iterations ]]; then
+                if [[ $iteration_count -gt $MOLE_MAX_ORPHAN_ITERATIONS ]]; then
                     break
                 fi
 
@@ -324,7 +325,7 @@ clean_orphaned_app_data() {
         done
     done
 
-    stop_inline_spinner
+    stop_section_spinner
 
     if [[ $orphaned_count -gt 0 ]]; then
         local orphaned_mb=$(echo "$total_orphaned_kb" | awk '{printf "%.1f", $1/1024}')
