@@ -5,7 +5,12 @@ set -euo pipefail
 
 # Clean user essentials (caches, logs, trash)
 clean_user_essentials() {
+    start_section_spinner "Scanning caches..."
+
     safe_clean ~/Library/Caches/* "User app cache"
+
+    stop_section_spinner
+
     safe_clean ~/Library/Logs/* "User app logs"
     safe_clean ~/.Trash/* "Trash"
 }
@@ -56,16 +61,14 @@ scan_external_volumes() {
     if [[ $volume_count -eq 0 ]]; then
         # Show info if network volumes were skipped
         if [[ $network_count -gt 0 ]]; then
-            echo -e "  ${GRAY}→${NC} External volumes (${network_count} network volume(s) skipped)"
+            echo -e "  ${GRAY}${ICON_LIST}${NC} External volumes (${network_count} network volume(s) skipped)"
             note_activity
         fi
         return 0
     fi
 
     # We have local external volumes, now perform full scan
-    if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning $volume_count external volume(s)..."
-    fi
+    start_section_spinner "Scanning $volume_count external volume(s)..."
 
     for volume in "${candidate_volumes[@]}"; do
         # Verify volume is actually mounted (reduced timeout from 2s to 1s)
@@ -85,14 +88,16 @@ scan_external_volumes() {
         fi
     done
 
-    if [[ -t 1 ]]; then stop_inline_spinner; fi
+    stop_section_spinner
 }
 
 # Clean Finder metadata (.DS_Store files)
 clean_finder_metadata() {
+    stop_section_spinner
+
     if [[ "$PROTECT_FINDER_METADATA" == "true" ]]; then
         note_activity
-        echo -e "  ${GRAY}⊘${NC} Finder metadata (protected)"
+        echo -e "  ${GREEN}${ICON_EMPTY}${NC} Finder metadata · whitelist protected"
         return
     fi
 
@@ -101,6 +106,8 @@ clean_finder_metadata() {
 
 # Clean macOS system caches
 clean_macos_system_caches() {
+    stop_section_spinner
+
     # Clean saved application states with protection for System Settings
     # Note: safe_clean already calls should_protect_path for each file
     safe_clean ~/Library/Saved\ Application\ State/* "Saved application states"
@@ -121,20 +128,100 @@ clean_macos_system_caches() {
     safe_clean ~/Library/Caches/CloudKit/* "CloudKit cache"
 
     # Clean incomplete downloads
-    safe_clean ~/Downloads/*.download "Incomplete downloads (Safari)"
-    safe_clean ~/Downloads/*.crdownload "Incomplete downloads (Chrome)"
-    safe_clean ~/Downloads/*.part "Incomplete downloads (partial)"
+    safe_clean ~/Downloads/*.download "Safari incomplete downloads"
+    safe_clean ~/Downloads/*.crdownload "Chrome incomplete downloads"
+    safe_clean ~/Downloads/*.part "Partial incomplete downloads"
 
     # Additional user-level caches
     safe_clean ~/Library/Autosave\ Information/* "Autosave information"
     safe_clean ~/Library/IdentityCaches/* "Identity caches"
-    safe_clean ~/Library/Suggestions/* "Suggestions cache (Siri)"
+    safe_clean ~/Library/Suggestions/* "Siri suggestions cache"
     safe_clean ~/Library/Calendars/Calendar\ Cache "Calendar cache"
     safe_clean ~/Library/Application\ Support/AddressBook/Sources/*/Photos.cache "Address Book photo cache"
 }
 
+# Clean recent items lists
+clean_recent_items() {
+    stop_section_spinner
+
+    local shared_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"
+
+    # Target only the global recent item lists to avoid touching per-app/System Settings SFL files
+    local -a recent_lists=(
+        "$shared_dir/com.apple.LSSharedFileList.RecentApplications.sfl2"
+        "$shared_dir/com.apple.LSSharedFileList.RecentDocuments.sfl2"
+        "$shared_dir/com.apple.LSSharedFileList.RecentServers.sfl2"
+        "$shared_dir/com.apple.LSSharedFileList.RecentHosts.sfl2"
+        "$shared_dir/com.apple.LSSharedFileList.RecentApplications.sfl"
+        "$shared_dir/com.apple.LSSharedFileList.RecentDocuments.sfl"
+        "$shared_dir/com.apple.LSSharedFileList.RecentServers.sfl"
+        "$shared_dir/com.apple.LSSharedFileList.RecentHosts.sfl"
+    )
+
+    if [[ -d "$shared_dir" ]]; then
+        for sfl_file in "${recent_lists[@]}"; do
+            [[ -e "$sfl_file" ]] && safe_clean "$sfl_file" "Recent items list"
+        done
+    fi
+
+    # Clean recent items preferences
+    safe_clean ~/Library/Preferences/com.apple.recentitems.plist "Recent items preferences"
+}
+
+# Clean old mail downloads
+clean_mail_downloads() {
+    stop_section_spinner
+
+    local mail_age_days=${MOLE_MAIL_AGE_DAYS:-30}
+    if ! [[ "$mail_age_days" =~ ^[0-9]+$ ]]; then
+        mail_age_days=30
+    fi
+
+    local -a mail_dirs=(
+        "$HOME/Library/Mail Downloads"
+        "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
+    )
+
+    local count=0
+    local cleaned_kb=0
+
+    for target_path in "${mail_dirs[@]}"; do
+        if [[ -d "$target_path" ]]; then
+            # Check directory size threshold
+            local dir_size_kb=0
+            if command -v du > /dev/null 2>&1; then
+                dir_size_kb=$(du -sk "$target_path" 2> /dev/null | awk '{print $1}' || echo "0")
+            fi
+
+            # Skip if below threshold
+            if [[ $dir_size_kb -lt ${MOLE_MAIL_DOWNLOADS_MIN_KB:-5120} ]]; then
+                continue
+            fi
+
+            # Find and remove files older than specified days
+            while IFS= read -r -d '' file_path; do
+                if [[ -f "$file_path" ]]; then
+                    local file_size_kb=$(du -sk "$file_path" 2> /dev/null | awk '{print $1}' || echo "0")
+                    if safe_remove "$file_path" true; then
+                        ((count++))
+                        ((cleaned_kb += file_size_kb))
+                    fi
+                fi
+            done < <(command find "$target_path" -type f -mtime +"$mail_age_days" -print0 2> /dev/null || true)
+        fi
+    done
+
+    if [[ $count -gt 0 ]]; then
+        local cleaned_mb=$(echo "$cleaned_kb" | awk '{printf "%.1f", $1/1024}')
+        echo "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $count mail attachments (~${cleaned_mb}MB)"
+        note_activity
+    fi
+}
+
 # Clean sandboxed app caches
 clean_sandboxed_app_caches() {
+    stop_section_spinner
+
     safe_clean ~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/* "Wallpaper agent cache"
     safe_clean ~/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/* "Media analysis cache"
     safe_clean ~/Library/Containers/com.apple.AppStore/Data/Library/Caches/* "App Store cache"
@@ -144,41 +231,38 @@ clean_sandboxed_app_caches() {
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
 
-    # Enable nullglob for safe globbing; restore afterwards
-    local _ng_state
-    _ng_state=$(shopt -p nullglob || true)
-    shopt -s nullglob
-
-    if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning sandboxed apps..."
-    fi
+    start_section_spinner "Scanning sandboxed apps..."
 
     local total_size=0
     local cleaned_count=0
     local found_any=false
 
+    # Enable nullglob for safe globbing; restore afterwards
+    local _ng_state
+    _ng_state=$(shopt -p nullglob || true)
+    shopt -s nullglob
+
     for container_dir in "$containers_dir"/*; do
         process_container_cache "$container_dir"
     done
 
-    if [[ -t 1 ]]; then stop_inline_spinner; fi
+    # Restore nullglob to previous state
+    eval "$_ng_state"
+
+    stop_section_spinner
 
     if [[ "$found_any" == "true" ]]; then
         local size_human=$(bytes_to_human "$((total_size * 1024))")
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}→${NC} Sandboxed app caches ${YELLOW}($size_human dry)${NC}"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Sandboxed app caches ${YELLOW}($size_human dry)${NC}"
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Sandboxed app caches ${GREEN}($size_human)${NC}"
         fi
-        # Update global counters
         ((files_cleaned += cleaned_count))
         ((total_size_cleaned += total_size))
         ((total_items++))
         note_activity
     fi
-
-    # Restore nullglob to previous state
-    eval "$_ng_state"
 }
 
 # Process a single container cache directory (reduces nesting)
@@ -208,21 +292,25 @@ process_container_cache() {
         ((cleaned_count++))
 
         if [[ "$DRY_RUN" != "true" ]]; then
-            # Clean contents safely (rm -rf is restricted by safe_remove)
-            local _ng_item_state
-            _ng_item_state=$(shopt -p nullglob || true)
+            # Clean contents safely with local nullglob management
+            local _ng_state
+            _ng_state=$(shopt -p nullglob || true)
             shopt -s nullglob
+
             for item in "$cache_dir"/*; do
                 [[ -e "$item" ]] || continue
                 safe_remove "$item" true || true
             done
-            eval "$_ng_item_state"
+
+            eval "$_ng_state"
         fi
     fi
 }
 
 # Clean browser caches (Safari, Chrome, Edge, Firefox, etc.)
 clean_browsers() {
+    stop_section_spinner
+
     safe_clean ~/Library/Caches/com.apple.Safari/* "Safari cache"
 
     # Chrome/Chromium
@@ -246,6 +334,8 @@ clean_browsers() {
 
 # Clean cloud storage app caches
 clean_cloud_storage() {
+    stop_section_spinner
+
     safe_clean ~/Library/Caches/com.dropbox.* "Dropbox cache"
     safe_clean ~/Library/Caches/com.getdropbox.dropbox "Dropbox cache"
     safe_clean ~/Library/Caches/com.google.GoogleDrive "Google Drive cache"
@@ -257,6 +347,8 @@ clean_cloud_storage() {
 
 # Clean office application caches
 clean_office_applications() {
+    stop_section_spinner
+
     safe_clean ~/Library/Caches/com.microsoft.Word "Microsoft Word cache"
     safe_clean ~/Library/Caches/com.microsoft.Excel "Microsoft Excel cache"
     safe_clean ~/Library/Caches/com.microsoft.Powerpoint "Microsoft PowerPoint cache"
@@ -269,6 +361,8 @@ clean_office_applications() {
 
 # Clean virtualization tools
 clean_virtualization_tools() {
+    stop_section_spinner
+
     safe_clean ~/Library/Caches/com.vmware.fusion "VMware Fusion cache"
     safe_clean ~/Library/Caches/com.parallels.* "Parallels cache"
     safe_clean ~/VirtualBox\ VMs/.cache "VirtualBox cache"
@@ -277,24 +371,26 @@ clean_virtualization_tools() {
 
 # Clean Application Support logs and caches
 clean_application_support_logs() {
+    stop_section_spinner
+
     if [[ ! -d "$HOME/Library/Application Support" ]] || ! ls "$HOME/Library/Application Support" > /dev/null 2>&1; then
         note_activity
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Skipped: No permission to access Application Support"
         return 0
     fi
 
-    if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning Application Support..."
-    fi
+    start_section_spinner "Scanning Application Support..."
 
     local total_size=0
     local cleaned_count=0
     local found_any=false
 
-    # Clean log directories and cache patterns
-    local _ng_app_state
-    _ng_app_state=$(shopt -p nullglob || true)
+    # Enable nullglob for safe globbing
+    local _ng_state
+    _ng_state=$(shopt -p nullglob || true)
     shopt -s nullglob
+
+    # Clean log directories and cache patterns
     for app_dir in ~/Library/Application\ Support/*; do
         [[ -d "$app_dir" ]] || continue
 
@@ -327,20 +423,15 @@ clean_application_support_logs() {
                     found_any=true
 
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        local _ng_candidate_state
-                        _ng_candidate_state=$(shopt -p nullglob || true)
-                        shopt -s nullglob
                         for item in "$candidate"/*; do
                             [[ -e "$item" ]] || continue
                             safe_remove "$item" true > /dev/null 2>&1 || true
                         done
-                        eval "$_ng_candidate_state"
                     fi
                 fi
             fi
         done
     done
-    eval "$_ng_app_state"
 
     # Clean Group Containers logs
     local known_group_containers=(
@@ -370,16 +461,18 @@ clean_application_support_logs() {
         done
     done
 
-    if [[ -t 1 ]]; then stop_inline_spinner; fi
+    # Restore nullglob to previous state
+    eval "$_ng_state"
+
+    stop_section_spinner
 
     if [[ "$found_any" == "true" ]]; then
         local size_human=$(bytes_to_human "$((total_size * 1024))")
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}→${NC} Application Support logs/caches ${YELLOW}($size_human dry)${NC}"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Application Support logs/caches ${YELLOW}($size_human dry)${NC}"
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Application Support logs/caches ${GREEN}($size_human)${NC}"
         fi
-        # Update global counters
         ((files_cleaned += cleaned_count))
         ((total_size_cleaned += total_size))
         ((total_items++))
