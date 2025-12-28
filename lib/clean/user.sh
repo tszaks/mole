@@ -14,27 +14,7 @@ clean_user_essentials() {
     safe_clean ~/Library/Logs/* "User app logs"
 
     # Check if Trash directory is whitelisted
-    local trash_protected=false
-    local trash_path="$HOME/.Trash"
-
-    if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
-        for w in "${WHITELIST_PATTERNS[@]}"; do
-            # Expand tilde in whitelist pattern for comparison
-            local expanded_w="${w/#\~/$HOME}"
-
-            # Remove trailing slash for consistent comparison
-            expanded_w="${expanded_w%/}"
-
-            # Check for exact match or glob pattern match
-            # shellcheck disable=SC2053
-            if [[ "$trash_path" == "$expanded_w" ]] || [[ "$trash_path" == $expanded_w ]]; then
-                trash_protected=true
-                break
-            fi
-        done
-    fi
-
-    if [[ "$trash_protected" == "true" ]]; then
+    if is_path_whitelisted "$HOME/.Trash"; then
         note_activity
         echo -e "  ${GREEN}${ICON_EMPTY}${NC} Trash · whitelist protected"
     else
@@ -103,24 +83,9 @@ scan_external_volumes() {
 
         # 1. Clean Trash on volume
         local volume_trash="$volume/.Trashes"
-        local volume_trash_protected=false
 
         # Check if external volume Trash is whitelisted
-        if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
-            for w in "${WHITELIST_PATTERNS[@]}"; do
-                local expanded_w="${w/#\~/$HOME}"
-                expanded_w="${expanded_w%/}"
-
-                # Check for exact match or glob pattern match
-                # shellcheck disable=SC2053
-                if [[ "$volume_trash" == "$expanded_w" ]] || [[ "$volume_trash" == $expanded_w ]]; then
-                    volume_trash_protected=true
-                    break
-                fi
-            done
-        fi
-
-        if [[ -d "$volume_trash" && "$DRY_RUN" != "true" && "$volume_trash_protected" != "true" ]]; then
+        if [[ -d "$volume_trash" && "$DRY_RUN" != "true" ]] && ! is_path_whitelisted "$volume_trash"; then
             # Safely iterate and remove each item
             while IFS= read -r -d '' item; do
                 safe_remove "$item" true || true

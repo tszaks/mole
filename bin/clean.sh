@@ -222,16 +222,9 @@ safe_clean() {
         [[ "$skip" == "true" ]] && continue
 
         # Check user-defined whitelist
-        if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
-            for w in "${WHITELIST_PATTERNS[@]}"; do
-                # Match both exact path and glob pattern
-                # shellcheck disable=SC2053
-                if [[ "$path" == "$w" ]] || [[ $path == $w ]]; then
-                    skip=true
-                    ((skipped_count++))
-                    break
-                fi
-            done
+        if is_path_whitelisted "$path"; then
+            skip=true
+            ((skipped_count++))
         fi
         [[ "$skip" == "true" ]] && continue
         [[ -e "$path" ]] && existing_paths+=("$path")

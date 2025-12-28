@@ -590,6 +590,35 @@ should_protect_path() {
     return 1
 }
 
+# Check if a path is protected by whitelist patterns
+# Args: $1 - path to check
+# Returns: 0 if whitelisted, 1 if not
+is_path_whitelisted() {
+    local target_path="$1"
+    [[ -z "$target_path" ]] && return 1
+
+    # Normalize path (remove trailing slash)
+    local normalized_target="${target_path%/}"
+
+    # Empty whitelist means nothing is protected
+    [[ ${#WHITELIST_PATTERNS[@]} -eq 0 ]] && return 1
+
+    for pattern in "${WHITELIST_PATTERNS[@]}"; do
+        # Expand tilde in whitelist pattern for comparison
+        local expanded_pattern="${pattern/#\~/$HOME}"
+        expanded_pattern="${expanded_pattern%/}"
+
+        # Check for exact match or glob pattern match
+        # shellcheck disable=SC2053
+        if [[ "$normalized_target" == "$expanded_pattern" ]] ||
+           [[ "$normalized_target" == $expanded_pattern ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Locate files associated with an application
 find_app_files() {
     local bundle_id="$1"
