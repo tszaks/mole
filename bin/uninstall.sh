@@ -240,6 +240,7 @@ scan_applications() {
 
     local spinner_pid=""
     (
+        # shellcheck disable=SC2329  # Function invoked indirectly via trap
         cleanup_spinner() { exit 0; }
         trap cleanup_spinner TERM INT EXIT
         local spinner_chars="|/-\\"

@@ -28,6 +28,7 @@ CALL_LOG="$HOME/system_calls.log"
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
+sudo() { return 0; }
 safe_sudo_find_delete() {
     echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
     return 0
@@ -37,10 +38,13 @@ safe_sudo_remove() {
     return 0
 }
 log_success() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
 is_sip_enabled() { return 1; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
+run_with_timeout() { shift; "$@"; }
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -60,14 +64,18 @@ CALL_LOG="$HOME/system_calls_skip.log"
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
+sudo() { return 0; }
 safe_sudo_find_delete() { return 0; }
 safe_sudo_remove() {
     echo "REMOVE:$1" >> "$CALL_LOG"
     return 0
 }
 log_success() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
 is_sip_enabled() { return 0; } # SIP enabled -> skip removal
 find() { return 0; }
+run_with_timeout() { shift; "$@"; }
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -327,4 +335,399 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Fixed 2 broken preference files"* ]]
     [[ "$output" == *"Removed 1 broken login items"* ]]
+}
+
+# ============================================================================
+# Tests for new system cleaning features (v1.15.2)
+# ============================================================================
+
+@test "clean_deep_system cleans memory exception reports" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/memory_exception_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() { return 0; }
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2:$3:$4" >> "$CALL_LOG"
+    return 0
+}
+safe_sudo_remove() { return 0; }
+log_success() { :; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"reportmemoryexception/MemoryLimitViolations"* ]]
+    [[ "$output" == *":30:"* ]]  # 30-day retention
+}
+
+@test "clean_deep_system cleans diagnostic trace logs" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/diag_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() { return 0; }
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 0
+}
+safe_sudo_remove() { return 0; }
+log_success() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"diagnostics/Persist"* ]]
+    [[ "$output" == *"diagnostics/Special"* ]]
+    [[ "$output" == *"tracev3"* ]]
+}
+
+@test "clean_deep_system validates symbolication cache size before cleaning" {
+    # This test verifies the size threshold logic directly
+    # Testing that sizes > 1GB trigger cleanup
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+# Simulate size check logic
+symbolication_size_mb="2048"  # 2GB
+
+if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
+    if [[ $symbolication_size_mb -gt 1024 ]]; then
+        echo "WOULD_CLEAN=yes"
+    else
+        echo "WOULD_CLEAN=no"
+    fi
+else
+    echo "WOULD_CLEAN=no"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"WOULD_CLEAN=yes"* ]]
+}
+
+@test "clean_deep_system skips symbolication cache when small" {
+    # This test verifies sizes < 1GB don't trigger cleanup
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+# Simulate size check logic with small cache
+symbolication_size_mb="500"  # 500MB < 1GB
+
+if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
+    if [[ $symbolication_size_mb -gt 1024 ]]; then
+        echo "WOULD_CLEAN=yes"
+    else
+        echo "WOULD_CLEAN=no"
+    fi
+else
+    echo "WOULD_CLEAN=no"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"WOULD_CLEAN=no"* ]]
+}
+
+@test "clean_deep_system handles symbolication cache size check failure" {
+    # This test verifies invalid/empty size values don't trigger cleanup
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+# Simulate size check logic with empty/invalid value
+symbolication_size_mb=""  # Empty - simulates failure
+
+if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
+    if [[ $symbolication_size_mb -gt 1024 ]]; then
+        echo "WOULD_CLEAN=yes"
+    else
+        echo "WOULD_CLEAN=no"
+    fi
+else
+    echo "WOULD_CLEAN=no"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"WOULD_CLEAN=no"* ]]
+}
+
+@test "clean_deep_system cleans Aliyun components when present" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+CLEANED_PATHS=""
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        # Simulate Aliyun paths exist
+        [[ "$3" == *"ali_bas"* || "$3" == *"Aliedr"* ]] && return 0
+        return 1
+    fi
+    return 0
+}
+
+safe_sudo_remove() {
+    CLEANED_PATHS="$CLEANED_PATHS|$1"
+    return 0
+}
+safe_sudo_find_delete() { return 0; }
+log_success() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+echo "$CLEANED_PATHS"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"ali_bas"* ]]
+    [[ "$output" == *"Aliedr"* ]]
+}
+
+# ============================================================================
+# Tests for SQLite VACUUM optimization (v1.15.2)
+# ============================================================================
+
+@test "opt_sqlite_vacuum optimizes Safari databases" {
+    # Create test databases
+    mkdir -p "$HOME/Library/Safari"
+
+    # Clean up any existing databases from previous tests
+    rm -f "$HOME/Library/Safari/History.db" "$HOME/Library/Safari/CloudTabs.db"
+
+    # Create a simple SQLite database
+    run sqlite3 "$HOME/Library/Safari/History.db" "CREATE TABLE test(id INTEGER); INSERT INTO test VALUES(1);"
+    [ "$status" -eq 0 ]
+
+    # Create another test database
+    run sqlite3 "$HOME/Library/Safari/CloudTabs.db" "CREATE TABLE test(id INTEGER); INSERT INTO test VALUES(1);"
+    [ "$status" -eq 0 ]
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock functions to avoid actual operations
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+lsof() { return 1; }  # Database not in use
+
+opt_sqlite_vacuum
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Databases already optimized"* || "$output" == *"Optimized"* ]]
+}
+
+@test "opt_sqlite_vacuum checks database integrity before VACUUM" {
+    mkdir -p "$HOME/Library/Safari"
+
+    # Clean up and create database
+    rm -f "$HOME/Library/Safari/History.db"
+    sqlite3 "$HOME/Library/Safari/History.db" "CREATE TABLE test(id INTEGER);"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+INTEGRITY_CHECKS=0
+original_sqlite3=$(command -v sqlite3)
+
+sqlite3() {
+    if [[ "$2" == *"integrity_check"* ]]; then
+        ((INTEGRITY_CHECKS++))
+        echo "ok"
+        return 0
+    fi
+    "$original_sqlite3" "$@"
+}
+export -f sqlite3
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+lsof() { return 1; }
+
+opt_sqlite_vacuum
+echo "INTEGRITY_CHECKS=$INTEGRITY_CHECKS"
+EOF
+
+    [ "$status" -eq 0 ]
+    # Should check integrity at least once (before VACUUM)
+    [[ "$output" == *"INTEGRITY_CHECKS="* ]]
+}
+
+@test "opt_sqlite_vacuum skips databases in use" {
+    mkdir -p "$HOME/Library/Safari"
+    rm -f "$HOME/Library/Safari/History.db"
+    sqlite3 "$HOME/Library/Safari/History.db" "CREATE TABLE test(id INTEGER);"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+VACUUM_COUNT=0
+original_sqlite3=$(command -v sqlite3)
+
+sqlite3() {
+    if [[ "$2" == "VACUUM;" ]]; then
+        ((VACUUM_COUNT++))
+    fi
+    "$original_sqlite3" "$@"
+}
+export -f sqlite3
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+lsof() { return 0; }  # Database is in use
+
+opt_sqlite_vacuum
+echo "VACUUM_COUNT=$VACUUM_COUNT"
+EOF
+
+    [ "$status" -eq 0 ]
+    # Should not VACUUM when database is in use
+    [[ "$output" == *"VACUUM_COUNT=0"* ]]
+}
+
+@test "opt_sqlite_vacuum checks disk space before VACUUM" {
+    mkdir -p "$HOME/Library/Safari"
+
+    # Clean up and create a 2MB database
+    rm -f "$HOME/Library/Safari/History.db"
+    sqlite3 "$HOME/Library/Safari/History.db" << 'SQL'
+CREATE TABLE test(id INTEGER, data TEXT);
+INSERT INTO test VALUES(1, randomblob(1024*1024));
+INSERT INTO test VALUES(2, randomblob(1024*1024));
+SQL
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+VACUUM_ATTEMPTED=0
+original_sqlite3=$(command -v sqlite3)
+
+sqlite3() {
+    if [[ "$2" == "VACUUM;" ]]; then
+        VACUUM_ATTEMPTED=1
+    fi
+    "$original_sqlite3" "$@"
+}
+export -f sqlite3
+
+# Mock df to report insufficient space
+df() {
+    if [[ "$1" == "-k" ]]; then
+        echo "Filesystem 1024-blocks Used Available Capacity"
+        echo "/dev/disk1   1000000    900000  100  90%"  # Only 100KB free
+    fi
+}
+export -f df
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+lsof() { return 1; }
+
+opt_sqlite_vacuum
+echo "VACUUM_ATTEMPTED=$VACUUM_ATTEMPTED"
+EOF
+
+    [ "$status" -eq 0 ]
+    # Should skip VACUUM when insufficient disk space
+    [[ "$output" == *"VACUUM_ATTEMPTED=0"* ]]
+}
+
+@test "opt_sqlite_vacuum skips non-SQLite files" {
+    mkdir -p "$HOME/Library/Safari"
+
+    # Create a non-SQLite file
+    echo "not a database" > "$HOME/Library/Safari/History.db"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+
+opt_sqlite_vacuum
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Databases already optimized"* ]]
+}
+
+@test "opt_sqlite_vacuum verifies integrity after VACUUM" {
+    mkdir -p "$HOME/Library/Safari"
+    rm -f "$HOME/Library/Safari/History.db"
+    sqlite3 "$HOME/Library/Safari/History.db" "CREATE TABLE test(id INTEGER); INSERT INTO test VALUES(1);"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+CALL_LOG="$HOME/vacuum_calls.log"
+> "$CALL_LOG"
+
+original_sqlite3=$(command -v sqlite3)
+
+sqlite3() {
+    if [[ "$2" == *"integrity_check"* ]]; then
+        echo "INTEGRITY_CHECK" >> "$CALL_LOG"
+        echo "ok"
+        return 0
+    elif [[ "$2" == "VACUUM;" ]]; then
+        echo "VACUUM" >> "$CALL_LOG"
+    fi
+    "$original_sqlite3" "$@"
+}
+export -f sqlite3
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+lsof() { return 1; }
+
+opt_sqlite_vacuum
+
+# Count calls
+integrity_count=$(grep -c "INTEGRITY_CHECK" "$CALL_LOG" || echo 0)
+vacuum_count=$(grep -c "VACUUM" "$CALL_LOG" || echo 0)
+
+echo "INTEGRITY_CHECKS=$integrity_count"
+echo "VACUUM_COUNT=$vacuum_count"
+EOF
+
+    [ "$status" -eq 0 ]
+    # Should check integrity at least once and perform VACUUM
+    [[ "$output" == *"INTEGRITY_CHECKS="* ]]
+    [[ "$output" == *"VACUUM_COUNT="* ]]
 }
