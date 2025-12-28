@@ -296,12 +296,22 @@ check_mole_update() {
 
         # Try to get latest version from GitHub
         if command -v curl > /dev/null 2>&1; then
-            latest_version=$(curl -fsSL https://api.github.com/repos/tw93/mole/releases/latest 2> /dev/null | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' || echo "")
-            # Save to cache
-            if [[ -n "$latest_version" ]]; then
-                ensure_user_file "$cache_file"
-                echo "$latest_version" > "$cache_file" 2> /dev/null || true
+            # Run in background to allow Ctrl+C to interrupt
+            local temp_version
+            temp_version=$(mktemp_file "mole_version_check")
+            curl -fsSL --connect-timeout 3 --max-time 5 https://api.github.com/repos/tw93/mole/releases/latest 2> /dev/null | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' > "$temp_version" &
+            local curl_pid=$!
+
+            # Wait for curl to complete (allows Ctrl+C to interrupt)
+            if wait "$curl_pid" 2> /dev/null; then
+                latest_version=$(cat "$temp_version" 2> /dev/null || echo "")
+                # Save to cache
+                if [[ -n "$latest_version" ]]; then
+                    ensure_user_file "$cache_file"
+                    echo "$latest_version" > "$cache_file" 2> /dev/null || true
+                fi
             fi
+            rm -f "$temp_version" 2> /dev/null || true
         fi
 
         # Stop spinner
@@ -537,7 +547,8 @@ check_swap_usage() {
     if command -v sysctl > /dev/null 2>&1; then
         local swap_info=$(sysctl vm.swapusage 2> /dev/null || echo "")
         if [[ -n "$swap_info" ]]; then
-            local swap_used=$(echo "$swap_info" | grep -o "used = [0-9.]*[GM]" | awk '{print $3}' || echo "0M")
+            local swap_used=$(echo "$swap_info" | grep -o "used = [0-9.]*[GM]" | awk 'NR==1{print $3}')
+            swap_used=${swap_used:-0M}
             local swap_num="${swap_used//[GM]/}"
 
             if [[ "$swap_used" == *"G"* ]]; then
