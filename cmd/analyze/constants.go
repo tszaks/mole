@@ -138,6 +138,7 @@ var foldDirs = map[string]bool{
 	".build":      true,
 	"xcuserdata":  true,
 	"Carthage":    true,
+	".dart_tool":  true,
 
 	// Web frameworks
 	".angular":    true,
