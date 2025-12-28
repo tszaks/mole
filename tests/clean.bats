@@ -166,3 +166,97 @@ EOF
     # Verify old file was actually removed
     [ ! -f "$HOME/Library/Mail Downloads/old.pdf" ]
 }
+
+@test "clean_time_machine_failed_backups detects running backup correctly" {
+    # Skip test if tmutil is not available
+    if ! command -v tmutil > /dev/null 2>&1; then
+        skip "tmutil not available"
+    fi
+
+    # Create a mock tmutil executable
+    local mock_bin="$HOME/bin"
+    mkdir -p "$mock_bin"
+
+    cat > "$mock_bin/tmutil" << 'MOCK_TMUTIL'
+#!/bin/bash
+if [[ "$1" == "status" ]]; then
+    cat << 'TMUTIL_OUTPUT'
+Backup session status:
+{
+    ClientID = "com.apple.backupd";
+    Running = 0;
+}
+TMUTIL_OUTPUT
+elif [[ "$1" == "destinationinfo" ]]; then
+    cat << 'DEST_OUTPUT'
+====================================================
+Name          : TestBackup
+Kind          : Local
+Mount Point   : /Volumes/TestBackup
+ID            : 12345678-1234-1234-1234-123456789012
+====================================================
+DEST_OUTPUT
+fi
+MOCK_TMUTIL
+    chmod +x "$mock_bin/tmutil"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+# Run the function - should NOT skip cleanup when Running = 0
+clean_time_machine_failed_backups
+EOF
+
+    [ "$status" -eq 0 ]
+    # Should NOT output the "backup in progress" message
+    [[ "$output" != *"Time Machine backup in progress, skipping cleanup"* ]]
+}
+
+@test "clean_time_machine_failed_backups skips when backup is actually running" {
+    # Skip test if tmutil is not available
+    if ! command -v tmutil > /dev/null 2>&1; then
+        skip "tmutil not available"
+    fi
+
+    # Create a mock tmutil executable
+    local mock_bin="$HOME/bin"
+    mkdir -p "$mock_bin"
+
+    cat > "$mock_bin/tmutil" << 'MOCK_TMUTIL'
+#!/bin/bash
+if [[ "$1" == "status" ]]; then
+    cat << 'TMUTIL_OUTPUT'
+Backup session status:
+{
+    ClientID = "com.apple.backupd";
+    Running = 1;
+}
+TMUTIL_OUTPUT
+elif [[ "$1" == "destinationinfo" ]]; then
+    cat << 'DEST_OUTPUT'
+====================================================
+Name          : TestBackup
+Kind          : Local
+Mount Point   : /Volumes/TestBackup
+ID            : 12345678-1234-1234-1234-123456789012
+====================================================
+DEST_OUTPUT
+fi
+MOCK_TMUTIL
+    chmod +x "$mock_bin/tmutil"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+# Run the function - should skip cleanup when Running = 1
+clean_time_machine_failed_backups
+EOF
+
+    [ "$status" -eq 0 ]
+    # Should output the "backup in progress" message
+    [[ "$output" == *"Time Machine backup in progress, skipping cleanup"* ]]
+}
