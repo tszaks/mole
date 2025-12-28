@@ -240,7 +240,8 @@ scan_applications() {
 
     local spinner_pid=""
     (
-        trap 'exit 0' TERM INT EXIT
+        cleanup_spinner() { exit 0; }
+        trap cleanup_spinner TERM INT EXIT
         local spinner_chars="|/-\\"
         local i=0
         while true; do

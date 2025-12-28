@@ -255,7 +255,10 @@ start_inline_spinner() {
 
     if [[ -t 1 ]]; then
         (
-            trap 'exit 0' TERM INT EXIT
+            # Clean exit handler for spinner subprocess
+            cleanup_spinner() { exit 0; }
+            trap cleanup_spinner TERM INT EXIT
+
             local chars
             chars="$(mo_spinner_chars)"
             [[ -z "$chars" ]] && chars="|/-\\"

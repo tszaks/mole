@@ -10,8 +10,6 @@ export LANG=C
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/core/common.sh"
 
-# Set up cleanup trap for temporary files
-trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/../lib/core/sudo.sh"
 source "$SCRIPT_DIR/../lib/clean/brew.sh"
 source "$SCRIPT_DIR/../lib/clean/caches.sh"
@@ -136,6 +134,9 @@ cleanup() {
     if [[ -t 1 ]]; then
         printf "\r\033[K" >&2
     fi
+
+    # Clean up temporary files
+    cleanup_temp_files
 
     # Stop sudo session
     stop_sudo_session

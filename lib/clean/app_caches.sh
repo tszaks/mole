@@ -241,12 +241,9 @@ clean_remote_desktop() {
 
 # Main function to clean all user GUI applications
 clean_user_gui_applications() {
-    start_section_spinner "Scanning app caches..."
-
-    clean_xcode_tools
-
     stop_section_spinner
 
+    clean_xcode_tools
     clean_code_editors
     clean_communication_apps
     clean_dingtalk
