@@ -132,7 +132,7 @@ perform_auto_fix() {
     # Fix Firewall
     if [[ -n "${FIREWALL_DISABLED:-}" && "${FIREWALL_DISABLED}" == "true" ]]; then
         echo -e "${BLUE}Enabling Firewall...${NC}"
-        if sudo defaults write /Library/Preferences/com.apple.alf globalstate -int 1 2> /dev/null; then
+        if sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on > /dev/null 2>&1; then
             echo -e "${GREEN}✓${NC} Firewall enabled"
             ((fixed_count++))
             fixed_items+=("Firewall enabled")

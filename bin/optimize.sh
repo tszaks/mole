@@ -260,8 +260,7 @@ ask_for_security_fixes() {
 }
 
 apply_firewall_fix() {
-    if sudo defaults write /Library/Preferences/com.apple.alf globalstate -int 1; then
-        sudo pkill -HUP socketfilterfw 2> /dev/null || true
+    if sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on > /dev/null 2>&1; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Firewall enabled"
         FIREWALL_DISABLED=false
         return 0

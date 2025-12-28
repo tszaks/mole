@@ -113,10 +113,10 @@ check_filevault() {
 check_firewall() {
     # Check whitelist
     if command -v is_whitelisted > /dev/null && is_whitelisted "firewall"; then return; fi
-    # Check firewall status
+    # Check firewall status using socketfilterfw (more reliable than defaults on modern macOS)
     unset FIREWALL_DISABLED
-    local firewall_status=$(defaults read /Library/Preferences/com.apple.alf globalstate 2> /dev/null || echo "0")
-    if [[ "$firewall_status" == "1" || "$firewall_status" == "2" ]]; then
+    local firewall_output=$(sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2> /dev/null || echo "")
+    if [[ "$firewall_output" == *"State = 1"* ]] || [[ "$firewall_output" == *"State = 2"* ]]; then
         echo -e "  ${GREEN}✓${NC} Firewall     Network protection enabled"
     else
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Firewall     ${YELLOW}Network protection disabled${NC}"
