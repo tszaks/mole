@@ -105,6 +105,7 @@ var projectDependencyDirs = map[string]bool{
 	"Pods":        true,
 	".build":      true,
 	"Carthage":    true,
+	".dart_tool":  true,
 
 	// Other tools
 	".terraform": true, // Terraform plugins

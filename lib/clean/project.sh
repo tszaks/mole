@@ -21,6 +21,7 @@ readonly PURGE_TARGETS=(
     "obj"           # C# / Unity
     ".turbo"        # Turborepo cache
     ".parcel-cache" # Parcel bundler
+    ".dart_tool"    # Flutter/Dart build cache
 )
 
 # Minimum age in days before considering for cleanup

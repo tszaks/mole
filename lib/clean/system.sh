@@ -214,7 +214,7 @@ clean_time_machine_failed_backups() {
     fi
 
     # Skip if backup is running (check actual Running status, not just daemon existence)
-    if tmutil status 2>/dev/null | grep -q "Running = 1"; then
+    if tmutil status 2> /dev/null | grep -q "Running = 1"; then
         if [[ "$spinner_active" == "true" ]]; then
             stop_section_spinner
         fi
