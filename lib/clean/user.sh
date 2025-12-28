@@ -200,7 +200,8 @@ clean_mail_downloads() {
             # Check directory size threshold
             local dir_size_kb=0
             if command -v du > /dev/null 2>&1; then
-                dir_size_kb=$(du -sk "$target_path" 2> /dev/null | awk '{print $1}' || echo "0")
+                dir_size_kb=$(du -sk "$target_path" 2> /dev/null | awk 'NR==1{print $1}')
+                dir_size_kb=${dir_size_kb:-0}
             fi
 
             # Skip if below threshold
@@ -211,7 +212,8 @@ clean_mail_downloads() {
             # Find and remove files older than specified days
             while IFS= read -r -d '' file_path; do
                 if [[ -f "$file_path" ]]; then
-                    local file_size_kb=$(du -sk "$file_path" 2> /dev/null | awk '{print $1}' || echo "0")
+                    local file_size_kb=$(du -sk "$file_path" 2> /dev/null | awk 'NR==1{print $1}')
+                    file_size_kb=${file_size_kb:-0}
                     if safe_remove "$file_path" true; then
                         ((count++))
                         ((cleaned_kb += file_size_kb))
