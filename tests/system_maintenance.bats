@@ -186,25 +186,38 @@ EOF
     [[ "$output" == *"COUNT=0"* ]]
 }
 
-@test "check_macos_update warns when update available" {
+@test "check_macos_update avoids slow softwareupdate scans" {
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
 
-softwareupdate() {
-    echo "* Label: macOS 99"
-    return 0
+defaults() { echo "1"; }
+
+run_with_timeout() {
+    shift
+    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
+        cat <<'OUT'
+Software Update Tool
+
+Software Update found the following new or updated software:
+* Label: macOS 99
+OUT
+        return 0
+    fi
+    return 124
 }
 
 start_inline_spinner(){ :; }
 stop_inline_spinner(){ :; }
 
 check_macos_update
+echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"macOS"* ]]
+    [[ "$output" == *"Update available"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=true"* ]]
 }
 
 @test "run_with_timeout succeeds without GNU timeout" {
