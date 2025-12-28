@@ -105,6 +105,7 @@ files_cleaned=0
 total_size_cleaned=0
 whitelist_skipped_count=0
 
+# shellcheck disable=SC2329
 note_activity() {
     if [[ $TRACK_SECTION -eq 1 ]]; then
         SECTION_ACTIVITY=1
@@ -113,6 +114,7 @@ note_activity() {
 
 # Cleanup background processes
 CLEANUP_DONE=false
+# shellcheck disable=SC2329
 cleanup() {
     local signal="${1:-EXIT}"
     local exit_code="${2:-$?}"
@@ -124,7 +126,7 @@ cleanup() {
     CLEANUP_DONE=true
 
     # Stop all spinners and clear the line
-    if [[ -n "$INLINE_SPINNER_PID" ]]; then
+    if [[ -n "${INLINE_SPINNER_PID:-}" ]] && kill -0 "$INLINE_SPINNER_PID" 2> /dev/null; then
         kill "$INLINE_SPINNER_PID" 2> /dev/null || true
         wait "$INLINE_SPINNER_PID" 2> /dev/null || true
         INLINE_SPINNER_PID=""
@@ -176,6 +178,7 @@ end_section() {
     TRACK_SECTION=0
 }
 
+# shellcheck disable=SC2329
 safe_clean() {
     if [[ $# -eq 0 ]]; then
         return 0
@@ -767,6 +770,7 @@ main() {
     hide_cursor
     perform_cleanup
     show_cursor
+    exit 0
 }
 
 main "$@"

@@ -255,7 +255,7 @@ Mole uses **BATS (Bash Automated Testing System)** for automated testing.
 |---------------|----------|-----------|
 | Core File Operations | 95% | Path validation, symlink detection, permissions |
 | Cleaning Logic | 87% | Orphan detection, 60-day rule, vendor whitelist |
-| Optimization | 82% | SQLite VACUUM, cache cleanup, timeouts |
+| Optimization | 82% | Cache cleanup, timeouts |
 | System Maintenance | 90% | Time Machine, network volumes, crash recovery |
 | Security Controls | 100% | Path traversal, command injection, symlinks |
 
@@ -315,7 +315,6 @@ Mole relies on standard macOS system binaries (all SIP-protected):
 | `tmutil` | Time Machine interaction | Skip TM cleanup |
 | `dscacheutil` | System cache rebuilding | Optional optimization |
 | `diskutil` | Volume information | Skip network volumes |
-| `sqlite3` | Database optimization | Skip SQLite VACUUM |
 
 ### Go Dependencies (Interactive Tools)
 

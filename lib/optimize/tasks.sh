@@ -69,7 +69,20 @@ opt_cache_refresh() {
 
 # Run periodic maintenance scripts
 opt_maintenance_scripts() {
+    if [[ -t 1 ]]; then
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Rotating logs..."
+    fi
+
+    local success=false
     if run_with_timeout 120 sudo newsyslog > /dev/null 2>&1; then
+        success=true
+    fi
+
+    if [[ -t 1 ]]; then
+        stop_inline_spinner
+    fi
+
+    if [[ "$success" == "true" ]]; then
         echo -e "  ${GREEN}✓${NC} System logs rotated"
     else
         echo -e "  ${YELLOW}!${NC} Failed to rotate logs"
@@ -204,96 +217,6 @@ opt_network_optimization() {
     echo -e "  ${GREEN}✓${NC} mDNSResponder optimized"
 }
 
-# SQLite database optimization
-# Runs VACUUM on safe user-level databases to reduce size and improve performance
-# Only operates on databases that are not in use and meet size threshold
-opt_sqlite_vacuum() {
-    local optimized_count=0
-    local total_saved_kb=0
-    local min_size_kb=1024 # Only optimize databases larger than 1MB
-
-    # List of safe databases to optimize
-    # Exclude critical system databases like Mail, Messages, Photos
-    local -a safe_databases=(
-        "$HOME/Library/Safari/History.db"
-        "$HOME/Library/Safari/CloudTabs.db"
-    )
-
-    if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning databases..."
-    fi
-
-    for db_path in "${safe_databases[@]}"; do
-        # Check if database exists
-        [[ ! -f "$db_path" ]] && continue
-
-        # Check if it's a SQLite database
-        if ! file "$db_path" 2> /dev/null | grep -q "SQLite"; then
-            continue
-        fi
-
-        # Check size threshold
-        local db_size_kb
-        db_size_kb=$(get_path_size_kb "$db_path")
-        [[ $db_size_kb -lt $min_size_kb ]] && continue
-
-        # Check if database is in use
-        if lsof "$db_path" > /dev/null 2>&1; then
-            debug_log "Skipping $db_path - in use"
-            continue
-        fi
-
-        # Check disk space (VACUUM needs ~2x database size as temporary space)
-        local free_space_kb
-        free_space_kb=$(df -k "$(dirname "$db_path")" | tail -1 | awk '{print $4}')
-        if [[ $free_space_kb -lt $((db_size_kb * 2)) ]]; then
-            debug_log "Skipping $db_path - insufficient disk space"
-            continue
-        fi
-
-        # Verify database integrity before VACUUM
-        if ! sqlite3 "$db_path" "PRAGMA integrity_check;" 2> /dev/null | grep -q "ok"; then
-            debug_log "Skipping $db_path - integrity check failed"
-            continue
-        fi
-
-        # Get size before optimization
-        local size_before=$db_size_kb
-
-        # Perform VACUUM with error handling
-        if sqlite3 "$db_path" "VACUUM;" 2> /dev/null; then
-            # Verify database integrity after VACUUM
-            if ! sqlite3 "$db_path" "PRAGMA integrity_check;" 2> /dev/null | grep -q "ok"; then
-                debug_log "Warning: $db_path integrity check failed after VACUUM"
-                continue
-            fi
-
-            # Get size after optimization
-            local size_after
-            size_after=$(get_path_size_kb "$db_path")
-            local saved_kb=$((size_before - size_after))
-
-            if [[ $saved_kb -gt 0 ]]; then
-                ((optimized_count++))
-                ((total_saved_kb += saved_kb))
-            fi
-        else
-            debug_log "Failed to VACUUM $db_path"
-        fi
-    done
-
-    if [[ -t 1 ]]; then
-        stop_inline_spinner
-    fi
-
-    if [[ $optimized_count -gt 0 ]]; then
-        local saved_human=$(bytes_to_human "$((total_saved_kb * 1024))")
-        echo -e "  ${GREEN}✓${NC} Optimized $optimized_count databases ($saved_human saved)"
-    else
-        echo -e "  ${GREEN}✓${NC} Databases already optimized"
-    fi
-}
-
 # Clean Spotlight user caches
 
 # Execute optimization by action name
@@ -312,7 +235,6 @@ execute_optimization() {
         local_snapshots) opt_local_snapshots ;;
         fix_broken_configs) opt_fix_broken_configs ;;
         network_optimization) opt_network_optimization ;;
-        sqlite_vacuum) opt_sqlite_vacuum ;;
         *)
             echo -e "${YELLOW}${ICON_ERROR}${NC} Unknown action: $action"
             return 1

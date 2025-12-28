@@ -429,11 +429,18 @@ bytes_to_human_kb() {
 get_brand_name() {
     local name="$1"
 
-    # Detect if system primary language is Chinese
-    local is_chinese=false
-    local sys_lang
-    sys_lang=$(defaults read -g AppleLanguages 2> /dev/null | grep -o 'zh-Hans\|zh-Hant\|zh' | head -1 || echo "")
-    [[ -n "$sys_lang" ]] && is_chinese=true
+    # Detect if system primary language is Chinese (Cached)
+    if [[ -z "${MOLE_IS_CHINESE_SYSTEM:-}" ]]; then
+        local sys_lang
+        sys_lang=$(defaults read -g AppleLanguages 2> /dev/null | grep -o 'zh-Hans\|zh-Hant\|zh' | head -1 || echo "")
+        if [[ -n "$sys_lang" ]]; then
+            export MOLE_IS_CHINESE_SYSTEM="true"
+        else
+            export MOLE_IS_CHINESE_SYSTEM="false"
+        fi
+    fi
+
+    local is_chinese="${MOLE_IS_CHINESE_SYSTEM}"
 
     # Return localized names based on system language
     if [[ "$is_chinese" == true ]]; then

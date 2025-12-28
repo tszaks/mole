@@ -284,7 +284,7 @@ stop_inline_spinner() {
         # Try graceful TERM first, then force KILL if needed
         if kill -0 "$INLINE_SPINNER_PID" 2> /dev/null; then
             kill -TERM "$INLINE_SPINNER_PID" 2> /dev/null || true
-            sleep 0.05 2> /dev/null || true
+            sleep 0.1 2> /dev/null || true
             # Force kill if still running
             if kill -0 "$INLINE_SPINNER_PID" 2> /dev/null; then
                 kill -KILL "$INLINE_SPINNER_PID" 2> /dev/null || true

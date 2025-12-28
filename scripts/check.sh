@@ -38,9 +38,9 @@ if command -v shellcheck > /dev/null 2>&1; then
     SHELL_FILES=$(find . -type f \( -name "*.sh" -o -name "mole" \) -not -path "./tests/*" -not -path "./.git/*")
     FILE_COUNT=$(echo "$SHELL_FILES" | wc -l | tr -d ' ')
 
-    if shellcheck mole bin/*.sh lib/*.sh scripts/*.sh 2>&1 | grep -q "SC[0-9]"; then
+    if shellcheck mole bin/*.sh lib/*/*.sh scripts/*.sh 2>&1 | grep -q "SC[0-9]"; then
         echo -e "${YELLOW}⚠ ShellCheck found some issues (non-critical):${NC}"
-        shellcheck mole bin/*.sh lib/*.sh scripts/*.sh 2>&1 | head -20
+        shellcheck mole bin/*.sh lib/*/*.sh scripts/*.sh 2>&1 | head -20
         echo -e "${GREEN}✓ ShellCheck completed (${FILE_COUNT} files checked)${NC}\n"
     else
         echo -e "${GREEN}✓ ShellCheck passed (${FILE_COUNT} files checked)${NC}\n"

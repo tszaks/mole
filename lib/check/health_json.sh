@@ -128,8 +128,6 @@ EOF
     items+=('maintenance_scripts|System Log Rotation|Rotate and compress system logs with newsyslog|true')
     items+=('swap_cleanup|Virtual Memory Refresh|Reset swap files and dynamic pager service|true')
     items+=('network_optimization|Network Stack Optimization|Refresh DNS, rebuild ARP & restart mDNSResponder|true')
-    items+=('sqlite_vacuum|SQLite Database Optimization|Optimize user databases with VACUUM to reduce size|true')
-
     # Output items as JSON
     local first=true
     for item in "${items[@]}"; do

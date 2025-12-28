@@ -520,6 +520,11 @@ should_protect_path() {
         return 0
     fi
 
+    # Protect Notes cache (search index issues)
+    if [[ "$path_lower" =~ com\.apple\.notes ]]; then
+        return 0
+    fi
+
     # 2. Protect caches critical for system UI rendering
     # These caches are essential for modern macOS (Sonoma/Sequoia) system UI rendering
     case "$path" in

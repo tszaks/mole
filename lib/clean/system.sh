@@ -155,29 +155,6 @@ clean_deep_system() {
         fi
     fi
     debug_log "Core symbolication cache section completed"
-
-    # Clean Aliyun/DingTalk security component logs (if exists, can be 2-3GB)
-    # Only clean if the software is installed
-    debug_log "Checking Aliyun security components..."
-    local ali_cleaned=0
-
-    # List of Aliyun-related paths to clean
-    local -a ali_paths=(
-        "/private/var/root/Library/Application Support/ali_bas/bas_http_info/ali_bas_httpclient"
-        "/private/var/root/Library/Application Support/Aliedr/logs_dir"
-        "/private/var/root/Library/Application Support/Aliedr/cache"
-    )
-
-    # Clean each path if exists
-    for ali_path in "${ali_paths[@]}"; do
-        if sudo test -e "$ali_path" 2> /dev/null; then
-            debug_log "Found Aliyun component: $ali_path, removing..."
-            safe_sudo_remove "$ali_path" && ((ali_cleaned++)) || true
-        fi
-    done
-
-    debug_log "Aliyun security components check completed, cleaned: $ali_cleaned"
-    [[ $ali_cleaned -gt 0 ]] && log_success "Aliyun security component data"
 }
 
 # Clean incomplete Time Machine backups

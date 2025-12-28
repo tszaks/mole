@@ -142,14 +142,24 @@ func coloredProgressBar(value, max int64, percent float64) string {
 	return bar + colorReset
 }
 
-// Calculate display width considering CJK characters.
+// Calculate display width considering CJK characters and Emoji.
 func runeWidth(r rune) int {
-	if r >= 0x4E00 && r <= 0x9FFF ||
-		r >= 0x3400 && r <= 0x4DBF ||
-		r >= 0x3040 && r <= 0x30FF ||
-		r >= 0x31F0 && r <= 0x31FF ||
-		r >= 0xAC00 && r <= 0xD7AF ||
-		r >= 0xFF00 && r <= 0xFFEF {
+	if r >= 0x4E00 && r <= 0x9FFF || // CJK Unified Ideographs
+		r >= 0x3400 && r <= 0x4DBF || // CJK Extension A
+		r >= 0x20000 && r <= 0x2A6DF || // CJK Extension B
+		r >= 0x2A700 && r <= 0x2B73F || // CJK Extension C
+		r >= 0x2B740 && r <= 0x2B81F || // CJK Extension D
+		r >= 0x2B820 && r <= 0x2CEAF || // CJK Extension E
+		r >= 0x3040 && r <= 0x30FF || // Hiragana and Katakana
+		r >= 0x31F0 && r <= 0x31FF || // Katakana Phonetic Extensions
+		r >= 0xAC00 && r <= 0xD7AF || // Hangul Syllables
+		r >= 0xFF00 && r <= 0xFFEF || // Fullwidth Forms
+		r >= 0x1F300 && r <= 0x1F6FF || // Miscellaneous Symbols and Pictographs (includes Transport)
+		r >= 0x1F900 && r <= 0x1F9FF || // Supplemental Symbols and Pictographs
+		r >= 0x2600 && r <= 0x26FF || // Miscellaneous Symbols
+		r >= 0x2700 && r <= 0x27BF || // Dingbats
+		r >= 0xFE10 && r <= 0xFE1F || // Vertical Forms
+		r >= 0x1F000 && r <= 0x1F02F { // Mahjong Tiles
 		return 2
 	}
 	return 1
