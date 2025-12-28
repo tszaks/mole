@@ -202,6 +202,14 @@ Select Categories to Clean - 18.5GB (8 selected)
 
 > **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects (< 7 days) are marked and unselected by default.
 
+## Community Love
+
+<p align="center">
+  <img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="800" />
+</p>
+
+Users from around the world are loving Mole! Join the community and share your experience.
+
 ## Quick Launchers
 
 Launch Mole commands instantly from Raycast or Alfred:
