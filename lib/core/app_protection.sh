@@ -611,7 +611,7 @@ is_path_whitelisted() {
         # Check for exact match or glob pattern match
         # shellcheck disable=SC2053
         if [[ "$normalized_target" == "$expanded_pattern" ]] ||
-           [[ "$normalized_target" == $expanded_pattern ]]; then
+            [[ "$normalized_target" == $expanded_pattern ]]; then
             return 0
         fi
     done
