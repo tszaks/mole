@@ -76,7 +76,7 @@ clean_design_tools() {
     safe_clean ~/Library/Caches/Adobe/* "Adobe cache"
     safe_clean ~/Library/Caches/com.adobe.*/* "Adobe app caches"
     safe_clean ~/Library/Caches/com.figma.Desktop/* "Figma cache"
-    safe_clean ~/Library/Caches/com.raycast.macos/* "Raycast cache"
+    # Note: Raycast cache is protected - contains clipboard history (including images)
 }
 
 # Clean video editing tools
