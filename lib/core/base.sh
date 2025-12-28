@@ -85,6 +85,7 @@ declare -a DEFAULT_WHITELIST_PATTERNS=(
     "$HOME/Library/Caches/JetBrains*"
     "$HOME/Library/Caches/com.jetbrains.toolbox*"
     "$HOME/Library/Caches/com.apple.finder"
+    "$HOME/Library/Mobile Documents*"
     "$FINDER_METADATA_SENTINEL"
 )
 

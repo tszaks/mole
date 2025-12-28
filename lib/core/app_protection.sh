@@ -561,13 +561,17 @@ should_protect_path() {
             ;;
     esac
 
-    # 5. Protect critical preference files
+    # 5. Protect critical preference files and user data
     case "$path" in
         */Library/Preferences/com.apple.dock.plist | */Library/Preferences/com.apple.finder.plist)
             return 0
             ;;
         # Bluetooth and WiFi configurations
         */ByHost/com.apple.bluetooth.* | */ByHost/com.apple.wifi.*)
+            return 0
+            ;;
+        # iCloud Drive - protect user's cloud synced data
+        */Library/Mobile\ Documents* | */Mobile\ Documents*)
             return 0
             ;;
     esac

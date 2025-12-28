@@ -57,6 +57,13 @@ validate_path_for_deletion() {
         return 1
     fi
 
+    # Allow deletion of coresymbolicationd cache (safe system cache that can be rebuilt)
+    case "$path" in
+        /System/Library/Caches/com.apple.coresymbolicationd/data | /System/Library/Caches/com.apple.coresymbolicationd/data/*)
+            return 0
+            ;;
+    esac
+
     # Check path isn't critical system directory
     case "$path" in
         / | /bin | /sbin | /usr | /usr/bin | /usr/sbin | /etc | /var | /System | /System/* | /Library/Extensions)
