@@ -24,9 +24,9 @@ get_memory_info() {
     vm_output=$(vm_stat 2> /dev/null || echo "")
     page_size=4096
 
-    active=$(echo "$vm_output" | LC_ALL=C awk '/Pages active:/ {print $NF}' | tr -d '.' 2> /dev/null || echo "0")
-    wired=$(echo "$vm_output" | LC_ALL=C awk '/Pages wired down:/ {print $NF}' | tr -d '.' 2> /dev/null || echo "0")
-    compressed=$(echo "$vm_output" | LC_ALL=C awk '/Pages occupied by compressor:/ {print $NF}' | tr -d '.' 2> /dev/null || echo "0")
+    active=$(echo "$vm_output" | LC_ALL=C awk '/Pages active:/ {print $NF}' | tr -d '.\n' 2> /dev/null)
+    wired=$(echo "$vm_output" | LC_ALL=C awk '/Pages wired down:/ {print $NF}' | tr -d '.\n' 2> /dev/null)
+    compressed=$(echo "$vm_output" | LC_ALL=C awk '/Pages occupied by compressor:/ {print $NF}' | tr -d '.\n' 2> /dev/null)
 
     active=${active:-0}
     wired=${wired:-0}
@@ -47,8 +47,8 @@ get_disk_info() {
     df_output=$(command df -k "$home" 2> /dev/null | tail -1)
 
     local total_kb used_kb
-    total_kb=$(echo "$df_output" | LC_ALL=C awk '{print $2}' 2> /dev/null || echo "0")
-    used_kb=$(echo "$df_output" | LC_ALL=C awk '{print $3}' 2> /dev/null || echo "0")
+    total_kb=$(echo "$df_output" | LC_ALL=C awk 'NR==1{print $2}' 2> /dev/null)
+    used_kb=$(echo "$df_output" | LC_ALL=C awk 'NR==1{print $3}' 2> /dev/null)
 
     total_kb=${total_kb:-0}
     used_kb=${used_kb:-0}
