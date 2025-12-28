@@ -202,14 +202,6 @@ Select Categories to Clean - 18.5GB (8 selected)
 
 > **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects (< 7 days) are marked and unselected by default.
 
-## Community Love
-
-<p align="center">
-  <img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="800" />
-</p>
-
-Users from around the world are loving Mole! Join the community and share your experience.
-
 ## Quick Launchers
 
 Launch Mole commands instantly from Raycast or Alfred:
@@ -220,13 +212,20 @@ curl -fsSL https://raw.githubusercontent.com/tw93/Mole/main/scripts/setup-quick-
 
 Adds 5 commands: `clean`, `uninstall`, `optimize`, `analyze`, `status`. Mole automatically detects your terminal, or you can set `MO_LAUNCHER_APP=<name>` to override. For Raycast, run "Reload Script Directories" to load the new commands.
 
+## Community Love
+
+<p align="center">
+  <img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="800" />
+</p>
+
+Users from around the world are loving Mole! Join the community and share your experience.
+
 ## Support
 
 <a href="https://miaoyan.app/cats.html?name=Mole"><img src="https://miaoyan.app/assets/sponsors.svg" width="1000px" /></a>
 
 - If Mole saved you space, consider starring the repo or sharing it with friends who need a cleaner Mac.
 - Have ideas or fixes? Open an issue or PR to help shape Mole's future with the community.
-
 - Love cats? Treat Tangyuan and Cola to canned food via <a href="https://miaoyan.app/cats.html?name=Mole" target="_blank">this link</a> to keep our mascots purring.
 
 ## License
