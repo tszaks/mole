@@ -255,7 +255,8 @@ start_inline_spinner() {
 
     if [[ -t 1 ]]; then
         (
-            # Clean exit handler for spinner subprocess
+            # Clean exit handler for spinner subprocess (invoked by trap)
+            # shellcheck disable=SC2329
             cleanup_spinner() { exit 0; }
             trap cleanup_spinner TERM INT EXIT
 
