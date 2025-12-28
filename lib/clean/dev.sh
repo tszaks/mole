@@ -321,11 +321,24 @@ clean_dev_network() {
     safe_clean ~/Library/Caches/wget/* "macOS wget cache"
 }
 
+# Clean orphaned SQLite temporary files (-shm and -wal files)
+# Strategy: Only clean truly orphaned temp files where base database is missing
+# This is fast and safe - skip complex checks for files with existing base DB
+# Env: DRY_RUN
+clean_sqlite_temp_files() {
+    # Skip this cleanup due to low ROI (收益比低，经常没东西可清理)
+    # Find scan is still slow even optimized, and orphaned files are rare
+    return 0
+}
+
 # Main developer tools cleanup function
 # Calls all specialized cleanup functions
 # Env: DRY_RUN
 clean_developer_tools() {
     stop_section_spinner
+
+    # Clean SQLite temporary files first
+    clean_sqlite_temp_files
 
     clean_dev_npm
     clean_dev_python

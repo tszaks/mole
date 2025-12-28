@@ -78,8 +78,9 @@ scan_external_volumes() {
     start_section_spinner "Scanning $volume_count external volume(s)..."
 
     for volume in "${candidate_volumes[@]}"; do
-        # Verify volume is actually mounted (reduced timeout from 2s to 1s)
-        run_with_timeout 1 mount | grep -q "on $volume " || continue
+        # Re-verify volume is still accessible (may have been unmounted since initial scan)
+        # Use simple directory check instead of slow mount command for better performance
+        [[ -d "$volume" && -r "$volume" ]] || continue
 
         # 1. Clean Trash on volume
         local volume_trash="$volume/.Trashes"

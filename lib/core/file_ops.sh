@@ -185,13 +185,13 @@ safe_sudo_find_delete() {
     local age_days="${3:-7}"
     local type_filter="${4:-f}"
 
-    # Validate base directory
-    if [[ ! -d "$base_dir" ]]; then
-        log_error "Directory does not exist: $base_dir"
-        return 1
+    # Validate base directory (use sudo for permission-restricted dirs)
+    if ! sudo test -d "$base_dir" 2>/dev/null; then
+        debug_log "Directory does not exist (skipping): $base_dir"
+        return 0
     fi
 
-    if [[ -L "$base_dir" ]]; then
+    if sudo test -L "$base_dir" 2>/dev/null; then
         log_error "Refusing to search symlinked directory: $base_dir"
         return 1
     fi

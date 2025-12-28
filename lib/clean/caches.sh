@@ -241,7 +241,25 @@ clean_project_caches() {
     # 4. Clean up any stuck processes
     for pid in $next_pid $py_pid; do
         if kill -0 "$pid" 2> /dev/null; then
+            # Send TERM signal first
             kill -TERM "$pid" 2> /dev/null || true
+
+            # Wait up to 2 seconds for graceful termination
+            local grace_period=0
+            while [[ $grace_period -lt 20 ]]; do
+                if ! kill -0 "$pid" 2> /dev/null; then
+                    break
+                fi
+                sleep 0.1
+                ((grace_period++))
+            done
+
+            # Force kill if still running
+            if kill -0 "$pid" 2> /dev/null; then
+                kill -KILL "$pid" 2> /dev/null || true
+            fi
+
+            # Final wait (should be instant now)
             wait "$pid" 2> /dev/null || true
         else
             wait "$pid" 2> /dev/null || true
