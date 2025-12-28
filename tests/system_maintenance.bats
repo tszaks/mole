@@ -511,7 +511,12 @@ EOF
 # Tests for SQLite VACUUM optimization (v1.15.2)
 # ============================================================================
 
+skip_if_no_sqlite3() {
+    command -v sqlite3 > /dev/null 2>&1 || skip "sqlite3 not available"
+}
+
 @test "opt_sqlite_vacuum optimizes Safari databases" {
+    skip_if_no_sqlite3
     # Create test databases
     mkdir -p "$HOME/Library/Safari"
 
@@ -544,6 +549,7 @@ EOF
 }
 
 @test "opt_sqlite_vacuum checks database integrity before VACUUM" {
+    skip_if_no_sqlite3
     mkdir -p "$HOME/Library/Safari"
 
     # Clean up and create database
@@ -582,6 +588,7 @@ EOF
 }
 
 @test "opt_sqlite_vacuum skips databases in use" {
+    skip_if_no_sqlite3
     mkdir -p "$HOME/Library/Safari"
     rm -f "$HOME/Library/Safari/History.db"
     sqlite3 "$HOME/Library/Safari/History.db" "CREATE TABLE test(id INTEGER);"
@@ -616,6 +623,7 @@ EOF
 }
 
 @test "opt_sqlite_vacuum checks disk space before VACUUM" {
+    skip_if_no_sqlite3
     mkdir -p "$HOME/Library/Safari"
 
     # Clean up and create a 2MB database
@@ -665,6 +673,7 @@ EOF
 }
 
 @test "opt_sqlite_vacuum skips non-SQLite files" {
+    skip_if_no_sqlite3
     mkdir -p "$HOME/Library/Safari"
 
     # Create a non-SQLite file
@@ -686,6 +695,7 @@ EOF
 }
 
 @test "opt_sqlite_vacuum verifies integrity after VACUUM" {
+    skip_if_no_sqlite3
     mkdir -p "$HOME/Library/Safari"
     rm -f "$HOME/Library/Safari/History.db"
     sqlite3 "$HOME/Library/Safari/History.db" "CREATE TABLE test(id INTEGER); INSERT INTO test VALUES(1);"

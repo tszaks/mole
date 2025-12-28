@@ -146,6 +146,8 @@ func coloredProgressBar(value, max int64, percent float64) string {
 func runeWidth(r rune) int {
 	if r >= 0x4E00 && r <= 0x9FFF ||
 		r >= 0x3400 && r <= 0x4DBF ||
+		r >= 0x3040 && r <= 0x30FF ||
+		r >= 0x31F0 && r <= 0x31FF ||
 		r >= 0xAC00 && r <= 0xD7AF ||
 		r >= 0xFF00 && r <= 0xFFEF {
 		return 2

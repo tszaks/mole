@@ -14,7 +14,7 @@ func TestRuneWidth(t *testing.T) {
 		{"ASCII letter", 'a', 1},
 		{"ASCII digit", '5', 1},
 		{"Chinese character", '中', 2},
-		{"Japanese hiragana", 'あ', 1}, // BUG: Should be 2, but current implementation returns 1
+		{"Japanese hiragana", 'あ', 2},
 		{"Korean hangul", '한', 2},
 		{"CJK ideograph", '語', 2},
 		{"Full-width number", '１', 2},
