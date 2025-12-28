@@ -114,6 +114,70 @@ clean_deep_system() {
     # Clean power logs
     safe_sudo_find_delete "/private/var/db/powerlog" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
     log_success "Power logs"
+
+    # Clean memory exception reports (can accumulate to 1-2GB, thousands of files)
+    # These track app memory limit violations, safe to clean old ones
+    safe_sudo_find_delete "/private/var/db/reportmemoryexception/MemoryLimitViolations" "*" "30" "f" || true
+    log_success "Memory exception reports"
+
+    # Clean system diagnostic tracev3 logs (can be 1-2GB)
+    # System generates these continuously, safe to clean old ones
+    start_section_spinner "Cleaning diagnostic trace logs..."
+    local diag_logs_cleaned=0
+    safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*.tracev3" "30" "f" && diag_logs_cleaned=1 || true
+    safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*.tracev3" "30" "f" && diag_logs_cleaned=1 || true
+    stop_section_spinner
+    [[ $diag_logs_cleaned -eq 1 ]] && log_success "System diagnostic trace logs"
+
+    # Clean core symbolication cache (can be 3-5GB, mostly for crash report debugging)
+    # Will regenerate when needed for crash analysis
+    # Use faster du with timeout instead of get_path_size_kb to avoid hanging
+    debug_log "Checking core symbolication cache..."
+    if [[ -d "/System/Library/Caches/com.apple.coresymbolicationd/data" ]]; then
+        debug_log "Symbolication cache directory found, checking size..."
+        # Quick size check with timeout (max 5 seconds)
+        local symbolication_size_mb=""
+        symbolication_size_mb=$(run_with_timeout 5 du -sm "/System/Library/Caches/com.apple.coresymbolicationd/data" 2>/dev/null | awk '{print $1}')
+
+        # Validate that we got a valid size (non-empty and numeric)
+        if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
+            debug_log "Symbolication cache size: ${symbolication_size_mb}MB"
+
+            # Only clean if larger than 1GB (1024MB)
+            if [[ $symbolication_size_mb -gt 1024 ]]; then
+                debug_log "Cleaning symbolication cache (size > 1GB)..."
+                if safe_sudo_remove "/System/Library/Caches/com.apple.coresymbolicationd/data"; then
+                    log_success "Core symbolication cache (${symbolication_size_mb}MB)"
+                fi
+            fi
+        else
+            debug_log "Failed to get symbolication cache size, skipping cleanup"
+        fi
+    fi
+    debug_log "Core symbolication cache section completed"
+
+    # Clean Aliyun/DingTalk security component logs (if exists, can be 2-3GB)
+    # Only clean if the software is installed
+    debug_log "Checking Aliyun security components..."
+    local ali_cleaned=0
+
+    # List of Aliyun-related paths to clean
+    local -a ali_paths=(
+        "/private/var/root/Library/Application Support/ali_bas/bas_http_info/ali_bas_httpclient"
+        "/private/var/root/Library/Application Support/Aliedr/logs_dir"
+        "/private/var/root/Library/Application Support/Aliedr/cache"
+    )
+
+    # Clean each path if exists
+    for ali_path in "${ali_paths[@]}"; do
+        if sudo test -e "$ali_path" 2>/dev/null; then
+            debug_log "Found Aliyun component: $ali_path, removing..."
+            safe_sudo_remove "$ali_path" && ((ali_cleaned++)) || true
+        fi
+    done
+
+    debug_log "Aliyun security components check completed, cleaned: $ali_cleaned"
+    [[ $ali_cleaned -gt 0 ]] && log_success "Aliyun security component data"
 }
 
 # Clean incomplete Time Machine backups
