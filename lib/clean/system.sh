@@ -106,30 +106,6 @@ clean_deep_system() {
     safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*.tracev3" "30" "f" && diag_logs_cleaned=1 || true
     stop_section_spinner
     [[ $diag_logs_cleaned -eq 1 ]] && log_success "System diagnostic trace logs"
-    # Clean core symbolication cache (can be 3-5GB, mostly for crash report debugging)
-    # Will regenerate when needed for crash analysis
-    # Use faster du with timeout instead of get_path_size_kb to avoid hanging
-    debug_log "Checking core symbolication cache..."
-    if [[ -d "/System/Library/Caches/com.apple.coresymbolicationd/data" ]]; then
-        debug_log "Symbolication cache directory found, checking size..."
-        # Quick size check with timeout (max 5 seconds)
-        local symbolication_size_mb=""
-        symbolication_size_mb=$(run_with_timeout 5 du -sm "/System/Library/Caches/com.apple.coresymbolicationd/data" 2> /dev/null | awk '{print $1}')
-        # Validate that we got a valid size (non-empty and numeric)
-        if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
-            debug_log "Symbolication cache size: ${symbolication_size_mb}MB"
-            # Only clean if larger than 1GB (1024MB)
-            if [[ $symbolication_size_mb -gt 1024 ]]; then
-                debug_log "Cleaning symbolication cache (size > 1GB)..."
-                if safe_sudo_remove "/System/Library/Caches/com.apple.coresymbolicationd/data"; then
-                    log_success "Core symbolication cache (${symbolication_size_mb}MB)"
-                fi
-            fi
-        else
-            debug_log "Failed to get symbolication cache size, skipping cleanup"
-        fi
-    fi
-    debug_log "Core symbolication cache section completed"
 }
 # Clean incomplete Time Machine backups
 clean_time_machine_failed_backups() {

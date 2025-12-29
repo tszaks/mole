@@ -96,9 +96,6 @@ clean_macos_system_caches() {
     # Clean saved application states with protection for System Settings
     # Note: safe_clean already calls should_protect_path for each file
     safe_clean ~/Library/Saved\ Application\ State/* "Saved application states" || true
-    # REMOVED: Spotlight cache cleanup can cause system UI issues
-    # Spotlight indexes should be managed by macOS automatically
-    # safe_clean ~/Library/Caches/com.apple.spotlight "Spotlight cache"
     safe_clean ~/Library/Caches/com.apple.photoanalysisd "Photo analysis cache" || true
     safe_clean ~/Library/Caches/com.apple.akd "Apple ID cache" || true
     safe_clean ~/Library/Caches/com.apple.WebKit.Networking/* "WebKit network cache" || true
@@ -107,7 +104,6 @@ clean_macos_system_caches() {
     safe_clean ~/Library/Caches/com.apple.QuickLook.thumbnailcache "QuickLook thumbnails" || true
     safe_clean ~/Library/Caches/Quick\ Look/* "QuickLook cache" || true
     safe_clean ~/Library/Caches/com.apple.iconservices* "Icon services cache" || true
-    safe_clean ~/Library/Caches/CloudKit/* "CloudKit cache" || true
     # Clean incomplete downloads
     safe_clean ~/Downloads/*.download "Safari incomplete downloads" || true
     safe_clean ~/Downloads/*.crdownload "Chrome incomplete downloads" || true
