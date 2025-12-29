@@ -440,14 +440,8 @@ download_binary() {
     local url="https://github.com/tw93/mole/releases/download/V${version}/${binary_name}-darwin-${arch_suffix}"
 
     # Only attempt download if we have internet
-    if ! curl --connect-timeout 2 -s https://github.com > /dev/null; then
-        log_warning "No internet connection, trying local build for ${binary_name}"
-        if build_binary_from_source "$binary_name" "$target_path"; then
-            return 0
-        fi
-        log_error "Failed to install ${binary_name} binary (offline)"
-        return 1
-    fi
+    # Note: Skip network check and let curl download handle connectivity issues
+    # This avoids false negatives from strict 2-second timeout
 
     if [[ -t 1 ]]; then
         start_line_spinner "Downloading ${binary_name}..."
