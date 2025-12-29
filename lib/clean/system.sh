@@ -11,7 +11,6 @@ clean_deep_system() {
     safe_sudo_find_delete "/Library/Caches" "*.tmp" "$MOLE_TEMP_FILE_AGE_DAYS" "f" && cache_cleaned=1 || true
     safe_sudo_find_delete "/Library/Caches" "*.log" "$MOLE_LOG_AGE_DAYS" "f" && cache_cleaned=1 || true
     [[ $cache_cleaned -eq 1 ]] && log_success "System caches"
-    # Clean temporary files (macOS /tmp is a symlink to /private/tmp)
     local tmp_cleaned=0
     safe_sudo_find_delete "/private/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
     safe_sudo_find_delete "/private/var/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
@@ -19,22 +18,17 @@ clean_deep_system() {
     # Clean crash reports
     safe_sudo_find_delete "/Library/Logs/DiagnosticReports" "*" "$MOLE_CRASH_REPORT_AGE_DAYS" "f" || true
     log_success "System crash reports"
-    # Clean system logs (macOS /var is a symlink to /private/var)
     safe_sudo_find_delete "/private/var/log" "*.log" "$MOLE_LOG_AGE_DAYS" "f" || true
     safe_sudo_find_delete "/private/var/log" "*.gz" "$MOLE_LOG_AGE_DAYS" "f" || true
     log_success "System logs"
-    # Clean Library Updates safely (skip if SIP is enabled)
     if [[ -d "/Library/Updates" && ! -L "/Library/Updates" ]]; then
         if ! is_sip_enabled; then
-            # SIP is disabled, attempt cleanup with restricted flag check
             local updates_cleaned=0
             while IFS= read -r -d '' item; do
-                # Validate path format (must be direct child of /Library/Updates)
                 if [[ -z "$item" ]] || [[ ! "$item" =~ ^/Library/Updates/[^/]+$ ]]; then
                     debug_log "Skipping malformed path: $item"
                     continue
                 fi
-                # Skip system-protected files (restricted flag)
                 local item_flags
                 item_flags=$($STAT_BSD -f%Sf "$item" 2> /dev/null || echo "")
                 if [[ "$item_flags" == *"restricted"* ]]; then
@@ -47,7 +41,6 @@ clean_deep_system() {
             [[ $updates_cleaned -gt 0 ]] && log_success "System library updates"
         fi
     fi
-    # Clean macOS Install Data (legacy upgrade leftovers)
     if [[ -d "/macOS Install Data" ]]; then
         local mtime=$(get_file_mtime "/macOS Install Data")
         local age_days=$((($(date +%s) - mtime) / 86400))
@@ -65,19 +58,16 @@ clean_deep_system() {
             debug_log "Keeping macOS Install Data (only ${age_days} days old, needs 30+)"
         fi
     fi
-    # Clean browser code signature caches
     start_section_spinner "Scanning system caches..."
     local code_sign_cleaned=0
     local found_count=0
     local last_update_time=$(date +%s)
-    local update_interval=2 # Update spinner every 2 seconds instead of every 50 files
-    # Efficient stream processing for large directories
+    local update_interval=2
     while IFS= read -r -d '' cache_dir; do
         if safe_remove "$cache_dir" true; then
             ((code_sign_cleaned++))
         fi
         ((found_count++))
-        # Update progress spinner periodically based on time, not count
         local current_time=$(date +%s)
         if [[ $((current_time - last_update_time)) -ge $update_interval ]]; then
             start_section_spinner "Scanning system caches... ($found_count found)"
@@ -86,20 +76,14 @@ clean_deep_system() {
     done < <(run_with_timeout 5 command find /private/var/folders -type d -name "*.code_sign_clone" -path "*/X/*" -print0 2> /dev/null || true)
     stop_section_spinner
     [[ $code_sign_cleaned -gt 0 ]] && log_success "Browser code signature caches ($code_sign_cleaned items)"
-    # Clean system diagnostics logs
     safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
     safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
     safe_sudo_find_delete "/private/var/db/DiagnosticPipeline" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
     log_success "System diagnostic logs"
-    # Clean power logs
     safe_sudo_find_delete "/private/var/db/powerlog" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
     log_success "Power logs"
-    # Clean memory exception reports (can accumulate to 1-2GB, thousands of files)
-    # These track app memory limit violations, safe to clean old ones
     safe_sudo_find_delete "/private/var/db/reportmemoryexception/MemoryLimitViolations" "*" "30" "f" || true
     log_success "Memory exception reports"
-    # Clean system diagnostic tracev3 logs (can be 1-2GB)
-    # System generates these continuously, safe to clean old ones
     start_section_spinner "Cleaning diagnostic trace logs..."
     local diag_logs_cleaned=0
     safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*.tracev3" "30" "f" && diag_logs_cleaned=1 || true

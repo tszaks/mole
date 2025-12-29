@@ -1,13 +1,11 @@
 #!/bin/bash
 # User Data Cleanup Module
 set -euo pipefail
-# Clean user essentials (caches, logs, trash)
 clean_user_essentials() {
     start_section_spinner "Scanning caches..."
     safe_clean ~/Library/Caches/* "User app cache"
     stop_section_spinner
     safe_clean ~/Library/Logs/* "User app logs"
-    # Check if Trash directory is whitelisted
     if is_path_whitelisted "$HOME/.Trash"; then
         note_activity
         echo -e "  ${GREEN}${ICON_EMPTY}${NC} Trash · whitelist protected"
@@ -15,19 +13,13 @@ clean_user_essentials() {
         safe_clean ~/.Trash/* "Trash"
     fi
 }
-# Helper: Scan external volumes for cleanup (Trash & DS_Store)
 scan_external_volumes() {
     [[ -d "/Volumes" ]] || return 0
-    # Fast pre-check: collect non-system external volumes and detect network volumes
     local -a candidate_volumes=()
     local -a network_volumes=()
     for volume in /Volumes/*; do
-        # Basic checks (directory, writable, not a symlink)
         [[ -d "$volume" && -w "$volume" && ! -L "$volume" ]] || continue
-        # Skip system root if it appears in /Volumes
         [[ "$volume" == "/" || "$volume" == "/Volumes/Macintosh HD" ]] && continue
-        # Use diskutil to intelligently detect network volumes (SMB/NFS/AFP)
-        # Timeout protection: 1s per volume to avoid slow network responses
         local protocol=""
         protocol=$(run_with_timeout 1 command diskutil info "$volume" 2> /dev/null | grep -i "Protocol:" | awk '{print $2}' || echo "")
         case "$protocol" in
@@ -36,7 +28,6 @@ scan_external_volumes() {
                 continue
                 ;;
         esac
-        # Fallback: Check filesystem type via df if diskutil didn't identify protocol
         local fs_type=""
         fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "")
         case "$fs_type" in
@@ -47,33 +38,24 @@ scan_external_volumes() {
         esac
         candidate_volumes+=("$volume")
     done
-    # If no external volumes found, return immediately (zero overhead)
     local volume_count=${#candidate_volumes[@]}
     local network_count=${#network_volumes[@]}
     if [[ $volume_count -eq 0 ]]; then
-        # Show info if network volumes were skipped
         if [[ $network_count -gt 0 ]]; then
             echo -e "  ${GRAY}${ICON_LIST}${NC} External volumes (${network_count} network volume(s) skipped)"
             note_activity
         fi
         return 0
     fi
-    # We have local external volumes, now perform full scan
     start_section_spinner "Scanning $volume_count external volume(s)..."
     for volume in "${candidate_volumes[@]}"; do
-        # Re-verify volume is still accessible (may have been unmounted since initial scan)
-        # Use simple directory check instead of slow mount command for better performance
         [[ -d "$volume" && -r "$volume" ]] || continue
-        # 1. Clean Trash on volume
         local volume_trash="$volume/.Trashes"
-        # Check if external volume Trash is whitelisted
         if [[ -d "$volume_trash" && "$DRY_RUN" != "true" ]] && ! is_path_whitelisted "$volume_trash"; then
-            # Safely iterate and remove each item
             while IFS= read -r -d '' item; do
                 safe_remove "$item" true || true
             done < <(command find "$volume_trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
         fi
-        # 2. Clean .DS_Store
         if [[ "$PROTECT_FINDER_METADATA" != "true" ]]; then
             clean_ds_store_tree "$volume" "$(basename "$volume") volume (.DS_Store)"
         fi
@@ -104,22 +86,18 @@ clean_macos_system_caches() {
     safe_clean ~/Library/Caches/com.apple.QuickLook.thumbnailcache "QuickLook thumbnails" || true
     safe_clean ~/Library/Caches/Quick\ Look/* "QuickLook cache" || true
     safe_clean ~/Library/Caches/com.apple.iconservices* "Icon services cache" || true
-    # Clean incomplete downloads
     safe_clean ~/Downloads/*.download "Safari incomplete downloads" || true
     safe_clean ~/Downloads/*.crdownload "Chrome incomplete downloads" || true
     safe_clean ~/Downloads/*.part "Partial incomplete downloads" || true
-    # Additional user-level caches
     safe_clean ~/Library/Autosave\ Information/* "Autosave information" || true
     safe_clean ~/Library/IdentityCaches/* "Identity caches" || true
     safe_clean ~/Library/Suggestions/* "Siri suggestions cache" || true
     safe_clean ~/Library/Calendars/Calendar\ Cache "Calendar cache" || true
     safe_clean ~/Library/Application\ Support/AddressBook/Sources/*/Photos.cache "Address Book photo cache" || true
 }
-# Clean recent items lists
 clean_recent_items() {
     stop_section_spinner
     local shared_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"
-    # Target only the global recent item lists to avoid touching per-app/System Settings SFL files
     local -a recent_lists=(
         "$shared_dir/com.apple.LSSharedFileList.RecentApplications.sfl2"
         "$shared_dir/com.apple.LSSharedFileList.RecentDocuments.sfl2"
@@ -135,10 +113,8 @@ clean_recent_items() {
             [[ -e "$sfl_file" ]] && safe_clean "$sfl_file" "Recent items list" || true
         done
     fi
-    # Clean recent items preferences
     safe_clean ~/Library/Preferences/com.apple.recentitems.plist "Recent items preferences" || true
 }
-# Clean old mail downloads
 clean_mail_downloads() {
     stop_section_spinner
     local mail_age_days=${MOLE_MAIL_AGE_DAYS:-30}
@@ -153,14 +129,11 @@ clean_mail_downloads() {
     local cleaned_kb=0
     for target_path in "${mail_dirs[@]}"; do
         if [[ -d "$target_path" ]]; then
-            # Check directory size threshold
             local dir_size_kb=0
             dir_size_kb=$(get_path_size_kb "$target_path")
-            # Skip if below threshold
             if [[ $dir_size_kb -lt ${MOLE_MAIL_DOWNLOADS_MIN_KB:-5120} ]]; then
                 continue
             fi
-            # Find and remove files older than specified days
             while IFS= read -r -d '' file_path; do
                 if [[ -f "$file_path" ]]; then
                     local file_size_kb=$(get_path_size_kb "$file_path")
