@@ -7,10 +7,13 @@ set -euo pipefail
 # Get script directory and source dependencies
 _MOLE_MANAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_MOLE_MANAGE_DIR/../core/common.sh"
-source "$_MOLE_MANAGE_DIR/../clean/project.sh"
+# Only source project.sh if not already loaded (has readonly vars)
+if [[ -z "${PURGE_TARGETS:-}" ]]; then
+    source "$_MOLE_MANAGE_DIR/../clean/project.sh"
+fi
 
-# Config file path
-readonly PURGE_PATHS_CONFIG="$HOME/.config/mole/purge_paths"
+# Config file path (use :- to avoid re-declaration if already set)
+PURGE_PATHS_CONFIG="${PURGE_PATHS_CONFIG:-$HOME/.config/mole/purge_paths}"
 
 # Ensure config file exists with helpful template
 ensure_config_template() {

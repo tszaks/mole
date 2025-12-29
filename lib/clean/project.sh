@@ -44,9 +44,121 @@ readonly PURGE_CONFIG_FILE="$HOME/.config/mole/purge_paths"
 # Global array to hold actual search paths
 PURGE_SEARCH_PATHS=()
 
-# Load purge paths from config or defaults
+# Project indicator files (if a directory contains these, it's likely a project)
+readonly PROJECT_INDICATORS=(
+    "package.json"
+    "Cargo.toml"
+    "go.mod"
+    "pyproject.toml"
+    "requirements.txt"
+    "pom.xml"
+    "build.gradle"
+    "Gemfile"
+    "composer.json"
+    "pubspec.yaml"
+    "Makefile"
+    ".git"
+)
+
+# Check if a directory contains projects (directly or in subdirectories)
+is_project_container() {
+    local dir="$1"
+    local max_depth="${2:-2}"
+
+    # Skip hidden directories and system directories
+    local basename
+    basename=$(basename "$dir")
+    [[ "$basename" == .* ]] && return 1
+    [[ "$basename" == "Library" ]] && return 1
+    [[ "$basename" == "Applications" ]] && return 1
+    [[ "$basename" == "Movies" ]] && return 1
+    [[ "$basename" == "Music" ]] && return 1
+    [[ "$basename" == "Pictures" ]] && return 1
+    [[ "$basename" == "Public" ]] && return 1
+
+    # Build find expression with all indicators (single find call for efficiency)
+    local -a find_args=("$dir" "-maxdepth" "$max_depth" "(")
+    local first=true
+    for indicator in "${PROJECT_INDICATORS[@]}"; do
+        if [[ "$first" == "true" ]]; then
+            first=false
+        else
+            find_args+=("-o")
+        fi
+        find_args+=("-name" "$indicator")
+    done
+    find_args+=(")" "-print" "-quit")
+
+    # Single find call to check all indicators at once
+    if find "${find_args[@]}" 2>/dev/null | grep -q .; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Discover project directories in $HOME
+discover_project_dirs() {
+    local -a discovered=()
+
+    # First check default paths that exist
+    for path in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
+        if [[ -d "$path" ]]; then
+            discovered+=("$path")
+        fi
+    done
+
+    # Then scan $HOME for other project containers (depth 1)
+    local dir
+    for dir in "$HOME"/*/; do
+        [[ ! -d "$dir" ]] && continue
+        dir="${dir%/}"  # Remove trailing slash
+
+        # Skip if already in defaults
+        local already_found=false
+        for existing in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
+            if [[ "$dir" == "$existing" ]]; then
+                already_found=true
+                break
+            fi
+        done
+        [[ "$already_found" == "true" ]] && continue
+
+        # Check if this directory contains projects
+        if is_project_container "$dir" 2; then
+            discovered+=("$dir")
+        fi
+    done
+
+    # Return unique paths
+    printf '%s\n' "${discovered[@]}" | sort -u
+}
+
+# Save discovered paths to config
+save_discovered_paths() {
+    local -a paths=("$@")
+
+    ensure_user_dir "$(dirname "$PURGE_CONFIG_FILE")"
+
+    cat > "$PURGE_CONFIG_FILE" << 'EOF'
+# Mole Purge Paths - Auto-discovered project directories
+# Edit this file to customize, or run: mo purge --paths
+# Add one path per line (supports ~ for home directory)
+EOF
+
+    printf '\n' >> "$PURGE_CONFIG_FILE"
+    for path in "${paths[@]}"; do
+        # Convert $HOME to ~ for portability
+        path="${path/#$HOME/~}"
+        echo "$path" >> "$PURGE_CONFIG_FILE"
+    done
+}
+
+# Load purge paths from config or auto-discover
 load_purge_config() {
     PURGE_SEARCH_PATHS=()
+
+    # Try loading from config file
     if [[ -f "$PURGE_CONFIG_FILE" ]]; then
         while IFS= read -r line; do
             # Remove leading/trailing whitespace
@@ -63,9 +175,30 @@ load_purge_config() {
         done < "$PURGE_CONFIG_FILE"
     fi
 
-    # Fallback to defaults if no paths loaded
+    # If no paths loaded, auto-discover and save
     if [[ ${#PURGE_SEARCH_PATHS[@]} -eq 0 ]]; then
-        PURGE_SEARCH_PATHS=("${DEFAULT_PURGE_SEARCH_PATHS[@]}")
+        # Show discovery message if running interactively
+        if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
+            echo -e "${GRAY}First run: discovering project directories...${NC}" >&2
+        fi
+
+        local -a discovered=()
+        while IFS= read -r path; do
+            [[ -n "$path" ]] && discovered+=("$path")
+        done < <(discover_project_dirs)
+
+        if [[ ${#discovered[@]} -gt 0 ]]; then
+            PURGE_SEARCH_PATHS=("${discovered[@]}")
+            # Save for next time
+            save_discovered_paths "${discovered[@]}"
+
+            if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
+                echo -e "${GRAY}Found ${#discovered[@]} project directories, saved to config${NC}" >&2
+            fi
+        else
+            # Fallback to defaults if nothing found
+            PURGE_SEARCH_PATHS=("${DEFAULT_PURGE_SEARCH_PATHS[@]}")
+        fi
     fi
 }
 
