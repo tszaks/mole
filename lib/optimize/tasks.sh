@@ -163,14 +163,14 @@ opt_sqlite_vacuum() {
             should_protect_path "$db_file" && continue
 
             # Verify it's a SQLite database
-            if ! file "$db_file" 2>/dev/null | grep -q "SQLite"; then
+            if ! file "$db_file" 2> /dev/null | grep -q "SQLite"; then
                 continue
             fi
 
             # Try to vacuum
             local exit_code=0
             set +e
-            run_with_timeout 20 sqlite3 "$db_file" "VACUUM;" 2>/dev/null
+            run_with_timeout 20 sqlite3 "$db_file" "VACUUM;" 2> /dev/null
             exit_code=$?
             set -e
 
@@ -330,14 +330,14 @@ opt_startup_items_cleanup() {
                 fi
 
                 if [[ "$need_sudo" == "true" ]]; then
-                    sudo launchctl unload "$plist_file" 2>/dev/null || true
+                    sudo launchctl unload "$plist_file" 2> /dev/null || true
                     if safe_sudo_remove "$plist_file"; then
                         ((broken_count++))
                     else
                         echo -e "  ${YELLOW}!${NC} Failed to remove (sudo) $plist_file"
                     fi
                 else
-                    launchctl unload "$plist_file" 2>/dev/null || true
+                    launchctl unload "$plist_file" 2> /dev/null || true
                     if safe_remove "$plist_file" true; then
                         ((broken_count++))
                     else
@@ -349,10 +349,10 @@ opt_startup_items_cleanup() {
 
             # Extract program path
             local program=""
-            program=$(plutil -extract Program raw "$plist_file" 2>/dev/null || echo "")
+            program=$(plutil -extract Program raw "$plist_file" 2> /dev/null || echo "")
 
             if [[ -z "$program" ]]; then
-                program=$(plutil -extract ProgramArguments.0 raw "$plist_file" 2>/dev/null || echo "")
+                program=$(plutil -extract ProgramArguments.0 raw "$plist_file" 2> /dev/null || echo "")
             fi
 
             program="${program/#\~/$HOME}"
@@ -363,7 +363,7 @@ opt_startup_items_cleanup() {
             fi
             # Check for orphaned privileged helpers (app uninstalled but helper remains)
             local associated_bundle=""
-            associated_bundle=$(plutil -extract AssociatedBundleIdentifiers.0 raw "$plist_file" 2>/dev/null || echo "")
+            associated_bundle=$(plutil -extract AssociatedBundleIdentifiers.0 raw "$plist_file" 2> /dev/null || echo "")
 
             if [[ -n "$associated_bundle" ]]; then
                 # Check if the associated app exists
@@ -375,51 +375,51 @@ opt_startup_items_cleanup() {
                     app_path="$HOME/Applications/$associated_bundle.app"
                 else
                     # Fallback to mdfind (slower but comprehensive, with 10s timeout)
-                    app_path=$(run_with_timeout 10 mdfind "kMDItemCFBundleIdentifier == '$associated_bundle'" 2>/dev/null | head -1 || echo "")
+                    app_path=$(run_with_timeout 10 mdfind "kMDItemCFBundleIdentifier == '$associated_bundle'" 2> /dev/null | head -1 || echo "")
                 fi
 
                 # If associated app is MISSING, this is an orphan
                 if [[ -z "$app_path" ]]; then
-                     if command -v should_protect_path > /dev/null && should_protect_path "$plist_file"; then
+                    if command -v should_protect_path > /dev/null && should_protect_path "$plist_file"; then
                         continue
                     fi
 
                     # Get the helper tool path
                     local program=""
-                    program=$(plutil -extract Program raw "$plist_file" 2>/dev/null || echo "")
+                    program=$(plutil -extract Program raw "$plist_file" 2> /dev/null || echo "")
                     if [[ -z "$program" ]]; then
-                         program=$(plutil -extract ProgramArguments.0 raw "$plist_file" 2>/dev/null || echo "")
+                        program=$(plutil -extract ProgramArguments.0 raw "$plist_file" 2> /dev/null || echo "")
                     fi
                     program="${program/#\~/$HOME}"
 
                     # Double check we are not deleting system files
                     if [[ "$program" == /System/* ||
-                          "$program" == /usr/lib/* ||
-                          "$program" == /usr/bin/* ||
-                          "$program" == /usr/sbin/* ||
-                          "$program" == /Library/Apple/* ]]; then
+                        "$program" == /usr/lib/* ||
+                        "$program" == /usr/bin/* ||
+                        "$program" == /usr/sbin/* ||
+                        "$program" == /Library/Apple/* ]]; then
                         continue
                     fi
 
                     if [[ "$need_sudo" == "true" ]]; then
-                        sudo launchctl unload "$plist_file" 2>/dev/null || true
+                        sudo launchctl unload "$plist_file" 2> /dev/null || true
                         # remove the plist
                         safe_sudo_remove "$plist_file"
 
                         # AND remove the helper binary if it exists and is not protected
                         if [[ -n "$program" && -f "$program" ]]; then
-                             safe_sudo_remove "$program"
+                            safe_sudo_remove "$program"
                         fi
                         ((broken_count++))
                         echo -e "  ${GREEN}✓${NC} Removed orphaned helper: $(basename "$program")"
                     else
-                         launchctl unload "$plist_file" 2>/dev/null || true
-                         safe_remove "$plist_file" true
-                         if [[ -n "$program" && -f "$program" ]]; then
-                             safe_remove "$program" true
-                         fi
-                         ((broken_count++))
-                         echo -e "  ${GREEN}✓${NC} Removed orphaned helper: $(basename "$program")"
+                        launchctl unload "$plist_file" 2> /dev/null || true
+                        safe_remove "$plist_file" true
+                        if [[ -n "$program" && -f "$program" ]]; then
+                            safe_remove "$program" true
+                        fi
+                        ((broken_count++))
+                        echo -e "  ${GREEN}✓${NC} Removed orphaned helper: $(basename "$program")"
                     fi
                     continue
                 fi
@@ -432,14 +432,14 @@ opt_startup_items_cleanup() {
                 fi
 
                 if [[ "$need_sudo" == "true" ]]; then
-                    sudo launchctl unload "$plist_file" 2>/dev/null || true
+                    sudo launchctl unload "$plist_file" 2> /dev/null || true
                     if safe_sudo_remove "$plist_file"; then
                         ((broken_count++))
                     else
                         echo -e "  ${YELLOW}!${NC} Failed to remove (sudo) $plist_file"
                     fi
                 else
-                    launchctl unload "$plist_file" 2>/dev/null || true
+                    launchctl unload "$plist_file" 2> /dev/null || true
                     if safe_remove "$plist_file" true; then
                         ((broken_count++))
                     else
@@ -447,7 +447,7 @@ opt_startup_items_cleanup() {
                     fi
                 fi
             fi
-        done < <("${find_cmd[@]}" "$dir" -maxdepth 1 -name "*.plist" -type f 2>/dev/null || true)
+        done < <("${find_cmd[@]}" "$dir" -maxdepth 1 -name "*.plist" -type f 2> /dev/null || true)
     done
 
     if [[ $broken_count -gt 0 ]]; then
@@ -475,7 +475,7 @@ opt_dyld_cache_update() {
     local dyld_cache_path="/var/db/dyld/dyld_shared_cache_$(uname -m)"
     if [[ -e "$dyld_cache_path" ]]; then
         local cache_mtime
-        cache_mtime=$(stat -f "%m" "$dyld_cache_path" 2>/dev/null || echo "0")
+        cache_mtime=$(stat -f "%m" "$dyld_cache_path" 2> /dev/null || echo "0")
         local current_time
         current_time=$(date +%s)
         local time_diff=$((current_time - cache_mtime))
@@ -522,22 +522,22 @@ opt_system_services_refresh() {
     local -a restarted_services=()
 
     # cfprefsd - Preferences cache daemon (ensures fixed preferences take effect)
-    if killall -HUP cfprefsd 2>/dev/null; then
+    if killall -HUP cfprefsd 2> /dev/null; then
         restarted_services+=("Preferences")
     fi
 
     # lsd - LaunchServices daemon (ensures rebuild takes effect)
-    if killall lsd 2>/dev/null; then
+    if killall lsd 2> /dev/null; then
         restarted_services+=("LaunchServices")
     fi
 
     # iconservicesagent - Icon services (ensures cache refresh takes effect)
-    if killall iconservicesagent 2>/dev/null; then
+    if killall iconservicesagent 2> /dev/null; then
         restarted_services+=("Icon Services")
     fi
 
     # fontd - Font server (ensures font cache refresh takes effect)
-    if killall fontd 2>/dev/null; then
+    if killall fontd 2> /dev/null; then
         restarted_services+=("Font Server")
     fi
 
@@ -563,25 +563,24 @@ opt_dock_refresh() {
             if [[ -f "$db_file" ]]; then
                 safe_remove "$db_file" true > /dev/null 2>&1 && refreshed=true
             fi
-        done < <(find "$dock_support" -name "*.db" -type f 2>/dev/null || true)
+        done < <(find "$dock_support" -name "*.db" -type f 2> /dev/null || true)
     fi
 
     # Also clear Dock plist cache
     local dock_plist="$HOME/Library/Preferences/com.apple.dock.plist"
     if [[ -f "$dock_plist" ]]; then
         # Just touch to invalidate cache, don't delete (preserves user settings)
-        touch "$dock_plist" 2>/dev/null || true
+        touch "$dock_plist" 2> /dev/null || true
     fi
 
     # Restart Dock to apply changes
-    killall Dock 2>/dev/null || true
+    killall Dock 2> /dev/null || true
 
     if [[ "$refreshed" == "true" ]]; then
         echo -e "  ${GREEN}✓${NC} Dock cache cleared"
     fi
     echo -e "  ${GREEN}✓${NC} Dock refreshed"
 }
-
 
 # Execute optimization by action name
 execute_optimization() {
