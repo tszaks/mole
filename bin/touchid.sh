@@ -109,8 +109,7 @@ enable_touchid() {
 
     # Apply the changes
     if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2> /dev/null; then
-        echo -e "${GREEN}${ICON_SUCCESS} Touch ID enabled${NC} ${GRAY}- try: sudo ls${NC}"
-        echo ""
+        log_success "Touch ID enabled - try: sudo ls"
         return 0
     else
         log_error "Failed to enable Touch ID"
