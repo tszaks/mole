@@ -15,10 +15,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-13
+          - os: macos-latest
             target: release-amd64
             artifact_name: binaries-amd64
-          - os: macos-14
+          - os: macos-latest
             target: release-arm64
             artifact_name: binaries-arm64
     steps:
