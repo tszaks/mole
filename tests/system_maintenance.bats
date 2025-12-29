@@ -186,25 +186,175 @@ EOF
     [[ "$output" == *"COUNT=0"* ]]
 }
 
-@test "check_macos_update warns when update available" {
+@test "check_macos_update avoids slow softwareupdate scans" {
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
 
-softwareupdate() {
-    echo "* Label: macOS 99"
-    return 0
+defaults() { echo "1"; }
+
+run_with_timeout() {
+    local timeout="${1:-}"
+    shift
+    if [[ "$timeout" != "10" ]]; then
+        echo "BAD_TIMEOUT:$timeout"
+        return 124
+    fi
+    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
+        cat <<'OUT'
+Software Update Tool
+
+Software Update found the following new or updated software:
+* Label: macOS 99
+OUT
+        return 0
+    fi
+    return 124
 }
 
 start_inline_spinner(){ :; }
 stop_inline_spinner(){ :; }
 
 check_macos_update
+echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"macOS"* ]]
+    [[ "$output" == *"Update available"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=true"* ]]
+    [[ "$output" != *"BAD_TIMEOUT:"* ]]
+}
+
+@test "check_macos_update clears update flag when softwareupdate reports no updates" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+defaults() { echo "1"; }
+
+run_with_timeout() {
+    local timeout="${1:-}"
+    shift
+    if [[ "$timeout" != "10" ]]; then
+        echo "BAD_TIMEOUT:$timeout"
+        return 124
+    fi
+    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
+        cat <<'OUT'
+Software Update Tool
+
+Finding available software
+No new software available.
+OUT
+        return 0
+    fi
+    return 124
+}
+
+start_inline_spinner(){ :; }
+stop_inline_spinner(){ :; }
+
+check_macos_update
+echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"System up to date"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=false"* ]]
+    [[ "$output" != *"BAD_TIMEOUT:"* ]]
+}
+
+@test "check_macos_update keeps update flag when softwareupdate times out" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+defaults() { echo "1"; }
+
+run_with_timeout() {
+    local timeout="${1:-}"
+    shift
+    if [[ "$timeout" != "10" ]]; then
+        echo "BAD_TIMEOUT:$timeout"
+        return 124
+    fi
+    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
+        return 124
+    fi
+    return 124
+}
+
+start_inline_spinner(){ :; }
+stop_inline_spinner(){ :; }
+
+check_macos_update
+echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Update available"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=true"* ]]
+    [[ "$output" != *"BAD_TIMEOUT:"* ]]
+}
+
+@test "check_macos_update keeps update flag when softwareupdate returns empty output" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+defaults() { echo "1"; }
+
+run_with_timeout() {
+    local timeout="${1:-}"
+    shift
+    if [[ "$timeout" != "10" ]]; then
+        echo "BAD_TIMEOUT:$timeout"
+        return 124
+    fi
+    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
+        return 0
+    fi
+    return 124
+}
+
+start_inline_spinner(){ :; }
+stop_inline_spinner(){ :; }
+
+check_macos_update
+echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Update available"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=true"* ]]
+    [[ "$output" != *"BAD_TIMEOUT:"* ]]
+}
+
+@test "check_macos_update skips softwareupdate when defaults shows no updates" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+defaults() { echo "0"; }
+
+run_with_timeout() {
+    echo "SHOULD_NOT_CALL_SOFTWAREUPDATE"
+    return 0
+}
+
+check_macos_update
+echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"System up to date"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=false"* ]]
+    [[ "$output" != *"SHOULD_NOT_CALL_SOFTWAREUPDATE"* ]]
 }
 
 @test "run_with_timeout succeeds without GNU timeout" {

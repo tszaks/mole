@@ -236,7 +236,7 @@ check_macos_update() {
     if [[ $(get_software_updates) == "Updates Available" ]]; then
         updates_available="true"
 
-        # Verify with softwareupdate -l (short timeout) to reduce false positives
+        # Verify with softwareupdate using --no-scan (fast) to reduce false positives
         local sw_output=""
         local sw_status=0
         local spinner_started=false
@@ -245,7 +245,9 @@ check_macos_update() {
             spinner_started=true
         fi
 
-        if ! sw_output=$(run_with_timeout 5 softwareupdate -l 2> /dev/null); then
+        if sw_output=$(run_with_timeout 10 softwareupdate -l --no-scan 2> /dev/null); then
+            :
+        else
             sw_status=$?
         fi
 
@@ -253,10 +255,9 @@ check_macos_update() {
             stop_inline_spinner
         fi
 
-        # If command failed, timed out, or returned empty, treat as no updates to avoid false positives
-        if [[ $sw_status -ne 0 || -z "$sw_output" ]]; then
-            updates_available="false"
-        elif echo "$sw_output" | grep -q "No new software available"; then
+        # Prefer avoiding false negatives: if the system indicates updates are pending,
+        # only clear the flag when softwareupdate explicitly reports no updates.
+        if [[ $sw_status -eq 0 && -n "$sw_output" ]] && echo "$sw_output" | grep -qE '^[[:space:]]*No new software available'; then
             updates_available="false"
         fi
     fi
