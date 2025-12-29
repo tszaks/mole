@@ -100,7 +100,7 @@ safe_remove() {
     # Use || to capture the exit code so set -e won't abort on rm failures
     local error_msg
     local rm_exit=0
-    error_msg=$(rm -rf "$path" 2>&1) || rm_exit=$?
+    error_msg=$(rm -rf "$path" 2>&1) || rm_exit=$? # safe_remove
 
     if [[ $rm_exit -eq 0 ]]; then
         return 0
