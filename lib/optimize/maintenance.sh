@@ -60,5 +60,3 @@ fix_broken_preferences() {
 
     echo "$broken_count"
 }
-
-
