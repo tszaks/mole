@@ -217,11 +217,7 @@ get_latest_release_tag() {
     if [[ -z "$tag" ]]; then
         return 1
     fi
-    if [[ "$tag" != V* && "$tag" != v* ]]; then
-        tag="V${tag}"
-    else
-        tag="V${tag#v}"
-    fi
+    # Return tag as-is; normalize_release_tag will handle standardization
     printf '%s\n' "$tag"
 }
 
@@ -238,8 +234,11 @@ get_latest_release_tag_from_git() {
 
 normalize_release_tag() {
     local tag="$1"
-    tag="${tag#v}"
-    tag="${tag#V}"
+    # Remove all leading 'v' or 'V' prefixes (handle edge cases like VV1.0.0)
+    while [[ "$tag" =~ ^[vV] ]]; do
+        tag="${tag#v}"
+        tag="${tag#V}"
+    done
     if [[ -n "$tag" ]]; then
         printf 'V%s\n' "$tag"
     fi
