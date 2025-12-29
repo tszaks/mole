@@ -2,6 +2,14 @@
 # Project Purge Module (mo purge)
 # Removes heavy project build artifacts and dependencies
 set -euo pipefail
+
+PROJECT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORE_LIB_DIR="$(cd "$PROJECT_LIB_DIR/../core" && pwd)"
+if ! command -v ensure_user_dir > /dev/null 2>&1; then
+    # shellcheck disable=SC1090
+    source "$CORE_LIB_DIR/common.sh"
+fi
+
 # Targets to look for (heavy build artifacts)
 readonly PURGE_TARGETS=(
     "node_modules"
