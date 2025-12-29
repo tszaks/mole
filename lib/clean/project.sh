@@ -53,17 +53,17 @@ load_purge_config() {
             # Remove leading/trailing whitespace
             line="${line#"${line%%[![:space:]]*}"}"
             line="${line%"${line##*[![:space:]]}"}"
-            
+
             # Skip empty lines and comments
             [[ -z "$line" || "$line" =~ ^# ]] && continue
-            
+
             # Expand tilde to HOME
             line="${line/#\~/$HOME}"
-            
+
             PURGE_SEARCH_PATHS+=("$line")
         done < "$PURGE_CONFIG_FILE"
     fi
-    
+
     # Fallback to defaults if no paths loaded
     if [[ ${#PURGE_SEARCH_PATHS[@]} -eq 0 ]]; then
         PURGE_SEARCH_PATHS=("${DEFAULT_PURGE_SEARCH_PATHS[@]}")
