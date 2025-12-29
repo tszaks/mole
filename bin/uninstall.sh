@@ -4,7 +4,7 @@
 #
 # Usage:
 #   uninstall.sh                  # Launch interactive uninstaller
-#   uninstall.sh --force-rescan   # Rescan apps and refresh cache
+#   uninstall.sh                  # Launch interactive uninstaller
 
 set -euo pipefail
 
@@ -370,13 +370,11 @@ trap cleanup EXIT INT TERM
 
 main() {
     local force_rescan=false
+    # Parse global flags locally if needed (currently none specific to uninstall)
     for arg in "$@"; do
         case "$arg" in
             "--debug")
                 export MO_DEBUG=1
-                ;;
-            "--force-rescan")
-                force_rescan=true
                 ;;
         esac
     done
