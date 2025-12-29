@@ -479,6 +479,22 @@ paginated_multi_select() {
 
         # Footer: single line with controls
         local sep=" ${GRAY}|${NC} "
+
+        # Helper to calculate display length without ANSI codes
+        _calc_len() {
+            local text="$1"
+            local stripped
+            stripped=$(printf "%s" "$text" | LC_ALL=C awk '{gsub(/\033\[[0-9;]*[A-Za-z]/,""); print}')
+            printf "%d" "${#stripped}"
+        }
+
+        # Common menu items
+        local nav="${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
+        local space_select="${GRAY}Space Select${NC}"
+        local space="${GRAY}Space${NC}"
+        local enter="${GRAY}Enter${NC}"
+        local exit="${GRAY}Q Exit${NC}"
+
         if [[ "$filter_mode" == "true" ]]; then
             # Filter mode: simple controls without sort
             local -a _segs_filter=(
@@ -489,106 +505,60 @@ paginated_multi_select() {
             )
             _print_wrapped_controls "$sep" "${_segs_filter[@]}"
         else
-            # Normal mode - single line compact format
+            # Normal mode - prepare dynamic items
             local reverse_arrow="↑"
             [[ "$sort_reverse" == "true" ]] && reverse_arrow="↓"
 
-            # Determine filter text based on whether filter is active
             local filter_text="/ Search"
             [[ -n "$applied_query" ]] && filter_text="/ Clear"
 
+            local refresh="${GRAY}R Refresh${NC}"
+            local search="${GRAY}${filter_text}${NC}"
+            local sort_ctrl="${GRAY}S ${sort_status}${NC}"
+            local order_ctrl="${GRAY}O ${reverse_arrow}${NC}"
+
             if [[ "$has_metadata" == "true" ]]; then
                 if [[ -n "$applied_query" ]]; then
-                    # Filtering: hide sort controls
-                    local -a _segs_all=(
-                        "${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
-                        "${GRAY}Space${NC}"
-                        "${GRAY}Enter${NC}"
-                        "${GRAY}${filter_text}${NC}"
-                        "${GRAY}Q Exit${NC}"
-                    )
+                    # Filtering active: hide sort controls
+                    local -a _segs_all=("$nav" "$space" "$enter" "$refresh" "$search" "$exit")
                     _print_wrapped_controls "$sep" "${_segs_all[@]}"
                 else
-                    # Normal: show full controls (without O ↑/↓ to save space)
-                    # Dynamically reduce controls if they won't fit
+                    # Normal: show full controls with dynamic reduction
                     local term_width="${COLUMNS:-}"
                     [[ -z "$term_width" ]] && term_width=$(tput cols 2> /dev/null || echo 80)
 
-                    # Helper to calculate display length without ANSI codes
-                    _calc_len() {
-                        local text="$1"
-                        local stripped
-                        stripped=$(printf "%s" "$text" | LC_ALL=C awk '{gsub(/\033\[[0-9;]*[A-Za-z]/,""); print}')
-                        printf "%d" "${#stripped}"
-                    }
+                    # Level 0: Full controls
+                    local -a _segs=("$nav" "$space_select" "$enter" "$refresh" "$search" "$sort_ctrl" "$order_ctrl" "$exit")
 
-                    # Build full controls and calculate total width
-                    local -a _segs_full=(
-                        "${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
-                        "${GRAY}Space Select${NC}"
-                        "${GRAY}Enter${NC}"
-                        "${GRAY}R Refresh${NC}"
-                        "${GRAY}${filter_text}${NC}"
-                        "${GRAY}S ${sort_status}${NC}"
-                        "${GRAY}Q Exit${NC}"
-                    )
-
-                    # Calculate total width with separators
-                    local total_len=0 seg_count=${#_segs_full[@]}
-                    local i
-                    for i in "${!_segs_full[@]}"; do
-                        total_len=$((total_len + $(_calc_len "${_segs_full[i]}")))
-                        # Add separator width (3 chars: " | ")
+                    # Calculate width
+                    local total_len=0 seg_count=${#_segs[@]}
+                    for i in "${!_segs[@]}"; do
+                        total_len=$((total_len + $(_calc_len "${_segs[i]}")))
                         [[ $i -lt $((seg_count - 1)) ]] && total_len=$((total_len + 3))
                     done
 
-                    # Multi-level fallback: progressively remove items if too wide
+                    # Level 1: Remove "Space Select"
                     if [[ $total_len -gt $term_width ]]; then
-                        # Level 1: Remove "R Refresh" (least critical)
-                        local -a _segs_reduced=(
-                            "${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
-                            "${GRAY}Space Select${NC}"
-                            "${GRAY}Enter${NC}"
-                            "${GRAY}${filter_text}${NC}"
-                            "${GRAY}S ${sort_status}${NC}"
-                            "${GRAY}Q Exit${NC}"
-                        )
+                        _segs=("$nav" "$enter" "$refresh" "$search" "$sort_ctrl" "$order_ctrl" "$exit")
 
-                        # Recalculate length
                         total_len=0
-                        seg_count=${#_segs_reduced[@]}
-                        for i in "${!_segs_reduced[@]}"; do
-                            total_len=$((total_len + $(_calc_len "${_segs_reduced[i]}")))
+                        seg_count=${#_segs[@]}
+                        for i in "${!_segs[@]}"; do
+                            total_len=$((total_len + $(_calc_len "${_segs[i]}")))
                             [[ $i -lt $((seg_count - 1)) ]] && total_len=$((total_len + 3))
                         done
 
-                        # Level 2: If still too wide, also remove "S ${sort_status}"
+                        # Level 2: Remove "S ${sort_status}"
                         if [[ $total_len -gt $term_width ]]; then
-                            local -a _segs_all=(
-                                "${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
-                                "${GRAY}Space Select${NC}"
-                                "${GRAY}Enter${NC}"
-                                "${GRAY}${filter_text}${NC}"
-                                "${GRAY}Q Exit${NC}"
-                            )
-                        else
-                            local -a _segs_all=("${_segs_reduced[@]}")
+                            _segs=("$nav" "$enter" "$refresh" "$search" "$order_ctrl" "$exit")
                         fi
-                    else
-                        local -a _segs_all=("${_segs_full[@]}")
                     fi
 
-                    _print_wrapped_controls "$sep" "${_segs_all[@]}"
+                    _print_wrapped_controls "$sep" "${_segs[@]}"
                 fi
             else
                 # Without metadata: basic controls
-                local -a _segs_simple=(
-                    "${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
-                    "${GRAY}Space Select${NC}"
-                    "${GRAY}Enter${NC}"
-                    "${GRAY}${filter_text}${NC}"
-                    "${GRAY}Q Exit${NC}"
-                )
+                local -a _segs_simple=("$nav" "$space_select" "$enter" "$refresh" "$search" "$exit")
                 _print_wrapped_controls "$sep" "${_segs_simple[@]}"
             fi
         fi
