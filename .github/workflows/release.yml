@@ -35,6 +35,18 @@ jobs:
           make ${{ matrix.target }}
           ls -l bin/
 
+      - name: Package binaries for Homebrew
+        run: |
+          cd bin
+          # Package binaries into tar.gz for Homebrew resource
+          if [[ "${{ matrix.target }}" == "release-arm64" ]]; then
+            tar -czf binaries-darwin-arm64.tar.gz analyze-darwin-arm64 status-darwin-arm64
+            ls -lh binaries-darwin-arm64.tar.gz
+          else
+            tar -czf binaries-darwin-amd64.tar.gz analyze-darwin-amd64 status-darwin-amd64
+            ls -lh binaries-darwin-amd64.tar.gz
+          fi
+
       - name: Upload artifacts
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
