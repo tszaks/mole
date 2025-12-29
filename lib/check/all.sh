@@ -236,7 +236,10 @@ check_macos_update() {
     if [[ $(get_software_updates) == "Updates Available" ]]; then
         updates_available="true"
 
-        # Verify with softwareupdate using --no-scan (fast) to reduce false positives
+        # Verify with softwareupdate using --no-scan to avoid triggering a fresh scan
+        # which can timeout. We prioritize avoiding false negatives (missing actual updates)
+        # over false positives, so we only clear the update flag when softwareupdate
+        # explicitly reports "No new software available"
         local sw_output=""
         local sw_status=0
         local spinner_started=false
@@ -245,7 +248,8 @@ check_macos_update() {
             spinner_started=true
         fi
 
-        if sw_output=$(run_with_timeout 10 softwareupdate -l --no-scan 2> /dev/null); then
+        local softwareupdate_timeout="${MO_SOFTWAREUPDATE_TIMEOUT:-10}"
+        if sw_output=$(run_with_timeout "$softwareupdate_timeout" softwareupdate -l --no-scan 2> /dev/null); then
             :
         else
             sw_status=$?
@@ -255,9 +259,14 @@ check_macos_update() {
             stop_inline_spinner
         fi
 
+        # Debug logging for troubleshooting
+        if [[ -n "${MO_DEBUG:-}" ]]; then
+            echo "[DEBUG] softwareupdate exit status: $sw_status, output lines: $(echo "$sw_output" | wc -l | tr -d ' ')" >&2
+        fi
+
         # Prefer avoiding false negatives: if the system indicates updates are pending,
         # only clear the flag when softwareupdate explicitly reports no updates.
-        if [[ $sw_status -eq 0 && -n "$sw_output" ]] && echo "$sw_output" | grep -qE '^[[:space:]]*No new software available'; then
+        if [[ $sw_status -eq 0 && -n "$sw_output" ]] && echo "$sw_output" | grep -qE '^\s*No new software available\s*\.?\s*$'; then
             updates_available="false"
         fi
     fi

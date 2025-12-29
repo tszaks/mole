@@ -357,6 +357,72 @@ EOF
     [[ "$output" != *"SHOULD_NOT_CALL_SOFTWAREUPDATE"* ]]
 }
 
+@test "check_macos_update respects MO_SOFTWAREUPDATE_TIMEOUT" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+defaults() { echo "1"; }
+
+export MO_SOFTWAREUPDATE_TIMEOUT=15
+
+run_with_timeout() {
+    local timeout="${1:-}"
+    shift
+    if [[ "$timeout" != "15" ]]; then
+        echo "BAD_TIMEOUT:$timeout"
+        return 124
+    fi
+    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
+        echo "No new software available."
+        return 0
+    fi
+    return 124
+}
+
+start_inline_spinner(){ :; }
+stop_inline_spinner(){ :; }
+
+check_macos_update
+echo "TEST_PASSED"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TEST_PASSED"* ]]
+    [[ "$output" != *"BAD_TIMEOUT:"* ]]
+}
+
+@test "check_macos_update outputs debug info when MO_DEBUG set" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+defaults() { echo "1"; }
+
+export MO_DEBUG=1
+
+run_with_timeout() {
+    local timeout="${1:-}"
+    shift
+    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
+        echo "No new software available."
+        return 0
+    fi
+    return 124
+}
+
+start_inline_spinner(){ :; }
+stop_inline_spinner(){ :; }
+
+check_macos_update 2>&1
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[DEBUG] softwareupdate exit status:"* ]]
+}
+
 @test "run_with_timeout succeeds without GNU timeout" {
     run bash --noprofile --norc -c '
         set -euo pipefail
