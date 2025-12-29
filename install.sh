@@ -144,6 +144,9 @@ resolve_source_dir() {
     if [[ -z "$branch" ]]; then
         branch="main"
     fi
+    if [[ "$branch" != "main" ]]; then
+        branch="$(normalize_release_tag "$branch")"
+    fi
     local url="https://github.com/tw93/mole/archive/refs/heads/main.tar.gz"
 
     # If a specific version is requested (e.g. V1.0.0), use the tag URL
@@ -231,6 +234,15 @@ get_latest_release_tag_from_git() {
         grep -E '^V[0-9]' |
         sort -V |
         tail -n 1
+}
+
+normalize_release_tag() {
+    local tag="$1"
+    tag="${tag#v}"
+    tag="${tag#V}"
+    if [[ -n "$tag" ]]; then
+        printf 'V%s\n' "$tag"
+    fi
 }
 
 get_installed_version() {
