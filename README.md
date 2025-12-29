@@ -59,6 +59,7 @@ mo clean --dry-run           # Preview the cleanup plan
 mo clean --whitelist         # Manage protected caches
 mo uninstall --force-rescan  # Rescan applications and refresh cache
 mo optimize --whitelist      # Manage protected optimization rules
+mo purge --paths             # Configure project scan directories
 ```
 
 ## Tips
@@ -205,7 +206,7 @@ Select Categories to Clean - 18.5GB (8 selected)
 <details>
 <summary><strong>Custom Scan Paths</strong></summary>
 
-Create `~/.config/mole/purge_paths` to specify custom directories (one per line, supports `~`):
+Run `mo purge --paths` to configure which directories to scan, or edit `~/.config/mole/purge_paths` directly:
 
 ```shell
 ~/Documents/MyProjects
@@ -213,7 +214,7 @@ Create `~/.config/mole/purge_paths` to specify custom directories (one per line,
 ~/Work/ClientB
 ```
 
-When this file exists, only listed paths are scanned. Otherwise, defaults to `~/Projects`, `~/GitHub`, `~/dev`, etc.
+When custom paths are configured, only those directories are scanned. Otherwise, defaults to `~/Projects`, `~/GitHub`, `~/dev`, etc.
 
 </details>
 

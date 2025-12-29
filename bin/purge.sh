@@ -118,12 +118,9 @@ show_help() {
     echo -e "${YELLOW}Usage:${NC} mo purge [options]"
     echo ""
     echo -e "${YELLOW}Options:${NC}"
-    echo "  --help          Show this help message"
+    echo "  --paths         Edit custom scan directories"
     echo "  --debug         Enable debug logging"
-    echo ""
-    echo -e "${YELLOW}Configuration:${NC}"
-    echo "  To customize search paths, create: $HOME/.config/mole/purge_paths"
-    echo "  Add one directory path per line (supports ~)."
+    echo "  --help          Show this help message"
     echo ""
     echo -e "${YELLOW}Default Paths:${NC}"
     for path in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
@@ -139,6 +136,11 @@ main() {
     # Parse arguments
     for arg in "$@"; do
         case "$arg" in
+            "--paths")
+                source "$SCRIPT_DIR/../lib/manage/purge_paths.sh"
+                manage_purge_paths
+                exit 0
+                ;;
             "--help")
                 show_help
                 exit 0
