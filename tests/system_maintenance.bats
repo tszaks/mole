@@ -541,16 +541,12 @@ source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 fix_broken_preferences() {
     echo 2
 }
-fix_broken_login_items() {
-    echo 1
-}
 
 opt_fix_broken_configs
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Fixed 2 broken preference files"* ]]
-    [[ "$output" == *"Removed 1 broken login items"* ]]
+    [[ "$output" == *"Repaired 2 corrupted preference files"* ]]
 }
 
 # ============================================================================
@@ -685,3 +681,149 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"WOULD_CLEAN=no"* ]]
 }
+
+
+
+
+
+
+@test "opt_startup_items_cleanup scans system directories and uses sudo" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_TEST_MODE=1 bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock sudo to track calls but allow find
+sudo() {
+    if [[ "$1" == "find" ]]; then
+        shift
+        find "$@"
+        return 0
+    fi
+    if [[ "$1" == "plutil" ]]; then
+        echo "Invalid plist"
+        return 1
+    fi
+    echo "sudo:$@"
+    return 0
+}
+export -f sudo
+
+# Mock find to return dummy plists in system paths
+find() {
+    local dir="$1"
+    if [[ "$dir" == "/Library/LaunchDaemons" ]]; then
+        echo "/Library/LaunchDaemons/com.malware.plist"
+    fi
+}
+export -f find
+
+# Mock plutil to fail linting (simulating broken plist)
+plutil() {
+    return 1
+}
+export -f plutil
+
+test() {
+    return 0
+}
+export -f test
+
+# Mock safe_sudo_remove to succeed without file checks
+safe_sudo_remove() {
+    echo "sudo:rm -rf $1"
+    return 0
+}
+export -f safe_sudo_remove
+
+opt_startup_items_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    # Should attempt to unload with sudo
+    [[ "$output" == *"sudo:launchctl unload /Library/LaunchDaemons/com.malware.plist"* ]]
+    # Should attempt to remove with sudo
+    [[ "$output" == *"sudo:rm -rf /Library/LaunchDaemons/com.malware.plist"* ]]
+    [[ "$output" == *"Removed 1 broken startup items"* ]]
+}
+
+@test "opt_startup_items_cleanup removes orphaned helpers" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_TEST_MODE=1 bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock sudo to handle find/rm/pkill
+sudo() {
+    if [[ "$1" == "find" ]]; then
+        shift
+        find "$@"
+        return 0
+    fi
+    if [[ "$1" == "rm" ]]; then
+        echo "sudo:rm $@"
+        return 0
+    fi
+     if [[ "$1" == "launchctl" ]]; then
+       echo "sudo:launchctl $@"
+       return 0
+    fi
+    echo "sudo:$@"
+    return 0
+}
+export -f sudo
+
+safe_sudo_remove() {
+    echo "sudo:rm -rf $1"
+    return 0
+}
+export -f safe_sudo_remove
+
+# Mock find
+find() {
+    local dir="$1"
+    if [[ "$dir" == "/Library/LaunchDaemons" ]]; then
+        echo "/Library/LaunchDaemons/com.orphan.helper.plist"
+    fi
+}
+export -f find
+
+# Mock plutil to return associated bundle
+plutil() {
+    if [[ "$1" == "-lint" ]]; then return 0; fi # Lint passes
+
+    if [[ "$2" == "AssociatedBundleIdentifiers.0" ]]; then
+        echo "com.deleted.app"
+        return 0
+    fi
+
+    if [[ "$2" == "Program" ]]; then
+        echo "/Library/PrivilegedHelperTools/com.orphan.helper"
+        return 0
+    fi
+    return 1
+}
+export -f plutil
+
+# Mock mdfind (return nothing -> app missing)
+mdfind() {
+    return 0
+}
+export -f mdfind
+
+# Mock directory check (standard app paths don't exist)
+test() {
+    return 1
+}
+export -f test
+
+opt_startup_items_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"sudo:rm -rf /Library/LaunchDaemons/com.orphan.helper.plist"* ]]
+    [[ "$output" == *"sudo:rm -rf /Library/PrivilegedHelperTools/com.orphan.helper"* ]]
+    [[ "$output" == *"Removed orphaned helper: com.orphan.helper"* ]]
+}
+
+

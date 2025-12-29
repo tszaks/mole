@@ -4,7 +4,7 @@
 
 **Security Audit & Compliance Report**
 
-Version 1.15.3 | December 26, 2025
+Version 1.15.9 | December 29, 2025
 
 ---
 
@@ -31,9 +31,9 @@ Version 1.15.3 | December 26, 2025
 
 | Attribute | Details |
 |-----------|---------|
-| Audit Date | December 26, 2025 |
+| Audit Date | December 29, 2025 |
 | Audit Conclusion | **PASSED** |
-| Mole Version | V1.15.3 |
+| Mole Version | V1.15.9 |
 | Audited Branch | `main` (HEAD) |
 | Scope | Shell scripts, Go binaries, Configuration |
 | Methodology | Static analysis, Threat modeling, Code review |
@@ -183,6 +183,20 @@ For user-selected app removal:
 | Time Machine | Local snapshots, backups | Checks `backupd` process, aborts if active |
 | VPN & Proxy | Shadowsocks, V2Ray, Tailscale, Clash | Protects network configs |
 | AI & LLM Tools | Cursor, Claude, ChatGPT, Ollama, LM Studio | Protects models, tokens, sessions |
+| Startup Items | `com.apple.*` LaunchAgents/Daemons | System items unconditionally skipped |
+
+**Orphaned Helper Cleanup (`opt_startup_items_cleanup`):**
+
+Removes LaunchAgents/Daemons whose associated app has been uninstalled:
+
+- Checks `AssociatedBundleIdentifiers` to detect orphans
+- Skips all `com.apple.*` system items
+- Skips paths under `/System/*`, `/usr/bin/*`, `/usr/lib/*`, `/usr/sbin/*`, `/Library/Apple/*`
+- Uses `safe_remove` / `safe_sudo_remove` with path validation
+- Unloads service via `launchctl` before deletion
+- `mdfind` operations have 10-second timeout protection
+
+**Code:** `lib/optimize/tasks.sh:opt_startup_items_cleanup()`
 
 ### Crash Safety & Atomic Operations
 
@@ -193,6 +207,9 @@ For user-selected app removal:
 | Volume Scanning | Timeout + filesystem check | Auto-skip unresponsive NFS/SMB/AFP mounts |
 | Homebrew Cache | Pre-flight size check | Skip if <50MB (avoids 30-120s delay) |
 | Network Volume Check | `diskutil info` with timeout | Prevents hangs on slow/dead mounts |
+| SQLite Vacuum | App-running check + 20s timeout | Skips if Mail/Safari/Messages running |
+| dyld Cache Update | 24-hour freshness check + 180s timeout | Skips if recently updated |
+| App Bundle Search | 10s timeout on mdfind | Fallback to standard paths |
 
 **Timeout Example:**
 

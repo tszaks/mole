@@ -193,22 +193,6 @@ ensure_directory() {
     ensure_user_dir "$expanded_path"
 }
 
-count_local_snapshots() {
-    if ! command -v tmutil > /dev/null 2>&1; then
-        echo 0
-        return
-    fi
-
-    local output
-    output=$(tmutil listlocalsnapshots / 2> /dev/null || true)
-    if [[ -z "$output" ]]; then
-        echo 0
-        return
-    fi
-
-    echo "$output" | grep -c "com.apple.TimeMachine." | tr -d ' '
-}
-
 declare -a SECURITY_FIXES=()
 
 collect_security_fix_actions() {
@@ -224,7 +208,7 @@ collect_security_fix_actions() {
         fi
     fi
     if touchid_supported && ! touchid_configured; then
-        if ! is_whitelisted "touchid"; then
+        if ! is_whitelisted "check_touchid"; then
             SECURITY_FIXES+=("touchid|Enable Touch ID for sudo")
         fi
     fi
@@ -424,7 +408,7 @@ main() {
     done < "$opts_file"
 
     echo ""
-    ensure_sudo_session "System optimization requires admin access (Touch ID or password)" || true
+    ensure_sudo_session "System optimization requires admin access" || true
 
     export FIRST_ACTION=true
     if [[ ${#safe_items[@]} -gt 0 ]]; then
