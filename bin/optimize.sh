@@ -340,13 +340,13 @@ main() {
     fi
     print_header
     if ! command -v jq > /dev/null 2>&1; then
-        echo -e "${RED}${ICON_ERROR}${NC} Missing dependency: jq"
+        echo -e "${YELLOW}${ICON_ERROR}${NC} Missing dependency: jq"
         echo -e "${GRAY}Install with: ${GREEN}brew install jq${NC}"
         exit 1
     fi
 
     if ! command -v bc > /dev/null 2>&1; then
-        echo -e "${RED}${ICON_ERROR}${NC} Missing dependency: bc"
+        echo -e "${YELLOW}${ICON_ERROR}${NC} Missing dependency: bc"
         echo -e "${GRAY}Install with: ${GREEN}brew install bc${NC}"
         exit 1
     fi

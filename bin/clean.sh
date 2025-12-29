@@ -125,16 +125,12 @@ cleanup() {
     fi
     CLEANUP_DONE=true
 
-    # Stop all spinners and clear the line
-    if [[ -n "${INLINE_SPINNER_PID:-}" ]] && kill -0 "$INLINE_SPINNER_PID" 2> /dev/null; then
-        kill "$INLINE_SPINNER_PID" 2> /dev/null || true
-        wait "$INLINE_SPINNER_PID" 2> /dev/null || true
-        INLINE_SPINNER_PID=""
-    fi
+    # Stop any inline spinner
+    stop_inline_spinner 2> /dev/null || true
 
     # Clear any spinner output - spinner outputs to stderr
     if [[ -t 1 ]]; then
-        printf "\r\033[K" >&2
+        printf "\r\033[K" >&2 || true
     fi
 
     # Clean up temporary files
@@ -205,6 +201,8 @@ safe_clean() {
     local total_size_bytes=0
     local total_count=0
     local skipped_count=0
+    local removal_failed_count=0
+    local permission_start=${MOLE_PERMISSION_DENIED_COUNT:-0}
 
     local show_scan_feedback=false
     if [[ ${#targets[@]} -gt 20 && -t 1 ]]; then
@@ -316,17 +314,25 @@ safe_clean() {
             if [[ -f "$result_file" ]]; then
                 read -r size count < "$result_file" 2> /dev/null || true
                 if [[ "$count" -gt 0 && "$size" -gt 0 ]]; then
+                    local removed=1
                     if [[ "$DRY_RUN" != "true" ]]; then
+                        removed=0
                         # Handle symbolic links separately (only remove the link, not the target)
                         if [[ -L "$path" ]]; then
-                            rm "$path" 2> /dev/null || true
+                            rm "$path" 2> /dev/null && removed=1
                         else
-                            safe_remove "$path" true || true
+                            if safe_remove "$path" true; then
+                                removed=1
+                            fi
                         fi
                     fi
-                    ((total_size_bytes += size))
-                    ((total_count += 1))
-                    removed_any=1
+                    if [[ $removed -eq 1 ]]; then
+                        ((total_size_bytes += size))
+                        ((total_count += 1))
+                        removed_any=1
+                    else
+                        ((removal_failed_count++))
+                    fi
                 fi
             fi
             ((idx++))
@@ -341,17 +347,25 @@ safe_clean() {
 
             # Optimization: Skip expensive file counting
             if [[ "$size_bytes" -gt 0 ]]; then
+                local removed=1
                 if [[ "$DRY_RUN" != "true" ]]; then
+                    removed=0
                     # Handle symbolic links separately (only remove the link, not the target)
                     if [[ -L "$path" ]]; then
-                        rm "$path" 2> /dev/null || true
+                        rm "$path" 2> /dev/null && removed=1
                     else
-                        safe_remove "$path" true || true
+                        if safe_remove "$path" true; then
+                            removed=1
+                        fi
                     fi
                 fi
-                ((total_size_bytes += size_bytes))
-                ((total_count += 1))
-                removed_any=1
+                if [[ $removed -eq 1 ]]; then
+                    ((total_size_bytes += size_bytes))
+                    ((total_count += 1))
+                    removed_any=1
+                else
+                    ((removal_failed_count++))
+                fi
             fi
             ((idx++))
         done
@@ -359,6 +373,16 @@ safe_clean() {
 
     if [[ "$show_spinner" == "true" ]]; then
         stop_section_spinner
+    fi
+
+    # Track permission failures reported by safe_remove
+    local permission_end=${MOLE_PERMISSION_DENIED_COUNT:-0}
+    if [[ $permission_end -gt $permission_start && $removed_any -eq 0 ]]; then
+        debug_log "Permission denied while cleaning: $description"
+    fi
+    if [[ $removal_failed_count -gt 0 && "$DRY_RUN" != "true" ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Skipped $removal_failed_count items (permission denied or in use)"
+        note_activity
     fi
 
     if [[ $removed_any -eq 1 ]]; then
@@ -562,9 +586,27 @@ perform_cleanup() {
         fi
     fi
 
+    # Hint about Full Disk Access for better results (only if not already granted)
+    if [[ -t 1 && "$DRY_RUN" != "true" ]]; then
+        local fda_status=0
+        has_full_disk_access
+        fda_status=$?
+        if [[ $fda_status -eq 1 ]]; then
+            echo ""
+            echo -e "${YELLOW}${ICON_WARNING}${NC} ${GRAY}Tip: Grant Full Disk Access to your terminal in System Settings for best results${NC}"
+        fi
+    fi
+
     total_items=0
     files_cleaned=0
     total_size_cleaned=0
+
+    local had_errexit=0
+    [[ $- == *e* ]] && had_errexit=1
+
+    # Allow cleanup functions to fail without exiting the script
+    # Individual operations use || true for granular error handling
+    set +e
 
     # ===== 1. Deep system cleanup (if admin) - Do this first while sudo is fresh =====
     if [[ "$SYSTEM_CLEAN" == "true" ]]; then
@@ -743,6 +785,11 @@ perform_cleanup() {
             summary_details+=("System was already clean; no additional space freed.")
         fi
         summary_details+=("Free space now: $(get_free_space)")
+    fi
+
+    # Restore strict error handling only if it was enabled
+    if [[ $had_errexit -eq 1 ]]; then
+        set -e
     fi
 
     print_summary_block "$summary_heading" "${summary_details[@]}"

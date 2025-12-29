@@ -249,28 +249,35 @@ show_menu_option() {
 
 # Background spinner implementation
 INLINE_SPINNER_PID=""
+INLINE_SPINNER_STOP_FILE=""
+
 start_inline_spinner() {
     stop_inline_spinner 2> /dev/null || true
     local message="$1"
 
     if [[ -t 1 ]]; then
-        (
-            # Clean exit handler for spinner subprocess (invoked by trap)
-            # shellcheck disable=SC2329
-            cleanup_spinner() { exit 0; }
-            trap cleanup_spinner TERM INT EXIT
+        # Create unique stop flag file for this spinner instance
+        INLINE_SPINNER_STOP_FILE="${TMPDIR:-/tmp}/mole_spinner_$$_$RANDOM.stop"
 
+        (
+            local stop_file="$INLINE_SPINNER_STOP_FILE"
             local chars
             chars="$(mo_spinner_chars)"
             [[ -z "$chars" ]] && chars="|/-\\"
             local i=0
-            while true; do
+
+            # Cooperative exit: check for stop file instead of relying on signals
+            while [[ ! -f "$stop_file" ]]; do
                 local c="${chars:$((i % ${#chars})):1}"
                 # Output to stderr to avoid interfering with stdout
-                printf "\r${MOLE_SPINNER_PREFIX:-}${BLUE}%s${NC} %s" "$c" "$message" >&2 || exit 0
+                printf "\r${MOLE_SPINNER_PREFIX:-}${BLUE}%s${NC} %s" "$c" "$message" >&2 || break
                 ((i++))
                 sleep 0.1
             done
+
+            # Clean up stop file before exiting
+            rm -f "$stop_file" 2> /dev/null || true
+            exit 0
         ) &
         INLINE_SPINNER_PID=$!
         disown 2> /dev/null || true
@@ -281,17 +288,30 @@ start_inline_spinner() {
 
 stop_inline_spinner() {
     if [[ -n "$INLINE_SPINNER_PID" ]]; then
-        # Try graceful TERM first, then force KILL if needed
-        if kill -0 "$INLINE_SPINNER_PID" 2> /dev/null; then
-            kill -TERM "$INLINE_SPINNER_PID" 2> /dev/null || true
-            sleep 0.1 2> /dev/null || true
-            # Force kill if still running
-            if kill -0 "$INLINE_SPINNER_PID" 2> /dev/null; then
-                kill -KILL "$INLINE_SPINNER_PID" 2> /dev/null || true
-            fi
+        # Cooperative stop: create stop file to signal spinner to exit
+        if [[ -n "$INLINE_SPINNER_STOP_FILE" ]]; then
+            touch "$INLINE_SPINNER_STOP_FILE" 2> /dev/null || true
         fi
+
+        # Wait briefly for cooperative exit
+        local wait_count=0
+        while kill -0 "$INLINE_SPINNER_PID" 2> /dev/null && [[ $wait_count -lt 5 ]]; do
+            sleep 0.05 2> /dev/null || true
+            ((wait_count++))
+        done
+
+        # Only use SIGKILL as last resort if process is stuck
+        if kill -0 "$INLINE_SPINNER_PID" 2> /dev/null; then
+            kill -KILL "$INLINE_SPINNER_PID" 2> /dev/null || true
+        fi
+
         wait "$INLINE_SPINNER_PID" 2> /dev/null || true
+
+        # Cleanup
+        rm -f "$INLINE_SPINNER_STOP_FILE" 2> /dev/null || true
         INLINE_SPINNER_PID=""
+        INLINE_SPINNER_STOP_FILE=""
+
         # Clear the line - use \033[2K to clear entire line, not just to end
         [[ -t 1 ]] && printf "\r\033[2K" >&2 || true
     fi
@@ -354,4 +374,61 @@ format_last_used_summary() {
         return 0
     fi
     echo "$value"
+}
+
+# Check if terminal has Full Disk Access
+# Returns 0 if FDA is granted, 1 if denied, 2 if unknown
+has_full_disk_access() {
+    # Cache the result to avoid repeated checks
+    if [[ -n "${MOLE_HAS_FDA:-}" ]]; then
+        if [[ "$MOLE_HAS_FDA" == "1" ]]; then
+            return 0
+        elif [[ "$MOLE_HAS_FDA" == "unknown" ]]; then
+            return 2
+        else
+            return 1
+        fi
+    fi
+
+    # Test access to protected directories that require FDA
+    # Strategy: Try to access directories that are commonly protected
+    # If ANY of them are accessible, we likely have FDA
+    # If ALL fail, we definitely don't have FDA
+    local -a protected_dirs=(
+        "$HOME/Library/Safari/LocalStorage"
+        "$HOME/Library/Mail/V10"
+        "$HOME/Library/Messages/chat.db"
+    )
+
+    local accessible_count=0
+    local tested_count=0
+
+    for test_path in "${protected_dirs[@]}"; do
+        # Only test when the protected path exists
+        if [[ -e "$test_path" ]]; then
+            tested_count=$((tested_count + 1))
+            # Try to stat the ACTUAL protected path - this requires FDA
+            if stat "$test_path" > /dev/null 2>&1; then
+                accessible_count=$((accessible_count + 1))
+            fi
+        fi
+    done
+
+    # Three possible outcomes:
+    # 1. tested_count = 0: Can't determine (test paths don't exist) → unknown
+    # 2. tested_count > 0 && accessible_count > 0: Has FDA → yes
+    # 3. tested_count > 0 && accessible_count = 0: No FDA → no
+    if [[ $tested_count -eq 0 ]]; then
+        # Can't determine - test paths don't exist, treat as unknown
+        export MOLE_HAS_FDA="unknown"
+        return 2
+    elif [[ $accessible_count -gt 0 ]]; then
+        # At least one path is accessible → has FDA
+        export MOLE_HAS_FDA=1
+        return 0
+    else
+        # Tested paths exist but not accessible → no FDA
+        export MOLE_HAS_FDA=0
+        return 1
+    fi
 }

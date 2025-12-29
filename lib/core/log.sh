@@ -81,7 +81,7 @@ log_warning() {
 
 # Log error message
 log_error() {
-    echo -e "${RED}${ICON_ERROR}${NC} $1" >&2
+    echo -e "${YELLOW}${ICON_ERROR}${NC} $1" >&2
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[$timestamp] ERROR: $1" >> "$LOG_FILE" 2> /dev/null || true
     if [[ "${MO_DEBUG:-}" == "1" ]]; then

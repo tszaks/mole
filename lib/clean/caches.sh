@@ -1,19 +1,14 @@
 #!/bin/bash
 # Cache Cleanup Module
-
 set -euo pipefail
-
-# Trigger all TCC permission dialogs upfront to avoid random interruptions
 # Only runs once (uses ~/.cache/mole/permissions_granted flag)
+# Trigger all TCC permission dialogs upfront to avoid random interruptions
 check_tcc_permissions() {
     # Only check in interactive mode
     [[ -t 1 ]] || return 0
-
     local permission_flag="$HOME/.cache/mole/permissions_granted"
-
     # Skip if permissions were already granted
     [[ -f "$permission_flag" ]] && return 0
-
     # Key protected directories that require TCC approval
     local -a tcc_dirs=(
         "$HOME/Library/Caches"
@@ -22,14 +17,12 @@ check_tcc_permissions() {
         "$HOME/Library/Containers"
         "$HOME/.cache"
     )
-
     # Quick permission test - if first directory is accessible, likely others are too
     # Use simple ls test instead of find to avoid triggering permission dialogs prematurely
     local needs_permission_check=false
     if ! ls "$HOME/Library/Caches" > /dev/null 2>&1; then
         needs_permission_check=true
     fi
-
     if [[ "$needs_permission_check" == "true" ]]; then
         echo ""
         echo -e "${BLUE}First-time setup${NC}"
@@ -38,44 +31,35 @@ check_tcc_permissions() {
         echo ""
         echo -ne "${PURPLE}${ICON_ARROW}${NC} Press ${GREEN}Enter${NC} to continue: "
         read -r
-
         MOLE_SPINNER_PREFIX="" start_inline_spinner "Requesting permissions..."
-
         # Trigger all TCC prompts upfront by accessing each directory
         # Using find -maxdepth 1 ensures we touch the directory without deep scanning
         for dir in "${tcc_dirs[@]}"; do
             [[ -d "$dir" ]] && command find "$dir" -maxdepth 1 -type d > /dev/null 2>&1
         done
-
         stop_inline_spinner
         echo ""
     fi
-
     # Mark permissions as granted (won't prompt again)
     ensure_user_file "$permission_flag"
+    return 0
 }
-
-# Clean browser Service Worker cache, protecting web editing tools (capcut, photopea, pixlr)
 # Args: $1=browser_name, $2=cache_path
+# Clean browser Service Worker cache, protecting web editing tools (capcut, photopea, pixlr)
 clean_service_worker_cache() {
     local browser_name="$1"
     local cache_path="$2"
-
     [[ ! -d "$cache_path" ]] && return 0
-
     local cleaned_size=0
     local protected_count=0
-
     # Find all cache directories and calculate sizes with timeout protection
     while IFS= read -r cache_dir; do
         [[ ! -d "$cache_dir" ]] && continue
-
         # Extract domain from path using regex
         # Pattern matches: letters/numbers, hyphens, then dot, then TLD
         # Example: "abc123_https_example.com_0" → "example.com"
         local domain=$(basename "$cache_dir" | grep -oE '[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}' | head -1 || echo "")
         local size=$(run_with_timeout 5 get_path_size_kb "$cache_dir")
-
         # Check if domain is protected
         local is_protected=false
         for protected_domain in "${PROTECTED_SW_DOMAINS[@]}"; do
@@ -85,7 +69,6 @@ clean_service_worker_cache() {
                 break
             fi
         done
-
         # Clean if not protected
         if [[ "$is_protected" == "false" ]]; then
             if [[ "$DRY_RUN" != "true" ]]; then
@@ -94,7 +77,6 @@ clean_service_worker_cache() {
             cleaned_size=$((cleaned_size + size))
         fi
     done < <(run_with_timeout 10 sh -c "find '$cache_path' -type d -depth 2 2> /dev/null || true")
-
     if [[ $cleaned_size -gt 0 ]]; then
         # Temporarily stop spinner for clean output
         local spinner_was_running=false
@@ -102,7 +84,6 @@ clean_service_worker_cache() {
             stop_inline_spinner
             spinner_was_running=true
         fi
-
         local cleaned_mb=$((cleaned_size / 1024))
         if [[ "$DRY_RUN" != "true" ]]; then
             if [[ $protected_count -gt 0 ]]; then
@@ -114,19 +95,16 @@ clean_service_worker_cache() {
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $browser_name Service Worker (would clean ${cleaned_mb}MB, ${protected_count} protected)"
         fi
         note_activity
-
         # Restart spinner if it was running
         if [[ "$spinner_was_running" == "true" ]]; then
             MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning browser Service Worker caches..."
         fi
     fi
 }
-
-# Clean Next.js (.next/cache) and Python (__pycache__) build caches
 # Uses maxdepth 3, excludes Library/.Trash/node_modules, 10s timeout per scan
+# Clean Next.js (.next/cache) and Python (__pycache__) build caches
 clean_project_caches() {
     stop_inline_spinner 2> /dev/null || true
-
     # Quick check: skip if user likely doesn't have development projects
     local has_dev_projects=false
     local -a common_dev_dirs=(
@@ -149,14 +127,12 @@ clean_project_caches() {
         "$HOME/dotnet"
         "$HOME/node"
     )
-
     for dir in "${common_dev_dirs[@]}"; do
         if [[ -d "$dir" ]]; then
             has_dev_projects=true
             break
         fi
     done
-
     # If no common dev directories found, perform feature-based detection
     # Check for project markers in $HOME (node_modules, .git, target, etc.)
     if [[ "$has_dev_projects" == "false" ]]; then
@@ -170,14 +146,12 @@ clean_project_caches() {
             "pom.xml"
             "build.gradle"
         )
-
         local spinner_active=false
         if [[ -t 1 ]]; then
             MOLE_SPINNER_PREFIX="  "
             start_inline_spinner "Detecting dev projects..."
             spinner_active=true
         fi
-
         for marker in "${project_markers[@]}"; do
             # Quick check with maxdepth 2 and 3s timeout to avoid slow scans
             if run_with_timeout 3 sh -c "find '$HOME' -maxdepth 2 -name '$marker' -not -path '*/Library/*' -not -path '*/.Trash/*' 2>/dev/null | head -1" | grep -q .; then
@@ -185,26 +159,21 @@ clean_project_caches() {
                 break
             fi
         done
-
         if [[ "$spinner_active" == "true" ]]; then
             stop_inline_spinner 2> /dev/null || true
         fi
-
         # If still no dev projects found, skip scanning
         [[ "$has_dev_projects" == "false" ]] && return 0
     fi
-
     if [[ -t 1 ]]; then
         MOLE_SPINNER_PREFIX="  "
         start_inline_spinner "Searching project caches..."
     fi
-
     local nextjs_tmp_file
     nextjs_tmp_file=$(create_temp_file)
     local pycache_tmp_file
     pycache_tmp_file=$(create_temp_file)
     local find_timeout=10
-
     # 1. Start Next.js search
     (
         command find "$HOME" -P -mount -type d -name ".next" -maxdepth 3 \
@@ -215,7 +184,6 @@ clean_project_caches() {
             2> /dev/null || true
     ) > "$nextjs_tmp_file" 2>&1 &
     local next_pid=$!
-
     # 2. Start Python search
     (
         command find "$HOME" -P -mount -type d -name "__pycache__" -maxdepth 3 \
@@ -226,7 +194,6 @@ clean_project_caches() {
             2> /dev/null || true
     ) > "$pycache_tmp_file" 2>&1 &
     local py_pid=$!
-
     # 3. Wait for both with timeout (using smaller intervals for better responsiveness)
     local elapsed=0
     local check_interval=0.2 # Check every 200ms instead of 1s for smoother experience
@@ -237,13 +204,11 @@ clean_project_caches() {
         sleep $check_interval
         elapsed=$(echo "$elapsed + $check_interval" | awk '{print $1 + $2}')
     done
-
     # 4. Clean up any stuck processes
     for pid in $next_pid $py_pid; do
         if kill -0 "$pid" 2> /dev/null; then
             # Send TERM signal first
             kill -TERM "$pid" 2> /dev/null || true
-
             # Wait up to 2 seconds for graceful termination
             local grace_period=0
             while [[ $grace_period -lt 20 ]]; do
@@ -253,28 +218,23 @@ clean_project_caches() {
                 sleep 0.1
                 ((grace_period++))
             done
-
             # Force kill if still running
             if kill -0 "$pid" 2> /dev/null; then
                 kill -KILL "$pid" 2> /dev/null || true
             fi
-
             # Final wait (should be instant now)
             wait "$pid" 2> /dev/null || true
         else
             wait "$pid" 2> /dev/null || true
         fi
     done
-
     if [[ -t 1 ]]; then
         stop_inline_spinner
     fi
-
     # 5. Process Next.js results
     while IFS= read -r next_dir; do
         [[ -d "$next_dir/cache" ]] && safe_clean "$next_dir/cache"/* "Next.js build cache" || true
     done < "$nextjs_tmp_file"
-
     # 6. Process Python results
     while IFS= read -r pycache; do
         [[ -d "$pycache" ]] && safe_clean "$pycache"/* "Python bytecode cache" || true

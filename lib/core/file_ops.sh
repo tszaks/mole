@@ -97,10 +97,23 @@ safe_remove() {
     debug_log "Removing: $path"
 
     # Perform the deletion
-    if rm -rf "$path" 2> /dev/null; then # SAFE: safe_remove implementation
+    # Use || to capture the exit code so set -e won't abort on rm failures
+    local error_msg
+    local rm_exit=0
+    error_msg=$(rm -rf "$path" 2>&1) || rm_exit=$?
+
+    if [[ $rm_exit -eq 0 ]]; then
         return 0
     else
-        [[ "$silent" != "true" ]] && log_error "Failed to remove: $path"
+        # Check if it's a permission error
+        if [[ "$error_msg" == *"Permission denied"* ]] || [[ "$error_msg" == *"Operation not permitted"* ]]; then
+            MOLE_PERMISSION_DENIED_COUNT=${MOLE_PERMISSION_DENIED_COUNT:-0}
+            MOLE_PERMISSION_DENIED_COUNT=$((MOLE_PERMISSION_DENIED_COUNT + 1))
+            export MOLE_PERMISSION_DENIED_COUNT
+            debug_log "Permission denied: $path (may need Full Disk Access)"
+        else
+            [[ "$silent" != "true" ]] && log_error "Failed to remove: $path"
+        fi
         return 1
     fi
 }
@@ -241,8 +254,10 @@ get_path_size_kb() {
         return
     }
     # Direct execution without timeout overhead - critical for performance in loops
+    # Use || echo 0 to ensure failure in du (e.g. permission error) doesn't exit script under set -e
+    # Pipefail would normally cause the pipeline to fail if du fails, but || handle catches it.
     local size
-    size=$(command du -sk "$path" 2> /dev/null | awk '{print $1}')
+    size=$(command du -sk "$path" 2> /dev/null | awk '{print $1}' || echo "0")
     echo "${size:-0}"
 }
 
