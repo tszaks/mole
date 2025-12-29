@@ -179,7 +179,7 @@ get_installed_version() {
     if [[ -x "$binary" ]]; then
         # Try running the binary first (preferred method)
         local version
-        version=$("$binary" --version 2> /dev/null | awk 'NF {print $NF; exit}')
+        version=$("$binary" --version 2> /dev/null | awk '/Mole version/ {print $NF; exit}')
         if [[ -n "$version" ]]; then
             echo "$version"
         else
@@ -525,10 +525,12 @@ perform_update() {
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
         # Try to use shared function if available (when running from installed Mole)
         resolve_source_dir 2> /dev/null || true
+        local current_version
+        current_version=$(get_installed_version || echo "unknown")
         if [[ -f "$SOURCE_DIR/lib/core/common.sh" ]]; then
             # shellcheck disable=SC1090,SC1091
             source "$SOURCE_DIR/lib/core/common.sh"
-            update_via_homebrew "$VERSION"
+            update_via_homebrew "$current_version"
         else
             # Fallback: inline implementation
             if [[ -t 1 ]]; then
@@ -553,9 +555,9 @@ perform_update() {
             fi
 
             if echo "$upgrade_output" | grep -q "already installed"; then
-                local current_version
-                current_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
-                echo -e "${GREEN}✓${NC} Already on latest version (${current_version:-$VERSION})"
+                local brew_version
+                brew_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
+                echo -e "${GREEN}✓${NC} Already on latest version (${brew_version:-$current_version})"
             elif echo "$upgrade_output" | grep -q "Error:"; then
                 log_error "Homebrew upgrade failed"
                 echo "$upgrade_output" | grep "Error:" >&2
@@ -564,7 +566,7 @@ perform_update() {
                 echo "$upgrade_output" | grep -Ev "^(==>|Updating Homebrew|Warning:)" || true
                 local new_version
                 new_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
-                echo -e "${GREEN}✓${NC} Updated to latest version (${new_version:-$VERSION})"
+                echo -e "${GREEN}✓${NC} Updated to latest version (${new_version:-$current_version})"
             fi
 
             rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message"
