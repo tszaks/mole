@@ -181,7 +181,7 @@ resolve_source_dir() {
     if command -v git > /dev/null 2>&1; then
         local git_args=("--depth=1")
         if [[ "$branch" != "main" ]]; then
-             git_args+=("--branch" "$branch")
+            git_args+=("--branch" "$branch")
         fi
 
         if git clone "${git_args[@]}" https://github.com/tw93/mole.git "$tmp/mole" > /dev/null 2>&1; then
