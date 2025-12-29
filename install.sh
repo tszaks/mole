@@ -236,17 +236,35 @@ check_requirements() {
 
     # Check if already installed via Homebrew
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
-        if [[ "$ACTION" == "update" ]]; then
-            return 0
+        # Verify that mole executable actually exists and is from Homebrew
+        local mole_path
+        mole_path=$(command -v mole 2> /dev/null || true)
+        local is_homebrew_binary=false
+
+        if [[ -n "$mole_path" && -L "$mole_path" ]]; then
+            if readlink "$mole_path" | grep -q "Cellar/mole"; then
+                is_homebrew_binary=true
+            fi
         fi
 
-        echo -e "${YELLOW}Mole is installed via Homebrew${NC}"
-        echo ""
-        echo "Choose one:"
-        echo -e "  1. Update via Homebrew: ${GREEN}brew upgrade mole${NC}"
-        echo -e "  2. Switch to manual: ${GREEN}brew uninstall mole${NC} then re-run this"
-        echo ""
-        exit 1
+        # Only block installation if Homebrew binary actually exists
+        if [[ "$is_homebrew_binary" == "true" ]]; then
+            if [[ "$ACTION" == "update" ]]; then
+                return 0
+            fi
+
+            echo -e "${YELLOW}Mole is installed via Homebrew${NC}"
+            echo ""
+            echo "Choose one:"
+            echo -e "  1. Update via Homebrew: ${GREEN}brew upgrade mole${NC}"
+            echo -e "  2. Switch to manual: ${GREEN}brew uninstall --force mole${NC} then re-run this"
+            echo ""
+            exit 1
+        else
+            # Brew has mole in database but binary doesn't exist - clean up
+            log_warning "Cleaning up stale Homebrew installation..."
+            brew uninstall --force mole > /dev/null 2>&1 || true
+        fi
     fi
 
     # Check if install directory exists and is writable
