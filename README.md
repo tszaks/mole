@@ -211,7 +211,7 @@ You can configure which directories `mole` scans for projects by creating a conf
 
 Example `~/.config/mole/purge_paths`:
 
-```
+```shell
 ~/Documents/MyProjects
 ~/Work/ClientA
 ~/Work/ClientB

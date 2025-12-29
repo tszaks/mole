@@ -122,7 +122,7 @@ show_help() {
     echo "  --debug         Enable debug logging"
     echo ""
     echo -e "${YELLOW}Configuration:${NC}"
-    echo "  To customize search paths, create: ${NC}$HOME/.config/mole/purge_paths${NC}"
+    echo "  To customize search paths, create: $HOME/.config/mole/purge_paths"
     echo "  Add one directory path per line (supports ~)."
     echo ""
     echo -e "${YELLOW}Default Paths:${NC}"

@@ -26,8 +26,7 @@ readonly MIN_AGE_DAYS=7
 # Scan depth defaults (relative to search root)
 readonly PURGE_MIN_DEPTH_DEFAULT=2
 readonly PURGE_MAX_DEPTH_DEFAULT=8
-# Search paths (only project directories)
-# Search paths (default)
+# Search paths (default, can be overridden via config file)
 readonly DEFAULT_PURGE_SEARCH_PATHS=(
     "$HOME/www"
     "$HOME/dev"
@@ -70,8 +69,9 @@ load_purge_config() {
     fi
 }
 
-# Initialize paths
+# Initialize paths on script load
 load_purge_config
+
 # Args: $1 - path to check
 # Check if path is safe to clean (must be inside a project directory)
 is_safe_project_artifact() {
