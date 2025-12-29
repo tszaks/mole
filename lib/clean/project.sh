@@ -90,7 +90,7 @@ is_project_container() {
     find_args+=(")" "-print" "-quit")
 
     # Single find call to check all indicators at once
-    if find "${find_args[@]}" 2>/dev/null | grep -q .; then
+    if find "${find_args[@]}" 2> /dev/null | grep -q .; then
         return 0
     fi
 
@@ -112,7 +112,7 @@ discover_project_dirs() {
     local dir
     for dir in "$HOME"/*/; do
         [[ ! -d "$dir" ]] && continue
-        dir="${dir%/}"  # Remove trailing slash
+        dir="${dir%/}" # Remove trailing slash
 
         # Skip if already in defaults
         local already_found=false
