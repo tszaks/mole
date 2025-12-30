@@ -50,7 +50,7 @@ readonly MOLE_MAIL_DOWNLOADS_MIN_KB=5120 # Mail attachment size threshold
 readonly MOLE_MAIL_AGE_DAYS=30           # Mail attachment retention (days)
 readonly MOLE_LOG_AGE_DAYS=7             # Log retention (days)
 readonly MOLE_CRASH_REPORT_AGE_DAYS=7    # Crash report retention (days)
-readonly MOLE_SAVED_STATE_AGE_DAYS=7     # Saved state retention (days)
+readonly MOLE_SAVED_STATE_AGE_DAYS=30    # Saved state retention (days) - increased for safety
 readonly MOLE_TM_BACKUP_SAFE_HOURS=48    # TM backup safety window (hours)
 readonly MOLE_MAX_DS_STORE_FILES=500     # Max .DS_Store files to clean per scan
 readonly MOLE_MAX_ORPHAN_ITERATIONS=100  # Max iterations for orphaned app data scan
@@ -96,7 +96,6 @@ declare -a DEFAULT_WHITELIST_PATTERNS=(
 )
 
 declare -a DEFAULT_OPTIMIZE_WHITELIST_PATTERNS=(
-    "check_brew_updates"
     "check_brew_health"
     "check_touchid"
     "check_git_config"

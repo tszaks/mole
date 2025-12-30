@@ -156,8 +156,8 @@ get_optimize_whitelist_items() {
     cat << 'EOF'
 macOS Firewall check|firewall|security_check
 Gatekeeper check|gatekeeper|security_check
-Homebrew updates check|check_brew_updates|update_check
 macOS system updates check|check_macos_updates|update_check
+Mole updates check|check_mole_update|update_check
 Homebrew health check (doctor)|check_brew_health|health_check
 SIP status check|check_sip|security_check
 FileVault status check|check_filevault|security_check

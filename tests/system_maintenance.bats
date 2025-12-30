@@ -451,7 +451,7 @@ EOF
     mkdir -p "$state_dir/com.example.app.savedState"
     touch "$state_dir/com.example.app.savedState/data.plist"
 
-    # Make the file old (8+ days) - MOLE_SAVED_STATE_AGE_DAYS defaults to 7
+    # Make the file old (31+ days) - MOLE_SAVED_STATE_AGE_DAYS now defaults to 30
     touch -t 202301010000 "$state_dir/com.example.app.savedState/data.plist"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
@@ -687,143 +687,355 @@ EOF
 
 
 
-@test "opt_startup_items_cleanup scans system directories and uses sudo" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_TEST_MODE=1 bash --noprofile --norc << 'EOF'
+# Removed tests for opt_startup_items_cleanup
+# This optimization was removed due to high risk of deleting legitimate app helpers
+
+# ============================================================================
+# Tests for new system optimizations (v1.16.3+)
+# ============================================================================
+
+@test "opt_memory_pressure_relief skips when pressure is normal" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock sudo to track calls but allow find
-sudo() {
-    if [[ "$1" == "find" ]]; then
-        shift
-        find "$@"
-        return 0
-    fi
-    if [[ "$1" == "plutil" ]]; then
-        echo "Invalid plist"
-        return 1
-    fi
-    echo "sudo:$@"
+# Mock memory_pressure to indicate normal pressure
+memory_pressure() {
+    echo "System-wide memory free percentage: 50%"
     return 0
 }
-export -f sudo
+export -f memory_pressure
 
-# Mock find to return dummy plists in system paths
-find() {
-    local dir="$1"
-    if [[ "$dir" == "/Library/LaunchDaemons" ]]; then
-        echo "/Library/LaunchDaemons/com.malware.plist"
-    fi
-}
-export -f find
-
-# Mock plutil to fail linting (simulating broken plist)
-plutil() {
-    return 1
-}
-export -f plutil
-
-test() {
-    return 0
-}
-export -f test
-
-# Mock safe_sudo_remove to succeed without file checks
-safe_sudo_remove() {
-    echo "sudo:rm -rf $1"
-    return 0
-}
-export -f safe_sudo_remove
-
-opt_startup_items_cleanup
+opt_memory_pressure_relief
 EOF
 
     [ "$status" -eq 0 ]
-    # Should attempt to unload with sudo
-    [[ "$output" == *"sudo:launchctl unload /Library/LaunchDaemons/com.malware.plist"* ]]
-    # Should attempt to remove with sudo
-    [[ "$output" == *"sudo:rm -rf /Library/LaunchDaemons/com.malware.plist"* ]]
-    [[ "$output" == *"Removed 1 broken startup items"* ]]
+    [[ "$output" == *"Memory pressure already optimal"* ]]
 }
 
-@test "opt_startup_items_cleanup removes orphaned helpers" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_TEST_MODE=1 bash --noprofile --norc << 'EOF'
+@test "opt_memory_pressure_relief executes purge when pressure is high" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock sudo to handle find/rm/pkill
+# Mock memory_pressure to indicate high pressure
+memory_pressure() {
+    echo "System-wide memory free percentage: warning"
+    return 0
+}
+export -f memory_pressure
+
+# Mock sudo purge
 sudo() {
-    if [[ "$1" == "find" ]]; then
-        shift
-        find "$@"
-        return 0
-    fi
-    if [[ "$1" == "rm" ]]; then
-        echo "sudo:rm $@"
-        return 0
-    fi
-     if [[ "$1" == "launchctl" ]]; then
-       echo "sudo:launchctl $@"
-       return 0
-    fi
-    echo "sudo:$@"
-    return 0
-}
-export -f sudo
-
-safe_sudo_remove() {
-    echo "sudo:rm -rf $1"
-    return 0
-}
-export -f safe_sudo_remove
-
-# Mock find
-find() {
-    local dir="$1"
-    if [[ "$dir" == "/Library/LaunchDaemons" ]]; then
-        echo "/Library/LaunchDaemons/com.orphan.helper.plist"
-    fi
-}
-export -f find
-
-# Mock plutil to return associated bundle
-plutil() {
-    if [[ "$1" == "-lint" ]]; then return 0; fi # Lint passes
-
-    if [[ "$2" == "AssociatedBundleIdentifiers.0" ]]; then
-        echo "com.deleted.app"
-        return 0
-    fi
-
-    if [[ "$2" == "Program" ]]; then
-        echo "/Library/PrivilegedHelperTools/com.orphan.helper"
+    if [[ "$1" == "purge" ]]; then
+        echo "purge:executed"
         return 0
     fi
     return 1
 }
-export -f plutil
+export -f sudo
 
-# Mock mdfind (return nothing -> app missing)
+opt_memory_pressure_relief
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Inactive memory released"* ]]
+    [[ "$output" == *"System responsiveness improved"* ]]
+}
+
+@test "opt_network_stack_optimize skips when network is healthy" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock route to indicate healthy routing
+route() {
+    return 0
+}
+export -f route
+
+# Mock dscacheutil to indicate healthy DNS
+dscacheutil() {
+    echo "ip_address: 93.184.216.34"
+    return 0
+}
+export -f dscacheutil
+
+opt_network_stack_optimize
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Network stack already optimal"* ]]
+}
+
+@test "opt_network_stack_optimize flushes when network has issues" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock route to fail (network issue)
+route() {
+    if [[ "$2" == "get" ]]; then
+        return 1
+    fi
+    if [[ "$1" == "-n" && "$2" == "flush" ]]; then
+        echo "route:flushed"
+        return 0
+    fi
+    return 0
+}
+export -f route
+
+# Mock sudo
+sudo() {
+    if [[ "$1" == "route" || "$1" == "arp" ]]; then
+        shift
+        route "$@" || arp "$@"
+        return 0
+    fi
+    return 1
+}
+export -f sudo
+
+# Mock arp
+arp() {
+    echo "arp:cleared"
+    return 0
+}
+export -f arp
+
+# Mock dscacheutil
+dscacheutil() {
+    return 1
+}
+export -f dscacheutil
+
+opt_network_stack_optimize
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Network routing table refreshed"* ]]
+    [[ "$output" == *"ARP cache cleared"* ]]
+}
+
+@test "opt_disk_permissions_repair skips when permissions are fine" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock stat to return correct owner
+stat() {
+    if [[ "$2" == "%Su" ]]; then
+        echo "$USER"
+        return 0
+    fi
+    command stat "$@"
+}
+export -f stat
+
+# Mock test to indicate directories are writable
+test() {
+    if [[ "$1" == "-e" || "$1" == "-w" ]]; then
+        return 0
+    fi
+    command test "$@"
+}
+export -f test
+
+opt_disk_permissions_repair
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"User directory permissions already optimal"* ]]
+}
+
+@test "opt_disk_permissions_repair calls diskutil when needed" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock stat to return wrong owner
+stat() {
+    if [[ "$2" == "%Su" ]]; then
+        echo "root"
+        return 0
+    fi
+    command stat "$@"
+}
+export -f stat
+
+# Mock sudo diskutil
+sudo() {
+    if [[ "$1" == "diskutil" && "$2" == "resetUserPermissions" ]]; then
+        echo "diskutil:resetUserPermissions"
+        return 0
+    fi
+    return 1
+}
+export -f sudo
+
+id() {
+    echo "501"
+}
+export -f id
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+export -f start_inline_spinner stop_inline_spinner
+
+opt_disk_permissions_repair
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"User directory permissions repaired"* ]]
+}
+
+@test "opt_bluetooth_reset skips when HID device is connected" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock system_profiler to indicate Bluetooth keyboard connected
+system_profiler() {
+    cat << 'PROFILER_OUT'
+Bluetooth:
+  Apple Magic Keyboard:
+    Connected: Yes
+    Type: Keyboard
+PROFILER_OUT
+    return 0
+}
+export -f system_profiler
+
+opt_bluetooth_reset
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Bluetooth already optimal"* ]]
+}
+
+@test "opt_bluetooth_reset skips when media apps are running" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock system_profiler to indicate Bluetooth headphones (no HID)
+system_profiler() {
+    cat << 'PROFILER_OUT'
+Bluetooth:
+  AirPods Pro:
+    Connected: Yes
+    Type: Headphones
+PROFILER_OUT
+    return 0
+}
+export -f system_profiler
+
+# Mock pgrep to indicate Spotify is running
+pgrep() {
+    if [[ "$2" == "Spotify" ]]; then
+        echo "12345"
+        return 0
+    fi
+    return 1
+}
+export -f pgrep
+
+opt_bluetooth_reset
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Bluetooth already optimal"* ]]
+}
+
+@test "opt_bluetooth_reset restarts when safe" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock system_profiler (no HID devices, just audio)
+system_profiler() {
+    cat << 'PROFILER_OUT'
+Bluetooth:
+  AirPods:
+    Connected: Yes
+    Type: Audio
+PROFILER_OUT
+    return 0
+}
+export -f system_profiler
+
+# Mock pgrep (no media apps running)
+pgrep() {
+    if [[ "$2" == "bluetoothd" ]]; then
+        return 1  # bluetoothd not running after TERM
+    fi
+    return 1
+}
+export -f pgrep
+
+# Mock sudo pkill
+sudo() {
+    if [[ "$1" == "pkill" ]]; then
+        echo "pkill:bluetoothd:$2"
+        return 0
+    fi
+    return 1
+}
+export -f sudo
+
+sleep() { :; }
+export -f sleep
+
+opt_bluetooth_reset
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Bluetooth module restarted"* ]]
+}
+
+@test "opt_spotlight_index_optimize skips when search is fast" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock mdutil
+mdutil() {
+    if [[ "$1" == "-s" ]]; then
+        echo "Indexing enabled."
+        return 0
+    fi
+    return 0
+}
+export -f mdutil
+
+# Mock mdfind (fast search)
 mdfind() {
     return 0
 }
 export -f mdfind
 
-# Mock directory check (standard app paths don't exist)
-test() {
-    return 1
+# Mock date to simulate fast search (< 3 seconds)
+date() {
+    echo "1000"
 }
-export -f test
+export -f date
 
-opt_startup_items_cleanup
+opt_spotlight_index_optimize
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"sudo:rm -rf /Library/LaunchDaemons/com.orphan.helper.plist"* ]]
-    [[ "$output" == *"sudo:rm -rf /Library/PrivilegedHelperTools/com.orphan.helper"* ]]
-    [[ "$output" == *"Removed orphaned helper: com.orphan.helper"* ]]
+    [[ "$output" == *"Spotlight index already optimal"* ]]
 }
 
 

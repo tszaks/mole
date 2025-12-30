@@ -283,6 +283,8 @@ check_macos_update() {
 }
 
 check_mole_update() {
+    if command -v is_whitelisted > /dev/null && is_whitelisted "check_mole_update"; then return; fi
+
     # Check if Mole has updates
     # Auto-detect version from mole main script
     local current_version

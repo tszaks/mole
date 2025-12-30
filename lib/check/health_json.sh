@@ -125,7 +125,7 @@ EOF
     # Core optimizations (safe and valuable)
     items+=('system_maintenance|DNS & Spotlight Check|Refresh DNS cache & verify Spotlight status|true')
     items+=('cache_refresh|Finder Cache Refresh|Refresh QuickLook thumbnails & icon services cache|true')
-    items+=('saved_state_cleanup|App State Cleanup|Remove old saved application states (7+ days)|true')
+    items+=('saved_state_cleanup|App State Cleanup|Remove old saved application states (30+ days)|true')
     items+=('fix_broken_configs|Broken Config Repair|Fix corrupted preferences files|true')
     items+=('network_optimization|Network Cache Refresh|Optimize DNS cache & restart mDNSResponder|true')
 
@@ -133,10 +133,19 @@ EOF
     items+=('sqlite_vacuum|Database Optimization|Compress SQLite databases for Mail, Safari & Messages (skips if apps are running)|true')
     items+=('launch_services_rebuild|LaunchServices Repair|Repair "Open with" menu & file associations|true')
     items+=('font_cache_rebuild|Font Cache Rebuild|Rebuild font database to fix rendering issues|true')
-    items+=('startup_items_cleanup|Startup Items Cleanup|Remove broken login items & optimize boot time|true')
-    items+=('dyld_cache_update|App Launch Optimization|Rebuild dyld cache to speed up app launches|true')
-    items+=('system_services_refresh|System Services Refresh|Restart system services to apply optimization changes|true')
     items+=('dock_refresh|Dock Refresh|Fix broken icons and visual glitches in the Dock|true')
+
+    # System performance optimizations (new)
+    items+=('memory_pressure_relief|Memory Optimization|Release inactive memory to improve system responsiveness|true')
+    items+=('network_stack_optimize|Network Stack Refresh|Flush routing table and ARP cache to resolve network issues|true')
+    items+=('disk_permissions_repair|Permission Repair|Fix user directory permission issues|true')
+    items+=('bluetooth_reset|Bluetooth Refresh|Restart Bluetooth module to fix connectivity (skips if in use)|true')
+    items+=('spotlight_index_optimize|Spotlight Optimization|Rebuild index if search is slow (smart detection)|true')
+
+    # Removed high-risk optimizations:
+    # - startup_items_cleanup: Risk of deleting legitimate app helpers
+    # - system_services_refresh: Risk of data loss when killing system services
+    # - dyld_cache_update: Low benefit, time-consuming, auto-managed by macOS
 
     # Output items as JSON
     local first=true
