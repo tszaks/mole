@@ -21,6 +21,21 @@ opt_msg() {
     fi
 }
 
+run_launchctl_unload() {
+    local plist_file="$1"
+    local need_sudo="${2:-false}"
+
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        return 0
+    fi
+
+    if [[ "$need_sudo" == "true" ]]; then
+        sudo launchctl unload "$plist_file" 2> /dev/null || true
+    else
+        launchctl unload "$plist_file" 2> /dev/null || true
+    fi
+}
+
 flush_dns_cache() {
     # Skip actual flush in dry-run mode
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
@@ -354,18 +369,14 @@ opt_startup_items_cleanup() {
                 fi
 
                 if [[ "$need_sudo" == "true" ]]; then
-                    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                        sudo launchctl unload "$plist_file" 2> /dev/null || true
-                    fi
+                    run_launchctl_unload "$plist_file" "$need_sudo"
                     if safe_sudo_remove "$plist_file"; then
                         ((broken_count++))
                     else
                         echo -e "  ${YELLOW}!${NC} Failed to remove (sudo) $plist_file"
                     fi
                 else
-                    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                        launchctl unload "$plist_file" 2> /dev/null || true
-                    fi
+                    run_launchctl_unload "$plist_file" "$need_sudo"
                     if safe_remove "$plist_file" true; then
                         ((broken_count++))
                     else
@@ -443,9 +454,7 @@ opt_startup_items_cleanup() {
                     debug_log "Removing orphaned helper (app not found, program missing): $plist_file"
 
                     if [[ "$need_sudo" == "true" ]]; then
-                        if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                            sudo launchctl unload "$plist_file" 2> /dev/null || true
-                        fi
+                        run_launchctl_unload "$plist_file" "$need_sudo"
                         # remove the plist
                         safe_sudo_remove "$plist_file"
 
@@ -453,9 +462,7 @@ opt_startup_items_cleanup() {
                         ((broken_count++))
                         opt_msg "Removed orphaned helper: $(basename "$plist_file" .plist)"
                     else
-                        if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                            launchctl unload "$plist_file" 2> /dev/null || true
-                        fi
+                        run_launchctl_unload "$plist_file" "$need_sudo"
                         safe_remove "$plist_file" true
                         ((broken_count++))
                         opt_msg "Removed orphaned helper: $(basename "$plist_file" .plist)"
@@ -471,18 +478,14 @@ opt_startup_items_cleanup() {
                 fi
 
                 if [[ "$need_sudo" == "true" ]]; then
-                    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                        sudo launchctl unload "$plist_file" 2> /dev/null || true
-                    fi
+                    run_launchctl_unload "$plist_file" "$need_sudo"
                     if safe_sudo_remove "$plist_file"; then
                         ((broken_count++))
                     else
                         echo -e "  ${YELLOW}!${NC} Failed to remove (sudo) $plist_file"
                     fi
                 else
-                    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                        launchctl unload "$plist_file" 2> /dev/null || true
-                    fi
+                    run_launchctl_unload "$plist_file" "$need_sudo"
                     if safe_remove "$plist_file" true; then
                         ((broken_count++))
                     else

@@ -449,6 +449,27 @@ select_purge_categories() {
         # Recalculate items_per_page dynamically to handle window resize
         items_per_page=$(_get_items_per_page)
 
+        # Clamp pagination state to avoid cursor drifting out of view
+        local max_top_index=0
+        if [[ $total_items -gt $items_per_page ]]; then
+            max_top_index=$((total_items - items_per_page))
+        fi
+        if [[ $top_index -gt $max_top_index ]]; then
+            top_index=$max_top_index
+        fi
+        if [[ $top_index -lt 0 ]]; then
+            top_index=0
+        fi
+
+        local visible_count=$((total_items - top_index))
+        [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
+        if [[ $cursor_pos -gt $((visible_count - 1)) ]]; then
+            cursor_pos=$((visible_count - 1))
+        fi
+        if [[ $cursor_pos -lt 0 ]]; then
+            cursor_pos=0
+        fi
+
         printf "\033[H"
         # Calculate total size of selected items for header
         local selected_size=0
@@ -477,8 +498,6 @@ select_purge_categories() {
         IFS=',' read -r -a recent_flags <<< "${PURGE_RECENT_CATEGORIES:-}"
 
         # Calculate visible range
-        local visible_count=$((total_items - top_index))
-        [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
         local end_index=$((top_index + visible_count))
 
         # Draw only visible items
