@@ -91,7 +91,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Releasing version: $VERSION (tag: $TAG)"
 
-      - name: Update Homebrew formula
+      - name: Update Homebrew formula (Personal Tap)
         uses: mislav/bump-homebrew-formula-action@56a283fa15557e9abaa4bdb63b8212abc68e655c # v3.6
         with:
           formula-name: mole
@@ -105,9 +105,21 @@ jobs:
         env:
           COMMITTER_TOKEN: ${{ secrets.PAT_TOKEN }}
 
-      - name: Verify formula update
+      - name: Update Homebrew formula (Official Core)
+        uses: mislav/bump-homebrew-formula-action@56a283fa15557e9abaa4bdb63b8212abc68e655c # v3.6
+        with:
+          formula-name: mole
+          homebrew-tap: Homebrew/homebrew-core
+          tag-name: ${{ steps.tag_version.outputs.tag }}
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+        continue-on-error: true
+
+      - name: Verify formula updates
         if: success()
         run: |
-          echo "✓ Homebrew formula updated successfully"
+          echo "✓ Homebrew formulae updated successfully"
           echo "  Version: ${{ steps.tag_version.outputs.version }}"
           echo "  Tag: ${{ steps.tag_version.outputs.tag }}"
+          echo "  Personal tap: tw93/homebrew-tap"
+          echo "  Official core: Homebrew/homebrew-core (PR created)"
