@@ -397,7 +397,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.dropbox.*"                 # Dropbox
     "com.getdropbox.*"              # Dropbox legacy
     "*dropbox*"                     # Dropbox helpers/updaters
-    "ws.agile.*"                    # 1Password (already protected above, but explicit for helpers)
+    "ws.agile.*"                    # 1Password sync helpers
     "com.backblaze.*"               # Backblaze
     "*backblaze*"                   # Backblaze helpers
     "com.box.desktop*"              # Box
