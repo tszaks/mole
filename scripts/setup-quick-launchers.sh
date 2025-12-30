@@ -28,6 +28,7 @@ prompt_enter() {
         echo "$prompt"
     fi
 }
+RAYCAST_HINT_FILE="$HOME/.config/mole/raycast_script_dirs_added"
 
 detect_mo() {
     if command -v mo > /dev/null 2>&1; then
@@ -264,25 +265,34 @@ create_raycast_commands() {
         log_warn "Could not auto-open Raycast."
     fi
 
-    for dir in "${dirs[@]}"; do
-        if [ ! -d "$dir" ]; then
-            echo "Skipping: $dir (Directory does not exist)"
-            continue
+    if [[ -f "$RAYCAST_HINT_FILE" ]]; then
+        echo "Raycast script directories already configured. Skipping manual setup."
+    else
+        for dir in "${dirs[@]}"; do
+            if [ ! -d "$dir" ]; then
+                echo "Skipping: $dir (Directory does not exist)"
+                continue
+            fi
+
+            echo -n "$dir" | pbcopy
+            echo ""
+            echo "--- Action Required for folder: $(basename "$dir") ---"
+            echo "1. In the Raycast Extensions window, click the '+' icon."
+            echo "2. Select 'Add Script Directory'."
+            echo "3. A folder picker will open. Press: Shift + Command + G (⇧⌘G)."
+            echo "4. Paste the path (manually) that is copied to your clipboard and press Enter."
+            echo "5. Open / select the folder to confirm."
+            echo ""
+            echo "Path copied to your clipboard: $dir"
+
+            prompt_enter "Press [Enter] once you have added this folder..."
+        done
+
+        if is_interactive; then
+            mkdir -p "$(dirname "$RAYCAST_HINT_FILE")"
+            touch "$RAYCAST_HINT_FILE"
         fi
-
-        echo -n "$dir" | pbcopy
-        echo ""
-        echo "--- Action Required for folder: $(basename "$dir") ---"
-        echo "1. In the Raycast Extensions window, click the '+' icon."
-        echo "2. Select 'Add Script Directory'."
-        echo "3. A folder picker will open. Press: Shift + Command + G (⇧⌘G)."
-        echo "4. Paste the path (manually) that is copied to your clipboard and press Enter."
-        echo "5. Open / select the folder to confirm."
-        echo ""
-        echo "Path copied to your clipboard: $dir"
-
-        prompt_enter "Press [Enter] once you have added this folder..."
-    done
+    fi
 
     log_header "Finalizing Setup"
     prompt_enter "In Raycast we need to reload the script directories to sync your new commands. Press [Enter] to reload..."
