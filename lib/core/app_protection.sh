@@ -392,6 +392,35 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.synology.*"                 # Synology apps
 
     # ============================================================================
+    # Cloud Storage & Backup (Issue #204)
+    # ============================================================================
+    "com.dropbox.*"                 # Dropbox
+    "com.getdropbox.*"              # Dropbox legacy
+    "*dropbox*"                     # Dropbox helpers/updaters
+    "ws.agile.*"                    # 1Password (already protected above, but explicit for helpers)
+    "com.backblaze.*"               # Backblaze
+    "*backblaze*"                   # Backblaze helpers
+    "com.box.desktop*"              # Box
+    "*box.desktop*"                 # Box helpers
+    "com.microsoft.OneDrive*"       # Microsoft OneDrive
+    "com.microsoft.SyncReporter"    # OneDrive sync reporter
+    "*OneDrive*"                    # OneDrive helpers/updaters
+    "com.google.GoogleDrive"        # Google Drive
+    "com.google.keystone*"          # Google updaters (Drive, Chrome, etc.)
+    "*GoogleDrive*"                 # Google Drive helpers
+    "com.amazon.drive"              # Amazon Drive
+    "com.apple.bird"                # iCloud Drive daemon
+    "com.apple.CloudDocs*"          # iCloud Documents
+    "com.displaylink.*"             # DisplayLink
+    "com.fujitsu.pfu.ScanSnap*"     # ScanSnap
+    "com.citrix.*"                  # Citrix Workspace
+    "org.xquartz.*"                 # XQuartz
+    "us.zoom.updater*"              # Zoom updaters
+    "com.DigiDNA.iMazing*"          # iMazing
+    "com.shirtpocket.*"             # SuperDuper backup
+    "homebrew.mxcl.*"               # Homebrew services
+
+    # ============================================================================
     # Screenshot & Recording
     # ============================================================================
     "com.cleanshot.*"                   # CleanShot X

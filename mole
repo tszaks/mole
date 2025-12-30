@@ -25,7 +25,7 @@ source "$SCRIPT_DIR/lib/core/common.sh"
 trap cleanup_temp_files EXIT INT TERM
 
 # Version info
-VERSION="1.16.1"
+VERSION="1.16.2"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
 # Check TouchID configuration
@@ -286,6 +286,7 @@ show_help() {
     printf "  %s%-28s%s %s\n" "$GREEN" "mo clean --dry-run" "$NC" "Preview cleanup"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo clean --whitelist" "$NC" "Manage protected caches"
 
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --dry-run" "$NC" "Preview optimization"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --whitelist" "$NC" "Manage protected items"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --paths" "$NC" "Configure scan directories"
     echo

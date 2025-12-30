@@ -58,6 +58,7 @@ mo --version                 # Show installed version
 mo clean --dry-run           # Preview the cleanup plan
 mo clean --whitelist         # Manage protected caches
 
+mo optimize --dry-run        # Preview optimization actions
 mo optimize --whitelist      # Manage protected optimization rules
 mo purge --paths             # Configure project scan directories
 ```
