@@ -432,11 +432,15 @@ update_mole() {
     # Run installer with visible output (but capture for error handling)
     local install_output
     local update_tag="V${latest#V}"
-    if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$HOME/.config/mole" --update 2>&1); then
+    local config_dir="${MOLE_CONFIG_DIR:-$SCRIPT_DIR}"
+    if [[ ! -f "$config_dir/lib/core/common.sh" ]]; then
+        config_dir="$HOME/.config/mole"
+    fi
+    if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
         process_install_output "$install_output"
     else
         # Retry without --update flag
-        if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$HOME/.config/mole" 2>&1); then
+        if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
             process_install_output "$install_output"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -461,11 +465,27 @@ remove_mole() {
     fi
 
     local is_homebrew=false
+    local brew_cmd=""
+    local brew_has_mole="false"
     local -a manual_installs=()
     local -a alias_installs=()
 
+    if command -v brew > /dev/null 2>&1; then
+        brew_cmd="brew"
+    elif [[ -x "/opt/homebrew/bin/brew" ]]; then
+        brew_cmd="/opt/homebrew/bin/brew"
+    elif [[ -x "/usr/local/bin/brew" ]]; then
+        brew_cmd="/usr/local/bin/brew"
+    fi
+
+    if [[ -n "$brew_cmd" ]]; then
+        if "$brew_cmd" list --formula 2> /dev/null | grep -q "^mole$"; then
+            brew_has_mole="true"
+        fi
+    fi
+
     # Check Homebrew
-    if is_homebrew_install; then
+    if [[ "$brew_has_mole" == "true" ]] || is_homebrew_install; then
         is_homebrew=true
     fi
 
@@ -557,11 +577,25 @@ remove_mole() {
             ;;
     esac
 
-    # Remove Homebrew installation (silent)
+    # Remove Homebrew installation
     local has_error=false
     if [[ "$is_homebrew" == "true" ]]; then
-        if ! brew uninstall --force mole > /dev/null 2>&1; then
+        if [[ -z "$brew_cmd" ]]; then
+            log_error "Homebrew command not found. Please ensure Homebrew is installed and in your PATH."
+            log_warning "You may need to manually run: brew uninstall --force mole"
+            exit 1
+        fi
+
+        log_admin "Attempting to uninstall Mole via Homebrew..."
+        local brew_uninstall_output
+        if ! brew_uninstall_output=$("$brew_cmd" uninstall --force mole 2>&1); then
             has_error=true
+            log_error "Homebrew uninstallation failed:"
+            printf "%s\n" "$brew_uninstall_output" | sed "s/^/${RED}  | ${NC}/" >&2
+            log_warning "Please manually run: ${YELLOW}brew uninstall --force mole${NC}"
+            echo "" # Add a blank line for readability
+        else
+            log_success "Mole uninstalled via Homebrew."
         fi
     fi
     # Remove manual installations
