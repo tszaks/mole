@@ -174,6 +174,61 @@ end_section() {
     TRACK_SECTION=0
 }
 
+normalize_paths_for_cleanup() {
+    local -a input_paths=("$@")
+    local -a unique_paths=()
+
+    for path in "${input_paths[@]}"; do
+        local normalized="${path%/}"
+        [[ -z "$normalized" ]] && normalized="$path"
+        local found=false
+        for existing in "${unique_paths[@]}"; do
+            if [[ "$existing" == "$normalized" ]]; then
+                found=true
+                break
+            fi
+        done
+        [[ "$found" == "true" ]] || unique_paths+=("$normalized")
+    done
+
+    local sorted_paths
+    sorted_paths=$(printf '%s\n' "${unique_paths[@]}" | awk '{print length "|" $0}' | LC_ALL=C sort -n | cut -d'|' -f2-)
+
+    local -a result_paths=()
+    while IFS= read -r path; do
+        [[ -z "$path" ]] && continue
+        local is_child=false
+        for kept in "${result_paths[@]}"; do
+            if [[ "$path" == "$kept" || "$path" == "$kept"/* ]]; then
+                is_child=true
+                break
+            fi
+        done
+        [[ "$is_child" == "true" ]] || result_paths+=("$path")
+    done <<< "$sorted_paths"
+
+    printf '%s\n' "${result_paths[@]}"
+}
+
+get_cleanup_path_size_kb() {
+    local path="$1"
+
+    if [[ -L "$path" ]]; then
+        if command -v stat > /dev/null 2>&1; then
+            local bytes
+            bytes=$(stat -f%z "$path" 2>/dev/null || echo "0")
+            if [[ "$bytes" =~ ^[0-9]+$ && "$bytes" -gt 0 ]]; then
+                echo $(( (bytes + 1023) / 1024 ))
+            else
+                echo 0
+            fi
+            return 0
+        fi
+    fi
+
+    get_path_size_kb "$path"
+}
+
 # shellcheck disable=SC2329
 safe_clean() {
     if [[ $# -eq 0 ]]; then
@@ -247,6 +302,14 @@ safe_clean() {
         return 0
     fi
 
+    if [[ ${#existing_paths[@]} -gt 1 ]]; then
+        local -a normalized_paths=()
+        while IFS= read -r path; do
+            [[ -n "$path" ]] && normalized_paths+=("$path")
+        done < <(normalize_paths_for_cleanup "${existing_paths[@]}")
+        existing_paths=("${normalized_paths[@]}")
+    fi
+
     # Only show spinner if we have enough items to justify it (>10 items)
     local show_spinner=false
     if [[ ${#existing_paths[@]} -gt 10 ]]; then
@@ -270,7 +333,7 @@ safe_clean() {
         for path in "${existing_paths[@]}"; do
             (
                 local size
-                size=$(get_path_size_kb "$path")
+                size=$(get_cleanup_path_size_kb "$path")
                 # Ensure size is numeric (additional safety layer)
                 [[ ! "$size" =~ ^[0-9]+$ ]] && size=0
                 # Use index + PID for unique filename
@@ -315,25 +378,39 @@ safe_clean() {
             local result_file="$temp_dir/result_${idx}"
             if [[ -f "$result_file" ]]; then
                 read -r size count < "$result_file" 2> /dev/null || true
-                if [[ "$count" -gt 0 && "$size" -gt 0 ]]; then
-                    local removed=1
-                    if [[ "$DRY_RUN" != "true" ]]; then
-                        removed=0
-                        # Handle symbolic links separately (only remove the link, not the target)
-                        if [[ -L "$path" ]]; then
-                            rm "$path" 2> /dev/null && removed=1
-                        else
-                            if safe_remove "$path" true; then
-                                removed=1
-                            fi
+                # Even if size is 0 or du failed, we should try to remove the file if it was found
+                # count > 0 means the file existed at scan time (or we forced it to 1)
+
+                # Correction: The subshell now writes "size 1" if size>0, or "0 0" if size=0
+                # But we want to delete even if size is 0.
+                # Let's check if the path still exists to be safe, or trust the input list.
+                # Actually, safe_remove checks existence.
+
+                local removed=0
+                if [[ "$DRY_RUN" != "true" ]]; then
+                    # Handle symbolic links separately (only remove the link, not the target)
+                    if [[ -L "$path" ]]; then
+                        rm "$path" 2> /dev/null && removed=1
+                    else
+                        if safe_remove "$path" true; then
+                            removed=1
                         fi
                     fi
-                    if [[ $removed -eq 1 ]]; then
+                else
+                    removed=1
+                fi
+
+                if [[ $removed -eq 1 ]]; then
+                    if [[ "$size" -gt 0 ]]; then
                         ((total_size_kb += size))
-                        ((total_count += 1))
-                        removed_any=1
-                    else
-                        ((removal_failed_count++))
+                    fi
+                    ((total_count += 1))
+                    removed_any=1
+                else
+                    # Only increment failure count if we actually tried and failed
+                    # Check existence to avoid false failure report for already gone files
+                    if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
+                         ((removal_failed_count++))
                     fi
                 fi
             fi
@@ -345,31 +422,38 @@ safe_clean() {
         local idx=0
         for path in "${existing_paths[@]}"; do
             local size_kb
-            size_kb=$(get_path_size_kb "$path")
+            size_kb=$(get_cleanup_path_size_kb "$path")
             # Ensure size_kb is numeric (additional safety layer)
             [[ ! "$size_kb" =~ ^[0-9]+$ ]] && size_kb=0
 
-            # Optimization: Skip expensive file counting
-            if [[ "$size_kb" -gt 0 ]]; then
-                local removed=1
-                if [[ "$DRY_RUN" != "true" ]]; then
-                    removed=0
-                    # Handle symbolic links separately (only remove the link, not the target)
-                    if [[ -L "$path" ]]; then
-                        rm "$path" 2> /dev/null && removed=1
-                    else
-                        if safe_remove "$path" true; then
-                            removed=1
-                        fi
+            # Optimization: Skip expensive file counting, but DO NOT skip deletion if size is 0
+            # Previously: if [[ "$size_kb" -gt 0 ]]; then ...
+
+            local removed=0
+            if [[ "$DRY_RUN" != "true" ]]; then
+                # Handle symbolic links separately (only remove the link, not the target)
+                if [[ -L "$path" ]]; then
+                    rm "$path" 2> /dev/null && removed=1
+                else
+                    if safe_remove "$path" true; then
+                        removed=1
                     fi
                 fi
-                if [[ $removed -eq 1 ]]; then
+            else
+                removed=1
+            fi
+
+            if [[ $removed -eq 1 ]]; then
+                if [[ "$size_kb" -gt 0 ]]; then
                     ((total_size_kb += size_kb))
-                    ((total_count += 1))
-                    removed_any=1
-                else
-                    ((removal_failed_count++))
                 fi
+                ((total_count += 1))
+                removed_any=1
+            else
+                 # Only increment failure count if we actually tried and failed
+                 if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
+                     ((removal_failed_count++))
+                 fi
             fi
             ((idx++))
         done
@@ -410,7 +494,7 @@ safe_clean() {
                 if [[ -n "${temp_dir:-}" && -f "$temp_dir/result_${idx}" ]]; then
                     read -r size count < "$temp_dir/result_${idx}" 2> /dev/null || true
                 else
-                    size=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
+                    size=$(get_cleanup_path_size_kb "$path" 2> /dev/null || echo "0")
                 fi
 
                 [[ "$size" == "0" || -z "$size" ]] && {
