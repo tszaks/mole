@@ -23,7 +23,7 @@ is_interactive() { [[ -t 1 && -r /dev/tty ]]; }
 prompt_enter() {
     local prompt="$1"
     if is_interactive; then
-        read -r -p "$prompt" </dev/tty || true
+        read -r -p "$prompt" < /dev/tty || true
     else
         echo "$prompt"
     fi
