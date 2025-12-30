@@ -956,6 +956,57 @@ EOF
     [[ "$output" == *"Bluetooth already optimal"* ]]
 }
 
+@test "opt_bluetooth_reset skips when Bluetooth audio output is active" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+# Mock system_profiler to return Bluetooth audio as default output (Method 1)
+system_profiler() {
+    if [[ "$1" == "SPAudioDataType" ]]; then
+        cat << 'AUDIO_OUT'
+Audio:
+    Devices:
+        AirPods Pro:
+          Default Output Device: Yes
+          Manufacturer: Apple Inc.
+          Output Channels: 2
+          Transport: Bluetooth
+          Output Source: AirPods Pro
+AUDIO_OUT
+        return 0
+    elif [[ "$1" == "SPBluetoothDataType" ]]; then
+        echo "Bluetooth:"
+        return 0
+    fi
+    return 1
+}
+export -f system_profiler
+
+# Mock awk to process audio output
+awk() {
+    if [[ "${*}" == *"Default Output Device"* ]]; then
+        cat << 'AWK_OUT'
+          Default Output Device: Yes
+          Manufacturer: Apple Inc.
+          Output Channels: 2
+          Transport: Bluetooth
+          Output Source: AirPods Pro
+AWK_OUT
+        return 0
+    fi
+    command awk "$@"
+}
+export -f awk
+
+opt_bluetooth_reset
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Bluetooth already optimal"* ]]
+}
+
 @test "opt_bluetooth_reset restarts when safe" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail

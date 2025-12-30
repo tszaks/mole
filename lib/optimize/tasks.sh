@@ -506,7 +506,9 @@ opt_disk_permissions_repair() {
 
 # Bluetooth module reset
 # Resets Bluetooth daemon to fix connectivity issues
-# Only runs if no Bluetooth audio is playing
+# Intelligently detects Bluetooth audio usage:
+#   1. Checks if default audio output is Bluetooth (precise)
+#   2. Falls back to Bluetooth + media app detection (compatibility)
 opt_bluetooth_reset() {
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         if has_bluetooth_hid_connected; then
@@ -517,16 +519,31 @@ opt_bluetooth_reset() {
         # Check if any audio is playing through Bluetooth
         local bt_audio_active=false
 
-        # Check system audio output
-        if system_profiler SPBluetoothDataType 2> /dev/null | grep -q "Connected: Yes"; then
-            # Check if any audio/video apps are running that might be using Bluetooth
-            local -a media_apps=("Music" "Spotify" "VLC" "QuickTime Player" "TV" "Podcasts")
-            for app in "${media_apps[@]}"; do
-                if pgrep -x "$app" > /dev/null 2>&1; then
-                    bt_audio_active=true
-                    break
-                fi
-            done
+        # Method 1: Check if default audio output is Bluetooth (precise)
+        local audio_info
+        audio_info=$(system_profiler SPAudioDataType 2> /dev/null || echo "")
+
+        # Extract default output device information
+        local default_output
+        default_output=$(echo "$audio_info" | awk '/Default Output Device: Yes/,/^$/' 2> /dev/null || echo "")
+
+        # Check if transport type is Bluetooth
+        if echo "$default_output" | grep -qi "Transport:.*Bluetooth"; then
+            bt_audio_active=true
+        fi
+
+        # Method 2: Fallback - Bluetooth connected + media apps running (compatibility)
+        if [[ "$bt_audio_active" == "false" ]]; then
+            if system_profiler SPBluetoothDataType 2> /dev/null | grep -q "Connected: Yes"; then
+                # Extended media apps list for broader coverage
+                local -a media_apps=("Music" "Spotify" "VLC" "QuickTime Player" "TV" "Podcasts" "Safari" "Google Chrome" "Chrome" "Firefox" "Arc" "IINA" "mpv")
+                for app in "${media_apps[@]}"; do
+                    if pgrep -x "$app" > /dev/null 2>&1; then
+                        bt_audio_active=true
+                        break
+                    fi
+                done
+            fi
         fi
 
         if [[ "$bt_audio_active" == "true" ]]; then

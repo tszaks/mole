@@ -182,32 +182,42 @@ normalize_paths_for_cleanup() {
         local normalized="${path%/}"
         [[ -z "$normalized" ]] && normalized="$path"
         local found=false
-        for existing in "${unique_paths[@]}"; do
-            if [[ "$existing" == "$normalized" ]]; then
-                found=true
-                break
-            fi
-        done
+        if [[ ${#unique_paths[@]} -gt 0 ]]; then
+            for existing in "${unique_paths[@]}"; do
+                if [[ "$existing" == "$normalized" ]]; then
+                    found=true
+                    break
+                fi
+            done
+        fi
         [[ "$found" == "true" ]] || unique_paths+=("$normalized")
     done
 
     local sorted_paths
-    sorted_paths=$(printf '%s\n' "${unique_paths[@]}" | awk '{print length "|" $0}' | LC_ALL=C sort -n | cut -d'|' -f2-)
+    if [[ ${#unique_paths[@]} -gt 0 ]]; then
+        sorted_paths=$(printf '%s\n' "${unique_paths[@]}" | awk '{print length "|" $0}' | LC_ALL=C sort -n | cut -d'|' -f2-)
+    else
+        sorted_paths=""
+    fi
 
     local -a result_paths=()
     while IFS= read -r path; do
         [[ -z "$path" ]] && continue
         local is_child=false
-        for kept in "${result_paths[@]}"; do
-            if [[ "$path" == "$kept" || "$path" == "$kept"/* ]]; then
-                is_child=true
-                break
-            fi
-        done
+        if [[ ${#result_paths[@]} -gt 0 ]]; then
+            for kept in "${result_paths[@]}"; do
+                if [[ "$path" == "$kept" || "$path" == "$kept"/* ]]; then
+                    is_child=true
+                    break
+                fi
+            done
+        fi
         [[ "$is_child" == "true" ]] || result_paths+=("$path")
     done <<< "$sorted_paths"
 
-    printf '%s\n' "${result_paths[@]}"
+    if [[ ${#result_paths[@]} -gt 0 ]]; then
+        printf '%s\n' "${result_paths[@]}"
+    fi
 }
 
 get_cleanup_path_size_kb() {
@@ -307,7 +317,12 @@ safe_clean() {
         while IFS= read -r path; do
             [[ -n "$path" ]] && normalized_paths+=("$path")
         done < <(normalize_paths_for_cleanup "${existing_paths[@]}")
-        existing_paths=("${normalized_paths[@]}")
+
+        if [[ ${#normalized_paths[@]} -gt 0 ]]; then
+            existing_paths=("${normalized_paths[@]}")
+        else
+            existing_paths=()
+        fi
     fi
 
     # Only show spinner if we have enough items to justify it (>10 items)
@@ -330,61 +345,111 @@ safe_clean() {
         local last_progress_update=$(date +%s)
         local total_paths=${#existing_paths[@]}
 
-        for path in "${existing_paths[@]}"; do
-            (
-                local size
-                size=$(get_cleanup_path_size_kb "$path")
-                # Ensure size is numeric (additional safety layer)
-                [[ ! "$size" =~ ^[0-9]+$ ]] && size=0
-                # Use index + PID for unique filename
-                local tmp_file="$temp_dir/result_${idx}.$$"
-                # Optimization: Skip expensive file counting. Size is the key metric.
-                # Just indicate presence if size > 0
-                if [[ "$size" -gt 0 ]]; then
-                    echo "$size 1" > "$tmp_file"
-                else
-                    echo "0 0" > "$tmp_file"
-                fi
-                mv "$tmp_file" "$temp_dir/result_${idx}" 2> /dev/null || true
-            ) &
-            pids+=($!)
-            ((idx++))
+        if [[ ${#existing_paths[@]} -gt 0 ]]; then
+            for path in "${existing_paths[@]}"; do
+                (
+                    local size
+                    size=$(get_cleanup_path_size_kb "$path")
+                    # Ensure size is numeric (additional safety layer)
+                    [[ ! "$size" =~ ^[0-9]+$ ]] && size=0
+                    # Use index + PID for unique filename
+                    local tmp_file="$temp_dir/result_${idx}.$$"
+                    # Optimization: Skip expensive file counting. Size is the key metric.
+                    # Just indicate presence if size > 0
+                    if [[ "$size" -gt 0 ]]; then
+                        echo "$size 1" > "$tmp_file"
+                    else
+                        echo "0 0" > "$tmp_file"
+                    fi
+                    mv "$tmp_file" "$temp_dir/result_${idx}" 2> /dev/null || true
+                ) &
+                pids+=($!)
+                ((idx++))
 
-            if ((${#pids[@]} >= MOLE_MAX_PARALLEL_JOBS)); then
-                wait "${pids[0]}" 2> /dev/null || true
-                pids=("${pids[@]:1}")
+                if ((${#pids[@]} >= MOLE_MAX_PARALLEL_JOBS)); then
+                    wait "${pids[0]}" 2> /dev/null || true
+                    pids=("${pids[@]:1}")
+                    ((completed++))
+
+                    # Update progress using helper function
+                    if [[ "$show_spinner" == "true" && -t 1 ]]; then
+                        update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
+                    fi
+                fi
+            done
+        fi
+
+        if [[ ${#pids[@]} -gt 0 ]]; then
+            for pid in "${pids[@]}"; do
+                wait "$pid" 2> /dev/null || true
                 ((completed++))
 
                 # Update progress using helper function
                 if [[ "$show_spinner" == "true" && -t 1 ]]; then
                     update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
                 fi
-            fi
-        done
-
-        for pid in "${pids[@]}"; do
-            wait "$pid" 2> /dev/null || true
-            ((completed++))
-
-            # Update progress using helper function
-            if [[ "$show_spinner" == "true" && -t 1 ]]; then
-                update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
-            fi
-        done
+            done
+        fi
 
         # Read results using same index
         idx=0
-        for path in "${existing_paths[@]}"; do
-            local result_file="$temp_dir/result_${idx}"
-            if [[ -f "$result_file" ]]; then
-                read -r size count < "$result_file" 2> /dev/null || true
-                # Even if size is 0 or du failed, we should try to remove the file if it was found
-                # count > 0 means the file existed at scan time (or we forced it to 1)
+        if [[ ${#existing_paths[@]} -gt 0 ]]; then
+            for path in "${existing_paths[@]}"; do
+                local result_file="$temp_dir/result_${idx}"
+                if [[ -f "$result_file" ]]; then
+                    read -r size count < "$result_file" 2> /dev/null || true
+                    # Even if size is 0 or du failed, we should try to remove the file if it was found
+                    # count > 0 means the file existed at scan time (or we forced it to 1)
 
-                # Correction: The subshell now writes "size 1" if size>0, or "0 0" if size=0
-                # But we want to delete even if size is 0.
-                # Let's check if the path still exists to be safe, or trust the input list.
-                # Actually, safe_remove checks existence.
+                    # Correction: The subshell now writes "size 1" if size>0, or "0 0" if size=0
+                    # But we want to delete even if size is 0.
+                    # Let's check if the path still exists to be safe, or trust the input list.
+                    # Actually, safe_remove checks existence.
+
+                    local removed=0
+                    if [[ "$DRY_RUN" != "true" ]]; then
+                        # Handle symbolic links separately (only remove the link, not the target)
+                        if [[ -L "$path" ]]; then
+                            rm "$path" 2> /dev/null && removed=1
+                        else
+                            if safe_remove "$path" true; then
+                                removed=1
+                            fi
+                        fi
+                    else
+                        removed=1
+                    fi
+
+                    if [[ $removed -eq 1 ]]; then
+                        if [[ "$size" -gt 0 ]]; then
+                            ((total_size_kb += size))
+                        fi
+                        ((total_count += 1))
+                        removed_any=1
+                    else
+                        # Only increment failure count if we actually tried and failed
+                        # Check existence to avoid false failure report for already gone files
+                        if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
+                            ((removal_failed_count++))
+                        fi
+                    fi
+                fi
+                ((idx++))
+            done
+        fi
+
+        # Temp dir will be auto-cleaned by cleanup_temp_files
+    else
+        local idx=0
+        if [[ ${#existing_paths[@]} -gt 0 ]]; then
+            for path in "${existing_paths[@]}"; do
+                local size_kb
+                size_kb=$(get_cleanup_path_size_kb "$path")
+                # Ensure size_kb is numeric (additional safety layer)
+                [[ ! "$size_kb" =~ ^[0-9]+$ ]] && size_kb=0
+
+                # Optimization: Skip expensive file counting, but DO NOT skip deletion if size is 0
+                # Previously: if [[ "$size_kb" -gt 0 ]]; then ...
 
                 local removed=0
                 if [[ "$DRY_RUN" != "true" ]]; then
@@ -401,62 +466,20 @@ safe_clean() {
                 fi
 
                 if [[ $removed -eq 1 ]]; then
-                    if [[ "$size" -gt 0 ]]; then
-                        ((total_size_kb += size))
+                    if [[ "$size_kb" -gt 0 ]]; then
+                        ((total_size_kb += size_kb))
                     fi
                     ((total_count += 1))
                     removed_any=1
                 else
                     # Only increment failure count if we actually tried and failed
-                    # Check existence to avoid false failure report for already gone files
                     if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
                         ((removal_failed_count++))
                     fi
                 fi
-            fi
-            ((idx++))
-        done
-
-        # Temp dir will be auto-cleaned by cleanup_temp_files
-    else
-        local idx=0
-        for path in "${existing_paths[@]}"; do
-            local size_kb
-            size_kb=$(get_cleanup_path_size_kb "$path")
-            # Ensure size_kb is numeric (additional safety layer)
-            [[ ! "$size_kb" =~ ^[0-9]+$ ]] && size_kb=0
-
-            # Optimization: Skip expensive file counting, but DO NOT skip deletion if size is 0
-            # Previously: if [[ "$size_kb" -gt 0 ]]; then ...
-
-            local removed=0
-            if [[ "$DRY_RUN" != "true" ]]; then
-                # Handle symbolic links separately (only remove the link, not the target)
-                if [[ -L "$path" ]]; then
-                    rm "$path" 2> /dev/null && removed=1
-                else
-                    if safe_remove "$path" true; then
-                        removed=1
-                    fi
-                fi
-            else
-                removed=1
-            fi
-
-            if [[ $removed -eq 1 ]]; then
-                if [[ "$size_kb" -gt 0 ]]; then
-                    ((total_size_kb += size_kb))
-                fi
-                ((total_count += 1))
-                removed_any=1
-            else
-                # Only increment failure count if we actually tried and failed
-                if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
-                    ((removal_failed_count++))
-                fi
-            fi
-            ((idx++))
-        done
+                ((idx++))
+            done
+        fi
     fi
 
     if [[ "$show_spinner" == "true" ]]; then
@@ -488,23 +511,25 @@ safe_clean() {
             local paths_temp=$(create_temp_file)
 
             idx=0
-            for path in "${existing_paths[@]}"; do
-                local size=0
+            if [[ ${#existing_paths[@]} -gt 0 ]]; then
+                for path in "${existing_paths[@]}"; do
+                    local size=0
 
-                if [[ -n "${temp_dir:-}" && -f "$temp_dir/result_${idx}" ]]; then
-                    read -r size count < "$temp_dir/result_${idx}" 2> /dev/null || true
-                else
-                    size=$(get_cleanup_path_size_kb "$path" 2> /dev/null || echo "0")
-                fi
+                    if [[ -n "${temp_dir:-}" && -f "$temp_dir/result_${idx}" ]]; then
+                        read -r size count < "$temp_dir/result_${idx}" 2> /dev/null || true
+                    else
+                        size=$(get_cleanup_path_size_kb "$path" 2> /dev/null || echo "0")
+                    fi
 
-                [[ "$size" == "0" || -z "$size" ]] && {
+                    [[ "$size" == "0" || -z "$size" ]] && {
+                        ((idx++))
+                        continue
+                    }
+
+                    echo "$(dirname "$path")|$size|$path" >> "$paths_temp"
                     ((idx++))
-                    continue
-                }
-
-                echo "$(dirname "$path")|$size|$path" >> "$paths_temp"
-                ((idx++))
-            done
+                done
+            fi
 
             # Group and export paths
             if [[ -f "$paths_temp" && -s "$paths_temp" ]]; then
