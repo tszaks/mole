@@ -269,7 +269,7 @@ opt_sqlite_vacuum() {
             page_count=$(echo "$page_info" | awk 'NR==1 {print $1}' 2> /dev/null || echo "")
             freelist_count=$(echo "$page_info" | awk 'NR==2 {print $1}' 2> /dev/null || echo "")
             if [[ "$page_count" =~ ^[0-9]+$ && "$freelist_count" =~ ^[0-9]+$ && "$page_count" -gt 0 ]]; then
-                if (( freelist_count * 100 < page_count * 5 )); then
+                if ((freelist_count * 100 < page_count * 5)); then
                     ((skipped++))
                     continue
                 fi
@@ -518,7 +518,7 @@ opt_bluetooth_reset() {
         local bt_audio_active=false
 
         # Check system audio output
-        if system_profiler SPBluetoothDataType 2>/dev/null | grep -q "Connected: Yes"; then
+        if system_profiler SPBluetoothDataType 2> /dev/null | grep -q "Connected: Yes"; then
             # Check if any audio/video apps are running that might be using Bluetooth
             local -a media_apps=("Music" "Spotify" "VLC" "QuickTime Player" "TV" "Podcasts")
             for app in "${media_apps[@]}"; do

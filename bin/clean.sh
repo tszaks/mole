@@ -216,9 +216,9 @@ get_cleanup_path_size_kb() {
     if [[ -L "$path" ]]; then
         if command -v stat > /dev/null 2>&1; then
             local bytes
-            bytes=$(stat -f%z "$path" 2>/dev/null || echo "0")
+            bytes=$(stat -f%z "$path" 2> /dev/null || echo "0")
             if [[ "$bytes" =~ ^[0-9]+$ && "$bytes" -gt 0 ]]; then
-                echo $(( (bytes + 1023) / 1024 ))
+                echo $(((bytes + 1023) / 1024))
             else
                 echo 0
             fi
@@ -410,7 +410,7 @@ safe_clean() {
                     # Only increment failure count if we actually tried and failed
                     # Check existence to avoid false failure report for already gone files
                     if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
-                         ((removal_failed_count++))
+                        ((removal_failed_count++))
                     fi
                 fi
             fi
@@ -450,10 +450,10 @@ safe_clean() {
                 ((total_count += 1))
                 removed_any=1
             else
-                 # Only increment failure count if we actually tried and failed
-                 if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
-                     ((removal_failed_count++))
-                 fi
+                # Only increment failure count if we actually tried and failed
+                if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
+                    ((removal_failed_count++))
+                fi
             fi
             ((idx++))
         done
