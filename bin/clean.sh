@@ -198,7 +198,7 @@ safe_clean() {
     fi
 
     local removed_any=0
-    local total_size_bytes=0
+    local total_size_kb=0
     local total_count=0
     local skipped_count=0
     local removal_failed_count=0
@@ -329,7 +329,7 @@ safe_clean() {
                         fi
                     fi
                     if [[ $removed -eq 1 ]]; then
-                        ((total_size_bytes += size))
+                        ((total_size_kb += size))
                         ((total_count += 1))
                         removed_any=1
                     else
@@ -344,13 +344,13 @@ safe_clean() {
     else
         local idx=0
         for path in "${existing_paths[@]}"; do
-            local size_bytes
-            size_bytes=$(get_path_size_kb "$path")
-            # Ensure size_bytes is numeric (additional safety layer)
-            [[ ! "$size_bytes" =~ ^[0-9]+$ ]] && size_bytes=0
+            local size_kb
+            size_kb=$(get_path_size_kb "$path")
+            # Ensure size_kb is numeric (additional safety layer)
+            [[ ! "$size_kb" =~ ^[0-9]+$ ]] && size_kb=0
 
             # Optimization: Skip expensive file counting
-            if [[ "$size_bytes" -gt 0 ]]; then
+            if [[ "$size_kb" -gt 0 ]]; then
                 local removed=1
                 if [[ "$DRY_RUN" != "true" ]]; then
                     removed=0
@@ -364,7 +364,7 @@ safe_clean() {
                     fi
                 fi
                 if [[ $removed -eq 1 ]]; then
-                    ((total_size_bytes += size_bytes))
+                    ((total_size_kb += size_kb))
                     ((total_count += 1))
                     removed_any=1
                 else
@@ -390,7 +390,7 @@ safe_clean() {
     fi
 
     if [[ $removed_any -eq 1 ]]; then
-        local size_human=$(bytes_to_human "$((total_size_bytes * 1024))")
+        local size_human=$(bytes_to_human "$((total_size_kb * 1024))")
 
         local label="$description"
         if [[ ${#targets[@]} -gt 1 ]]; then
@@ -461,7 +461,7 @@ safe_clean() {
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $label ${GREEN}($size_human)${NC}"
         fi
         ((files_cleaned += total_count))
-        ((total_size_cleaned += total_size_bytes))
+        ((total_size_cleaned += total_size_kb))
         ((total_items++))
         note_activity
     fi
