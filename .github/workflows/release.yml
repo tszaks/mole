@@ -111,10 +111,13 @@ jobs:
           formula-name: mole
           homebrew-tap: Homebrew/homebrew-core
           tag-name: ${{ steps.tag_version.outputs.tag }}
+<<<<<<< HEAD
           commit-message: |
             mole ${{ steps.tag_version.outputs.version }}
 
             Automated release via GitHub Actions
+=======
+>>>>>>> e6a0b587970be3fcda25a778961a4a8a3c204710
         env:
           COMMITTER_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
         continue-on-error: true
