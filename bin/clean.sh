@@ -271,6 +271,8 @@ safe_clean() {
             (
                 local size
                 size=$(get_path_size_kb "$path")
+                # Ensure size is numeric (additional safety layer)
+                [[ ! "$size" =~ ^[0-9]+$ ]] && size=0
                 # Use index + PID for unique filename
                 local tmp_file="$temp_dir/result_${idx}.$$"
                 # Optimization: Skip expensive file counting. Size is the key metric.
@@ -344,6 +346,8 @@ safe_clean() {
         for path in "${existing_paths[@]}"; do
             local size_bytes
             size_bytes=$(get_path_size_kb "$path")
+            # Ensure size_bytes is numeric (additional safety layer)
+            [[ ! "$size_bytes" =~ ^[0-9]+$ ]] && size_bytes=0
 
             # Optimization: Skip expensive file counting
             if [[ "$size_bytes" -gt 0 ]]; then
@@ -577,12 +581,31 @@ perform_cleanup() {
         done
 
         # Display whitelist status
-        if [[ $custom_count -gt 0 && $predefined_count -gt 0 ]]; then
-            echo -e "${BLUE}${ICON_SUCCESS}${NC} Whitelist: $predefined_count core + $custom_count custom patterns active"
-        elif [[ $custom_count -gt 0 ]]; then
-            echo -e "${BLUE}${ICON_SUCCESS}${NC} Whitelist: $custom_count custom patterns active"
-        elif [[ $predefined_count -gt 0 ]]; then
-            echo -e "${BLUE}${ICON_SUCCESS}${NC} Whitelist: $predefined_count core patterns active"
+        if [[ $custom_count -gt 0 || $predefined_count -gt 0 ]]; then
+            local summary=""
+            [[ $predefined_count -gt 0 ]] && summary+="$predefined_count core"
+            [[ $custom_count -gt 0 && $predefined_count -gt 0 ]] && summary+=" + "
+            [[ $custom_count -gt 0 ]] && summary+="$custom_count custom"
+            summary+=" patterns active"
+
+            echo -e "${BLUE}${ICON_SUCCESS}${NC} Whitelist: $summary"
+
+            # List custom patterns for verification
+            if [[ $custom_count -gt 0 ]]; then
+                for pattern in "${WHITELIST_PATTERNS[@]}"; do
+                    local is_custom=true
+                    for default in "${DEFAULT_WHITELIST_PATTERNS[@]}"; do
+                        if [[ "$pattern" == "$default" ]]; then
+                            is_custom=false
+                            break
+                        fi
+                    done
+
+                    if [[ "$is_custom" == "true" ]]; then
+                        echo -e "  ${GRAY}→ Custom: $pattern${NC}"
+                    fi
+                done
+            fi
         fi
     fi
 
@@ -775,7 +798,8 @@ perform_cleanup() {
             fi
 
             # Free space now at the end
-            summary_details+=("Free space now: $(get_free_space)")
+            local final_free_space=$(get_free_space)
+            summary_details+=("Free space now: $final_free_space")
         fi
     else
         summary_status="info"

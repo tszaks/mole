@@ -94,6 +94,12 @@ safe_remove() {
         return 0
     fi
 
+    # Dry-run mode: log but don't delete
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        debug_log "[DRY RUN] Would remove: $path"
+        return 0
+    fi
+
     debug_log "Removing: $path"
 
     # Perform the deletion
@@ -137,6 +143,12 @@ safe_sudo_remove() {
     if [[ -L "$path" ]]; then
         log_error "Refusing to sudo remove symlink: $path"
         return 1
+    fi
+
+    # Dry-run mode: log but don't delete
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        debug_log "[DRY RUN] Would remove (sudo): $path"
+        return 0
     fi
 
     debug_log "Removing (sudo): $path"
@@ -257,8 +269,14 @@ get_path_size_kb() {
     # Use || echo 0 to ensure failure in du (e.g. permission error) doesn't exit script under set -e
     # Pipefail would normally cause the pipeline to fail if du fails, but || handle catches it.
     local size
-    size=$(command du -sk "$path" 2> /dev/null | awk '{print $1}' || echo "0")
-    echo "${size:-0}"
+    size=$(command du -sk "$path" 2> /dev/null | awk '{print $1}' || true)
+
+    # Ensure size is a valid number (fix for non-numeric du output)
+    if [[ "$size" =~ ^[0-9]+$ ]]; then
+        echo "$size"
+    else
+        echo "0"
+    fi
 }
 
 # Calculate total size for multiple paths
