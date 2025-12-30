@@ -271,7 +271,7 @@ create_raycast_commands() {
         echo "5. Open / select the folder to confirm."
         echo ""
         echo "Path copied to your clipboard: $dir"
-        
+
         read -r -p "Press [Enter] once you have added this folder..."
     done
 
