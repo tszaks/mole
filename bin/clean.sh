@@ -796,13 +796,15 @@ perform_cleanup() {
     # Show whitelist info if patterns are active
     if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
         # Count predefined vs custom patterns
+        # Note: WHITELIST_PATTERNS are already expanded, need to expand defaults for comparison
         local predefined_count=0
         local custom_count=0
 
         for pattern in "${WHITELIST_PATTERNS[@]}"; do
             local is_predefined=false
             for default in "${DEFAULT_WHITELIST_PATTERNS[@]}"; do
-                if [[ "$pattern" == "$default" ]]; then
+                local expanded_default="${default/#\~/$HOME}"
+                if [[ "$pattern" == "$expanded_default" ]]; then
                     is_predefined=true
                     break
                 fi
@@ -825,20 +827,12 @@ perform_cleanup() {
 
             echo -e "${BLUE}${ICON_SUCCESS}${NC} Whitelist: $summary"
 
-            # List custom patterns for verification
-            if [[ $custom_count -gt 0 ]]; then
+            # List all whitelist patterns in dry-run mode for verification (Issue #206)
+            if [[ "$DRY_RUN" == "true" ]]; then
                 for pattern in "${WHITELIST_PATTERNS[@]}"; do
-                    local is_custom=true
-                    for default in "${DEFAULT_WHITELIST_PATTERNS[@]}"; do
-                        if [[ "$pattern" == "$default" ]]; then
-                            is_custom=false
-                            break
-                        fi
-                    done
-
-                    if [[ "$is_custom" == "true" ]]; then
-                        echo -e "  ${GRAY}→ Custom: $pattern${NC}"
-                    fi
+                    # Skip FINDER_METADATA sentinel
+                    [[ "$pattern" == "$FINDER_METADATA_SENTINEL" ]] && continue
+                    echo -e "  ${GRAY}→ $pattern${NC}"
                 done
             fi
         fi
