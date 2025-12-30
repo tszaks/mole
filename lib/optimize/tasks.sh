@@ -252,7 +252,7 @@ opt_launch_services_rebuild() {
             fi
             set -e
         else
-            success=0  # Assume success in dry-run mode
+            success=0 # Assume success in dry-run mode
         fi
 
         if [[ -t 1 ]]; then
@@ -284,7 +284,7 @@ opt_font_cache_rebuild() {
             success=true
         fi
     else
-        success=true  # Assume success in dry-run mode
+        success=true # Assume success in dry-run mode
     fi
 
     if [[ "$success" == "true" ]]; then
@@ -551,7 +551,7 @@ opt_dyld_cache_update() {
             success=true
         fi
     else
-        success=true  # Assume success in dry-run mode
+        success=true # Assume success in dry-run mode
         exit_code=0
     fi
 
