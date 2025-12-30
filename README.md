@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 Or via Homebrew:
 
 ```bash
-brew install tw93/tap/mole
+brew install mole
 ```
 
 **Run:**
