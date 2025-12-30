@@ -18,6 +18,7 @@ log_step() { echo -e "${BLUE}${ICON_STEP}${NC} $1"; }
 log_success() { echo -e "${GREEN}${ICON_SUCCESS}${NC} $1"; }
 log_warn() { echo -e "${YELLOW}${ICON_WARN}${NC} $1"; }
 log_error() { echo -e "${RED}${ICON_ERR}${NC} $1"; }
+log_header() { echo -e "\n${BLUE}==== $1 ====${NC}\n"; }
 
 detect_mo() {
     if command -v mo > /dev/null 2>&1; then
@@ -247,18 +248,38 @@ create_raycast_commands() {
         log_success "Scripts ready in: $dir"
     done
 
-    echo ""
-    if open "raycast://extensions/script-commands" > /dev/null 2>&1; then
+    log_header "Raycast Configuration"
+    if open "raycast://extensions/raycast/raycast-settings/extensions" > /dev/null 2>&1; then
         log_step "Raycast settings opened."
     else
         log_warn "Could not auto-open Raycast."
     fi
 
-    echo ""
-    echo "Next steps to activate Raycast commands:"
-    echo "  1. Open Raycast (⌘ Space)"
-    echo "  2. Search for 'Reload Script Directories'"
-    echo "  3. Press Enter to load new commands"
+    for dir in "${dirs[@]}"; do
+        if [ ! -d "$dir" ]; then
+            echo "Skipping: $dir (Directory does not exist)"
+            continue
+        fi
+
+        echo -n "$dir" | pbcopy
+        echo ""
+        echo "--- Action Required for folder: $(basename "$dir") ---"
+        echo "1. In the Raycast Extensions window, click the '+' icon."
+        echo "2. Select 'Add Script Directory'."
+        echo "3. A folder picker will open. Press: Shift + Command + G (⇧⌘G)."
+        echo "4. Paste the path (manually) that is copied to your clipboard and press Enter."
+        echo "5. Open / select the folder to confirm."
+        echo ""
+        echo "Path copied to your clipboard: $dir"
+        
+        read -r -p "Press [Enter] once you have added this folder..."
+    done
+
+    log_header "Finalizing Setup"
+    read -r -p "In Raycast we need to reload the script directories to sync your new commands. Press [Enter] to reload..."
+    open "raycast://extensions/raycast/raycast/reload-script-directories"
+
+    log_success "Raycast setup complete!"
 }
 
 uuid() {
