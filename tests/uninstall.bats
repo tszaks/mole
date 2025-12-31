@@ -73,7 +73,6 @@ calculate_total_size "$files"
 EOF
     )"
 
-    # Result should be >=3 KB (some filesystems allocate slightly more)
     [ "$result" -ge 3 ]
 }
 
@@ -85,7 +84,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
-# Test stubs
 request_sudo_access() { return 0; }
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }
@@ -110,10 +108,8 @@ files_cleaned=0
 total_items=0
 total_size_cleaned=0
 
-# Use the actual bash function directly, don't pipe printf as that complicates stdin
 batch_uninstall_applications
 
-# Verify cleanup
 [[ ! -d "$app_bundle" ]] || exit 1
 [[ ! -d "$HOME/Library/Application Support/TestApp" ]] || exit 1
 [[ ! -d "$HOME/Library/Caches/TestApp" ]] || exit 1
@@ -144,7 +140,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
-# Valid base64 encoded path list
 valid_data=$(printf '/path/one
 /path/two' | base64)
 result=$(decode_file_list "$valid_data" "TestApp")
@@ -160,12 +155,9 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
-# Invalid base64 - function should return empty and fail
 if result=$(decode_file_list "not-valid-base64!!!" "TestApp" 2>/dev/null); then
-    # If decode succeeded, result should be empty
     [[ -z "$result" ]]
 else
-    # Function returned error, which is expected
     true
 fi
 EOF
@@ -179,10 +171,8 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
-# Empty base64
 empty_data=$(printf '' | base64)
 result=$(decode_file_list "$empty_data" "TestApp" 2>/dev/null) || true
-# Empty result is acceptable
 [[ -z "$result" ]]
 EOF
 
@@ -195,13 +185,10 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
-# Relative path - function should reject it
 bad_data=$(printf 'relative/path' | base64)
 if result=$(decode_file_list "$bad_data" "TestApp" 2>/dev/null); then
-    # Should return empty string
     [[ -z "$result" ]]
 else
-    # Or return error code
     true
 fi
 EOF
@@ -215,22 +202,16 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
-# Test data: absolute paths
 test_paths="/path/to/file1
 /path/to/file2"
 
-# Encode with whatever base64 is available (no flags)
 encoded_data=$(printf '%s' "$test_paths" | base64 | tr -d '\n')
 
-# decode_file_list should handle it regardless of BSD (-D) or GNU (-d)
 result=$(decode_file_list "$encoded_data" "TestApp")
 
-# Verify result contains expected paths
 [[ "$result" == *"/path/to/file1"* ]] || exit 1
 [[ "$result" == *"/path/to/file2"* ]] || exit 1
 
-# Verify the function tries both -D and -d by checking it doesn't fail
-# This tests the fallback logic in decode_file_list
 [[ -n "$result" ]] || exit 1
 EOF
 

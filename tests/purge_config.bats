@@ -26,13 +26,10 @@ setup() {
 }
 
 @test "load_purge_config loads default paths when config file is missing" {
-    # Source the file in a subshell to avoid polluting test environment variables
-    # We need to export HOME so it's picked up by the script
     run env HOME="$HOME" bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
     
     [ "$status" -eq 0 ]
     
-    # Check for a few expected default paths
     [[ "$output" == *"$HOME/Projects"* ]]
     [[ "$output" == *"$HOME/GitHub"* ]]
     [[ "$output" == *"$HOME/dev"* ]]
@@ -52,7 +49,6 @@ EOF
     
     [[ "$output" == *"$HOME/custom/projects"* ]]
     [[ "$output" == *"$HOME/work"* ]]
-    # Should NOT have default paths
     [[ "$output" != *"$HOME/GitHub"* ]]
 }
 
@@ -77,10 +73,8 @@ EOF
     local config_file="$HOME/.config/mole/purge_paths"
     
     cat > "$config_file" << EOF
-# This is a comment
 $HOME/valid/path
 
-   # Indented comment
    
 $HOME/another/path
 EOF
@@ -91,7 +85,6 @@ EOF
     
     local lines
     read -r -a lines <<< "$output"
-    # First line of output is count
     local count="${lines[0]}"
     
     [ "$count" -eq 2 ]
@@ -107,7 +100,6 @@ EOF
     
     [ "$status" -eq 0 ]
     
-    # Should have default paths
     [[ "$output" == *"$HOME/Projects"* ]]
 }
 
@@ -119,6 +111,5 @@ EOF
     
     [ "$status" -eq 0 ]
     
-    # Should have default paths
     [[ "$output" == *"$HOME/Projects"* ]]
 }

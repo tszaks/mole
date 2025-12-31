@@ -1,4 +1,4 @@
-name: Tests
+name: Test
 
 on:
   push:
@@ -7,88 +7,22 @@ on:
     branches: [main, dev]
 
 jobs:
-  unit-tests:
-    name: Unit Tests
+  tests:
+    name: Test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
-      - name: Install bats
-        run: brew install bats-core
-
-      - name: Run all test suites
-        run: |
-          echo "Running all test suites..."
-          bats tests/*.bats --formatter tap
-          echo ""
-          echo "Test summary:"
-          echo "  Total test files: $(ls tests/*.bats | wc -l | tr -d ' ')"
-          echo "  Total tests: $(grep -c "^@test" tests/*.bats | awk -F: '{sum+=$2} END {print sum}')"
-          echo "✓ All tests passed"
-
-  go-tests:
-    name: Go Tests
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
-
-      - name: Set up Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v5
-        with:
-          go-version: '1.24'
-
-      - name: Build Go binaries
-        run: |
-          echo "Building Go binaries..."
-          go build ./...
-          echo "✓ Build successful"
-
-      - name: Run go vet
-        run: |
-          echo "Running go vet..."
-          go vet ./cmd/...
-          echo "✓ Vet passed"
-
-      - name: Run go test
-        run: |
-          echo "Running go test..."
-          go test ./cmd/...
-          echo "✓ Go tests passed"
-
-  integration-tests:
-    name: Integration Tests
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+      - name: Install tools
+        run: brew install bats-core shellcheck
 
       - name: Set up Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v5
         with:
           go-version: "1.24.6"
 
-      - name: Install dependencies
-        run: brew install coreutils
-
-      - name: Build binaries
-        run: make build
-
-      - name: Test module loading
-        run: |
-          echo "Testing module loading..."
-          bash -c 'source lib/core/common.sh && echo "✓ Modules loaded successfully"'
-
-      - name: Test clean --dry-run
-        run: |
-          echo "Testing clean --dry-run..."
-          ./bin/clean.sh --dry-run
-          echo "✓ Clean dry-run completed"
-
-      - name: Test installation
-        run: |
-          echo "Testing installation script..."
-          ./install.sh --prefix /tmp/mole-test
-          test -f /tmp/mole-test/mole
-          echo "✓ Installation successful"
+      - name: Run test script
+        run: ./scripts/test.sh
 
   compatibility:
     name: macOS Compatibility

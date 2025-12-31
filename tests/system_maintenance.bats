@@ -234,7 +234,6 @@ source "$PROJECT_ROOT/lib/clean/brew.sh"
 mkdir -p "$HOME/.cache/mole"
 rm -f "$HOME/.cache/mole/brew_last_cleanup"
 
-# Create a large enough Homebrew cache to pass pre-check (>50MB)
 mkdir -p "$HOME/Library/Caches/Homebrew"
 dd if=/dev/zero of="$HOME/Library/Caches/Homebrew/test.tar.gz" bs=1024 count=51200 2>/dev/null
 
@@ -262,7 +261,6 @@ brew() {
 
 clean_homebrew
 
-# Cleanup test files
 rm -rf "$HOME/Library/Caches/Homebrew"
 EOF
 
@@ -549,7 +547,6 @@ EOF
     mkdir -p "$state_dir/com.example.app.savedState"
     touch "$state_dir/com.example.app.savedState/data.plist"
 
-    # Make the file old (31+ days) - MOLE_SAVED_STATE_AGE_DAYS now defaults to 30
     touch -t 202301010000 "$state_dir/com.example.app.savedState/data.plist"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
@@ -584,7 +581,6 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-# Mock qlmanage and cleanup_path to avoid system calls
 qlmanage() { return 0; }
 cleanup_path() {
     local path="$1"
@@ -624,7 +620,6 @@ echo "$size"
 EOF
 
     [ "$status" -eq 0 ]
-    # Should be >= 10 KB
     [ "$output" -ge 10 ]
 }
 
@@ -647,9 +642,6 @@ EOF
     [[ "$output" == *"Repaired 2 corrupted preference files"* ]]
 }
 
-# ============================================================================
-# Tests for new system cleaning features (v1.15.2)
-# ============================================================================
 
 @test "clean_deep_system cleans memory exception reports" {
     run bash --noprofile --norc <<'EOF'
@@ -711,12 +703,9 @@ EOF
 }
 
 @test "clean_deep_system validates symbolication cache size before cleaning" {
-    # This test verifies the size threshold logic directly
-    # Testing that sizes > 1GB trigger cleanup
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
-# Simulate size check logic
 symbolication_size_mb="2048"  # 2GB
 
 if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
@@ -735,11 +724,9 @@ EOF
 }
 
 @test "clean_deep_system skips symbolication cache when small" {
-    # This test verifies sizes < 1GB don't trigger cleanup
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
-# Simulate size check logic with small cache
 symbolication_size_mb="500"  # 500MB < 1GB
 
 if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
@@ -758,11 +745,9 @@ EOF
 }
 
 @test "clean_deep_system handles symbolication cache size check failure" {
-    # This test verifies invalid/empty size values don't trigger cleanup
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
-# Simulate size check logic with empty/invalid value
 symbolication_size_mb=""  # Empty - simulates failure
 
 if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
@@ -785,12 +770,7 @@ EOF
 
 
 
-# Removed tests for opt_startup_items_cleanup
-# This optimization was removed due to high risk of deleting legitimate app helpers
 
-# ============================================================================
-# Tests for new system optimizations (v1.16.3+)
-# ============================================================================
 
 @test "opt_memory_pressure_relief skips when pressure is normal" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
@@ -798,7 +778,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock memory_pressure to indicate normal pressure
 memory_pressure() {
     echo "System-wide memory free percentage: 50%"
     return 0
@@ -818,14 +797,12 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock memory_pressure to indicate high pressure
 memory_pressure() {
     echo "System-wide memory free percentage: warning"
     return 0
 }
 export -f memory_pressure
 
-# Mock sudo purge
 sudo() {
     if [[ "$1" == "purge" ]]; then
         echo "purge:executed"
@@ -849,13 +826,11 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock route to indicate healthy routing
 route() {
     return 0
 }
 export -f route
 
-# Mock dscacheutil to indicate healthy DNS
 dscacheutil() {
     echo "ip_address: 93.184.216.34"
     return 0
@@ -875,7 +850,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock route to fail (network issue)
 route() {
     if [[ "$2" == "get" ]]; then
         return 1
@@ -888,7 +862,6 @@ route() {
 }
 export -f route
 
-# Mock sudo
 sudo() {
     if [[ "$1" == "route" || "$1" == "arp" ]]; then
         shift
@@ -899,14 +872,12 @@ sudo() {
 }
 export -f sudo
 
-# Mock arp
 arp() {
     echo "arp:cleared"
     return 0
 }
 export -f arp
 
-# Mock dscacheutil
 dscacheutil() {
     return 1
 }
@@ -926,7 +897,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock stat to return correct owner
 stat() {
     if [[ "$2" == "%Su" ]]; then
         echo "$USER"
@@ -936,7 +906,6 @@ stat() {
 }
 export -f stat
 
-# Mock test to indicate directories are writable
 test() {
     if [[ "$1" == "-e" || "$1" == "-w" ]]; then
         return 0
@@ -958,7 +927,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock stat to return wrong owner
 stat() {
     if [[ "$2" == "%Su" ]]; then
         echo "root"
@@ -968,7 +936,6 @@ stat() {
 }
 export -f stat
 
-# Mock sudo diskutil
 sudo() {
     if [[ "$1" == "diskutil" && "$2" == "resetUserPermissions" ]]; then
         echo "diskutil:resetUserPermissions"
@@ -1000,7 +967,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock system_profiler to indicate Bluetooth keyboard connected
 system_profiler() {
     cat << 'PROFILER_OUT'
 Bluetooth:
@@ -1025,7 +991,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock system_profiler to indicate Bluetooth headphones (no HID)
 system_profiler() {
     cat << 'PROFILER_OUT'
 Bluetooth:
@@ -1037,7 +1002,6 @@ PROFILER_OUT
 }
 export -f system_profiler
 
-# Mock pgrep to indicate Spotify is running
 pgrep() {
     if [[ "$2" == "Spotify" ]]; then
         echo "12345"
@@ -1060,7 +1024,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock system_profiler to return Bluetooth audio as default output (Method 1)
 system_profiler() {
     if [[ "$1" == "SPAudioDataType" ]]; then
         cat << 'AUDIO_OUT'
@@ -1082,7 +1045,6 @@ AUDIO_OUT
 }
 export -f system_profiler
 
-# Mock awk to process audio output
 awk() {
     if [[ "${*}" == *"Default Output Device"* ]]; then
         cat << 'AWK_OUT'
@@ -1111,7 +1073,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock system_profiler (no HID devices, just audio)
 system_profiler() {
     cat << 'PROFILER_OUT'
 Bluetooth:
@@ -1123,7 +1084,6 @@ PROFILER_OUT
 }
 export -f system_profiler
 
-# Mock pgrep (no media apps running)
 pgrep() {
     if [[ "$2" == "bluetoothd" ]]; then
         return 1  # bluetoothd not running after TERM
@@ -1132,7 +1092,6 @@ pgrep() {
 }
 export -f pgrep
 
-# Mock sudo pkill
 sudo() {
     if [[ "$1" == "pkill" ]]; then
         echo "pkill:bluetoothd:$2"
@@ -1158,7 +1117,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-# Mock mdutil
 mdutil() {
     if [[ "$1" == "-s" ]]; then
         echo "Indexing enabled."
@@ -1168,13 +1126,11 @@ mdutil() {
 }
 export -f mdutil
 
-# Mock mdfind (fast search)
 mdfind() {
     return 0
 }
 export -f mdfind
 
-# Mock date to simulate fast search (< 3 seconds)
 date() {
     echo "1000"
 }

@@ -218,10 +218,19 @@ get_installed_version() {
 parse_args() {
     local -a args=("$@")
     local version_token=""
-    local i
+    local i skip_next=false
     for i in "${!args[@]}"; do
         local token="${args[$i]}"
         [[ -z "$token" ]] && continue
+        # Skip values for options that take arguments
+        if [[ "$skip_next" == "true" ]]; then
+            skip_next=false
+            continue
+        fi
+        if [[ "$token" == "--prefix" || "$token" == "--config" ]]; then
+            skip_next=true
+            continue
+        fi
         if [[ "$token" == -* ]]; then
             continue
         fi

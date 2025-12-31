@@ -31,15 +31,12 @@ setup() {
     [ "$status" -eq 0 ]
     MOLE_OUTPUT="$output"
 
-    # Check if log file exists
     DEBUG_LOG="$HOME/.config/mole/mole_debug_session.log"
     [ -f "$DEBUG_LOG" ]
 
-    # Validates log content
     run grep "Mole Debug Session" "$DEBUG_LOG"
     [ "$status" -eq 0 ]
 
-    # Validates standard output message (ignoring colors)
     [[ "$MOLE_OUTPUT" =~ "Debug session log saved to" ]]
 }
 
@@ -56,7 +53,6 @@ setup() {
 
     DEBUG_LOG="$HOME/.config/mole/mole_debug_session.log"
 
-    # Check for system info headers
     run grep "User:" "$DEBUG_LOG"
     [ "$status" -eq 0 ]
 

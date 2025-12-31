@@ -4,12 +4,23 @@ setup_file() {
     PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
     export PROJECT_ROOT
 
-    # Create a dummy cache directory for tests
+    ORIGINAL_HOME="${HOME:-}"
+    export ORIGINAL_HOME
+
+    HOME="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-update-manager.XXXXXX")"
+    export HOME
+
     mkdir -p "${HOME}/.cache/mole"
 }
 
+teardown_file() {
+    rm -rf "$HOME"
+    if [[ -n "${ORIGINAL_HOME:-}" ]]; then
+        export HOME="$ORIGINAL_HOME"
+    fi
+}
+
 setup() {
-    # Default values for tests
     BREW_OUTDATED_COUNT=0
     BREW_FORMULA_OUTDATED_COUNT=0
     BREW_CASK_OUTDATED_COUNT=0
@@ -17,7 +28,6 @@ setup() {
     MACOS_UPDATE_AVAILABLE=false
     MOLE_UPDATE_AVAILABLE=false
 
-    # Create a temporary bin directory for mocks
     export MOCK_BIN_DIR="$BATS_TMPDIR/mole-mocks-$$"
     mkdir -p "$MOCK_BIN_DIR"
     export PATH="$MOCK_BIN_DIR:$PATH"
@@ -28,7 +38,6 @@ teardown() {
 }
 
 read_key() {
-    # Default mock: press ESC to cancel
     echo "ESC"
     return 0
 }
@@ -147,7 +156,8 @@ perform_updates
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Homebrew formulae updated"* ]]
-    [[ "$output" == *"Already on latest version"* ]]
+    [[ "$output" == *"Updating Mole"* ]]
+    [[ "$output" == *"Mole updated"* ]]
     [[ "$output" == *"MOLE_CACHE_RESET"* ]]
+    [[ "$output" == *"All updates completed"* ]]
 }

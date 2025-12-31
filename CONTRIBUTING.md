@@ -9,26 +9,16 @@ brew install shfmt shellcheck bats-core
 
 ## Development
 
-Run all quality checks before committing:
+Run quality checks before committing (auto-formats code):
 
 ```bash
 ./scripts/check.sh
 ```
 
-This command runs:
-
-- Code formatting check
-- ShellCheck linting
-- Unit tests
-
-Individual commands:
+Run tests:
 
 ```bash
-# Format code
-./scripts/format.sh
-
-# Run tests only
-./scripts/run-tests.sh
+./scripts/test.sh
 ```
 
 ## Code Style

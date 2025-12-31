@@ -36,7 +36,7 @@ Use this file as the single source of truth for how to work on Mole.
 
 ## Build & Test
 
-- `./scripts/run-tests.sh` runs lint/shell/go tests.
+- `./scripts/test.sh` runs unit/go/integration tests.
 - `make build` builds Go binaries for local development.
 - `go run ./cmd/analyze` for dev runs without building.
 

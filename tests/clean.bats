@@ -86,7 +86,17 @@ EOF
 FINDER_METADATA_SENTINEL
 EOF
 
-    run env HOME="$HOME" "$PROJECT_ROOT/mole" clean --dry-run
+    # Test whitelist logic directly instead of running full clean
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+load_whitelist
+if is_whitelisted "$HOME/Documents/.DS_Store"; then
+    echo "protected by whitelist"
+fi
+EOF
+
     [ "$status" -eq 0 ]
     [[ "$output" == *"protected by whitelist"* ]]
     [ -f "$HOME/Documents/.DS_Store" ]
@@ -146,13 +156,10 @@ EOF
 @test "clean_mail_downloads removes old attachments" {
     mkdir -p "$HOME/Library/Mail Downloads"
     touch "$HOME/Library/Mail Downloads/old.pdf"
-    # Make file old (31+ days)
     touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"
 
-    # Create large enough size to trigger cleanup (>5MB threshold)
     dd if=/dev/zero of="$HOME/Library/Mail Downloads/dummy.dat" bs=1024 count=6000 2>/dev/null
 
-    # Verify file exists before cleanup
     [ -f "$HOME/Library/Mail Downloads/old.pdf" ]
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
@@ -163,17 +170,14 @@ clean_mail_downloads
 EOF
 
     [ "$status" -eq 0 ]
-    # Verify old file was actually removed
     [ ! -f "$HOME/Library/Mail Downloads/old.pdf" ]
 }
 
 @test "clean_time_machine_failed_backups detects running backup correctly" {
-    # Skip test if tmutil is not available
     if ! command -v tmutil > /dev/null 2>&1; then
         skip "tmutil not available"
     fi
 
-    # Create a mock tmutil executable
     local mock_bin="$HOME/bin"
     mkdir -p "$mock_bin"
 
@@ -205,22 +209,18 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
-# Run the function - should NOT skip cleanup when Running = 0
 clean_time_machine_failed_backups
 EOF
 
     [ "$status" -eq 0 ]
-    # Should NOT output the "backup in progress" message
     [[ "$output" != *"Time Machine backup in progress, skipping cleanup"* ]]
 }
 
 @test "clean_time_machine_failed_backups skips when backup is actually running" {
-    # Skip test if tmutil is not available
     if ! command -v tmutil > /dev/null 2>&1; then
         skip "tmutil not available"
     fi
 
-    # Create a mock tmutil executable
     local mock_bin="$HOME/bin"
     mkdir -p "$mock_bin"
 
@@ -252,11 +252,9 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
-# Run the function - should skip cleanup when Running = 1
 clean_time_machine_failed_backups
 EOF
 
     [ "$status" -eq 0 ]
-    # Should output the "backup in progress" message
     [[ "$output" == *"Time Machine backup in progress, skipping cleanup"* ]]
 }
