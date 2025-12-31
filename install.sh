@@ -266,7 +266,11 @@ parse_args() {
                 ;;
         esac
     done
-    set -- "${args[@]}"
+    if [[ ${#args[@]} -gt 0 ]]; then
+        set -- "${args[@]}"
+    else
+        set --
+    fi
 
     while [[ $# -gt 0 ]]; do
         case $1 in
