@@ -283,6 +283,10 @@ parse_args() {
                 CONFIG_DIR="$2"
                 shift 2
                 ;;
+            --update)
+                ACTION="update"
+                shift 1
+                ;;
             --verbose | -v)
                 VERBOSE=1
                 shift 1
