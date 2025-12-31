@@ -622,9 +622,13 @@ remove_mole() {
             if [[ -f "$alias" ]]; then
                 # Check if directory requires sudo
                 if [[ ! -w "$(dirname "$alias")" ]]; then
-                    sudo rm -f "$alias" 2> /dev/null || true
+                    if ! sudo rm -f "$alias" 2> /dev/null; then
+                        has_error=true
+                    fi
                 else
-                    rm -f "$alias" 2> /dev/null || true
+                    if ! rm -f "$alias" 2> /dev/null; then
+                        has_error=true
+                    fi
                 fi
             fi
         done

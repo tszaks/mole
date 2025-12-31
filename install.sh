@@ -64,7 +64,7 @@ ACTION="install"
 
 # Check if we need sudo for install directory operations
 needs_sudo() {
-    [[ "$INSTALL_DIR" == "/usr/local/bin" ]] && [[ ! -w "$INSTALL_DIR" ]]
+    [[ ! -w "$INSTALL_DIR" ]]
 }
 
 # Execute command with sudo if needed
@@ -103,7 +103,7 @@ resolve_source_dir() {
     local tmp
     tmp="$(mktemp -d)"
     # Expand tmp now so trap doesn't depend on local scope
-    trap "rm -rf '$tmp'" EXIT
+    trap "stop_line_spinner 2>/dev/null; rm -rf '$tmp'" EXIT
 
     local branch="${MOLE_VERSION:-}"
     if [[ -z "$branch" ]]; then
@@ -276,10 +276,18 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
             --prefix)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Missing value for --prefix"
+                    exit 1
+                fi
                 INSTALL_DIR="$2"
                 shift 2
                 ;;
             --config)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Missing value for --config"
+                    exit 1
+                fi
                 CONFIG_DIR="$2"
                 shift 2
                 ;;
@@ -359,9 +367,10 @@ create_directories() {
     fi
 
     # Create config directory
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "$CONFIG_DIR/bin"
-    mkdir -p "$CONFIG_DIR/lib"
+    if ! mkdir -p "$CONFIG_DIR" "$CONFIG_DIR/bin" "$CONFIG_DIR/lib"; then
+        log_error "Failed to create config directory: $CONFIG_DIR"
+        exit 1
+    fi
 
 }
 
@@ -516,9 +525,14 @@ install_files() {
         if [[ "$source_bin_abs" == "$config_bin_abs" ]]; then
             log_success "Modules already synced"
         else
-            cp -r "$SOURCE_DIR/bin"/* "$CONFIG_DIR/bin/"
-            chmod +x "$CONFIG_DIR/bin"/*
-            log_success "Installed modules"
+            local -a bin_files=("$SOURCE_DIR/bin"/*)
+            if [[ ${#bin_files[@]} -gt 0 ]]; then
+                cp -r "${bin_files[@]}" "$CONFIG_DIR/bin/"
+                for file in "$CONFIG_DIR/bin/"*; do
+                    [[ -e "$file" ]] && chmod +x "$file"
+                done
+                log_success "Installed modules"
+            fi
         fi
     fi
 
@@ -528,8 +542,11 @@ install_files() {
         if [[ "$source_lib_abs" == "$config_lib_abs" ]]; then
             log_success "Libraries already synced"
         else
-            cp -r "$SOURCE_DIR/lib"/* "$CONFIG_DIR/lib/"
-            log_success "Installed libraries"
+            local -a lib_files=("$SOURCE_DIR/lib"/*)
+            if [[ ${#lib_files[@]} -gt 0 ]]; then
+                cp -r "${lib_files[@]}" "$CONFIG_DIR/lib/"
+                log_success "Installed libraries"
+            fi
         fi
     fi
 
@@ -642,69 +659,6 @@ print_usage_summary() {
     echo ""
 }
 
-# Uninstall function
-uninstall_mole() {
-    log_confirm "Uninstalling Mole"
-    echo ""
-
-    # Remove executable
-    if [[ -f "$INSTALL_DIR/mole" ]]; then
-        if needs_sudo; then
-            log_admin "Admin access required"
-        fi
-        maybe_sudo rm -f "$INSTALL_DIR/mole"
-        log_success "Removed mole executable"
-    fi
-
-    if [[ -f "$INSTALL_DIR/mo" ]]; then
-        maybe_sudo rm -f "$INSTALL_DIR/mo"
-        log_success "Removed mo alias"
-    fi
-
-    # SAFETY CHECK: Verify config directory is safe to remove
-    # Only allow removal of mole-specific directories
-    local is_safe=0
-
-    # Additional safety: never delete system critical paths (check first)
-    case "$CONFIG_DIR" in
-        / | /usr | /usr/local | /usr/local/bin | /usr/local/lib | /usr/local/share | \
-            /Library | /System | /bin | /sbin | /etc | /var | /opt | "$HOME" | "$HOME/Library" | \
-            /usr/local/lib/* | /usr/local/share/* | /Library/* | /System/*)
-            is_safe=0
-            ;;
-        *)
-            # Safe patterns: must be in user's home and end with 'mole'
-            if [[ "$CONFIG_DIR" == "$HOME/.config/mole" ]] ||
-                [[ "$CONFIG_DIR" == "$HOME"/.*/mole ]]; then
-                is_safe=1
-            fi
-            ;;
-    esac
-
-    # Ask before removing config directory
-    if [[ -d "$CONFIG_DIR" ]]; then
-        if [[ $is_safe -eq 0 ]]; then
-            log_warning "Config directory $CONFIG_DIR is not safe to auto-remove"
-            log_warning "Skipping automatic removal for safety"
-            echo ""
-            echo "Please manually review and remove mole-specific files from:"
-            echo "  $CONFIG_DIR"
-        else
-            echo ""
-            read -p "Remove configuration directory $CONFIG_DIR? (y/N): " -n 1 -r
-            echo ""
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                rm -rf "$CONFIG_DIR"
-                log_success "Removed configuration"
-            else
-                log_success "Configuration preserved"
-            fi
-        fi
-    fi
-
-    echo ""
-    log_confirm "Mole uninstalled successfully"
-}
 
 # Main installation function
 perform_install() {
@@ -749,44 +703,12 @@ perform_update() {
             source "$SOURCE_DIR/lib/core/common.sh"
             update_via_homebrew "$current_version"
         else
-            # Fallback: inline implementation
-            if [[ -t 1 ]]; then
-                start_line_spinner "Updating Homebrew..."
-            else
-                echo "Updating Homebrew..."
-            fi
-            brew update 2>&1 | grep -Ev "^(==>|Already up-to-date)" || true
-            if [[ -t 1 ]]; then
-                stop_line_spinner
-            fi
-
-            if [[ -t 1 ]]; then
-                start_line_spinner "Upgrading Mole..."
-            else
-                echo "Upgrading Mole..."
-            fi
-            local upgrade_output
-            upgrade_output=$(brew upgrade mole 2>&1) || true
-            if [[ -t 1 ]]; then
-                stop_line_spinner
-            fi
-
-            if echo "$upgrade_output" | grep -q "already installed"; then
-                local brew_version
-                brew_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
-                echo -e "${GREEN}✓${NC} Already on latest version (${brew_version:-$current_version})"
-            elif echo "$upgrade_output" | grep -q "Error:"; then
-                log_error "Homebrew upgrade failed"
-                echo "$upgrade_output" | grep "Error:" >&2
-                exit 1
-            else
-                echo "$upgrade_output" | grep -Ev "^(==>|Updating Homebrew|Warning:)" || true
-                local new_version
-                new_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
-                echo -e "${GREEN}✓${NC} Updated to latest version (${new_version:-$current_version})"
-            fi
-
-            rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message"
+            # No common.sh available - provide helpful instructions
+            log_error "Cannot update Homebrew-managed Mole without full installation"
+            echo ""
+            echo "Please update via Homebrew:"
+            echo -e "  ${GREEN}brew upgrade mole${NC}"
+            exit 1
         fi
         exit 0
     fi
@@ -810,7 +732,7 @@ perform_update() {
     fi
 
     if [[ "$installed_version" == "$target_version" ]]; then
-        echo -e "${GREEN}✓${NC} Already on latest version ($installed_version)"
+        echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version ($installed_version)"
         exit 0
     fi
 
@@ -842,7 +764,7 @@ perform_update() {
         updated_version="$target_version"
     fi
 
-    echo -e "${GREEN}✓${NC} Updated to latest version ($updated_version)"
+    echo -e "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version ($updated_version)"
 }
 
 # Run requested action
