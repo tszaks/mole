@@ -883,11 +883,11 @@ perform_cleanup() {
 
     local summary_heading=""
     local summary_status="success"
-        if [[ "$DRY_RUN" == "true" ]]; then
-            summary_heading="Dry run complete - no changes made"
-        else
-            summary_heading="Cleanup complete"
-        fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        summary_heading="Dry run complete - no changes made"
+    else
+        summary_heading="Cleanup complete"
+    fi
 
     local -a summary_details=()
 

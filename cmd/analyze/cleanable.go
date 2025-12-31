@@ -48,10 +48,10 @@ func isHandledByMoClean(path string) bool {
 // Project dependency and build directories.
 var projectDependencyDirs = map[string]bool{
 	// JavaScript/Node.
-	"node_modules": true,
+	"node_modules":     true,
 	"bower_components": true,
-	".yarn":        true,
-	".pnpm-store":  true,
+	".yarn":            true,
+	".pnpm-store":      true,
 
 	// Python.
 	"venv":               true,
