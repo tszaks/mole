@@ -26,13 +26,13 @@
 
 ## Quick Start
 
-**Homebrew, recommended:**
+**Install by Brew, recommended:**
 
 ```bash
 brew install mole
 ```
 
-**or Script:**
+**or by Script:**
 
 ```bash
 # Append '-s latest' for latest code or '-s 1.17.0' for specific version
