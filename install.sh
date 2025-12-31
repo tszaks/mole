@@ -1,16 +1,16 @@
 #!/bin/bash
-# Mole Installation Script
+# Mole - Installer for manual installs.
+# Fetches source/binaries and installs to prefix.
+# Supports update and edge installs.
 
 set -euo pipefail
 
-# Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Simple spinner
 _SPINNER_PID=""
 start_line_spinner() {
     local msg="$1"
@@ -36,17 +36,15 @@ stop_line_spinner() { if [[ -n "$_SPINNER_PID" ]]; then
     printf "\r\033[K"
 fi; }
 
-# Verbosity (0 = quiet, 1 = verbose)
 VERBOSE=1
 
-# Icons (duplicated from lib/core/common.sh - necessary as install.sh runs standalone)
-# Note: Don't use 'readonly' here to avoid conflicts when sourcing common.sh later
+# Icons duplicated from lib/core/common.sh (install.sh runs standalone).
+# Avoid readonly to prevent conflicts when sourcing common.sh later.
 ICON_SUCCESS="✓"
 ICON_ADMIN="●"
 ICON_CONFIRM="◎"
 ICON_ERROR="☻"
 
-# Logging functions
 log_info() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}$1${NC}"; }
 log_success() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${GREEN}${ICON_SUCCESS}${NC} $1"; }
 log_warning() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${YELLOW}$1${NC}"; }
@@ -54,21 +52,18 @@ log_error() { echo -e "${YELLOW}${ICON_ERROR}${NC} $1"; }
 log_admin() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}${ICON_ADMIN}${NC} $1"; }
 log_confirm() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}${ICON_CONFIRM}${NC} $1"; }
 
-# Default installation directory
+# Install defaults
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="$HOME/.config/mole"
 SOURCE_DIR=""
 
-# Default action (install|update)
 ACTION="install"
 
-# Check if we need sudo for install directory operations
+# Resolve source dir (local checkout, env override, or download).
 needs_sudo() {
     [[ ! -w "$INSTALL_DIR" ]]
 }
 
-# Execute command with sudo if needed
-# Usage: maybe_sudo cp source dest
 maybe_sudo() {
     if needs_sudo; then
         sudo "$@"
@@ -77,13 +72,11 @@ maybe_sudo() {
     fi
 }
 
-# Resolve the directory containing source files (supports curl | bash)
 resolve_source_dir() {
     if [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR" && -f "$SOURCE_DIR/mole" ]]; then
         return 0
     fi
 
-    # 1) If script is on disk, use its directory (only when mole executable present)
     if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
         local script_dir
         script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -93,16 +86,13 @@ resolve_source_dir() {
         fi
     fi
 
-    # 2) If CLEAN_SOURCE_DIR env is provided, honor it
     if [[ -n "${CLEAN_SOURCE_DIR:-}" && -d "$CLEAN_SOURCE_DIR" && -f "$CLEAN_SOURCE_DIR/mole" ]]; then
         SOURCE_DIR="$CLEAN_SOURCE_DIR"
         return 0
     fi
 
-    # 3) Fallback: fetch repository to a temp directory (works for curl | bash)
     local tmp
     tmp="$(mktemp -d)"
-    # Expand tmp now so trap doesn't depend on local scope
     trap "stop_line_spinner 2>/dev/null; rm -rf '$tmp'" EXIT
 
     local branch="${MOLE_VERSION:-}"
@@ -120,7 +110,6 @@ resolve_source_dir() {
     fi
     local url="https://github.com/tw93/mole/archive/refs/heads/main.tar.gz"
 
-    # If a specific version is requested (e.g. V1.0.0), use the tag URL
     if [[ "$branch" != "main" ]]; then
         url="https://github.com/tw93/mole/archive/refs/tags/${branch}.tar.gz"
     fi
@@ -131,8 +120,6 @@ resolve_source_dir() {
             if tar -xzf "$tmp/mole.tar.gz" -C "$tmp" 2> /dev/null; then
                 stop_line_spinner
 
-                # Find the extracted directory (name varies by tag/branch)
-                # It usually looks like Mole-main, mole-main, Mole-1.0.0, etc.
                 local extracted_dir
                 extracted_dir=$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 
@@ -170,6 +157,7 @@ resolve_source_dir() {
     exit 1
 }
 
+# Version helpers
 get_source_version() {
     local source_mole="$SOURCE_DIR/mole"
     if [[ -f "$source_mole" ]]; then
@@ -188,7 +176,6 @@ get_latest_release_tag() {
     if [[ -z "$tag" ]]; then
         return 1
     fi
-    # Return tag as-is; normalize_release_tag will handle standardization
     printf '%s\n' "$tag"
 }
 
@@ -205,7 +192,6 @@ get_latest_release_tag_from_git() {
 
 normalize_release_tag() {
     local tag="$1"
-    # Remove all leading 'v' or 'V' prefixes (handle edge cases like VV1.0.0)
     while [[ "$tag" =~ ^[vV] ]]; do
         tag="${tag#v}"
         tag="${tag#V}"
@@ -218,21 +204,18 @@ normalize_release_tag() {
 get_installed_version() {
     local binary="$INSTALL_DIR/mole"
     if [[ -x "$binary" ]]; then
-        # Try running the binary first (preferred method)
         local version
         version=$("$binary" --version 2> /dev/null | awk '/Mole version/ {print $NF; exit}')
         if [[ -n "$version" ]]; then
             echo "$version"
         else
-            # Fallback: parse VERSION from file (in case binary is broken)
             sed -n 's/^VERSION="\(.*\)"$/\1/p' "$binary" | head -n1
         fi
     fi
 }
 
-# Parse command line arguments
+# CLI parsing (supports main/latest and version tokens).
 parse_args() {
-    # Handle positional version selector in any position
     local -a args=("$@")
     local version_token=""
     local i
@@ -248,14 +231,12 @@ parse_args() {
         fi
         case "$token" in
             latest | main)
-                # Install from main branch (edge/beta)
                 export MOLE_VERSION="main"
                 export MOLE_EDGE_INSTALL="true"
                 version_token="$token"
                 unset 'args[$i]'
                 ;;
             [0-9]* | V[0-9]* | v[0-9]*)
-                # Install specific version (e.g., 1.16.0, V1.16.0)
                 export MOLE_VERSION="$token"
                 version_token="$token"
                 unset 'args[$i]'
@@ -266,7 +247,6 @@ parse_args() {
                 ;;
         esac
     done
-    # Use ${args[@]+...} pattern to safely handle sparse/empty arrays with set -u
     if [[ ${#args[@]} -gt 0 ]]; then
         set -- ${args[@]+"${args[@]}"}
     else
@@ -311,17 +291,14 @@ parse_args() {
     done
 }
 
-# Check system requirements
+# Environment checks and directory setup
 check_requirements() {
-    # Check if running on macOS
     if [[ "$OSTYPE" != "darwin"* ]]; then
         log_error "This tool is designed for macOS only"
         exit 1
     fi
 
-    # Check if already installed via Homebrew
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
-        # Verify that mole executable actually exists and is from Homebrew
         local mole_path
         mole_path=$(command -v mole 2> /dev/null || true)
         local is_homebrew_binary=false
@@ -332,7 +309,6 @@ check_requirements() {
             fi
         fi
 
-        # Only block installation if Homebrew binary actually exists
         if [[ "$is_homebrew_binary" == "true" ]]; then
             if [[ "$ACTION" == "update" ]]; then
                 return 0
@@ -346,27 +322,22 @@ check_requirements() {
             echo ""
             exit 1
         else
-            # Brew has mole in database but binary doesn't exist - clean up
             log_warning "Cleaning up stale Homebrew installation..."
             brew uninstall --force mole > /dev/null 2>&1 || true
         fi
     fi
 
-    # Check if install directory exists and is writable
     if [[ ! -d "$(dirname "$INSTALL_DIR")" ]]; then
         log_error "Parent directory $(dirname "$INSTALL_DIR") does not exist"
         exit 1
     fi
 }
 
-# Create installation directories
 create_directories() {
-    # Create install directory if it doesn't exist
     if [[ ! -d "$INSTALL_DIR" ]]; then
         maybe_sudo mkdir -p "$INSTALL_DIR"
     fi
 
-    # Create config directory
     if ! mkdir -p "$CONFIG_DIR" "$CONFIG_DIR/bin" "$CONFIG_DIR/lib"; then
         log_error "Failed to create config directory: $CONFIG_DIR"
         exit 1
@@ -374,7 +345,7 @@ create_directories() {
 
 }
 
-# Build binary locally from source when download isn't available
+# Binary install helpers
 build_binary_from_source() {
     local binary_name="$1"
     local target_path="$2"
@@ -418,7 +389,6 @@ build_binary_from_source() {
     return 1
 }
 
-# Download binary from release
 download_binary() {
     local binary_name="$1"
     local target_path="$CONFIG_DIR/bin/${binary_name}-go"
@@ -429,8 +399,6 @@ download_binary() {
         arch_suffix="arm64"
     fi
 
-    # Try to use local binary first (from build or source)
-    # Check for both standard name and cross-compiled name
     if [[ -f "$SOURCE_DIR/bin/${binary_name}-go" ]]; then
         cp "$SOURCE_DIR/bin/${binary_name}-go" "$target_path"
         chmod +x "$target_path"
@@ -443,7 +411,6 @@ download_binary() {
         return 0
     fi
 
-    # Fallback to download
     local version
     version=$(get_source_version)
     if [[ -z "$version" ]]; then
@@ -455,9 +422,7 @@ download_binary() {
     fi
     local url="https://github.com/tw93/mole/releases/download/V${version}/${binary_name}-darwin-${arch_suffix}"
 
-    # Only attempt download if we have internet
-    # Note: Skip network check and let curl download handle connectivity issues
-    # This avoids false negatives from strict 2-second timeout
+    # Skip preflight network checks to avoid false negatives.
 
     if [[ -t 1 ]]; then
         start_line_spinner "Downloading ${binary_name}..."
@@ -480,7 +445,7 @@ download_binary() {
     fi
 }
 
-# Install files
+# File installation (bin/lib/scripts + go helpers).
 install_files() {
 
     resolve_source_dir
@@ -492,7 +457,6 @@ install_files() {
     install_dir_abs="$(cd "$INSTALL_DIR" && pwd)"
     config_dir_abs="$(cd "$CONFIG_DIR" && pwd)"
 
-    # Copy main executable when destination differs
     if [[ -f "$SOURCE_DIR/mole" ]]; then
         if [[ "$source_dir_abs" != "$install_dir_abs" ]]; then
             if needs_sudo; then
@@ -507,7 +471,6 @@ install_files() {
         exit 1
     fi
 
-    # Install mo alias for Mole if available
     if [[ -f "$SOURCE_DIR/mo" ]]; then
         if [[ "$source_dir_abs" == "$install_dir_abs" ]]; then
             log_success "mo alias already present"
@@ -518,7 +481,6 @@ install_files() {
         fi
     fi
 
-    # Copy configuration and modules
     if [[ -d "$SOURCE_DIR/bin" ]]; then
         local source_bin_abs="$(cd "$SOURCE_DIR/bin" && pwd)"
         local config_bin_abs="$(cd "$CONFIG_DIR/bin" && pwd)"
@@ -550,7 +512,6 @@ install_files() {
         fi
     fi
 
-    # Copy other files if they exist and directories differ
     if [[ "$config_dir_abs" != "$source_dir_abs" ]]; then
         for file in README.md LICENSE install.sh; do
             if [[ -f "$SOURCE_DIR/$file" ]]; then
@@ -563,12 +524,10 @@ install_files() {
         chmod +x "$CONFIG_DIR/install.sh"
     fi
 
-    # Update the mole script to use the config directory when installed elsewhere
     if [[ "$source_dir_abs" != "$install_dir_abs" ]]; then
         maybe_sudo sed -i '' "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"
     fi
 
-    # Install/Download Go binaries
     if ! download_binary "analyze"; then
         exit 1
     fi
@@ -577,12 +536,11 @@ install_files() {
     fi
 }
 
-# Verify installation
+# Verification and PATH hint
 verify_installation() {
 
     if [[ -x "$INSTALL_DIR/mole" ]] && [[ -f "$CONFIG_DIR/lib/core/common.sh" ]]; then
 
-        # Test if mole command works
         if "$INSTALL_DIR/mole" --help > /dev/null 2>&1; then
             return 0
         else
@@ -594,14 +552,11 @@ verify_installation() {
     fi
 }
 
-# Add to PATH if needed
 setup_path() {
-    # Check if install directory is in PATH
     if [[ ":$PATH:" == *":$INSTALL_DIR:"* ]]; then
         return
     fi
 
-    # Only suggest PATH setup for custom directories
     if [[ "$INSTALL_DIR" != "/usr/local/bin" ]]; then
         log_warning "$INSTALL_DIR is not in your PATH"
         echo ""
@@ -659,7 +614,7 @@ print_usage_summary() {
     echo ""
 }
 
-# Main installation function
+# Main install/update flows
 perform_install() {
     resolve_source_dir
     local source_version
@@ -678,7 +633,7 @@ perform_install() {
         installed_version="$source_version"
     fi
 
-    # Add edge indicator for main branch installs
+    # Edge installs get a suffix to make the version explicit.
     if [[ "${MOLE_EDGE_INSTALL:-}" == "true" ]]; then
         installed_version="${installed_version}-edge"
         echo ""
@@ -693,7 +648,6 @@ perform_update() {
     check_requirements
 
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
-        # Try to use shared function if available (when running from installed Mole)
         resolve_source_dir 2> /dev/null || true
         local current_version
         current_version=$(get_installed_version || echo "unknown")
@@ -702,7 +656,6 @@ perform_update() {
             source "$SOURCE_DIR/lib/core/common.sh"
             update_via_homebrew "$current_version"
         else
-            # No common.sh available - provide helpful instructions
             log_error "Cannot update Homebrew-managed Mole without full installation"
             echo ""
             echo "Please update via Homebrew:"
@@ -735,7 +688,6 @@ perform_update() {
         exit 0
     fi
 
-    # Update with minimal output (suppress info/success, show errors only)
     local old_verbose=$VERBOSE
     VERBOSE=0
     create_directories || {
@@ -766,7 +718,6 @@ perform_update() {
     echo -e "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version ($updated_version)"
 }
 
-# Run requested action
 parse_args "$@"
 
 case "$ACTION" in

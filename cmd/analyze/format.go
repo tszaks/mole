@@ -18,7 +18,7 @@ func displayPath(path string) string {
 	return path
 }
 
-// truncateMiddle truncates string in the middle, keeping head and tail.
+// truncateMiddle trims the middle, keeping head and tail.
 func truncateMiddle(s string, maxWidth int) string {
 	runes := []rune(s)
 	currentWidth := displayWidth(s)
@@ -27,9 +27,7 @@ func truncateMiddle(s string, maxWidth int) string {
 		return s
 	}
 
-	// Reserve 3 width for "..."
 	if maxWidth < 10 {
-		// Simple truncation for very small width
 		width := 0
 		for i, r := range runes {
 			width += runeWidth(r)
@@ -40,11 +38,9 @@ func truncateMiddle(s string, maxWidth int) string {
 		return s
 	}
 
-	// Keep more of the tail (filename usually more important)
 	targetHeadWidth := (maxWidth - 3) / 3
 	targetTailWidth := maxWidth - 3 - targetHeadWidth
 
-	// Find head cutoff point based on display width
 	headWidth := 0
 	headIdx := 0
 	for i, r := range runes {
@@ -56,7 +52,6 @@ func truncateMiddle(s string, maxWidth int) string {
 		headIdx = i + 1
 	}
 
-	// Find tail cutoff point
 	tailWidth := 0
 	tailIdx := len(runes)
 	for i := len(runes) - 1; i >= 0; i-- {
@@ -108,7 +103,6 @@ func coloredProgressBar(value, max int64, percent float64) string {
 		filled = barWidth
 	}
 
-	// Choose color based on percentage
 	var barColor string
 	if percent >= 50 {
 		barColor = colorRed
@@ -142,7 +136,7 @@ func coloredProgressBar(value, max int64, percent float64) string {
 	return bar + colorReset
 }
 
-// Calculate display width considering CJK characters and Emoji.
+// runeWidth returns display width for wide characters and emoji.
 func runeWidth(r rune) int {
 	if r >= 0x4E00 && r <= 0x9FFF || // CJK Unified Ideographs
 		r >= 0x3400 && r <= 0x4DBF || // CJK Extension A
@@ -173,18 +167,16 @@ func displayWidth(s string) int {
 	return width
 }
 
-// calculateNameWidth computes the optimal name column width based on terminal width.
-// Fixed elements: prefix(3) + num(3) + bar(24) + percent(7) + sep(5) + icon(3) + size(12) + hint(4) = 61
+// calculateNameWidth computes name column width from terminal width.
 func calculateNameWidth(termWidth int) int {
 	const fixedWidth = 61
 	available := termWidth - fixedWidth
 
-	// Constrain to reasonable bounds
 	if available < 24 {
-		return 24 // Minimum for readability
+		return 24
 	}
 	if available > 60 {
-		return 60 // Maximum to avoid overly wide columns
+		return 60
 	}
 	return available
 }
@@ -233,7 +225,7 @@ func padName(name string, targetWidth int) string {
 	return name + strings.Repeat(" ", targetWidth-currentWidth)
 }
 
-// formatUnusedTime formats the time since last access in a compact way.
+// formatUnusedTime formats time since last access.
 func formatUnusedTime(lastAccess time.Time) string {
 	if lastAccess.IsZero() {
 		return ""

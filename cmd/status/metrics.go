@@ -141,16 +141,16 @@ type BluetoothDevice struct {
 }
 
 type Collector struct {
-	// Static Cache (Collected once at startup)
+	// Static cache.
 	cachedHW  HardwareInfo
 	lastHWAt  time.Time
 	hasStatic bool
 
-	// Slow Cache (Collected every 30s-1m)
+	// Slow cache (30s-1m).
 	lastBTAt time.Time
 	lastBT   []BluetoothDevice
 
-	// Fast Metrics (Collected every 1 second)
+	// Fast metrics (1s).
 	prevNet    map[string]net.IOCountersStat
 	lastNetAt  time.Time
 	lastGPUAt  time.Time
@@ -168,9 +168,7 @@ func NewCollector() *Collector {
 func (c *Collector) Collect() (MetricsSnapshot, error) {
 	now := time.Now()
 
-	// Start host info collection early (it's fast but good to parallelize if possible,
-	// but it returns a struct needed for result, so we can just run it here or in parallel)
-	// host.Info is usually cached by gopsutil but let's just call it.
+	// Host info is cached by gopsutil; fetch once.
 	hostInfo, _ := host.Info()
 
 	var (
@@ -192,7 +190,7 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 		topProcs     []ProcessInfo
 	)
 
-	// Helper to launch concurrent collection
+	// Helper to launch concurrent collection.
 	collect := func(fn func() error) {
 		wg.Add(1)
 		go func() {
@@ -209,7 +207,7 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 		}()
 	}
 
-	// Launch all independent collection tasks
+	// Launch independent collection tasks.
 	collect(func() (err error) { cpuStats, err = collectCPU(); return })
 	collect(func() (err error) { memStats, err = collectMemory(); return })
 	collect(func() (err error) { diskStats, err = collectDisks(); return })
@@ -221,7 +219,7 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 	collect(func() (err error) { sensorStats, _ = collectSensors(); return nil })
 	collect(func() (err error) { gpuStats, err = c.collectGPU(now); return })
 	collect(func() (err error) {
-		// Bluetooth is slow, cache for 30s
+		// Bluetooth is slow; cache for 30s.
 		if now.Sub(c.lastBTAt) > 30*time.Second || len(c.lastBT) == 0 {
 			btStats = c.collectBluetooth(now)
 			c.lastBT = btStats
@@ -233,12 +231,11 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 	})
 	collect(func() (err error) { topProcs = collectTopProcesses(); return nil })
 
-	// Wait for all to complete
+	// Wait for all to complete.
 	wg.Wait()
 
-	// Dependent tasks (must run after others)
-	// Dependent tasks (must run after others)
-	// Cache hardware info as it's expensive and rarely changes
+	// Dependent tasks (post-collect).
+	// Cache hardware info as it's expensive and rarely changes.
 	if !c.hasStatic || now.Sub(c.lastHWAt) > 10*time.Minute {
 		c.cachedHW = collectHardware(memStats.Total, diskStats)
 		c.lastHWAt = now
@@ -272,8 +269,6 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 	}, mergeErr
 }
 
-// Utility functions
-
 func runCmd(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	output, err := cmd.Output()
@@ -289,11 +284,9 @@ func commandExists(name string) bool {
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			// If LookPath panics due to permissions or platform quirks, act as if the command is missing.
+			// Treat LookPath panics as "missing".
 		}
 	}()
 	_, err := exec.LookPath(name)
 	return err == nil
 }
-
-// humanBytes is defined in view.go to avoid duplication

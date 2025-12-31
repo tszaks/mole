@@ -12,9 +12,7 @@ readonly MOLE_APP_PROTECTION_LOADED=1
 _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "${MOLE_BASE_LOADED:-}" ]] && source "$_MOLE_CORE_DIR/base.sh"
 
-# ============================================================================
 # Application Management
-# ============================================================================
 
 # Critical system components protected from uninstallation
 readonly SYSTEM_CRITICAL_BUNDLES=(
@@ -70,9 +68,7 @@ readonly SYSTEM_CRITICAL_BUNDLES=(
 
 # Applications with sensitive data; protected during cleanup but removable
 readonly DATA_PROTECTED_BUNDLES=(
-    # ============================================================================
     # System Utilities & Cleanup Tools
-    # ============================================================================
     "com.nektony.*"                 # App Cleaner & Uninstaller
     "com.macpaw.*"                  # CleanMyMac, CleanMaster
     "com.freemacsoft.AppCleaner"    # AppCleaner
@@ -82,9 +78,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.grandperspectiv.*"         # GrandPerspective
     "com.binaryfruit.*"             # FusionCast
 
-    # ============================================================================
     # Password Managers & Security
-    # ============================================================================
     "com.1password.*" # 1Password
     "com.agilebits.*" # 1Password legacy
     "com.lastpass.*"  # LastPass
@@ -95,9 +89,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.authy.*"     # Authy
     "com.yubico.*"    # YubiKey Manager
 
-    # ============================================================================
     # Development Tools - IDEs & Editors
-    # ============================================================================
     "com.jetbrains.*"              # JetBrains IDEs (IntelliJ, DataGrip, etc.)
     "JetBrains*"                   # JetBrains Application Support folders
     "com.microsoft.VSCode"         # Visual Studio Code
@@ -112,9 +104,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "abnerworks.Typora"            # Typora (Markdown editor)
     "com.uranusjr.macdown"         # MacDown
 
-    # ============================================================================
     # AI & LLM Tools
-    # ============================================================================
     "com.todesktop.*"             # Cursor (often uses generic todesktop ID)
     "Cursor"                      # Cursor App Support
     "com.anthropic.claude*"       # Claude
@@ -136,9 +126,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.quora.poe.electron"      # Poe
     "chat.openai.com.*"           # OpenAI web wrappers
 
-    # ============================================================================
     # Development Tools - Database Clients
-    # ============================================================================
     "com.sequelpro.*"                   # Sequel Pro
     "com.sequel-ace.*"                  # Sequel Ace
     "com.tinyapp.*"                     # TablePlus
@@ -151,9 +139,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.valentina-db.Valentina-Studio" # Valentina Studio
     "com.dbvis.DbVisualizer"            # DbVisualizer
 
-    # ============================================================================
     # Development Tools - API & Network
-    # ============================================================================
     "com.postmanlabs.mac"      # Postman
     "com.konghq.insomnia"      # Insomnia
     "com.CharlesProxy.*"       # Charles Proxy
@@ -164,9 +150,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.telerik.Fiddler"      # Fiddler
     "com.usebruno.app"         # Bruno (API client)
 
-    # ============================================================================
     # Network Proxy & VPN Tools (pattern-based protection)
-    # ============================================================================
     # Clash variants
     "*clash*"               # All Clash variants (ClashX, ClashX Pro, Clash Verge, etc)
     "*Clash*"               # Capitalized variants
@@ -217,9 +201,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "*Fliqlo*" # Fliqlo screensaver (all case variants)
     "*fliqlo*" # Fliqlo lowercase
 
-    # ============================================================================
     # Development Tools - Git & Version Control
-    # ============================================================================
     "com.github.GitHubDesktop"       # GitHub Desktop
     "com.sublimemerge"               # Sublime Merge
     "com.torusknot.SourceTreeNotMAS" # SourceTree
@@ -229,9 +211,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.fork.Fork"                  # Fork
     "com.axosoft.gitkraken"          # GitKraken
 
-    # ============================================================================
     # Development Tools - Terminal & Shell
-    # ============================================================================
     "com.googlecode.iterm2"  # iTerm2
     "net.kovidgoyal.kitty"   # Kitty
     "io.alacritty"           # Alacritty
@@ -242,9 +222,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "dev.warp.Warp-Stable"   # Warp
     "com.termius-dmg"        # Termius (SSH client)
 
-    # ============================================================================
     # Development Tools - Docker & Virtualization
-    # ============================================================================
     "com.docker.docker"             # Docker Desktop
     "com.getutm.UTM"                # UTM
     "com.vmware.fusion"             # VMware Fusion
@@ -253,9 +231,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.vagrant.*"                 # Vagrant
     "com.orbstack.OrbStack"         # OrbStack
 
-    # ============================================================================
     # System Monitoring & Performance
-    # ============================================================================
     "com.bjango.istatmenus*"       # iStat Menus
     "eu.exelban.Stats"             # Stats
     "com.monitorcontrol.*"         # MonitorControl
@@ -264,9 +240,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.activity-indicator.app"   # Activity Indicator
     "net.cindori.sensei"           # Sensei
 
-    # ============================================================================
     # Window Management & Productivity
-    # ============================================================================
     "com.macitbetter.*"            # BetterTouchTool, BetterSnapTool
     "com.hegenberg.*"              # BetterTouchTool legacy
     "com.manytricks.*"             # Moom, Witch, Name Mangler, Resolutionator
@@ -284,9 +258,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.gaosun.eul"               # eul (system monitor)
     "com.pointum.hazeover"         # HazeOver
 
-    # ============================================================================
     # Launcher & Automation
-    # ============================================================================
     "com.runningwithcrayons.Alfred"   # Alfred
     "com.raycast.macos"               # Raycast
     "com.blacktree.Quicksilver"       # Quicksilver
@@ -297,9 +269,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "org.pqrs.Karabiner-Elements"     # Karabiner-Elements
     "com.apple.Automator"             # Automator (system, but keep user workflows)
 
-    # ============================================================================
     # Note-Taking & Documentation
-    # ============================================================================
     "com.bear-writer.*"           # Bear
     "com.typora.*"                # Typora
     "com.ulyssesapp.*"            # Ulysses
@@ -318,9 +288,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.reflect.ReflectApp"      # Reflect
     "com.inkdrop.*"               # Inkdrop
 
-    # ============================================================================
     # Design & Creative Tools
-    # ============================================================================
     "com.adobe.*"             # Adobe Creative Suite
     "com.bohemiancoding.*"    # Sketch
     "com.figma.*"             # Figma
@@ -338,9 +306,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.autodesk.*"          # Autodesk products
     "com.sketchup.*"          # SketchUp
 
-    # ============================================================================
     # Communication & Collaboration
-    # ============================================================================
     "com.tencent.xinWeChat"                   # WeChat (Chinese users)
     "com.tencent.qq"                          # QQ
     "com.alibaba.DingTalkMac"                 # DingTalk
@@ -363,9 +329,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.postbox-inc.postbox"                 # Postbox
     "com.tinyspeck.slackmacgap"               # Slack legacy
 
-    # ============================================================================
     # Task Management & Productivity
-    # ============================================================================
     "com.omnigroup.OmniFocus*" # OmniFocus
     "com.culturedcode.*"       # Things
     "com.todoist.*"            # Todoist
@@ -380,9 +344,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.notion.id"            # Notion (also note-taking)
     "com.linear.linear"        # Linear
 
-    # ============================================================================
     # File Transfer & Sync
-    # ============================================================================
     "com.panic.transmit*"            # Transmit (FTP/SFTP)
     "com.binarynights.ForkLift*"     # ForkLift
     "com.noodlesoft.Hazel"           # Hazel
@@ -391,9 +353,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.apple.Xcode.CloudDocuments" # Xcode Cloud Documents
     "com.synology.*"                 # Synology apps
 
-    # ============================================================================
     # Cloud Storage & Backup (Issue #204)
-    # ============================================================================
     "com.dropbox.*"              # Dropbox
     "com.getdropbox.*"           # Dropbox legacy
     "*dropbox*"                  # Dropbox helpers/updaters
@@ -420,9 +380,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.shirtpocket.*"          # SuperDuper backup
     "homebrew.mxcl.*"            # Homebrew services
 
-    # ============================================================================
     # Screenshot & Recording
-    # ============================================================================
     "com.cleanshot.*"                   # CleanShot X
     "com.xnipapp.xnip"                  # Xnip
     "com.reincubate.camo"               # Camo
@@ -436,9 +394,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.linebreak.CloudApp"            # CloudApp
     "com.droplr.droplr-mac"             # Droplr
 
-    # ============================================================================
     # Media & Entertainment
-    # ============================================================================
     "com.spotify.client"       # Spotify
     "com.apple.Music"          # Apple Music
     "com.apple.podcasts"       # Apple Podcasts
@@ -456,9 +412,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "tv.plex.player.desktop"   # Plex
     "com.netease.163music"     # NetEase Music
 
-    # ============================================================================
     # License Management & App Stores
-    # ============================================================================
     "com.paddle.Paddle*"          # Paddle (license management)
     "com.setapp.DesktopClient"    # Setapp
     "com.devmate.*"               # DevMate (license framework)

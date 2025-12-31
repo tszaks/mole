@@ -1,6 +1,6 @@
 #!/bin/bash
-# Project Purge Module (mo purge)
-# Removes heavy project build artifacts and dependencies
+# Project Purge Module (mo purge).
+# Removes heavy project build artifacts and dependencies.
 set -euo pipefail
 
 PROJECT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,7 +10,7 @@ if ! command -v ensure_user_dir > /dev/null 2>&1; then
     source "$CORE_LIB_DIR/common.sh"
 fi
 
-# Targets to look for (heavy build artifacts)
+# Targets to look for (heavy build artifacts).
 readonly PURGE_TARGETS=(
     "node_modules"
     "target"        # Rust, Maven
@@ -29,12 +29,12 @@ readonly PURGE_TARGETS=(
     ".parcel-cache" # Parcel bundler
     ".dart_tool"    # Flutter/Dart build cache
 )
-# Minimum age in days before considering for cleanup
+# Minimum age in days before considering for cleanup.
 readonly MIN_AGE_DAYS=7
-# Scan depth defaults (relative to search root)
+# Scan depth defaults (relative to search root).
 readonly PURGE_MIN_DEPTH_DEFAULT=2
 readonly PURGE_MAX_DEPTH_DEFAULT=8
-# Search paths (default, can be overridden via config file)
+# Search paths (default, can be overridden via config file).
 readonly DEFAULT_PURGE_SEARCH_PATHS=(
     "$HOME/www"
     "$HOME/dev"
@@ -46,13 +46,13 @@ readonly DEFAULT_PURGE_SEARCH_PATHS=(
     "$HOME/Development"
 )
 
-# Config file for custom purge paths
+# Config file for custom purge paths.
 readonly PURGE_CONFIG_FILE="$HOME/.config/mole/purge_paths"
 
-# Global array to hold actual search paths
+# Resolved search paths.
 PURGE_SEARCH_PATHS=()
 
-# Project indicator files (if a directory contains these, it's likely a project)
+# Project indicators for container detection.
 readonly PROJECT_INDICATORS=(
     "package.json"
     "Cargo.toml"
@@ -68,12 +68,12 @@ readonly PROJECT_INDICATORS=(
     ".git"
 )
 
-# Check if a directory contains projects (directly or in subdirectories)
+# Check if a directory contains projects (directly or in subdirectories).
 is_project_container() {
     local dir="$1"
     local max_depth="${2:-2}"
 
-    # Skip hidden directories and system directories
+    # Skip hidden/system directories.
     local basename
     basename=$(basename "$dir")
     [[ "$basename" == .* ]] && return 1
@@ -84,7 +84,7 @@ is_project_container() {
     [[ "$basename" == "Pictures" ]] && return 1
     [[ "$basename" == "Public" ]] && return 1
 
-    # Build find expression with all indicators (single find call for efficiency)
+    # Single find expression for indicators.
     local -a find_args=("$dir" "-maxdepth" "$max_depth" "(")
     local first=true
     for indicator in "${PROJECT_INDICATORS[@]}"; do
@@ -97,7 +97,6 @@ is_project_container() {
     done
     find_args+=(")" "-print" "-quit")
 
-    # Single find call to check all indicators at once
     if find "${find_args[@]}" 2> /dev/null | grep -q .; then
         return 0
     fi
@@ -105,24 +104,22 @@ is_project_container() {
     return 1
 }
 
-# Discover project directories in $HOME
+# Discover project directories in $HOME.
 discover_project_dirs() {
     local -a discovered=()
 
-    # First check default paths that exist
     for path in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
         if [[ -d "$path" ]]; then
             discovered+=("$path")
         fi
     done
 
-    # Then scan $HOME for other project containers (depth 1)
+    # Scan $HOME for other containers (depth 1).
     local dir
     for dir in "$HOME"/*/; do
         [[ ! -d "$dir" ]] && continue
         dir="${dir%/}" # Remove trailing slash
 
-        # Skip if already in defaults
         local already_found=false
         for existing in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
             if [[ "$dir" == "$existing" ]]; then
@@ -132,17 +129,15 @@ discover_project_dirs() {
         done
         [[ "$already_found" == "true" ]] && continue
 
-        # Check if this directory contains projects
         if is_project_container "$dir" 2; then
             discovered+=("$dir")
         fi
     done
 
-    # Return unique paths
     printf '%s\n' "${discovered[@]}" | sort -u
 }
 
-# Save discovered paths to config
+# Save discovered paths to config.
 save_discovered_paths() {
     local -a paths=("$@")
 
@@ -166,26 +161,20 @@ EOF
 load_purge_config() {
     PURGE_SEARCH_PATHS=()
 
-    # Try loading from config file
     if [[ -f "$PURGE_CONFIG_FILE" ]]; then
         while IFS= read -r line; do
-            # Remove leading/trailing whitespace
             line="${line#"${line%%[![:space:]]*}"}"
             line="${line%"${line##*[![:space:]]}"}"
 
-            # Skip empty lines and comments
             [[ -z "$line" || "$line" =~ ^# ]] && continue
 
-            # Expand tilde to HOME
             line="${line/#\~/$HOME}"
 
             PURGE_SEARCH_PATHS+=("$line")
         done < "$PURGE_CONFIG_FILE"
     fi
 
-    # If no paths loaded, auto-discover and save
     if [[ ${#PURGE_SEARCH_PATHS[@]} -eq 0 ]]; then
-        # Show discovery message if running interactively
         if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
             echo -e "${GRAY}First run: discovering project directories...${NC}" >&2
         fi
@@ -197,47 +186,37 @@ load_purge_config() {
 
         if [[ ${#discovered[@]} -gt 0 ]]; then
             PURGE_SEARCH_PATHS=("${discovered[@]}")
-            # Save for next time
             save_discovered_paths "${discovered[@]}"
 
             if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
                 echo -e "${GRAY}Found ${#discovered[@]} project directories, saved to config${NC}" >&2
             fi
         else
-            # Fallback to defaults if nothing found
             PURGE_SEARCH_PATHS=("${DEFAULT_PURGE_SEARCH_PATHS[@]}")
         fi
     fi
 }
 
-# Initialize paths on script load
+# Initialize paths on script load.
 load_purge_config
 
 # Args: $1 - path to check
-# Check if path is safe to clean (must be inside a project directory)
+# Safe cleanup requires the path be inside a project directory.
 is_safe_project_artifact() {
     local path="$1"
     local search_path="$2"
-    # Path must be absolute
     if [[ "$path" != /* ]]; then
         return 1
     fi
-    # Must not be a direct child of HOME directory
-    # e.g., ~/.gradle is NOT safe, but ~/Projects/foo/.gradle IS safe
+    # Must not be a direct child of the search root.
     local relative_path="${path#"$search_path"/}"
     local depth=$(echo "$relative_path" | tr -cd '/' | wc -c)
-    # Require at least 1 level deep (inside a project folder)
-    # e.g., ~/www/weekly/node_modules is OK (depth >= 1)
-    # but ~/www/node_modules is NOT OK (depth < 1)
     if [[ $depth -lt 1 ]]; then
         return 1
     fi
     return 0
 }
-# Fast scan using fd or optimized find
-# Args: $1 - search path, $2 - output file
-# Args: $1 - search path, $2 - output file
-# Scan for purge targets using strict project boundary checks
+# Scan purge targets using fd (fast) or pruned find.
 scan_purge_targets() {
     local search_path="$1"
     local output_file="$2"
@@ -255,7 +234,6 @@ scan_purge_targets() {
     if [[ ! -d "$search_path" ]]; then
         return
     fi
-    # Use fd for fast parallel search if available
     if command -v fd > /dev/null 2>&1; then
         local fd_args=(
             "--absolute-path"
@@ -273,47 +251,28 @@ scan_purge_targets() {
         for target in "${PURGE_TARGETS[@]}"; do
             fd_args+=("-g" "$target")
         done
-        # Run fd command
         fd "${fd_args[@]}" . "$search_path" 2> /dev/null | while IFS= read -r item; do
             if is_safe_project_artifact "$item" "$search_path"; then
                 echo "$item"
             fi
         done | filter_nested_artifacts > "$output_file"
     else
-        # Fallback to optimized find with pruning
-        # This prevents descending into heavily nested dirs like node_modules once found,
-        # providing a massive speedup (O(project_dirs) vs O(files)).
+        # Pruned find avoids descending into heavy directories.
         local prune_args=()
-        # 1. Directories to prune (ignore completely)
         local prune_dirs=(".git" "Library" ".Trash" "Applications")
         for dir in "${prune_dirs[@]}"; do
-            # -name "DIR" -prune -o
             prune_args+=("-name" "$dir" "-prune" "-o")
         done
-        # 2. Targets to find (print AND prune)
-        # If we find node_modules, we print it and STOP looking inside it
         for target in "${PURGE_TARGETS[@]}"; do
-            # -name "TARGET" -print -prune -o
             prune_args+=("-name" "$target" "-print" "-prune" "-o")
         done
-        # Run find command
-        # Logic: ( prune_pattern -prune -o target_pattern -print -prune )
-        # Note: We rely on implicit recursion for directories that don't match any pattern.
-        # -print is only called explicitly on targets.
-        # Removing the trailing -o from loop construction if necessary?
-        # Actually my loop adds -o at the end. I need to handle that.
-        # Let's verify the array construction.
-        # Re-building args cleanly:
         local find_expr=()
-        # Excludes
         for dir in "${prune_dirs[@]}"; do
             find_expr+=("-name" "$dir" "-prune" "-o")
         done
-        # Targets
         local i=0
         for target in "${PURGE_TARGETS[@]}"; do
             find_expr+=("-name" "$target" "-print" "-prune")
-            # Add -o unless it's the very last item of targets
             if [[ $i -lt $((${#PURGE_TARGETS[@]} - 1)) ]]; then
                 find_expr+=("-o")
             fi
@@ -327,15 +286,12 @@ scan_purge_targets() {
         done | filter_nested_artifacts > "$output_file"
     fi
 }
-# Filter out nested artifacts (e.g. node_modules inside node_modules)
+# Filter out nested artifacts (e.g. node_modules inside node_modules).
 filter_nested_artifacts() {
     while IFS= read -r item; do
         local parent_dir=$(dirname "$item")
         local is_nested=false
         for target in "${PURGE_TARGETS[@]}"; do
-            # Check if parent directory IS a target or IS INSIDE a target
-            # e.g. .../node_modules/foo/node_modules -> parent has node_modules
-            # Use more strict matching to avoid false positives like "my_node_modules_backup"
             if [[ "$parent_dir" == *"/$target/"* || "$parent_dir" == *"/$target" ]]; then
                 is_nested=true
                 break
@@ -347,14 +303,13 @@ filter_nested_artifacts() {
     done
 }
 # Args: $1 - path
-# Check if a path was modified recently (safety check)
+# Check if a path was modified recently (safety check).
 is_recently_modified() {
     local path="$1"
     local age_days=$MIN_AGE_DAYS
     if [[ ! -e "$path" ]]; then
         return 1
     fi
-    # Get modification time using base.sh helper (handles GNU vs BSD stat)
     local mod_time
     mod_time=$(get_file_mtime "$path")
     local current_time=$(date +%s)
@@ -367,7 +322,7 @@ is_recently_modified() {
     fi
 }
 # Args: $1 - path
-# Get human-readable size of directory
+# Get directory size in KB.
 get_dir_size_kb() {
     local path="$1"
     if [[ -d "$path" ]]; then
@@ -376,10 +331,7 @@ get_dir_size_kb() {
         echo "0"
     fi
 }
-# Simple category selector (for purge only)
-# Args: category names and metadata as arrays (passed via global vars)
-# Uses PURGE_RECENT_CATEGORIES to mark categories with recent items (default unselected)
-# Returns: selected indices in PURGE_SELECTION_RESULT (comma-separated)
+# Purge category selector.
 select_purge_categories() {
     local -a categories=("$@")
     local total_items=${#categories[@]}
@@ -388,8 +340,7 @@ select_purge_categories() {
         return 1
     fi
 
-    # Calculate items per page based on terminal height
-    # Reserved: header(2) + blank(2) + footer(1) = 5 rows
+    # Calculate items per page based on terminal height.
     _get_items_per_page() {
         local term_height=24
         if [[ -t 0 ]] || [[ -t 2 ]]; then

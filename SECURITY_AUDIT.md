@@ -4,7 +4,7 @@
 
 **Security Audit & Compliance Report**
 
-Version 1.15.9 | December 29, 2025
+Version 1.17.0 | December 31, 2025
 
 ---
 
@@ -31,9 +31,9 @@ Version 1.15.9 | December 29, 2025
 
 | Attribute | Details |
 |-----------|---------|
-| Audit Date | December 29, 2025 |
+| Audit Date | December 31, 2025 |
 | Audit Conclusion | **PASSED** |
-| Mole Version | V1.15.9 |
+| Mole Version | V1.17.0 |
 | Audited Branch | `main` (HEAD) |
 | Scope | Shell scripts, Go binaries, Configuration |
 | Methodology | Static analysis, Threat modeling, Code review |

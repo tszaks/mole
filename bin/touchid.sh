@@ -1,6 +1,7 @@
 #!/bin/bash
-# Mole - Touch ID Configuration Helper
-# Automatically configure Touch ID for sudo
+# Mole - Touch ID command.
+# Configures sudo with Touch ID.
+# Guided toggle with safety checks.
 
 set -euo pipefail
 

@@ -1,6 +1,7 @@
 #!/bin/bash
-# Mole - Project purge command (mo purge)
-# Remove old project build artifacts and dependencies
+# Mole - Purge command.
+# Cleans heavy project build artifacts.
+# Interactive selection by project.
 
 set -euo pipefail
 

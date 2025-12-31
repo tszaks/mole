@@ -1,6 +1,7 @@
 #!/bin/bash
-# Mole - Deeper system cleanup
-# Complete cleanup with smart password handling
+# Mole - Clean command.
+# Runs cleanup modules with optional sudo.
+# Supports dry-run and whitelist.
 
 set -euo pipefail
 
@@ -88,8 +89,7 @@ else
     WHITELIST_PATTERNS=("${DEFAULT_WHITELIST_PATTERNS[@]}")
 fi
 
-# Pre-expand tildes in whitelist patterns once to avoid repetitive expansion in loops
-# This significantly improves performance when checking thousands of files
+# Expand whitelist patterns once to avoid repeated tilde expansion in hot loops.
 expand_whitelist_patterns() {
     if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
         local -a EXPANDED_PATTERNS
@@ -112,7 +112,7 @@ if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
     done
 fi
 
-# Global tracking variables (initialized in perform_cleanup)
+# Section tracking and summary counters.
 total_items=0
 TRACK_SECTION=0
 SECTION_ACTIVITY=0
@@ -127,31 +127,25 @@ note_activity() {
     fi
 }
 
-# Cleanup background processes
 CLEANUP_DONE=false
 # shellcheck disable=SC2329
 cleanup() {
     local signal="${1:-EXIT}"
     local exit_code="${2:-$?}"
 
-    # Prevent multiple executions
     if [[ "$CLEANUP_DONE" == "true" ]]; then
         return 0
     fi
     CLEANUP_DONE=true
 
-    # Stop any inline spinner
     stop_inline_spinner 2> /dev/null || true
 
-    # Clear any spinner output - spinner outputs to stderr
     if [[ -t 1 ]]; then
         printf "\r\033[K" >&2 || true
     fi
 
-    # Clean up temporary files
     cleanup_temp_files
 
-    # Stop sudo session
     stop_sudo_session
 
     show_cursor
@@ -172,7 +166,6 @@ start_section() {
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "Preparing..."
     fi
 
-    # Write section header to export list in dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
         ensure_user_file "$EXPORT_LIST_FILE"
         echo "" >> "$EXPORT_LIST_FILE"
@@ -240,11 +233,9 @@ normalize_paths_for_cleanup() {
 get_cleanup_path_size_kb() {
     local path="$1"
 
-    # Optimization: Use stat for regular files (much faster than du)
     if [[ -f "$path" && ! -L "$path" ]]; then
         if command -v stat > /dev/null 2>&1; then
             local bytes
-            # macOS/BSD stat
             bytes=$(stat -f%z "$path" 2> /dev/null || echo "0")
             if [[ "$bytes" =~ ^[0-9]+$ && "$bytes" -gt 0 ]]; then
                 echo $(((bytes + 1023) / 1024))
@@ -286,9 +277,7 @@ safe_clean() {
         description="$1"
         targets=("$1")
     else
-        # Get last argument as description
         description="${*: -1}"
-        # Get all arguments except last as targets array
         targets=("${@:1:$#-1}")
     fi
 
@@ -305,12 +294,10 @@ safe_clean() {
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning ${#targets[@]} items..."
     fi
 
-    # Optimized parallel processing for better performance
     local -a existing_paths=()
     for path in "${targets[@]}"; do
         local skip=false
 
-        # Centralized protection for critical apps and system components
         if should_protect_path "$path"; then
             skip=true
             ((skipped_count++))
@@ -318,7 +305,6 @@ safe_clean() {
 
         [[ "$skip" == "true" ]] && continue
 
-        # Check user-defined whitelist
         if is_path_whitelisted "$path"; then
             skip=true
             ((skipped_count++))
@@ -333,7 +319,6 @@ safe_clean() {
 
     debug_log "Cleaning: $description (${#existing_paths[@]} items)"
 
-    # Update global whitelist skip counter
     if [[ $skipped_count -gt 0 ]]; then
         ((whitelist_skipped_count += skipped_count))
     fi
@@ -355,7 +340,6 @@ safe_clean() {
         fi
     fi
 
-    # Only show spinner if we have enough items to justify it (>10 items)
     local show_spinner=false
     if [[ ${#existing_paths[@]} -gt 10 ]]; then
         show_spinner=true
@@ -363,14 +347,11 @@ safe_clean() {
         if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items..."; fi
     fi
 
+    # For larger batches, precompute sizes in parallel for better UX/stat accuracy.
     if [[ ${#existing_paths[@]} -gt 3 ]]; then
         local temp_dir
-        # create_temp_dir uses mktemp -d for secure temporary directory creation
         temp_dir=$(create_temp_dir)
 
-        # Check if we have many small files - in that case parallel overhead > benefit
-        # If most items are files (not dirs), avoidance of subshells is faster
-        # Sample up to 20 items or 20% of items (whichever is larger) for better accuracy
         local dir_count=0
         local sample_size=$((${#existing_paths[@]} > 20 ? 20 : ${#existing_paths[@]}))
         local max_sample=$((${#existing_paths[@]} * 20 / 100))
@@ -380,8 +361,7 @@ safe_clean() {
             [[ -d "${existing_paths[i]}" ]] && ((dir_count++))
         done
 
-        # If we have mostly files and few directories, use sequential processing
-        # Subshells for 50+ files is very slow compared to direct stat
+        # Heuristic: mostly files -> sequential stat is faster than subshells.
         if [[ $dir_count -lt 5 && ${#existing_paths[@]} -gt 20 ]]; then
             if [[ -t 1 && "$show_spinner" == "false" ]]; then
                 MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items..."
@@ -395,7 +375,6 @@ safe_clean() {
                 size=$(get_cleanup_path_size_kb "$path")
                 [[ ! "$size" =~ ^[0-9]+$ ]] && size=0
 
-                # Write result to file to maintain compatibility with the logic below
                 if [[ "$size" -gt 0 ]]; then
                     echo "$size 1" > "$temp_dir/result_${idx}"
                 else
@@ -403,14 +382,12 @@ safe_clean() {
                 fi
 
                 ((idx++))
-                # Provide UI feedback periodically
                 if [[ $((idx % 20)) -eq 0 && "$show_spinner" == "true" && -t 1 ]]; then
                     update_progress_if_needed "$idx" "${#existing_paths[@]}" last_progress_update 1 || true
                     last_progress_update=$(date +%s)
                 fi
             done
         else
-            # Parallel processing (bash 3.2 compatible)
             local -a pids=()
             local idx=0
             local completed=0
@@ -422,12 +399,8 @@ safe_clean() {
                     (
                         local size
                         size=$(get_cleanup_path_size_kb "$path")
-                        # Ensure size is numeric (additional safety layer)
                         [[ ! "$size" =~ ^[0-9]+$ ]] && size=0
-                        # Use index + PID for unique filename
                         local tmp_file="$temp_dir/result_${idx}.$$"
-                        # Optimization: Skip expensive file counting. Size is the key metric.
-                        # Just indicate presence if size > 0
                         if [[ "$size" -gt 0 ]]; then
                             echo "$size 1" > "$tmp_file"
                         else
@@ -443,7 +416,6 @@ safe_clean() {
                         pids=("${pids[@]:1}")
                         ((completed++))
 
-                        # Update progress using helper function
                         if [[ "$show_spinner" == "true" && -t 1 ]]; then
                             update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
                         fi
@@ -456,7 +428,6 @@ safe_clean() {
                     wait "$pid" 2> /dev/null || true
                     ((completed++))
 
-                    # Update progress using helper function
                     if [[ "$show_spinner" == "true" && -t 1 ]]; then
                         update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
                     fi
@@ -464,24 +435,15 @@ safe_clean() {
             fi
         fi
 
-        # Read results using same index
+        # Read results back in original order.
         idx=0
         if [[ ${#existing_paths[@]} -gt 0 ]]; then
             for path in "${existing_paths[@]}"; do
                 local result_file="$temp_dir/result_${idx}"
                 if [[ -f "$result_file" ]]; then
                     read -r size count < "$result_file" 2> /dev/null || true
-                    # Even if size is 0 or du failed, we should try to remove the file if it was found
-                    # count > 0 means the file existed at scan time (or we forced it to 1)
-
-                    # Correction: The subshell now writes "size 1" if size>0, or "0 0" if size=0
-                    # But we want to delete even if size is 0.
-                    # Let's check if the path still exists to be safe, or trust the input list.
-                    # Actually, safe_remove checks existence.
-
                     local removed=0
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        # Handle symbolic links separately (only remove the link, not the target)
                         if [[ -L "$path" ]]; then
                             rm "$path" 2> /dev/null && removed=1
                         else
@@ -500,8 +462,6 @@ safe_clean() {
                         ((total_count += 1))
                         removed_any=1
                     else
-                        # Only increment failure count if we actually tried and failed
-                        # Check existence to avoid false failure report for already gone files
                         if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
                             ((removal_failed_count++))
                         fi
@@ -511,22 +471,16 @@ safe_clean() {
             done
         fi
 
-        # Temp dir will be auto-cleaned by cleanup_temp_files
     else
         local idx=0
         if [[ ${#existing_paths[@]} -gt 0 ]]; then
             for path in "${existing_paths[@]}"; do
                 local size_kb
                 size_kb=$(get_cleanup_path_size_kb "$path")
-                # Ensure size_kb is numeric (additional safety layer)
                 [[ ! "$size_kb" =~ ^[0-9]+$ ]] && size_kb=0
-
-                # Optimization: Skip expensive file counting, but DO NOT skip deletion if size is 0
-                # Previously: if [[ "$size_kb" -gt 0 ]]; then ...
 
                 local removed=0
                 if [[ "$DRY_RUN" != "true" ]]; then
-                    # Handle symbolic links separately (only remove the link, not the target)
                     if [[ -L "$path" ]]; then
                         rm "$path" 2> /dev/null && removed=1
                     else
@@ -545,7 +499,6 @@ safe_clean() {
                     ((total_count += 1))
                     removed_any=1
                 else
-                    # Only increment failure count if we actually tried and failed
                     if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
                         ((removal_failed_count++))
                     fi
@@ -559,13 +512,12 @@ safe_clean() {
         stop_section_spinner
     fi
 
-    # Track permission failures reported by safe_remove
     local permission_end=${MOLE_PERMISSION_DENIED_COUNT:-0}
+    # Track permission failures in debug output (avoid noisy user warnings).
     if [[ $permission_end -gt $permission_start && $removed_any -eq 0 ]]; then
         debug_log "Permission denied while cleaning: $description"
     fi
     if [[ $removal_failed_count -gt 0 && "$DRY_RUN" != "true" ]]; then
-        # Log to debug instead of showing warning to user (avoid confusion)
         debug_log "Skipped $removal_failed_count items (permission denied or in use) for: $description"
     fi
 
@@ -580,7 +532,6 @@ safe_clean() {
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label ${YELLOW}($size_human dry)${NC}"
 
-            # Group paths by parent directory for export (Bash 3.2 compatible)
             local paths_temp=$(create_temp_file)
 
             idx=0
@@ -604,9 +555,8 @@ safe_clean() {
                 done
             fi
 
-            # Group and export paths
+            # Group dry-run paths by parent for a compact export list.
             if [[ -f "$paths_temp" && -s "$paths_temp" ]]; then
-                # Sort by parent directory to group children together
                 sort -t'|' -k1,1 "$paths_temp" | awk -F'|' '
                 {
                     parent = $1
@@ -653,7 +603,6 @@ safe_clean() {
 
 start_cleanup() {
     if [[ -t 1 ]]; then
-        # Avoid relying on TERM since CI often runs without it
         printf '\033[2J\033[H'
     fi
     printf '\n'
@@ -669,7 +618,6 @@ start_cleanup() {
         echo ""
         SYSTEM_CLEAN=false
 
-        # Initialize export list file
         ensure_user_file "$EXPORT_LIST_FILE"
         cat > "$EXPORT_LIST_FILE" << EOF
 # Mole Cleanup Preview - $(date '+%Y-%m-%d %H:%M:%S')
@@ -689,22 +637,19 @@ EOF
     if [[ -t 0 ]]; then
         echo -ne "${PURPLE}${ICON_ARROW}${NC} System caches need sudo — ${GREEN}Enter${NC} continue, ${GRAY}Space${NC} skip: "
 
-        # Use read_key to properly handle all key inputs
         local choice
         choice=$(read_key)
 
-        # Check for cancel (ESC or Q)
+        # ESC/Q aborts, Space skips, Enter enables system cleanup.
         if [[ "$choice" == "QUIT" ]]; then
             echo -e " ${GRAY}Canceled${NC}"
             exit 0
         fi
 
-        # Space = skip
         if [[ "$choice" == "SPACE" ]]; then
             echo -e " ${GRAY}Skipped${NC}"
             echo ""
             SYSTEM_CLEAN=false
-        # Enter = yes, do system cleanup
         elif [[ "$choice" == "ENTER" ]]; then
             printf "\r\033[K" # Clear the prompt line
             if ensure_sudo_session "System cleanup requires admin access"; then
@@ -717,7 +662,6 @@ EOF
                 echo -e "${YELLOW}Authentication failed${NC}, continuing with user-level cleanup"
             fi
         else
-            # Other keys (including arrow keys) = skip, no message needed
             SYSTEM_CLEAN=false
             echo -e " ${GRAY}Skipped${NC}"
             echo ""
@@ -732,10 +676,8 @@ EOF
     fi
 }
 
-# Clean Service Worker CacheStorage with domain protection
-
 perform_cleanup() {
-    # Fast test mode for CI/testing - skip expensive scans
+    # Test mode skips expensive scans and returns minimal output.
     local test_mode_enabled=false
     if [[ "${MOLE_TEST_MODE:-0}" == "1" ]]; then
         test_mode_enabled=true
@@ -743,10 +685,8 @@ perform_cleanup() {
             echo -e "${YELLOW}Dry Run Mode${NC} - Preview only, no deletions"
             echo ""
         fi
-        # Show minimal output to satisfy test assertions
         echo -e "${GREEN}${ICON_LIST}${NC} User app cache"
         if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
-            # Check if any custom patterns exist (not defaults)
             local -a expanded_defaults
             expanded_defaults=()
             for default in "${DEFAULT_WHITELIST_PATTERNS[@]}"; do
@@ -771,16 +711,13 @@ perform_cleanup() {
         total_items=1
         files_cleaned=0
         total_size_cleaned=0
-        # Don't return early - continue to summary block for debug log output
     fi
 
     if [[ "$test_mode_enabled" == "false" ]]; then
         echo -e "${BLUE}${ICON_ADMIN}${NC} $(detect_architecture) | Free space: $(get_free_space)"
     fi
 
-    # Skip all expensive operations in test mode
     if [[ "$test_mode_enabled" == "true" ]]; then
-        # Jump to summary block
         local summary_heading="Test mode complete"
         local -a summary_details
         summary_details=()
@@ -790,13 +727,10 @@ perform_cleanup() {
         return 0
     fi
 
-    # Pre-check TCC permissions upfront (delegated to clean_caches module)
+    # Pre-check TCC permissions to avoid mid-run prompts.
     check_tcc_permissions
 
-    # Show whitelist info if patterns are active
     if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
-        # Count predefined vs custom patterns
-        # Note: WHITELIST_PATTERNS are already expanded, need to expand defaults for comparison
         local predefined_count=0
         local custom_count=0
 
@@ -817,7 +751,6 @@ perform_cleanup() {
             fi
         done
 
-        # Display whitelist status
         if [[ $custom_count -gt 0 || $predefined_count -gt 0 ]]; then
             local summary=""
             [[ $predefined_count -gt 0 ]] && summary+="$predefined_count core"
@@ -827,10 +760,8 @@ perform_cleanup() {
 
             echo -e "${BLUE}${ICON_SUCCESS}${NC} Whitelist: $summary"
 
-            # List all whitelist patterns in dry-run mode for verification (Issue #206)
             if [[ "$DRY_RUN" == "true" ]]; then
                 for pattern in "${WHITELIST_PATTERNS[@]}"; do
-                    # Skip FINDER_METADATA sentinel
                     [[ "$pattern" == "$FINDER_METADATA_SENTINEL" ]] && continue
                     echo -e "  ${GRAY}→ $pattern${NC}"
                 done
@@ -838,7 +769,6 @@ perform_cleanup() {
         fi
     fi
 
-    # Hint about Full Disk Access for better results (only if not already granted)
     if [[ -t 1 && "$DRY_RUN" != "true" ]]; then
         local fda_status=0
         has_full_disk_access
@@ -856,20 +786,17 @@ perform_cleanup() {
     local had_errexit=0
     [[ $- == *e* ]] && had_errexit=1
 
-    # Allow cleanup functions to fail without exiting the script
-    # Individual operations use || true for granular error handling
+    # Allow per-section failures without aborting the full run.
     set +e
 
-    # ===== 1. Deep system cleanup (if admin) - Do this first while sudo is fresh =====
+    # ===== 1. Deep system cleanup (if admin) =====
     if [[ "$SYSTEM_CLEAN" == "true" ]]; then
         start_section "Deep system"
-        # Deep system cleanup (delegated to clean_system module)
         clean_deep_system
         clean_local_snapshots
         end_section
     fi
 
-    # Show whitelist warnings if any
     if [[ ${#WHITELIST_WARNINGS[@]} -gt 0 ]]; then
         echo ""
         for warning in "${WHITELIST_WARNINGS[@]}"; do
@@ -877,21 +804,17 @@ perform_cleanup() {
         done
     fi
 
-    # ===== 2. User essentials =====
     start_section "User essentials"
-    # User essentials cleanup (delegated to clean_user_data module)
     clean_user_essentials
     scan_external_volumes
     end_section
 
     start_section "Finder metadata"
-    # Finder metadata cleanup (delegated to clean_user_data module)
     clean_finder_metadata
     end_section
 
     # ===== 3. macOS system caches =====
     start_section "macOS system caches"
-    # macOS system caches cleanup (delegated to clean_user_data module)
     clean_macos_system_caches
     clean_recent_items
     clean_mail_downloads
@@ -899,55 +822,45 @@ perform_cleanup() {
 
     # ===== 4. Sandboxed app caches =====
     start_section "Sandboxed app caches"
-    # Sandboxed app caches cleanup (delegated to clean_user_data module)
     clean_sandboxed_app_caches
     end_section
 
     # ===== 5. Browsers =====
     start_section "Browsers"
-    # Browser caches cleanup (delegated to clean_user_data module)
     clean_browsers
     end_section
 
     # ===== 6. Cloud storage =====
     start_section "Cloud storage"
-    # Cloud storage caches cleanup (delegated to clean_user_data module)
     clean_cloud_storage
     end_section
 
     # ===== 7. Office applications =====
     start_section "Office applications"
-    # Office applications cleanup (delegated to clean_user_data module)
     clean_office_applications
     end_section
 
     # ===== 8. Developer tools =====
     start_section "Developer tools"
-    # Developer tools cleanup (delegated to clean_dev module)
     clean_developer_tools
     end_section
 
     # ===== 9. Development applications =====
     start_section "Development applications"
-    # User GUI applications cleanup (delegated to clean_user_apps module)
     clean_user_gui_applications
     end_section
 
     # ===== 10. Virtualization tools =====
     start_section "Virtual machine tools"
-    # Virtualization tools cleanup (delegated to clean_user_data module)
     clean_virtualization_tools
     end_section
 
     # ===== 11. Application Support logs and caches cleanup =====
     start_section "Application Support"
-    # Clean logs, Service Worker caches, Code Cache, Crashpad, stale updates, Group Containers
     clean_application_support_logs
     end_section
 
-    # ===== 12. Orphaned app data cleanup =====
-    # Only touch apps missing from scan + 60+ days inactive
-    # Skip protected vendors, keep Preferences/Application Support
+    # ===== 12. Orphaned app data cleanup (60+ days inactive, skip protected vendors) =====
     start_section "Uninstalled app data"
     clean_orphaned_app_data
     end_section
@@ -957,13 +870,11 @@ perform_cleanup() {
 
     # ===== 14. iOS device backups =====
     start_section "iOS device backups"
-    # iOS device backups check (delegated to clean_user_data module)
     check_ios_device_backups
     end_section
 
     # ===== 15. Time Machine incomplete backups =====
     start_section "Time Machine incomplete backups"
-    # Time Machine incomplete backups cleanup (delegated to clean_system module)
     clean_time_machine_failed_backups
     end_section
 
@@ -972,11 +883,11 @@ perform_cleanup() {
 
     local summary_heading=""
     local summary_status="success"
-    if [[ "$DRY_RUN" == "true" ]]; then
-        summary_heading="Dry run complete - no changes made"
-    else
-        summary_heading="Cleanup complete"
-    fi
+        if [[ "$DRY_RUN" == "true" ]]; then
+            summary_heading="Dry run complete - no changes made"
+        else
+            summary_heading="Cleanup complete"
+        fi
 
     local -a summary_details=()
 
@@ -985,13 +896,11 @@ perform_cleanup() {
         freed_gb=$(echo "$total_size_cleaned" | awk '{printf "%.2f", $1/1024/1024}')
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            # Build compact stats line for dry run
             local stats="Potential space: ${GREEN}${freed_gb}GB${NC}"
             [[ $files_cleaned -gt 0 ]] && stats+=" | Items: $files_cleaned"
             [[ $total_items -gt 0 ]] && stats+=" | Categories: $total_items"
             summary_details+=("$stats")
 
-            # Add summary to export file
             {
                 echo ""
                 echo "# ============================================"
@@ -1005,7 +914,6 @@ perform_cleanup() {
             summary_details+=("Detailed file list: ${GRAY}$EXPORT_LIST_FILE${NC}")
             summary_details+=("Use ${GRAY}mo clean --whitelist${NC} to add protection rules")
         else
-            # Build summary line: Space freed + Items cleaned
             local summary_line="Space freed: ${GREEN}${freed_gb}GB${NC}"
 
             if [[ $files_cleaned -gt 0 && $total_items -gt 0 ]]; then
@@ -1026,7 +934,6 @@ perform_cleanup() {
                 fi
             fi
 
-            # Free space now at the end
             local final_free_space=$(get_free_space)
             summary_details+=("Free space now: $final_free_space")
         fi
@@ -1040,7 +947,6 @@ perform_cleanup() {
         summary_details+=("Free space now: $(get_free_space)")
     fi
 
-    # Restore strict error handling only if it was enabled
     if [[ $had_errexit -eq 1 ]]; then
         set -e
     fi

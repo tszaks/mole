@@ -31,16 +31,14 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 
 	var total int64
 
-	// Use heaps to track Top N items, drastically reducing memory usage
-	// for directories with millions of files
+	// Keep Top N heaps.
 	entriesHeap := &entryHeap{}
 	heap.Init(entriesHeap)
 
 	largeFilesHeap := &largeFileHeap{}
 	heap.Init(largeFilesHeap)
 
-	// Use worker pool for concurrent directory scanning
-	// For I/O-bound operations, use more workers than CPU count
+	// Worker pool sized for I/O-bound scanning.
 	numWorkers := runtime.NumCPU() * cpuMultiplier
 	if numWorkers < minWorkers {
 		numWorkers = minWorkers
@@ -57,17 +55,15 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 	sem := make(chan struct{}, numWorkers)
 	var wg sync.WaitGroup
 
-	// Use channels to collect results without lock contention
+	// Collect results via channels.
 	entryChan := make(chan dirEntry, len(children))
 	largeFileChan := make(chan fileEntry, maxLargeFiles*2)
 
-	// Start goroutines to collect from channels into heaps
 	var collectorWg sync.WaitGroup
 	collectorWg.Add(2)
 	go func() {
 		defer collectorWg.Done()
 		for entry := range entryChan {
-			// Maintain Top N Heap for entries
 			if entriesHeap.Len() < maxEntries {
 				heap.Push(entriesHeap, entry)
 			} else if entry.Size > (*entriesHeap)[0].Size {
@@ -79,7 +75,6 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 	go func() {
 		defer collectorWg.Done()
 		for file := range largeFileChan {
-			// Maintain Top N Heap for large files
 			if largeFilesHeap.Len() < maxLargeFiles {
 				heap.Push(largeFilesHeap, file)
 			} else if file.Size > (*largeFilesHeap)[0].Size {
@@ -96,20 +91,15 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 	for _, child := range children {
 		fullPath := filepath.Join(root, child.Name())
 
-		// Skip symlinks to avoid following them into unexpected locations
-		// Use Type() instead of IsDir() to check without following symlinks
+		// Skip symlinks to avoid following unexpected targets.
 		if child.Type()&fs.ModeSymlink != 0 {
-			// For symlinks, check if they point to a directory
 			targetInfo, err := os.Stat(fullPath)
 			isDir := false
 			if err == nil && targetInfo.IsDir() {
 				isDir = true
 			}
 
-			// Get symlink size (we don't effectively count the target size towards parent to avoid double counting,
-			// or we just count the link size itself. Existing logic counts 'size' via getActualFileSize on the link info).
-			// Ideally we just want navigation.
-			// Re-fetching info for link itself if needed, but child.Info() does that.
+			// Count link size only to avoid double-counting targets.
 			info, err := child.Info()
 			if err != nil {
 				continue
@@ -118,28 +108,26 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 			atomic.AddInt64(&total, size)
 
 			entryChan <- dirEntry{
-				Name:       child.Name() + " →", // Add arrow to indicate symlink
+				Name:       child.Name() + " →",
 				Path:       fullPath,
 				Size:       size,
-				IsDir:      isDir, // Allow navigation if target is directory
+				IsDir:      isDir,
 				LastAccess: getLastAccessTimeFromInfo(info),
 			}
 			continue
 		}
 
 		if child.IsDir() {
-			// Check if directory should be skipped based on user configuration
 			if defaultSkipDirs[child.Name()] {
 				continue
 			}
 
-			// In root directory, skip system directories completely
+			// Skip system dirs at root.
 			if isRootDir && skipSystemDirs[child.Name()] {
 				continue
 			}
 
-			// Special handling for ~/Library - reuse cache to avoid duplicate scanning
-			// This is scanned separately in overview mode
+			// ~/Library is scanned separately; reuse cache when possible.
 			if isHomeDir && child.Name() == "Library" {
 				wg.Add(1)
 				go func(name, path string) {
@@ -148,14 +136,11 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 					defer func() { <-sem }()
 
 					var size int64
-					// Try overview cache first (from overview scan)
 					if cached, err := loadStoredOverviewSize(path); err == nil && cached > 0 {
 						size = cached
 					} else if cached, err := loadCacheFromDisk(path); err == nil {
-						// Try disk cache
 						size = cached.TotalSize
 					} else {
-						// No cache available, scan normally
 						size = calculateDirSizeConcurrent(path, largeFileChan, filesScanned, dirsScanned, bytesScanned, currentPath)
 					}
 					atomic.AddInt64(&total, size)
@@ -172,7 +157,7 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 				continue
 			}
 
-			// For folded directories, calculate size quickly without expanding
+			// Folded dirs: fast size without expanding.
 			if shouldFoldDirWithPath(child.Name(), fullPath) {
 				wg.Add(1)
 				go func(name, path string) {
@@ -180,10 +165,8 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 					sem <- struct{}{}
 					defer func() { <-sem }()
 
-					// Try du command first for folded dirs (much faster)
 					size, err := getDirectorySizeFromDu(path)
 					if err != nil || size <= 0 {
-						// Fallback to concurrent walk if du fails
 						size = calculateDirSizeFast(path, filesScanned, dirsScanned, bytesScanned, currentPath)
 					}
 					atomic.AddInt64(&total, size)
@@ -194,13 +177,12 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 						Path:       path,
 						Size:       size,
 						IsDir:      true,
-						LastAccess: time.Time{}, // Lazy load when displayed
+						LastAccess: time.Time{},
 					}
 				}(child.Name(), fullPath)
 				continue
 			}
 
-			// Normal directory: full scan with detail
 			wg.Add(1)
 			go func(name, path string) {
 				defer wg.Done()
@@ -216,7 +198,7 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 					Path:       path,
 					Size:       size,
 					IsDir:      true,
-					LastAccess: time.Time{}, // Lazy load when displayed
+					LastAccess: time.Time{},
 				}
 			}(child.Name(), fullPath)
 			continue
@@ -226,7 +208,7 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 		if err != nil {
 			continue
 		}
-		// Get actual disk usage for sparse files and cloud files
+		// Actual disk usage for sparse/cloud files.
 		size := getActualFileSize(fullPath, info)
 		atomic.AddInt64(&total, size)
 		atomic.AddInt64(filesScanned, 1)
@@ -239,7 +221,7 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 			IsDir:      false,
 			LastAccess: getLastAccessTimeFromInfo(info),
 		}
-		// Only track large files that are not code/text files
+		// Track large files only.
 		if !shouldSkipFileForLargeTracking(fullPath) && size >= minLargeFileSize {
 			largeFileChan <- fileEntry{Name: child.Name(), Path: fullPath, Size: size}
 		}
@@ -247,12 +229,12 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 
 	wg.Wait()
 
-	// Close channels and wait for collectors to finish
+	// Close channels and wait for collectors.
 	close(entryChan)
 	close(largeFileChan)
 	collectorWg.Wait()
 
-	// Convert Heaps to sorted slices (Descending order)
+	// Convert heaps to sorted slices (descending).
 	entries := make([]dirEntry, entriesHeap.Len())
 	for i := len(entries) - 1; i >= 0; i-- {
 		entries[i] = heap.Pop(entriesHeap).(dirEntry)
@@ -263,19 +245,10 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 		largeFiles[i] = heap.Pop(largeFilesHeap).(fileEntry)
 	}
 
-	// Try to use Spotlight (mdfind) for faster large file discovery
-	// This is a performance optimization that gracefully falls back to scan results
-	// if Spotlight is unavailable or fails. The fallback is intentionally silent
-	// because users only care about correct results, not the method used.
+	// Use Spotlight for large files when available.
 	if spotlightFiles := findLargeFilesWithSpotlight(root, minLargeFileSize); len(spotlightFiles) > 0 {
-		// Spotlight results are already sorted top N
-		// Use them in place of scanned large files
 		largeFiles = spotlightFiles
 	}
-
-	// Double check sorting consistency (Spotlight returns sorted, but heap pop handles scan results)
-	// If needed, we could re-sort largeFiles, but heap pop ensures ascending, and we filled reverse, so it's Descending.
-	// Spotlight returns Descending. So no extra sort needed for either.
 
 	return scanResult{
 		Entries:    entries,
@@ -285,21 +258,16 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 }
 
 func shouldFoldDirWithPath(name, path string) bool {
-	// Check basic fold list first
 	if foldDirs[name] {
 		return true
 	}
 
-	// Special case: npm cache directories - fold all subdirectories
-	// This includes: .npm/_quick/*, .npm/_cacache/*, .npm/a-z/*, .tnpm/*
+	// Handle npm cache structure.
 	if strings.Contains(path, "/.npm/") || strings.Contains(path, "/.tnpm/") {
-		// Get the parent directory name
 		parent := filepath.Base(filepath.Dir(path))
-		// If parent is a cache folder (_quick, _cacache, etc) or npm dir itself, fold it
 		if parent == ".npm" || parent == ".tnpm" || strings.HasPrefix(parent, "_") {
 			return true
 		}
-		// Also fold single-letter subdirectories (npm cache structure like .npm/a/, .npm/b/)
 		if len(name) == 1 {
 			return true
 		}
@@ -313,17 +281,14 @@ func shouldSkipFileForLargeTracking(path string) bool {
 	return skipExtensions[ext]
 }
 
-// calculateDirSizeFast performs concurrent directory size calculation using os.ReadDir
-// This is a faster fallback than filepath.WalkDir when du fails
+// calculateDirSizeFast performs concurrent dir sizing using os.ReadDir.
 func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *string) int64 {
 	var total int64
 	var wg sync.WaitGroup
 
-	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Limit total concurrency for this walk
 	concurrency := runtime.NumCPU() * 4
 	if concurrency > 64 {
 		concurrency = 64
@@ -351,19 +316,16 @@ func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *
 
 		for _, entry := range entries {
 			if entry.IsDir() {
-				// Directories: recurse concurrently
 				wg.Add(1)
-				// Capture loop variable
 				subDir := filepath.Join(dirPath, entry.Name())
 				go func(p string) {
 					defer wg.Done()
-					sem <- struct{}{}        // Acquire token
-					defer func() { <-sem }() // Release token
+					sem <- struct{}{}
+					defer func() { <-sem }()
 					walk(p)
 				}(subDir)
 				atomic.AddInt64(dirsScanned, 1)
 			} else {
-				// Files: process immediately
 				info, err := entry.Info()
 				if err == nil {
 					size := getActualFileSize(filepath.Join(dirPath, entry.Name()), info)
@@ -388,9 +350,8 @@ func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *
 	return total
 }
 
-// Use Spotlight (mdfind) to quickly find large files in a directory
+// Use Spotlight (mdfind) to quickly find large files.
 func findLargeFilesWithSpotlight(root string, minSize int64) []fileEntry {
-	// mdfind query: files >= minSize in the specified directory
 	query := fmt.Sprintf("kMDItemFSSize >= %d", minSize)
 
 	ctx, cancel := context.WithTimeout(context.Background(), mdlsTimeout)
@@ -399,7 +360,6 @@ func findLargeFilesWithSpotlight(root string, minSize int64) []fileEntry {
 	cmd := exec.CommandContext(ctx, "mdfind", "-onlyin", root, query)
 	output, err := cmd.Output()
 	if err != nil {
-		// Fallback: mdfind not available or failed
 		return nil
 	}
 
@@ -411,28 +371,26 @@ func findLargeFilesWithSpotlight(root string, minSize int64) []fileEntry {
 			continue
 		}
 
-		// Filter out code files first (cheapest check, no I/O)
+		// Filter code files first (cheap).
 		if shouldSkipFileForLargeTracking(line) {
 			continue
 		}
 
-		// Filter out files in folded directories (cheap string check)
+		// Filter folded directories (cheap string check).
 		if isInFoldedDir(line) {
 			continue
 		}
 
-		// Use Lstat instead of Stat (faster, doesn't follow symlinks)
 		info, err := os.Lstat(line)
 		if err != nil {
 			continue
 		}
 
-		// Skip if it's a directory or symlink
 		if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
 
-		// Get actual disk usage for sparse files and cloud files
+		// Actual disk usage for sparse/cloud files.
 		actualSize := getActualFileSize(line, info)
 		files = append(files, fileEntry{
 			Name: filepath.Base(line),
@@ -441,12 +399,11 @@ func findLargeFilesWithSpotlight(root string, minSize int64) []fileEntry {
 		})
 	}
 
-	// Sort by size (descending)
+	// Sort by size (descending).
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].Size > files[j].Size
 	})
 
-	// Return top N
 	if len(files) > maxLargeFiles {
 		files = files[:maxLargeFiles]
 	}
@@ -454,9 +411,8 @@ func findLargeFilesWithSpotlight(root string, minSize int64) []fileEntry {
 	return files
 }
 
-// isInFoldedDir checks if a path is inside a folded directory (optimized)
+// isInFoldedDir checks if a path is inside a folded directory.
 func isInFoldedDir(path string) bool {
-	// Split path into components for faster checking
 	parts := strings.Split(path, string(os.PathSeparator))
 	for _, part := range parts {
 		if foldDirs[part] {
@@ -467,7 +423,6 @@ func isInFoldedDir(path string) bool {
 }
 
 func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, filesScanned, dirsScanned, bytesScanned *int64, currentPath *string) int64 {
-	// Read immediate children
 	children, err := os.ReadDir(root)
 	if err != nil {
 		return 0
@@ -476,7 +431,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, fil
 	var total int64
 	var wg sync.WaitGroup
 
-	// Limit concurrent subdirectory scans to avoid too many goroutines
+	// Limit concurrent subdirectory scans.
 	maxConcurrent := runtime.NumCPU() * 2
 	if maxConcurrent > maxDirWorkers {
 		maxConcurrent = maxDirWorkers
@@ -486,9 +441,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, fil
 	for _, child := range children {
 		fullPath := filepath.Join(root, child.Name())
 
-		// Skip symlinks to avoid following them into unexpected locations
 		if child.Type()&fs.ModeSymlink != 0 {
-			// For symlinks, just count their size without following
 			info, err := child.Info()
 			if err != nil {
 				continue
@@ -501,9 +454,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, fil
 		}
 
 		if child.IsDir() {
-			// Check if this is a folded directory
 			if shouldFoldDirWithPath(child.Name(), fullPath) {
-				// Use du for folded directories (much faster)
 				wg.Add(1)
 				go func(path string) {
 					defer wg.Done()
@@ -517,7 +468,6 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, fil
 				continue
 			}
 
-			// Recursively scan subdirectory in parallel
 			wg.Add(1)
 			go func(path string) {
 				defer wg.Done()
@@ -531,7 +481,6 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, fil
 			continue
 		}
 
-		// Handle files
 		info, err := child.Info()
 		if err != nil {
 			continue
@@ -542,12 +491,11 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, fil
 		atomic.AddInt64(filesScanned, 1)
 		atomic.AddInt64(bytesScanned, size)
 
-		// Track large files
 		if !shouldSkipFileForLargeTracking(fullPath) && size >= minLargeFileSize {
 			largeFileChan <- fileEntry{Name: child.Name(), Path: fullPath, Size: size}
 		}
 
-		// Update current path occasionally to prevent UI jitter
+		// Update current path occasionally to prevent UI jitter.
 		if currentPath != nil && atomic.LoadInt64(filesScanned)%int64(batchUpdateSize) == 0 {
 			*currentPath = fullPath
 		}

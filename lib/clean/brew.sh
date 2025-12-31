@@ -4,13 +4,11 @@
 # Skips if run within 7 days, runs cleanup/autoremove in parallel with 120s timeout
 clean_homebrew() {
     command -v brew > /dev/null 2>&1 || return 0
-    # Dry run mode - just indicate what would happen
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Homebrew · would cleanup and autoremove"
         return 0
     fi
-    # Smart caching: check if brew cleanup was run recently (within 7 days)
-    # Extended from 2 days to 7 days to reduce cleanup frequency
+    # Skip if cleaned recently to avoid repeated heavy operations.
     local brew_cache_file="${HOME}/.cache/mole/brew_last_cleanup"
     local cache_valid_days=7
     local should_skip=false
@@ -27,20 +25,17 @@ clean_homebrew() {
         fi
     fi
     [[ "$should_skip" == "true" ]] && return 0
-    # Quick pre-check: determine if cleanup is needed based on cache size (<50MB)
-    # Use timeout to prevent slow du on very large caches
-    # If timeout occurs, assume cache is large and run cleanup
+    # Skip cleanup if cache is small; still run autoremove.
     local skip_cleanup=false
     local brew_cache_size=0
     if [[ -d ~/Library/Caches/Homebrew ]]; then
         brew_cache_size=$(run_with_timeout 3 du -sk ~/Library/Caches/Homebrew 2> /dev/null | awk '{print $1}')
         local du_exit=$?
-        # Skip cleanup (but still run autoremove) if cache is small
         if [[ $du_exit -eq 0 && -n "$brew_cache_size" && "$brew_cache_size" -lt 51200 ]]; then
             skip_cleanup=true
         fi
     fi
-    # Display appropriate spinner message
+    # Spinner reflects whether cleanup is skipped.
     if [[ -t 1 ]]; then
         if [[ "$skip_cleanup" == "true" ]]; then
             MOLE_SPINNER_PREFIX="  " start_inline_spinner "Homebrew autoremove (cleanup skipped)..."
@@ -48,8 +43,8 @@ clean_homebrew() {
             MOLE_SPINNER_PREFIX="  " start_inline_spinner "Homebrew cleanup and autoremove..."
         fi
     fi
+    # Run cleanup/autoremove in parallel with a timeout guard.
     local timeout_seconds=${MO_BREW_TIMEOUT:-120}
-    # Run brew cleanup and/or autoremove based on cache size
     local brew_tmp_file autoremove_tmp_file
     local brew_pid autoremove_pid
     if [[ "$skip_cleanup" == "false" ]]; then
@@ -63,9 +58,7 @@ clean_homebrew() {
     local elapsed=0
     local brew_done=false
     local autoremove_done=false
-    # Mark cleanup as done if it was skipped
     [[ "$skip_cleanup" == "true" ]] && brew_done=true
-    # Wait for both to complete or timeout
     while [[ "$brew_done" == "false" ]] || [[ "$autoremove_done" == "false" ]]; do
         if [[ $elapsed -ge $timeout_seconds ]]; then
             [[ -n "$brew_pid" ]] && kill -TERM $brew_pid 2> /dev/null || true
@@ -77,7 +70,6 @@ clean_homebrew() {
         sleep 1
         ((elapsed++))
     done
-    # Wait for processes to finish
     local brew_success=false
     if [[ "$skip_cleanup" == "false" && -n "$brew_pid" ]]; then
         if wait $brew_pid 2> /dev/null; then
@@ -90,6 +82,7 @@ clean_homebrew() {
     fi
     if [[ -t 1 ]]; then stop_inline_spinner; fi
     # Process cleanup output and extract metrics
+    # Summarize cleanup results.
     if [[ "$skip_cleanup" == "true" ]]; then
         # Cleanup was skipped due to small cache size
         local size_mb=$((brew_cache_size / 1024))
@@ -111,6 +104,7 @@ clean_homebrew() {
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Homebrew cleanup timed out · run ${GRAY}brew cleanup${NC} manually"
     fi
     # Process autoremove output - only show if packages were removed
+    # Only surface autoremove output when packages were removed.
     if [[ "$autoremove_success" == "true" && -f "$autoremove_tmp_file" ]]; then
         local autoremove_output
         autoremove_output=$(cat "$autoremove_tmp_file" 2> /dev/null || echo "")
@@ -124,6 +118,7 @@ clean_homebrew() {
     fi
     # Update cache timestamp on successful completion or when cleanup was intelligently skipped
     # This prevents repeated cache size checks within the 7-day window
+    # Update cache timestamp when any work succeeded or was intentionally skipped.
     if [[ "$skip_cleanup" == "true" ]] || [[ "$brew_success" == "true" ]] || [[ "$autoremove_success" == "true" ]]; then
         ensure_user_file "$brew_cache_file"
         date +%s > "$brew_cache_file"

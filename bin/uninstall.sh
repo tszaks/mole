@@ -1,28 +1,25 @@
 #!/bin/bash
-# Mole - Uninstall Module
-# Interactive application uninstaller with keyboard navigation
-#
-# Usage:
-#   uninstall.sh                  # Launch interactive uninstaller
-#   uninstall.sh                  # Launch interactive uninstaller
+# Mole - Uninstall command.
+# Interactive app uninstaller.
+# Removes app files and leftovers.
 
 set -euo pipefail
 
-# Fix locale issues (avoid Perl warnings on non-English systems)
+# Fix locale issues on non-English systems.
 export LC_ALL=C
 export LANG=C
 
-# Get script directory and source common functions
+# Load shared helpers.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/core/common.sh"
 
-# Set up cleanup trap for temporary files
+# Clean temp files on exit.
 trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/../lib/ui/menu_paginated.sh"
 source "$SCRIPT_DIR/../lib/ui/app_selector.sh"
 source "$SCRIPT_DIR/../lib/uninstall/batch.sh"
 
-# Initialize global variables
+# State
 selected_apps=()
 declare -a apps_data=()
 declare -a selection_state=()
@@ -30,10 +27,9 @@ total_items=0
 files_cleaned=0
 total_size_cleaned=0
 
-# Scan applications and collect information
+# Scan applications and collect information.
 scan_applications() {
-    # Application scan with intelligent caching (24h TTL)
-    # This speeds up repeated scans significantly by caching app metadata
+    # Cache app scan (24h TTL).
     local cache_dir="$HOME/.cache/mole"
     local cache_file="$cache_dir/app_scan_cache"
     local cache_ttl=86400 # 24 hours
@@ -41,12 +37,10 @@ scan_applications() {
 
     ensure_user_dir "$cache_dir"
 
-    # Check if cache exists and is fresh
     if [[ $force_rescan == false && -f "$cache_file" ]]; then
         local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
         [[ $cache_age -eq $(date +%s) ]] && cache_age=86401 # Handle mtime read failure
         if [[ $cache_age -lt $cache_ttl ]]; then
-            # Cache hit - show brief feedback and return cached results
             if [[ -t 2 ]]; then
                 echo -e "${GREEN}Loading from cache...${NC}" >&2
                 sleep 0.3 # Brief pause so user sees the message
@@ -56,7 +50,6 @@ scan_applications() {
         fi
     fi
 
-    # Cache miss - perform full scan
     local inline_loading=false
     if [[ -t 1 && -t 2 ]]; then
         inline_loading=true
@@ -66,12 +59,10 @@ scan_applications() {
     local temp_file
     temp_file=$(create_temp_file)
 
-    # Pre-cache current epoch to avoid repeated date calls
     local current_epoch
     current_epoch=$(date "+%s")
 
-    # First pass: quickly collect all valid app paths and bundle IDs
-    # This pass does NOT call mdls (slow) - only reads plists (fast)
+    # Pass 1: collect app paths and bundle IDs (no mdls).
     local -a app_data_tuples=()
     local -a app_dirs=(
         "/Applications"
@@ -104,37 +95,31 @@ scan_applications() {
             local app_name
             app_name=$(basename "$app_path" .app)
 
-            # Skip nested apps (e.g. inside Wrapper/ or Frameworks/ of another app)
-            # Check if parent path component ends in .app (e.g. /Foo.app/Bar.app or /Foo.app/Contents/Bar.app)
-            # This prevents false positives like /Old.apps/Target.app
+            # Skip nested apps inside another .app bundle.
             local parent_dir
             parent_dir=$(dirname "$app_path")
             if [[ "$parent_dir" == *".app" || "$parent_dir" == *".app/"* ]]; then
                 continue
             fi
 
-            # Get bundle ID (fast plist read, no mdls call yet)
+            # Bundle ID from plist (fast path).
             local bundle_id="unknown"
             if [[ -f "$app_path/Contents/Info.plist" ]]; then
                 bundle_id=$(defaults read "$app_path/Contents/Info.plist" CFBundleIdentifier 2> /dev/null || echo "unknown")
             fi
 
-            # Skip system critical apps (input methods, system components, etc.)
             if should_protect_from_uninstall "$bundle_id"; then
                 continue
             fi
 
-            # Store tuple: app_path|app_name|bundle_id
-            # Display name and metadata will be resolved in parallel later (second pass)
+            # Store tuple for pass 2 (metadata + size).
             app_data_tuples+=("${app_path}|${app_name}|${bundle_id}")
         done < <(command find "$app_dir" -name "*.app" -maxdepth 3 -print0 2> /dev/null)
     done
 
-    # Second pass: process each app with parallel metadata extraction
-    # This pass calls mdls (slow) and calculates sizes, but does so in parallel
+    # Pass 2: metadata + size in parallel (mdls is slow).
     local app_count=0
     local total_apps=${#app_data_tuples[@]}
-    # Bound parallelism - for metadata queries, can go higher since it's mostly waiting
     local max_parallel
     max_parallel=$(get_optimal_parallel_jobs "io")
     if [[ $max_parallel -lt 8 ]]; then
@@ -151,25 +136,17 @@ scan_applications() {
 
         IFS='|' read -r app_path app_name bundle_id <<< "$app_data_tuple"
 
-        # Get localized display name (moved from first pass for better performance)
-        # Priority order for name selection (prefer localized names):
-        # 1. System metadata display name (kMDItemDisplayName) - respects system language
-        # 2. CFBundleDisplayName - usually localized
-        # 3. CFBundleName - fallback
-        # 4. App folder name - last resort
+        # Display name priority: mdls display name → bundle display → bundle name → folder.
         local display_name="$app_name"
         if [[ -f "$app_path/Contents/Info.plist" ]]; then
-            # Try to get localized name from system metadata (best for i18n)
             local md_display_name
             md_display_name=$(run_with_timeout 0.05 mdls -name kMDItemDisplayName -raw "$app_path" 2> /dev/null || echo "")
 
-            # Get bundle names from plist
             local bundle_display_name
             bundle_display_name=$(plutil -extract CFBundleDisplayName raw "$app_path/Contents/Info.plist" 2> /dev/null)
             local bundle_name
             bundle_name=$(plutil -extract CFBundleName raw "$app_path/Contents/Info.plist" 2> /dev/null)
 
-            # Sanitize metadata values (prevent paths, pipes, and newlines)
             if [[ "$md_display_name" == /* ]]; then md_display_name=""; fi
             md_display_name="${md_display_name//|/-}"
             md_display_name="${md_display_name//[$'\t\r\n']/}"
@@ -180,7 +157,6 @@ scan_applications() {
             bundle_name="${bundle_name//|/-}"
             bundle_name="${bundle_name//[$'\t\r\n']/}"
 
-            # Select best available name
             if [[ -n "$md_display_name" && "$md_display_name" != "(null)" && "$md_display_name" != "$app_name" ]]; then
                 display_name="$md_display_name"
             elif [[ -n "$bundle_display_name" && "$bundle_display_name" != "(null)" ]]; then
@@ -190,29 +166,25 @@ scan_applications() {
             fi
         fi
 
-        # Final safety check: if display_name looks like a path, revert to app_name
         if [[ "$display_name" == /* ]]; then
             display_name="$app_name"
         fi
-        # Ensure no pipes or newlines in final display name
         display_name="${display_name//|/-}"
         display_name="${display_name//[$'\t\r\n']/}"
 
-        # Calculate app size (in parallel for performance)
+        # App size (KB → human).
         local app_size="N/A"
         local app_size_kb="0"
         if [[ -d "$app_path" ]]; then
-            # Get size in KB, then format for display
             app_size_kb=$(get_path_size_kb "$app_path")
             app_size=$(bytes_to_human "$((app_size_kb * 1024))")
         fi
 
-        # Get last used date with fallback strategy
+        # Last used: mdls (fast timeout) → mtime.
         local last_used="Never"
         local last_used_epoch=0
 
         if [[ -d "$app_path" ]]; then
-            # Try mdls first with short timeout (0.1s) for accuracy, fallback to mtime for speed
             local metadata_date
             metadata_date=$(run_with_timeout 0.1 mdls -name kMDItemLastUsedDate -raw "$app_path" 2> /dev/null || echo "")
 
@@ -220,7 +192,6 @@ scan_applications() {
                 last_used_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$metadata_date" "+%s" 2> /dev/null || echo "0")
             fi
 
-            # Fallback if mdls failed or returned nothing
             if [[ "$last_used_epoch" -eq 0 ]]; then
                 last_used_epoch=$(get_file_mtime "$app_path")
             fi
@@ -276,7 +247,6 @@ scan_applications() {
     ) &
     spinner_pid=$!
 
-    # Process apps in parallel batches
     for app_data_tuple in "${app_data_tuples[@]}"; do
         ((app_count++))
         process_app_metadata "$app_data_tuple" "$temp_file" "$current_epoch" &
@@ -368,7 +338,7 @@ load_applications() {
     return 0
 }
 
-# Cleanup function - restore cursor and clean up
+# Cleanup: restore cursor and kill keepalive.
 cleanup() {
     if [[ "${MOLE_ALT_SCREEN_ACTIVE:-}" == "1" ]]; then
         leave_alt_screen
@@ -387,7 +357,7 @@ trap cleanup EXIT INT TERM
 
 main() {
     local force_rescan=false
-    # Parse global flags locally if needed (currently none specific to uninstall)
+    # Global flags
     for arg in "$@"; do
         case "$arg" in
             "--debug")
@@ -403,7 +373,6 @@ main() {
 
     hide_cursor
 
-    # Main interaction loop
     while true; do
         local needs_scanning=true
         local cache_file="$HOME/.cache/mole/app_scan_cache"

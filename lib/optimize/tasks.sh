@@ -3,16 +3,12 @@
 
 set -euo pipefail
 
-# Configuration constants
-# MOLE_TM_THIN_TIMEOUT: Max seconds to wait for tmutil thinning (default: 180)
-# MOLE_TM_THIN_VALUE: Bytes to thin for local snapshots (default: 9999999999)
-# MOLE_MAIL_DOWNLOADS_MIN_KB: Minimum size in KB before cleaning Mail attachments (default: 5120)
-# MOLE_MAIL_AGE_DAYS: Minimum age in days for Mail attachments to be cleaned (default: 30)
+# Config constants (override via env).
 readonly MOLE_TM_THIN_TIMEOUT=180
 readonly MOLE_TM_THIN_VALUE=9999999999
 readonly MOLE_SQLITE_MAX_SIZE=104857600 # 100MB
 
-# Helper function to get appropriate icon and color for dry-run mode
+# Dry-run aware output.
 opt_msg() {
     local message="$1"
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
@@ -92,7 +88,6 @@ is_memory_pressure_high() {
 }
 
 flush_dns_cache() {
-    # Skip actual flush in dry-run mode
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         MOLE_DNS_FLUSHED=1
         return 0
@@ -105,7 +100,7 @@ flush_dns_cache() {
     return 1
 }
 
-# Rebuild databases and flush caches
+# Basic system maintenance.
 opt_system_maintenance() {
     if flush_dns_cache; then
         opt_msg "DNS cache flushed"
@@ -120,10 +115,8 @@ opt_system_maintenance() {
     fi
 }
 
-# Refresh Finder caches (QuickLook and icon services)
-# Note: Safari caches are cleaned separately in clean/user.sh, so excluded here
+# Refresh Finder caches (QuickLook/icon services).
 opt_cache_refresh() {
-    # Skip qlmanage commands in dry-run mode
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         qlmanage -r cache > /dev/null 2>&1 || true
         qlmanage -r > /dev/null 2>&1 || true
@@ -151,7 +144,7 @@ opt_cache_refresh() {
 
 # Removed: opt_radio_refresh - Interrupts active user connections (WiFi, Bluetooth), degrading UX
 
-# Saved state: remove OLD app saved states (7+ days)
+# Old saved states cleanup.
 opt_saved_state_cleanup() {
     local state_dir="$HOME/Library/Saved Application State"
 
@@ -193,7 +186,7 @@ opt_fix_broken_configs() {
     fi
 }
 
-# Network cache optimization
+# DNS cache refresh.
 opt_network_optimization() {
     if [[ "${MOLE_DNS_FLUSHED:-0}" == "1" ]]; then
         opt_msg "DNS cache already refreshed"
@@ -209,8 +202,7 @@ opt_network_optimization() {
     fi
 }
 
-# SQLite database vacuum optimization
-# Compresses and optimizes SQLite databases for Mail, Messages, Safari
+# SQLite vacuum for Mail/Messages/Safari (safety checks applied).
 opt_sqlite_vacuum() {
     if ! command -v sqlite3 > /dev/null 2>&1; then
         echo -e "  ${GRAY}-${NC} Database optimization already optimal (sqlite3 unavailable)"
@@ -254,15 +246,13 @@ opt_sqlite_vacuum() {
             [[ ! -f "$db_file" ]] && continue
             [[ "$db_file" == *"-wal" || "$db_file" == *"-shm" ]] && continue
 
-            # Skip if protected
             should_protect_path "$db_file" && continue
 
-            # Verify it's a SQLite database
             if ! file "$db_file" 2> /dev/null | grep -q "SQLite"; then
                 continue
             fi
 
-            # Safety check 1: Skip large databases (>100MB) to avoid timeouts
+            # Skip large DBs (>100MB).
             local file_size
             file_size=$(get_file_size "$db_file")
             if [[ "$file_size" -gt "$MOLE_SQLITE_MAX_SIZE" ]]; then
@@ -270,7 +260,7 @@ opt_sqlite_vacuum() {
                 continue
             fi
 
-            # Safety check 2: Skip if freelist is tiny (already compact)
+            # Skip if freelist is tiny (already compact).
             local page_info=""
             page_info=$(run_with_timeout 5 sqlite3 "$db_file" "PRAGMA page_count; PRAGMA freelist_count;" 2> /dev/null || echo "")
             local page_count=""
@@ -284,7 +274,7 @@ opt_sqlite_vacuum() {
                 fi
             fi
 
-            # Safety check 3: Verify database integrity before VACUUM
+            # Verify integrity before VACUUM.
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
                 local integrity_check=""
                 set +e
@@ -292,14 +282,12 @@ opt_sqlite_vacuum() {
                 local integrity_status=$?
                 set -e
 
-                # Skip if integrity check failed or database is corrupted
                 if [[ $integrity_status -ne 0 ]] || ! echo "$integrity_check" | grep -q "ok"; then
                     ((skipped++))
                     continue
                 fi
             fi
 
-            # Try to vacuum (skip in dry-run mode)
             local exit_code=0
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
                 set +e
@@ -315,7 +303,6 @@ opt_sqlite_vacuum() {
                     ((failed++))
                 fi
             else
-                # In dry-run mode, just count the database
                 ((vacuumed++))
             fi
         done < <(compgen -G "$pattern" || true)
@@ -346,8 +333,7 @@ opt_sqlite_vacuum() {
     fi
 }
 
-# LaunchServices database rebuild
-# Fixes "Open with" menu issues, duplicate apps, broken file associations
+# LaunchServices rebuild ("Open with" issues).
 opt_launch_services_rebuild() {
     if [[ -t 1 ]]; then
         start_inline_spinner ""
@@ -358,7 +344,6 @@ opt_launch_services_rebuild() {
     if [[ -f "$lsregister" ]]; then
         local success=0
 
-        # Skip actual rebuild in dry-run mode
         if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
             set +e
             "$lsregister" -r -domain local -domain user -domain system > /dev/null 2>&1
@@ -369,7 +354,7 @@ opt_launch_services_rebuild() {
             fi
             set -e
         else
-            success=0 # Assume success in dry-run mode
+            success=0
         fi
 
         if [[ -t 1 ]]; then
@@ -390,18 +375,16 @@ opt_launch_services_rebuild() {
     fi
 }
 
-# Font cache rebuild
-# Fixes font rendering issues, missing fonts, and character display problems
+# Font cache rebuild.
 opt_font_cache_rebuild() {
     local success=false
 
-    # Skip actual font cache removal in dry-run mode
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         if sudo atsutil databases -remove > /dev/null 2>&1; then
             success=true
         fi
     else
-        success=true # Assume success in dry-run mode
+        success=true
     fi
 
     if [[ "$success" == "true" ]]; then
@@ -417,8 +400,7 @@ opt_font_cache_rebuild() {
 # - opt_dyld_cache_update: Low benefit, time-consuming, auto-managed by macOS
 # - opt_system_services_refresh: Risk of data loss when killing system services
 
-# Memory pressure relief
-# Clears inactive memory and disk cache to improve system responsiveness
+# Memory pressure relief.
 opt_memory_pressure_relief() {
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         if ! is_memory_pressure_high; then
@@ -438,8 +420,7 @@ opt_memory_pressure_relief() {
     fi
 }
 
-# Network stack optimization
-# Flushes routing table and ARP cache to resolve network issues
+# Network stack reset (route + ARP).
 opt_network_stack_optimize() {
     local route_flushed="false"
     local arp_flushed="false"
@@ -460,12 +441,10 @@ opt_network_stack_optimize() {
             return 0
         fi
 
-        # Flush routing table
         if sudo route -n flush > /dev/null 2>&1; then
             route_flushed="true"
         fi
 
-        # Clear ARP cache
         if sudo arp -a -d > /dev/null 2>&1; then
             arp_flushed="true"
         fi
@@ -487,8 +466,7 @@ opt_network_stack_optimize() {
     fi
 }
 
-# Disk permissions repair
-# Fixes user home directory permission issues
+# User directory permissions repair.
 opt_disk_permissions_repair() {
     local user_id
     user_id=$(id -u)
@@ -524,11 +502,7 @@ opt_disk_permissions_repair() {
     fi
 }
 
-# Bluetooth module reset
-# Resets Bluetooth daemon to fix connectivity issues
-# Intelligently detects Bluetooth audio usage:
-#   1. Checks if default audio output is Bluetooth (precise)
-#   2. Falls back to Bluetooth + media app detection (compatibility)
+# Bluetooth reset (skip if HID/audio active).
 opt_bluetooth_reset() {
     local spinner_started="false"
     if [[ -t 1 ]]; then
@@ -545,26 +519,20 @@ opt_bluetooth_reset() {
             return 0
         fi
 
-        # Check if any audio is playing through Bluetooth
         local bt_audio_active=false
 
-        # Method 1: Check if default audio output is Bluetooth (precise)
         local audio_info
         audio_info=$(system_profiler SPAudioDataType 2> /dev/null || echo "")
 
-        # Extract default output device information
         local default_output
         default_output=$(echo "$audio_info" | awk '/Default Output Device: Yes/,/^$/' 2> /dev/null || echo "")
 
-        # Check if transport type is Bluetooth
         if echo "$default_output" | grep -qi "Transport:.*Bluetooth"; then
             bt_audio_active=true
         fi
 
-        # Method 2: Fallback - Bluetooth connected + media apps running (compatibility)
         if [[ "$bt_audio_active" == "false" ]]; then
             if system_profiler SPBluetoothDataType 2> /dev/null | grep -q "Connected: Yes"; then
-                # Extended media apps list for broader coverage
                 local -a media_apps=("Music" "Spotify" "VLC" "QuickTime Player" "TV" "Podcasts" "Safari" "Google Chrome" "Chrome" "Firefox" "Arc" "IINA" "mpv")
                 for app in "${media_apps[@]}"; do
                     if pgrep -x "$app" > /dev/null 2>&1; then
@@ -583,7 +551,6 @@ opt_bluetooth_reset() {
             return 0
         fi
 
-        # Safe to reset Bluetooth
         if sudo pkill -TERM bluetoothd > /dev/null 2>&1; then
             sleep 1
             if pgrep -x bluetoothd > /dev/null 2>&1; then
@@ -609,11 +576,8 @@ opt_bluetooth_reset() {
     fi
 }
 
-# Spotlight index optimization
-# Rebuilds Spotlight index if search is slow or results are inaccurate
-# Only runs if index is actually problematic
+# Spotlight index check/rebuild (only if slow).
 opt_spotlight_index_optimize() {
-    # Check if Spotlight indexing is disabled
     local spotlight_status
     spotlight_status=$(mdutil -s / 2> /dev/null || echo "")
 
@@ -622,9 +586,7 @@ opt_spotlight_index_optimize() {
         return 0
     fi
 
-    # Check if indexing is currently running
     if echo "$spotlight_status" | grep -qi "Indexing enabled" && ! echo "$spotlight_status" | grep -qi "Indexing and searching disabled"; then
-        # Check index health by testing search speed twice
         local slow_count=0
         local test_start test_end test_duration
         for _ in 1 2; do
@@ -663,13 +625,11 @@ opt_spotlight_index_optimize() {
     fi
 }
 
-# Dock cache refresh
-# Fixes broken icons, duplicate items, and visual glitches in the Dock
+# Dock cache refresh.
 opt_dock_refresh() {
     local dock_support="$HOME/Library/Application Support/Dock"
     local refreshed=false
 
-    # Remove Dock database files (icons, positions, etc.)
     if [[ -d "$dock_support" ]]; then
         while IFS= read -r db_file; do
             if [[ -f "$db_file" ]]; then
@@ -678,14 +638,11 @@ opt_dock_refresh() {
         done < <(find "$dock_support" -name "*.db" -type f 2> /dev/null || true)
     fi
 
-    # Also clear Dock plist cache
     local dock_plist="$HOME/Library/Preferences/com.apple.dock.plist"
     if [[ -f "$dock_plist" ]]; then
-        # Just touch to invalidate cache, don't delete (preserves user settings)
         touch "$dock_plist" 2> /dev/null || true
     fi
 
-    # Restart Dock to apply changes (skip in dry-run mode)
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         killall Dock 2> /dev/null || true
     fi
@@ -696,7 +653,7 @@ opt_dock_refresh() {
     opt_msg "Dock refreshed"
 }
 
-# Execute optimization by action name
+# Dispatch optimization by action name.
 execute_optimization() {
     local action="$1"
     local path="${2:-}"

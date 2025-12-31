@@ -62,7 +62,7 @@ scan_external_volumes() {
     done
     stop_section_spinner
 }
-# Clean Finder metadata (.DS_Store files)
+# Finder metadata (.DS_Store).
 clean_finder_metadata() {
     stop_section_spinner
     if [[ "$PROTECT_FINDER_METADATA" == "true" ]]; then
@@ -72,16 +72,14 @@ clean_finder_metadata() {
     fi
     clean_ds_store_tree "$HOME" "Home directory (.DS_Store)"
 }
-# Clean macOS system caches
+# macOS system caches and user-level leftovers.
 clean_macos_system_caches() {
     stop_section_spinner
-    # Clean saved application states with protection for System Settings
-    # Note: safe_clean already calls should_protect_path for each file
+    # safe_clean already checks protected paths.
     safe_clean ~/Library/Saved\ Application\ State/* "Saved application states" || true
     safe_clean ~/Library/Caches/com.apple.photoanalysisd "Photo analysis cache" || true
     safe_clean ~/Library/Caches/com.apple.akd "Apple ID cache" || true
     safe_clean ~/Library/Caches/com.apple.WebKit.Networking/* "WebKit network cache" || true
-    # Extra user items
     safe_clean ~/Library/DiagnosticReports/* "Diagnostic reports" || true
     safe_clean ~/Library/Caches/com.apple.QuickLook.thumbnailcache "QuickLook thumbnails" || true
     safe_clean ~/Library/Caches/Quick\ Look/* "QuickLook cache" || true
@@ -158,28 +156,26 @@ clean_mail_downloads() {
         note_activity
     fi
 }
-# Clean sandboxed app caches
+# Sandboxed app caches.
 clean_sandboxed_app_caches() {
     stop_section_spinner
     safe_clean ~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/* "Wallpaper agent cache"
     safe_clean ~/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/* "Media analysis cache"
     safe_clean ~/Library/Containers/com.apple.AppStore/Data/Library/Caches/* "App Store cache"
     safe_clean ~/Library/Containers/com.apple.configurator.xpc.InternetService/Data/tmp/* "Apple Configurator temp files"
-    # Clean sandboxed app caches - iterate quietly to avoid UI flashing
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
     start_section_spinner "Scanning sandboxed apps..."
     local total_size=0
     local cleaned_count=0
     local found_any=false
-    # Enable nullglob for safe globbing; restore afterwards
+    # Use nullglob to avoid literal globs.
     local _ng_state
     _ng_state=$(shopt -p nullglob || true)
     shopt -s nullglob
     for container_dir in "$containers_dir"/*; do
         process_container_cache "$container_dir"
     done
-    # Restore nullglob to previous state
     eval "$_ng_state"
     stop_section_spinner
     if [[ "$found_any" == "true" ]]; then
@@ -195,11 +191,10 @@ clean_sandboxed_app_caches() {
         note_activity
     fi
 }
-# Process a single container cache directory (reduces nesting)
+# Process a single container cache directory.
 process_container_cache() {
     local container_dir="$1"
     [[ -d "$container_dir" ]] || return 0
-    # Extract bundle ID and check protection status early
     local bundle_id=$(basename "$container_dir")
     if is_critical_system_component "$bundle_id"; then
         return 0
@@ -208,17 +203,15 @@ process_container_cache() {
         return 0
     fi
     local cache_dir="$container_dir/Data/Library/Caches"
-    # Check if dir exists and has content
     [[ -d "$cache_dir" ]] || return 0
-    # Fast check if empty using find (more efficient than ls)
+    # Fast non-empty check.
     if find "$cache_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
-        # Use global variables from caller for tracking
         local size=$(get_path_size_kb "$cache_dir")
         ((total_size += size))
         found_any=true
         ((cleaned_count++))
         if [[ "$DRY_RUN" != "true" ]]; then
-            # Clean contents safely with local nullglob management
+            # Clean contents safely with local nullglob.
             local _ng_state
             _ng_state=$(shopt -p nullglob || true)
             shopt -s nullglob
@@ -230,11 +223,11 @@ process_container_cache() {
         fi
     fi
 }
-# Clean browser caches (Safari, Chrome, Edge, Firefox, etc.)
+# Browser caches (Safari/Chrome/Edge/Firefox).
 clean_browsers() {
     stop_section_spinner
     safe_clean ~/Library/Caches/com.apple.Safari/* "Safari cache"
-    # Chrome/Chromium
+    # Chrome/Chromium.
     safe_clean ~/Library/Caches/Google/Chrome/* "Chrome cache"
     safe_clean ~/Library/Application\ Support/Google/Chrome/*/Application\ Cache/* "Chrome app cache"
     safe_clean ~/Library/Application\ Support/Google/Chrome/*/GPUCache/* "Chrome GPU cache"
@@ -251,7 +244,7 @@ clean_browsers() {
     safe_clean ~/Library/Caches/zen/* "Zen cache"
     safe_clean ~/Library/Application\ Support/Firefox/Profiles/*/cache2/* "Firefox profile cache"
 }
-# Clean cloud storage app caches
+# Cloud storage caches.
 clean_cloud_storage() {
     stop_section_spinner
     safe_clean ~/Library/Caches/com.dropbox.* "Dropbox cache"
@@ -262,7 +255,7 @@ clean_cloud_storage() {
     safe_clean ~/Library/Caches/com.box.desktop "Box cache"
     safe_clean ~/Library/Caches/com.microsoft.OneDrive "OneDrive cache"
 }
-# Clean office application caches
+# Office app caches.
 clean_office_applications() {
     stop_section_spinner
     safe_clean ~/Library/Caches/com.microsoft.Word "Microsoft Word cache"
@@ -274,7 +267,7 @@ clean_office_applications() {
     safe_clean ~/Library/Caches/org.mozilla.thunderbird/* "Thunderbird cache"
     safe_clean ~/Library/Caches/com.apple.mail/* "Apple Mail cache"
 }
-# Clean virtualization tools
+# Virtualization caches.
 clean_virtualization_tools() {
     stop_section_spinner
     safe_clean ~/Library/Caches/com.vmware.fusion "VMware Fusion cache"
@@ -282,7 +275,7 @@ clean_virtualization_tools() {
     safe_clean ~/VirtualBox\ VMs/.cache "VirtualBox cache"
     safe_clean ~/.vagrant.d/tmp/* "Vagrant temporary files"
 }
-# Clean Application Support logs and caches
+# Application Support logs/caches.
 clean_application_support_logs() {
     stop_section_spinner
     if [[ ! -d "$HOME/Library/Application Support" ]] || ! ls "$HOME/Library/Application Support" > /dev/null 2>&1; then
@@ -294,11 +287,10 @@ clean_application_support_logs() {
     local total_size=0
     local cleaned_count=0
     local found_any=false
-    # Enable nullglob for safe globbing
+    # Enable nullglob for safe globbing.
     local _ng_state
     _ng_state=$(shopt -p nullglob || true)
     shopt -s nullglob
-    # Clean log directories and cache patterns
     for app_dir in ~/Library/Application\ Support/*; do
         [[ -d "$app_dir" ]] || continue
         local app_name=$(basename "$app_dir")
@@ -333,7 +325,7 @@ clean_application_support_logs() {
             fi
         done
     done
-    # Clean Group Containers logs
+    # Group Containers logs (explicit allowlist).
     local known_group_containers=(
         "group.com.apple.contentdelivery"
     )
@@ -357,7 +349,6 @@ clean_application_support_logs() {
             fi
         done
     done
-    # Restore nullglob to previous state
     eval "$_ng_state"
     stop_section_spinner
     if [[ "$found_any" == "true" ]]; then
@@ -373,10 +364,10 @@ clean_application_support_logs() {
         note_activity
     fi
 }
-# Check and show iOS device backup info
+# iOS device backup info.
 check_ios_device_backups() {
     local backup_dir="$HOME/Library/Application Support/MobileSync/Backup"
-    # Simplified check without find to avoid hanging
+    # Simplified check without find to avoid hanging.
     if [[ -d "$backup_dir" ]]; then
         local backup_kb=$(get_path_size_kb "$backup_dir")
         if [[ -n "${backup_kb:-}" && "$backup_kb" -gt 102400 ]]; then
@@ -390,8 +381,7 @@ check_ios_device_backups() {
     fi
     return 0
 }
-# Env: IS_M_SERIES
-# Clean Apple Silicon specific caches
+# Apple Silicon specific caches (IS_M_SERIES).
 clean_apple_silicon_caches() {
     if [[ "${IS_M_SERIES:-false}" != "true" ]]; then
         return 0

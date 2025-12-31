@@ -1,11 +1,9 @@
 #!/bin/bash
-# System-Level Cleanup Module
-# Deep system cleanup (requires sudo) and Time Machine failed backups
+# System-Level Cleanup Module (requires sudo).
 set -euo pipefail
-# Deep system cleanup (requires sudo)
+# System caches, logs, and temp files.
 clean_deep_system() {
     stop_section_spinner
-    # Clean old system caches
     local cache_cleaned=0
     safe_sudo_find_delete "/Library/Caches" "*.cache" "$MOLE_TEMP_FILE_AGE_DAYS" "f" && cache_cleaned=1 || true
     safe_sudo_find_delete "/Library/Caches" "*.tmp" "$MOLE_TEMP_FILE_AGE_DAYS" "f" && cache_cleaned=1 || true
@@ -15,7 +13,6 @@ clean_deep_system() {
     safe_sudo_find_delete "/private/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
     safe_sudo_find_delete "/private/var/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
     [[ $tmp_cleaned -eq 1 ]] && log_success "System temp files"
-    # Clean crash reports
     safe_sudo_find_delete "/Library/Logs/DiagnosticReports" "*" "$MOLE_CRASH_REPORT_AGE_DAYS" "f" || true
     log_success "System crash reports"
     safe_sudo_find_delete "/private/var/log" "*.log" "$MOLE_LOG_AGE_DAYS" "f" || true
@@ -91,18 +88,15 @@ clean_deep_system() {
     stop_section_spinner
     [[ $diag_logs_cleaned -eq 1 ]] && log_success "System diagnostic trace logs"
 }
-# Clean incomplete Time Machine backups
+# Incomplete Time Machine backups.
 clean_time_machine_failed_backups() {
     local tm_cleaned=0
-    # Check if tmutil is available
     if ! command -v tmutil > /dev/null 2>&1; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
-    # Start spinner early (before potentially slow tmutil command)
     start_section_spinner "Checking Time Machine configuration..."
     local spinner_active=true
-    # Check if Time Machine is configured (with short timeout for faster response)
     local tm_info
     tm_info=$(run_with_timeout 2 tmutil destinationinfo 2>&1 || echo "failed")
     if [[ "$tm_info" == *"No destinations configured"* || "$tm_info" == "failed" ]]; then
@@ -119,7 +113,6 @@ clean_time_machine_failed_backups() {
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
-    # Skip if backup is running (check actual Running status, not just daemon existence)
     if tmutil status 2> /dev/null | grep -q "Running = 1"; then
         if [[ "$spinner_active" == "true" ]]; then
             stop_section_spinner
@@ -127,22 +120,19 @@ clean_time_machine_failed_backups() {
         echo -e "  ${YELLOW}!${NC} Time Machine backup in progress, skipping cleanup"
         return 0
     fi
-    # Update spinner message for volume scanning
     if [[ "$spinner_active" == "true" ]]; then
         start_section_spinner "Checking backup volumes..."
     fi
-    # Fast pre-scan: check which volumes have Backups.backupdb (avoid expensive tmutil checks)
+    # Fast pre-scan for backup volumes to avoid slow tmutil checks.
     local -a backup_volumes=()
     for volume in /Volumes/*; do
         [[ -d "$volume" ]] || continue
         [[ "$volume" == "/Volumes/MacintoshHD" || "$volume" == "/" ]] && continue
         [[ -L "$volume" ]] && continue
-        # Quick check: does this volume have backup directories?
         if [[ -d "$volume/Backups.backupdb" ]] || [[ -d "$volume/.MobileBackups" ]]; then
             backup_volumes+=("$volume")
         fi
     done
-    # If no backup volumes found, stop spinner and return
     if [[ ${#backup_volumes[@]} -eq 0 ]]; then
         if [[ "$spinner_active" == "true" ]]; then
             stop_section_spinner
@@ -150,23 +140,20 @@ clean_time_machine_failed_backups() {
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
-    # Update spinner message: we have potential backup volumes, now scan them
     if [[ "$spinner_active" == "true" ]]; then
         start_section_spinner "Scanning backup volumes..."
     fi
     for volume in "${backup_volumes[@]}"; do
-        # Skip network volumes (quick check)
         local fs_type
         fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "unknown")
         case "$fs_type" in
             nfs | smbfs | afpfs | cifs | webdav | unknown) continue ;;
         esac
-        # HFS+ style backups (Backups.backupdb)
         local backupdb_dir="$volume/Backups.backupdb"
         if [[ -d "$backupdb_dir" ]]; then
             while IFS= read -r inprogress_file; do
                 [[ -d "$inprogress_file" ]] || continue
-                # Only delete old incomplete backups (safety window)
+                # Only delete old incomplete backups (safety window).
                 local file_mtime=$(get_file_mtime "$inprogress_file")
                 local current_time=$(date +%s)
                 local hours_old=$(((current_time - file_mtime) / 3600))
@@ -175,7 +162,6 @@ clean_time_machine_failed_backups() {
                 fi
                 local size_kb=$(get_path_size_kb "$inprogress_file")
                 [[ "$size_kb" -le 0 ]] && continue
-                # Stop spinner before first output
                 if [[ "$spinner_active" == "true" ]]; then
                     stop_section_spinner
                     spinner_active=false
@@ -188,7 +174,6 @@ clean_time_machine_failed_backups() {
                     note_activity
                     continue
                 fi
-                # Real deletion
                 if ! command -v tmutil > /dev/null 2>&1; then
                     echo -e "  ${YELLOW}!${NC} tmutil not available, skipping: $backup_name"
                     continue
@@ -205,17 +190,15 @@ clean_time_machine_failed_backups() {
                 fi
             done < <(run_with_timeout 15 find "$backupdb_dir" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2> /dev/null || true)
         fi
-        # APFS style backups (.backupbundle or .sparsebundle)
+        # APFS bundles.
         for bundle in "$volume"/*.backupbundle "$volume"/*.sparsebundle; do
             [[ -e "$bundle" ]] || continue
             [[ -d "$bundle" ]] || continue
-            # Check if bundle is mounted
             local bundle_name=$(basename "$bundle")
             local mounted_path=$(hdiutil info 2> /dev/null | grep -A 5 "image-path.*$bundle_name" | grep "/Volumes/" | awk '{print $1}' | head -1 || echo "")
             if [[ -n "$mounted_path" && -d "$mounted_path" ]]; then
                 while IFS= read -r inprogress_file; do
                     [[ -d "$inprogress_file" ]] || continue
-                    # Only delete old incomplete backups (safety window)
                     local file_mtime=$(get_file_mtime "$inprogress_file")
                     local current_time=$(date +%s)
                     local hours_old=$(((current_time - file_mtime) / 3600))
@@ -224,7 +207,6 @@ clean_time_machine_failed_backups() {
                     fi
                     local size_kb=$(get_path_size_kb "$inprogress_file")
                     [[ "$size_kb" -le 0 ]] && continue
-                    # Stop spinner before first output
                     if [[ "$spinner_active" == "true" ]]; then
                         stop_section_spinner
                         spinner_active=false
@@ -237,7 +219,6 @@ clean_time_machine_failed_backups() {
                         note_activity
                         continue
                     fi
-                    # Real deletion
                     if ! command -v tmutil > /dev/null 2>&1; then
                         continue
                     fi
@@ -255,7 +236,6 @@ clean_time_machine_failed_backups() {
             fi
         done
     done
-    # Stop spinner if still active (no backups found)
     if [[ "$spinner_active" == "true" ]]; then
         stop_section_spinner
     fi
@@ -263,33 +243,27 @@ clean_time_machine_failed_backups() {
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
     fi
 }
-# Clean local APFS snapshots (keep the most recent snapshot)
+# Local APFS snapshots (keep the most recent).
 clean_local_snapshots() {
-    # Check if tmutil is available
     if ! command -v tmutil > /dev/null 2>&1; then
         return 0
     fi
     start_section_spinner "Checking local snapshots..."
-    # Check for local snapshots
     local snapshot_list
     snapshot_list=$(tmutil listlocalsnapshots / 2> /dev/null)
     stop_section_spinner
     [[ -z "$snapshot_list" ]] && return 0
-    # Parse and clean snapshots
     local cleaned_count=0
     local total_cleaned_size=0 # Estimation not possible without thin
     local newest_ts=0
     local newest_name=""
     local -a snapshots=()
-    # Find the most recent snapshot to keep at least one version
     while IFS= read -r line; do
-        # Format: com.apple.TimeMachine.2023-10-25-120000
         if [[ "$line" =~ com\.apple\.TimeMachine\.([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{6}) ]]; then
             local snap_name="${BASH_REMATCH[0]}"
             snapshots+=("$snap_name")
             local date_str="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]:0:2}:${BASH_REMATCH[4]:2:2}:${BASH_REMATCH[4]:4:2}"
             local snap_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$date_str" "+%s" 2> /dev/null || echo "0")
-            # Skip if parsing failed
             [[ "$snap_ts" == "0" ]] && continue
             if [[ "$snap_ts" -gt "$newest_ts" ]]; then
                 newest_ts="$snap_ts"
@@ -332,16 +306,13 @@ clean_local_snapshots() {
 
     local snap_name
     for snap_name in "${snapshots[@]}"; do
-        # Format: com.apple.TimeMachine.2023-10-25-120000
         if [[ "$snap_name" =~ com\.apple\.TimeMachine\.([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{6}) ]]; then
-            # Remove all but the most recent snapshot
             if [[ "${BASH_REMATCH[0]}" != "$newest_name" ]]; then
                 if [[ "$DRY_RUN" == "true" ]]; then
                     echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Local snapshot: $snap_name ${YELLOW}dry-run${NC}"
                     ((cleaned_count++))
                     note_activity
                 else
-                    # Secure removal
                     if sudo tmutil deletelocalsnapshots "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}-${BASH_REMATCH[4]}" > /dev/null 2>&1; then
                         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Removed snapshot: $snap_name"
                         ((cleaned_count++))

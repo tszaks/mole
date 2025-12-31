@@ -11,9 +11,7 @@ func TestDeleteMultiplePathsCmdHandlesParentChild(t *testing.T) {
 	parent := filepath.Join(base, "parent")
 	child := filepath.Join(parent, "child")
 
-	// Create structure:
-	// parent/fileA
-	// parent/child/fileC
+	// Structure: parent/fileA, parent/child/fileC.
 	if err := os.MkdirAll(child, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

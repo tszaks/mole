@@ -168,7 +168,6 @@ func TestTruncateMiddle(t *testing.T) {
 }
 
 func TestDisplayPath(t *testing.T) {
-	// This test assumes HOME is set
 	tests := []struct {
 		name  string
 		setup func() string

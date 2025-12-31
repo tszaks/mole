@@ -31,12 +31,9 @@ func collectCPU() (CPUStatus, error) {
 		logical = 1
 	}
 
-	// Use two-call pattern for more reliable CPU measurements
-	// First call: initialize/store current CPU times
+	// Two-call pattern for more reliable CPU usage.
 	cpu.Percent(0, true)
-	// Wait for sampling interval
 	time.Sleep(cpuSampleInterval)
-	// Second call: get actual percentages based on difference
 	percents, err := cpu.Percent(0, true)
 	var totalPercent float64
 	perCoreEstimated := false
@@ -69,7 +66,7 @@ func collectCPU() (CPUStatus, error) {
 		}
 	}
 
-	// Get P-core and E-core counts for Apple Silicon
+	// P/E core counts for Apple Silicon.
 	pCores, eCores := getCoreTopology()
 
 	return CPUStatus{
@@ -91,14 +88,13 @@ func isZeroLoad(avg load.AvgStat) bool {
 }
 
 var (
-	// Package-level cache for core topology
+	// Cache for core topology.
 	lastTopologyAt   time.Time
 	cachedP, cachedE int
 	topologyTTL      = 10 * time.Minute
 )
 
-// getCoreTopology returns P-core and E-core counts on Apple Silicon.
-// Returns (0, 0) on non-Apple Silicon or if detection fails.
+// getCoreTopology returns P/E core counts on Apple Silicon.
 func getCoreTopology() (pCores, eCores int) {
 	if runtime.GOOS != "darwin" {
 		return 0, 0
@@ -114,7 +110,6 @@ func getCoreTopology() (pCores, eCores int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	// Get performance level info from sysctl
 	out, err := runCmd(ctx, "sysctl", "-n",
 		"hw.perflevel0.logicalcpu",
 		"hw.perflevel0.name",
@@ -129,15 +124,12 @@ func getCoreTopology() (pCores, eCores int) {
 		return 0, 0
 	}
 
-	// Parse perflevel0
 	level0Count, _ := strconv.Atoi(strings.TrimSpace(lines[0]))
 	level0Name := strings.ToLower(strings.TrimSpace(lines[1]))
 
-	// Parse perflevel1
 	level1Count, _ := strconv.Atoi(strings.TrimSpace(lines[2]))
 	level1Name := strings.ToLower(strings.TrimSpace(lines[3]))
 
-	// Assign based on name (Performance vs Efficiency)
 	if strings.Contains(level0Name, "performance") {
 		pCores = level0Count
 	} else if strings.Contains(level0Name, "efficiency") {

@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	// Package-level cache for heavy system_profiler data
+	// Cache for heavy system_profiler output.
 	lastPowerAt   time.Time
 	cachedPower   string
 	powerCacheTTL = 30 * time.Second
@@ -24,15 +24,15 @@ var (
 func collectBatteries() (batts []BatteryStatus, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// Swallow panics from platform-specific battery probes to keep the UI alive.
+			// Swallow panics to keep UI alive.
 			err = fmt.Errorf("battery collection failed: %v", r)
 		}
 	}()
 
-	// macOS: pmset (fast, for real-time percentage/status)
+	// macOS: pmset for real-time percentage/status.
 	if runtime.GOOS == "darwin" && commandExists("pmset") {
 		if out, err := runCmd(context.Background(), "pmset", "-g", "batt"); err == nil {
-			// Get heavy info (health, cycles) from cached system_profiler
+			// Health/cycles from cached system_profiler.
 			health, cycles := getCachedPowerData()
 			if batts := parsePMSet(out, health, cycles); len(batts) > 0 {
 				return batts, nil
@@ -40,7 +40,7 @@ func collectBatteries() (batts []BatteryStatus, err error) {
 		}
 	}
 
-	// Linux: /sys/class/power_supply
+	// Linux: /sys/class/power_supply.
 	matches, _ := filepath.Glob("/sys/class/power_supply/BAT*/capacity")
 	for _, capFile := range matches {
 		statusFile := filepath.Join(filepath.Dir(capFile), "status")
@@ -73,9 +73,8 @@ func parsePMSet(raw string, health string, cycles int) []BatteryStatus {
 	var timeLeft string
 
 	for _, line := range lines {
-		// Check for time remaining
+		// Time remaining.
 		if strings.Contains(line, "remaining") {
-			// Extract time like "1:30 remaining"
 			parts := strings.Fields(line)
 			for i, p := range parts {
 				if p == "remaining" && i > 0 {
@@ -121,7 +120,7 @@ func parsePMSet(raw string, health string, cycles int) []BatteryStatus {
 	return out
 }
 
-// getCachedPowerData returns condition, cycles, and fan speed from cached system_profiler output.
+// getCachedPowerData returns condition and cycles from cached system_profiler.
 func getCachedPowerData() (health string, cycles int) {
 	out := getSystemPowerOutput()
 	if out == "" {
@@ -173,7 +172,7 @@ func collectThermal() ThermalStatus {
 
 	var thermal ThermalStatus
 
-	// Get fan info and adapter power from cached system_profiler
+	// Fan info from cached system_profiler.
 	out := getSystemPowerOutput()
 	if out != "" {
 		lines := strings.Split(out, "\n")
@@ -181,7 +180,6 @@ func collectThermal() ThermalStatus {
 			lower := strings.ToLower(line)
 			if strings.Contains(lower, "fan") && strings.Contains(lower, "speed") {
 				if _, after, found := strings.Cut(line, ":"); found {
-					// Extract number from string like "1200 RPM"
 					numStr := strings.TrimSpace(after)
 					numStr, _, _ = strings.Cut(numStr, " ")
 					thermal.FanSpeed, _ = strconv.Atoi(numStr)
@@ -190,7 +188,7 @@ func collectThermal() ThermalStatus {
 		}
 	}
 
-	// Get power metrics from ioreg (fast, real-time data)
+	// Power metrics from ioreg (fast, real-time).
 	ctxPower, cancelPower := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancelPower()
 	if out, err := runCmd(ctxPower, "ioreg", "-rn", "AppleSmartBattery"); err == nil {
@@ -198,8 +196,7 @@ func collectThermal() ThermalStatus {
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 
-			// Get battery temperature
-			// Matches: "Temperature" = 3055 (note: space before =)
+			// Battery temperature ("Temperature" = 3055).
 			if _, after, found := strings.Cut(line, "\"Temperature\" = "); found {
 				valStr := strings.TrimSpace(after)
 				if tempRaw, err := strconv.Atoi(valStr); err == nil && tempRaw > 0 {
@@ -207,13 +204,10 @@ func collectThermal() ThermalStatus {
 				}
 			}
 
-			// Get adapter power (Watts)
-			// Read from current adapter: "AdapterDetails" = {"Watts"=140...}
-			// Skip historical data: "AppleRawAdapterDetails" = ({Watts=90}, {Watts=140})
+			// Adapter power (Watts) from current adapter.
 			if strings.Contains(line, "\"AdapterDetails\" = {") && !strings.Contains(line, "AppleRaw") {
 				if _, after, found := strings.Cut(line, "\"Watts\"="); found {
 					valStr := strings.TrimSpace(after)
-					// Remove trailing characters like , or }
 					valStr, _, _ = strings.Cut(valStr, ",")
 					valStr, _, _ = strings.Cut(valStr, "}")
 					valStr = strings.TrimSpace(valStr)
@@ -223,8 +217,7 @@ func collectThermal() ThermalStatus {
 				}
 			}
 
-			// Get system power consumption (mW -> W)
-			// Matches: "SystemPowerIn"=12345
+			// System power consumption (mW -> W).
 			if _, after, found := strings.Cut(line, "\"SystemPowerIn\"="); found {
 				valStr := strings.TrimSpace(after)
 				valStr, _, _ = strings.Cut(valStr, ",")
@@ -235,8 +228,7 @@ func collectThermal() ThermalStatus {
 				}
 			}
 
-			// Get battery power (mW -> W, positive = discharging)
-			// Matches: "BatteryPower"=12345
+			// Battery power (mW -> W, positive = discharging).
 			if _, after, found := strings.Cut(line, "\"BatteryPower\"="); found {
 				valStr := strings.TrimSpace(after)
 				valStr, _, _ = strings.Cut(valStr, ",")
@@ -249,14 +241,13 @@ func collectThermal() ThermalStatus {
 		}
 	}
 
-	// Fallback: Try thermal level as a proxy if temperature not found
+	// Fallback: thermal level proxy.
 	if thermal.CPUTemp == 0 {
 		ctx2, cancel2 := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel2()
 		out2, err := runCmd(ctx2, "sysctl", "-n", "machdep.xcpm.cpu_thermal_level")
 		if err == nil {
 			level, _ := strconv.Atoi(strings.TrimSpace(out2))
-			// Estimate temp: level 0-100 roughly maps to 40-100°C
 			if level >= 0 {
 				thermal.CPUTemp = 45 + float64(level)*0.5
 			}

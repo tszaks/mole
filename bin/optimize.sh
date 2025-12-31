@@ -1,15 +1,18 @@
 #!/bin/bash
+# Mole - Optimize command.
+# Runs system maintenance checks and fixes.
+# Supports dry-run where applicable.
 
 set -euo pipefail
 
-# Fix locale issues (Issue #83)
+# Fix locale issues.
 export LC_ALL=C
 export LANG=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SCRIPT_DIR/lib/core/common.sh"
 
-# Set up cleanup trap for temporary files
+# Clean temp files on exit.
 trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/lib/core/sudo.sh"
 source "$SCRIPT_DIR/lib/manage/update.sh"
@@ -26,7 +29,7 @@ print_header() {
 }
 
 run_system_checks() {
-    # Skip system checks in dry-run mode (only show what optimizations would run)
+    # Skip checks in dry-run mode.
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         return 0
     fi
@@ -36,7 +39,6 @@ run_system_checks() {
     unset MOLE_SECURITY_FIXES_SKIPPED
     echo ""
 
-    # Run checks and display results directly without grouping
     check_all_updates
     echo ""
 
@@ -152,7 +154,7 @@ touchid_supported() {
         fi
     fi
 
-    # Fallback: Apple Silicon Macs usually have Touch ID
+    # Fallback: Apple Silicon Macs usually have Touch ID.
     if [[ "$(uname -m)" == "arm64" ]]; then
         return 0
     fi
@@ -354,7 +356,7 @@ main() {
     fi
     print_header
 
-    # Show dry-run mode indicator
+    # Dry-run indicator.
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}${ICON_DRY_RUN} DRY RUN MODE${NC} - No files will be modified\n"
     fi

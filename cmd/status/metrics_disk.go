@@ -43,7 +43,7 @@ func collectDisks() ([]DiskStatus, error) {
 		if strings.HasPrefix(part.Mountpoint, "/System/Volumes/") {
 			continue
 		}
-		// Skip private volumes
+		// Skip /private mounts.
 		if strings.HasPrefix(part.Mountpoint, "/private/") {
 			continue
 		}
@@ -58,12 +58,11 @@ func collectDisks() ([]DiskStatus, error) {
 		if err != nil || usage.Total == 0 {
 			continue
 		}
-		// Skip small volumes (< 1GB)
+		// Skip <1GB volumes.
 		if usage.Total < 1<<30 {
 			continue
 		}
-		// For APFS volumes, use a more precise dedup key (bytes level)
-		// to handle shared storage pools properly
+		// Use size-based dedupe key for shared pools.
 		volKey := fmt.Sprintf("%s:%d", part.Fstype, usage.Total)
 		if seenVolume[volKey] {
 			continue
@@ -94,7 +93,7 @@ func collectDisks() ([]DiskStatus, error) {
 }
 
 var (
-	// Package-level cache for external disk status
+	// External disk cache.
 	lastDiskCacheAt time.Time
 	diskTypeCache   = make(map[string]bool)
 	diskCacheTTL    = 2 * time.Minute
@@ -106,7 +105,7 @@ func annotateDiskTypes(disks []DiskStatus) {
 	}
 
 	now := time.Now()
-	// Clear cache if stale
+	// Clear stale cache.
 	if now.Sub(lastDiskCacheAt) > diskCacheTTL {
 		diskTypeCache = make(map[string]bool)
 		lastDiskCacheAt = now
