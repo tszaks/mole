@@ -659,7 +659,6 @@ print_usage_summary() {
     echo ""
 }
 
-
 # Main installation function
 perform_install() {
     resolve_source_dir
