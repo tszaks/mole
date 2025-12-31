@@ -77,35 +77,6 @@ maybe_sudo() {
     fi
 }
 
-show_help() {
-    cat << 'EOF'
-Mole Installation Script
-========================
-
-USAGE:
-    ./install.sh [OPTIONS]
-
-OPTIONS:
-    --prefix PATH       Install to custom directory (default: /usr/local/bin)
-    --config PATH       Config directory (default: ~/.config/mole)
-    --update            Update Mole to the latest version
-    --uninstall         Uninstall mole
-    --help, -h          Show this help
-
-EXAMPLES:
-    ./install.sh                    # Install to /usr/local/bin
-    ./install.sh --prefix ~/.local/bin  # Install to custom directory
-    ./install.sh --update           # Update Mole in place
-    ./install.sh --uninstall       # Uninstall mole
-
-The installer will:
-1. Copy mole binary and scripts to the install directory
-2. Set up config directory with all modules
-3. Make the mole command available system-wide
-EOF
-    echo ""
-}
-
 # Resolve the directory containing source files (supports curl | bash)
 resolve_source_dir() {
     if [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR" && -f "$SOURCE_DIR/mole" ]]; then
@@ -261,6 +232,42 @@ get_installed_version() {
 
 # Parse command line arguments
 parse_args() {
+    # Handle positional version selector in any position
+    local -a args=("$@")
+    local version_token=""
+    local i
+    for i in "${!args[@]}"; do
+        local token="${args[$i]}"
+        [[ -z "$token" ]] && continue
+        if [[ "$token" == -* ]]; then
+            continue
+        fi
+        if [[ -n "$version_token" ]]; then
+            log_error "Unexpected argument: $token"
+            exit 1
+        fi
+        case "$token" in
+            latest | main)
+                # Install from main branch (edge/beta)
+                export MOLE_VERSION="main"
+                export MOLE_EDGE_INSTALL="true"
+                version_token="$token"
+                unset 'args[$i]'
+                ;;
+            [0-9]* | V[0-9]* | v[0-9]*)
+                # Install specific version (e.g., 1.16.0, V1.16.0)
+                export MOLE_VERSION="$token"
+                version_token="$token"
+                unset 'args[$i]'
+                ;;
+            *)
+                log_error "Unknown option: $token"
+                exit 1
+                ;;
+        esac
+    done
+    set -- "${args[@]}"
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --prefix)
@@ -271,25 +278,16 @@ parse_args() {
                 CONFIG_DIR="$2"
                 shift 2
                 ;;
-            --update)
-                ACTION="update"
-                shift 1
-                ;;
-            --uninstall)
-                uninstall_mole
-                exit 0
-                ;;
             --verbose | -v)
                 VERBOSE=1
                 shift 1
                 ;;
             --help | -h)
-                show_help
-                exit 0
+                log_error "Unknown option: $1"
+                exit 1
                 ;;
             *)
                 log_error "Unknown option: $1"
-                show_help
                 exit 1
                 ;;
         esac
@@ -716,6 +714,14 @@ perform_install() {
 
     if [[ -z "$installed_version" ]]; then
         installed_version="$source_version"
+    fi
+
+    # Add edge indicator for main branch installs
+    if [[ "${MOLE_EDGE_INSTALL:-}" == "true" ]]; then
+        installed_version="${installed_version}-edge"
+        echo ""
+        log_warning "Edge version installed on main branch"
+        log_info "This is a testing version; use 'mo update' to switch to stable"
     fi
 
     print_usage_summary "installed" "$installed_version"

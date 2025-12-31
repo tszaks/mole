@@ -26,13 +26,7 @@
 
 ## Quick Start
 
-**Installation:**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
-```
-
-Or via Homebrew:
+**Installation via Homebrew:**
 
 ```bash
 brew install mole
@@ -71,6 +65,16 @@ mo purge --paths             # Configure project scan directories
 - **Touch ID**: Enable Touch ID for sudo commands by running `mo touchid`.
 - **Navigation**: Supports standard arrow keys and Vim bindings (`h/j/k/l`).
 - **Debug**: View detailed logs by appending the `--debug` flag (e.g., `mo clean --debug`).
+
+## Manual Installation
+
+```bash
+# Latest code main branch
+curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash -s latest
+
+# Specific version see releases for available versions
+curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash -s 1.17.0
+```
 
 ## Features in Detail
 
