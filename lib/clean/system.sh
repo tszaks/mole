@@ -280,33 +280,29 @@ clean_local_snapshots() {
     local total_cleaned_size=0 # Estimation not possible without thin
     local newest_ts=0
     local newest_name=""
+    local -a snapshots=()
     # Find the most recent snapshot to keep at least one version
     while IFS= read -r line; do
         # Format: com.apple.TimeMachine.2023-10-25-120000
         if [[ "$line" =~ com\.apple\.TimeMachine\.([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{6}) ]]; then
+            local snap_name="${BASH_REMATCH[0]}"
+            snapshots+=("$snap_name")
             local date_str="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]:0:2}:${BASH_REMATCH[4]:2:2}:${BASH_REMATCH[4]:4:2}"
             local snap_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$date_str" "+%s" 2> /dev/null || echo "0")
             # Skip if parsing failed
             [[ "$snap_ts" == "0" ]] && continue
             if [[ "$snap_ts" -gt "$newest_ts" ]]; then
                 newest_ts="$snap_ts"
-                newest_name="${BASH_REMATCH[0]}"
+                newest_name="$snap_name"
             fi
         fi
     done <<< "$snapshot_list"
 
+    [[ ${#snapshots[@]} -eq 0 ]] && return 0
     [[ -z "$newest_name" ]] && return 0
 
-    local deletable_count=0
-    while IFS= read -r line; do
-        if [[ "$line" =~ com\.apple\.TimeMachine\.([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{6}) ]]; then
-            if [[ "${BASH_REMATCH[0]}" != "$newest_name" ]]; then
-                ((deletable_count++))
-            fi
-        fi
-    done <<< "$snapshot_list"
-
-    [[ $deletable_count -eq 0 ]] && return 0
+    local deletable_count=$(( ${#snapshots[@]} - 1 ))
+    [[ $deletable_count -le 0 ]] && return 0
 
     if [[ "$DRY_RUN" != "true" ]]; then
         if [[ ! -t 0 ]]; then
@@ -318,7 +314,14 @@ clean_local_snapshots() {
         echo -e "  ${GRAY}The most recent snapshot will be kept.${NC}"
         echo -ne "  ${PURPLE}${ICON_ARROW}${NC} Remove all local snapshots except the most recent one? ${GREEN}Enter${NC} continue, ${GRAY}Space${NC} skip: "
         local choice
-        choice=$(read_key)
+        if type read_key > /dev/null 2>&1; then
+            choice=$(read_key)
+        else
+            IFS= read -r -s -n 1 choice || choice=""
+            if [[ -z "$choice" || "$choice" == $'\n' || "$choice" == $'\r' ]]; then
+                choice="ENTER"
+            fi
+        fi
         if [[ "$choice" == "ENTER" ]]; then
             printf "\r\033[K" # Clear the prompt line
         else
@@ -327,16 +330,12 @@ clean_local_snapshots() {
         fi
     fi
 
-    while IFS= read -r line; do
+    local snap_name
+    for snap_name in "${snapshots[@]}"; do
         # Format: com.apple.TimeMachine.2023-10-25-120000
-        if [[ "$line" =~ com\.apple\.TimeMachine\.([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{6}) ]]; then
-            local date_str="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]:0:2}:${BASH_REMATCH[4]:2:2}:${BASH_REMATCH[4]:4:2}"
-            local snap_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$date_str" "+%s" 2> /dev/null || echo "0")
-            # Skip if parsing failed
-            [[ "$snap_ts" == "0" ]] && continue
+        if [[ "$snap_name" =~ com\.apple\.TimeMachine\.([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{6}) ]]; then
             # Remove all but the most recent snapshot
             if [[ "${BASH_REMATCH[0]}" != "$newest_name" ]]; then
-                local snap_name="${BASH_REMATCH[0]}"
                 if [[ "$DRY_RUN" == "true" ]]; then
                     echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Local snapshot: $snap_name ${YELLOW}dry-run${NC}"
                     ((cleaned_count++))
@@ -353,7 +352,7 @@ clean_local_snapshots() {
                 fi
             fi
         fi
-    done <<< "$snapshot_list"
+    done
     if [[ $cleaned_count -gt 0 && "$DRY_RUN" != "true" ]]; then
         log_success "Cleaned $cleaned_count local snapshots, kept latest"
     fi
