@@ -266,8 +266,9 @@ parse_args() {
                 ;;
         esac
     done
+    # Use ${args[@]+...} pattern to safely handle sparse/empty arrays with set -u
     if [[ ${#args[@]} -gt 0 ]]; then
-        set -- "${args[@]}"
+        set -- ${args[@]+"${args[@]}"}
     else
         set --
     fi
