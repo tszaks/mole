@@ -10,15 +10,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$PROJECT_ROOT"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-readonly ICON_SUCCESS="✓"
-readonly ICON_ERROR="☻"
-readonly ICON_WARNING="●"
-readonly ICON_LIST="•"
+# shellcheck source=lib/core/file_ops.sh
+source "$PROJECT_ROOT/lib/core/file_ops.sh"
 
 echo "==============================="
 echo "Mole Test Runner"
@@ -123,7 +116,7 @@ else
     printf "${RED}${ICON_ERROR} Installation test failed${NC}\n"
     ((FAILED++))
 fi
-rm -rf /tmp/mole-test
+safe_remove "/tmp/mole-test" true || true
 echo ""
 
 echo "==============================="

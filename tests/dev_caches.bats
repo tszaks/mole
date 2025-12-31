@@ -30,6 +30,7 @@ stop_section_spinner() { :; }
 clean_tool_cache() { echo "$1"; }
 safe_clean() { echo "$2"; }
 note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
 pnpm() {
     if [[ "$1" == "store" && "$2" == "prune" ]]; then
         return 0

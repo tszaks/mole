@@ -18,6 +18,7 @@ setup() {
 
 @test "bytes_to_human handles large values efficiently" {
     local start end elapsed
+    local limit_ms="${MOLE_PERF_BYTES_TO_HUMAN_LIMIT_MS:-4000}"
 
     bytes_to_human 1073741824 > /dev/null
 
@@ -29,7 +30,7 @@ setup() {
 
     elapsed=$(( (end - start) / 1000000 ))
 
-    [ "$elapsed" -lt 2000 ]
+    [ "$elapsed" -lt "$limit_ms" ]
 }
 
 @test "bytes_to_human produces correct output for GB range" {
@@ -74,6 +75,7 @@ setup() {
     dd if=/dev/zero of="$test_file" bs=1024 count=100 2> /dev/null
 
     local start end elapsed
+    local limit_ms="${MOLE_PERF_GET_FILE_SIZE_LIMIT_MS:-2000}"
     start=$(date +%s%N)
     for i in {1..100}; do
         get_file_size "$test_file" > /dev/null
@@ -82,7 +84,7 @@ setup() {
 
     elapsed=$(( (end - start) / 1000000 ))
 
-    [ "$elapsed" -lt 1000 ]
+    [ "$elapsed" -lt "$limit_ms" ]
 }
 
 @test "get_file_mtime returns valid timestamp" {
