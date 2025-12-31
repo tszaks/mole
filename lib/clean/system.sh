@@ -301,7 +301,7 @@ clean_local_snapshots() {
     [[ ${#snapshots[@]} -eq 0 ]] && return 0
     [[ -z "$newest_name" ]] && return 0
 
-    local deletable_count=$(( ${#snapshots[@]} - 1 ))
+    local deletable_count=$((${#snapshots[@]} - 1))
     [[ $deletable_count -le 0 ]] && return 0
 
     if [[ "$DRY_RUN" != "true" ]]; then
