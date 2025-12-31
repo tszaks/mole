@@ -111,40 +111,61 @@ scan_applications() {
 
     # First pass: quickly collect all valid app paths and bundle IDs (NO mdls calls)
     local -a app_data_tuples=()
-    while IFS= read -r -d '' app_path; do
-        if [[ ! -e "$app_path" ]]; then continue; fi
-
-        local app_name
-        app_name=$(basename "$app_path" .app)
-
-        # Skip nested apps (e.g. inside Wrapper/ or Frameworks/ of another app)
-        # Check if parent path component ends in .app (e.g. /Foo.app/Bar.app or /Foo.app/Contents/Bar.app)
-        # This prevents false positives like /Old.apps/Target.app
-        local parent_dir
-        parent_dir=$(dirname "$app_path")
-        if [[ "$parent_dir" == *".app" || "$parent_dir" == *".app/"* ]]; then
-            continue
-        fi
-
-        # Get bundle ID only (fast, no mdls calls in first pass)
-        local bundle_id="unknown"
-        if [[ -f "$app_path/Contents/Info.plist" ]]; then
-            bundle_id=$(defaults read "$app_path/Contents/Info.plist" CFBundleIdentifier 2> /dev/null || echo "unknown")
-        fi
-
-        # Skip system critical apps (input methods, system components)
-        if should_protect_from_uninstall "$bundle_id"; then
-            continue
-        fi
-
-        # Store tuple: app_path|app_name|bundle_id (display_name will be resolved in parallel later)
-        app_data_tuples+=("${app_path}|${app_name}|${bundle_id}")
-    done < <(
-        # Scan both system and user application directories
-        # Using maxdepth 3 to find apps in subdirectories (e.g., Adobe apps in /Applications/Adobe X/)
-        command find /Applications -name "*.app" -maxdepth 3 -print0 2> /dev/null
-        command find ~/Applications -name "*.app" -maxdepth 3 -print0 2> /dev/null
+    local -a app_dirs=(
+        "/Applications"
+        "$HOME/Applications"
     )
+    local vol_app_dir
+    local nullglob_was_set=0
+    shopt -q nullglob && nullglob_was_set=1
+    shopt -s nullglob
+    for vol_app_dir in /Volumes/*/Applications; do
+        [[ -d "$vol_app_dir" && -r "$vol_app_dir" ]] || continue
+        if [[ -d "/Applications" && "$vol_app_dir" -ef "/Applications" ]]; then
+            continue
+        fi
+        if [[ -d "$HOME/Applications" && "$vol_app_dir" -ef "$HOME/Applications" ]]; then
+            continue
+        fi
+        app_dirs+=("$vol_app_dir")
+    done
+    if [[ $nullglob_was_set -eq 0 ]]; then
+        shopt -u nullglob
+    fi
+
+    for app_dir in "${app_dirs[@]}"; do
+        if [[ ! -d "$app_dir" ]]; then continue; fi
+
+        while IFS= read -r -d '' app_path; do
+            if [[ ! -e "$app_path" ]]; then continue; fi
+
+            local app_name
+            app_name=$(basename "$app_path" .app)
+
+            # Skip nested apps (e.g. inside Wrapper/ or Frameworks/ of another app)
+            # Check if parent path component ends in .app (e.g. /Foo.app/Bar.app or /Foo.app/Contents/Bar.app)
+            # This prevents false positives like /Old.apps/Target.app
+            local parent_dir
+            parent_dir=$(dirname "$app_path")
+            if [[ "$parent_dir" == *".app" || "$parent_dir" == *".app/"* ]]; then
+                continue
+            fi
+
+            # Get bundle ID only (fast, no mdls calls in first pass)
+            local bundle_id="unknown"
+            if [[ -f "$app_path/Contents/Info.plist" ]]; then
+                bundle_id=$(defaults read "$app_path/Contents/Info.plist" CFBundleIdentifier 2> /dev/null || echo "unknown")
+            fi
+
+            # Skip system critical apps (input methods, system components)
+            if should_protect_from_uninstall "$bundle_id"; then
+                continue
+            fi
+
+            # Store tuple: app_path|app_name|bundle_id (display_name will be resolved in parallel later)
+            app_data_tuples+=("${app_path}|${app_name}|${bundle_id}")
+        done < <(command find "$app_dir" -name "*.app" -maxdepth 3 -print0 2> /dev/null)
+    done
 
     # Second pass: process each app with parallel size calculation
     local app_count=0

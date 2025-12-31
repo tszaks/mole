@@ -319,8 +319,14 @@ perform_security_fixes() {
 }
 
 cleanup_all() {
+    stop_inline_spinner 2> /dev/null || true
     stop_sudo_session
     cleanup_temp_files
+}
+
+handle_interrupt() {
+    cleanup_all
+    exit 130
 }
 
 main() {
@@ -340,7 +346,8 @@ main() {
         esac
     done
 
-    trap cleanup_all EXIT INT TERM
+    trap cleanup_all EXIT
+    trap handle_interrupt INT TERM
 
     if [[ -t 1 ]]; then
         clear

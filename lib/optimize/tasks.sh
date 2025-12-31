@@ -174,7 +174,17 @@ opt_saved_state_cleanup() {
 # Removed: opt_local_snapshots - Deletes user Time Machine recovery points, breaks backup continuity
 
 opt_fix_broken_configs() {
+    local spinner_started="false"
+    if [[ -t 1 ]]; then
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking preferences..."
+        spinner_started="true"
+    fi
+
     local broken_prefs=$(fix_broken_preferences)
+
+    if [[ "$spinner_started" == "true" ]]; then
+        stop_inline_spinner
+    fi
 
     if [[ $broken_prefs -gt 0 ]]; then
         opt_msg "Repaired $broken_prefs corrupted preference files"
@@ -324,7 +334,7 @@ opt_sqlite_vacuum() {
     fi
 
     if [[ $skipped -gt 0 ]]; then
-        echo -e "  ${GRAY}Already optimal for $skipped databases (size or integrity limits)${NC}"
+        opt_msg "Already optimal for $skipped databases"
     fi
 
     if [[ $timed_out -gt 0 ]]; then
@@ -520,8 +530,17 @@ opt_disk_permissions_repair() {
 #   1. Checks if default audio output is Bluetooth (precise)
 #   2. Falls back to Bluetooth + media app detection (compatibility)
 opt_bluetooth_reset() {
+    local spinner_started="false"
+    if [[ -t 1 ]]; then
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking Bluetooth..."
+        spinner_started="true"
+    fi
+
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         if has_bluetooth_hid_connected; then
+            if [[ "$spinner_started" == "true" ]]; then
+                stop_inline_spinner
+            fi
             opt_msg "Bluetooth already optimal"
             return 0
         fi
@@ -557,6 +576,9 @@ opt_bluetooth_reset() {
         fi
 
         if [[ "$bt_audio_active" == "true" ]]; then
+            if [[ "$spinner_started" == "true" ]]; then
+                stop_inline_spinner
+            fi
             opt_msg "Bluetooth already optimal"
             return 0
         fi
@@ -567,12 +589,21 @@ opt_bluetooth_reset() {
             if pgrep -x bluetoothd > /dev/null 2>&1; then
                 sudo pkill -KILL bluetoothd > /dev/null 2>&1 || true
             fi
+            if [[ "$spinner_started" == "true" ]]; then
+                stop_inline_spinner
+            fi
             opt_msg "Bluetooth module restarted"
             opt_msg "Connectivity issues resolved"
         else
+            if [[ "$spinner_started" == "true" ]]; then
+                stop_inline_spinner
+            fi
             opt_msg "Bluetooth already optimal"
         fi
     else
+        if [[ "$spinner_started" == "true" ]]; then
+            stop_inline_spinner
+        fi
         opt_msg "Bluetooth module restarted"
         opt_msg "Connectivity issues resolved"
     fi

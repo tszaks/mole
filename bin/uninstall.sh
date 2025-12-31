@@ -77,6 +77,23 @@ scan_applications() {
         "/Applications"
         "$HOME/Applications"
     )
+    local vol_app_dir
+    local nullglob_was_set=0
+    shopt -q nullglob && nullglob_was_set=1
+    shopt -s nullglob
+    for vol_app_dir in /Volumes/*/Applications; do
+        [[ -d "$vol_app_dir" && -r "$vol_app_dir" ]] || continue
+        if [[ -d "/Applications" && "$vol_app_dir" -ef "/Applications" ]]; then
+            continue
+        fi
+        if [[ -d "$HOME/Applications" && "$vol_app_dir" -ef "$HOME/Applications" ]]; then
+            continue
+        fi
+        app_dirs+=("$vol_app_dir")
+    done
+    if [[ $nullglob_was_set -eq 0 ]]; then
+        shopt -u nullglob
+    fi
 
     for app_dir in "${app_dirs[@]}"; do
         if [[ ! -d "$app_dir" ]]; then continue; fi

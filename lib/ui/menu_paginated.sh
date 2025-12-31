@@ -235,11 +235,13 @@ paginated_multi_select() {
 
         local cols="${COLUMNS:-}"
         [[ -z "$cols" ]] && cols=$(tput cols 2> /dev/null || echo 80)
+        [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
 
         _strip_ansi_len() {
             local text="$1"
             local stripped
-            stripped=$(printf "%s" "$text" | LC_ALL=C awk '{gsub(/\033\[[0-9;]*[A-Za-z]/,""); print}')
+            stripped=$(printf "%s" "$text" | LC_ALL=C awk '{gsub(/\033\[[0-9;]*[A-Za-z]/,""); print}' || true)
+            [[ -z "$stripped" ]] && stripped="$text"
             printf "%d" "${#stripped}"
         }
 
@@ -251,7 +253,10 @@ paginated_multi_select() {
             else
                 candidate="$line${sep}${s}"
             fi
-            if (($(_strip_ansi_len "$candidate") > cols)); then
+            local candidate_len
+            candidate_len=$(_strip_ansi_len "$candidate")
+            [[ -z "$candidate_len" ]] && candidate_len=0
+            if ((candidate_len > cols)); then
                 printf "%s%s\n" "$clear_line" "$line" >&2
                 line="$s"
             else
@@ -526,6 +531,7 @@ paginated_multi_select() {
                     # Normal: show full controls with dynamic reduction
                     local term_width="${COLUMNS:-}"
                     [[ -z "$term_width" ]] && term_width=$(tput cols 2> /dev/null || echo 80)
+                    [[ "$term_width" =~ ^[0-9]+$ ]] || term_width=80
 
                     # Level 0: Full controls
                     local -a _segs=("$nav" "$space_select" "$enter" "$refresh" "$search" "$sort_ctrl" "$order_ctrl" "$exit")
