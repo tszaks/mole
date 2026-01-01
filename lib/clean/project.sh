@@ -220,6 +220,36 @@ is_safe_project_artifact() {
     fi
     return 0
 }
+
+is_rails_project_root() {
+    local dir="$1"
+    [[ -f "$dir/config/application.rb" ]] || return 1
+    [[ -f "$dir/Gemfile" ]] || return 1
+    [[ -f "$dir/bin/rails" || -f "$dir/config/environment.rb" ]]
+}
+
+is_rails_vendor_dir() {
+    local path="$1"
+    local base
+    base=$(basename "$path")
+    [[ "$base" == "vendor" ]] || return 1
+    is_rails_project_root "$(dirname "$path")"
+}
+
+is_protected_purge_artifact() {
+    local path="$1"
+    local base
+    base=$(basename "$path")
+    case "$base" in
+        vendor)
+            if is_rails_vendor_dir "$path"; then
+                return 0
+            fi
+            ;;
+    esac
+    return 1
+}
+
 # Scan purge targets using fd (fast) or pruned find.
 scan_purge_targets() {
     local search_path="$1"
@@ -259,7 +289,7 @@ scan_purge_targets() {
             if is_safe_project_artifact "$item" "$search_path"; then
                 echo "$item"
             fi
-        done | filter_nested_artifacts > "$output_file"
+        done | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
     else
         # Pruned find avoids descending into heavy directories.
         local prune_args=()
@@ -287,7 +317,7 @@ scan_purge_targets() {
             if is_safe_project_artifact "$item" "$search_path"; then
                 echo "$item"
             fi
-        done | filter_nested_artifacts > "$output_file"
+        done | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
     fi
 }
 # Filter out nested artifacts (e.g. node_modules inside node_modules).
@@ -302,6 +332,14 @@ filter_nested_artifacts() {
             fi
         done
         if [[ "$is_nested" == "false" ]]; then
+            echo "$item"
+        fi
+    done
+}
+
+filter_protected_artifacts() {
+    while IFS= read -r item; do
+        if ! is_protected_purge_artifact "$item"; then
             echo "$item"
         fi
     done

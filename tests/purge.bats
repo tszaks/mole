@@ -101,6 +101,54 @@ setup() {
     [[ "$result" == "2" ]]
 }
 
+@test "scan_purge_targets: skips Rails vendor directory" {
+    mkdir -p "$HOME/www/rails-app/vendor/javascript"
+    mkdir -p "$HOME/www/rails-app/config"
+    touch "$HOME/www/rails-app/config/application.rb"
+    touch "$HOME/www/rails-app/Gemfile"
+    mkdir -p "$HOME/www/rails-app/bin"
+    touch "$HOME/www/rails-app/bin/rails"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/rails-app/vendor' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'SKIPPED'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "SKIPPED" ]]
+}
+
+@test "scan_purge_targets: keeps non-Rails vendor directory" {
+    mkdir -p "$HOME/www/php-app/vendor"
+    touch "$HOME/www/php-app/composer.json"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/php-app/vendor' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'MISSING'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "FOUND" ]]
+}
+
 @test "is_recently_modified: detects recent projects" {
     mkdir -p "$HOME/www/project/node_modules"
     touch "$HOME/www/project/package.json"
