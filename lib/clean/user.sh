@@ -13,6 +13,86 @@ clean_user_essentials() {
         safe_clean ~/.Trash/* "Trash"
     fi
 }
+
+# Remove old Google Chrome versions while keeping Current.
+clean_chrome_old_versions() {
+    local -a app_paths=(
+        "/Applications/Google Chrome.app"
+        "$HOME/Applications/Google Chrome.app"
+    )
+
+    # Use -f to match Chrome Helper processes as well
+    if pgrep -f "Google Chrome" > /dev/null 2>&1; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Google Chrome running · old versions cleanup skipped"
+        return 0
+    fi
+
+    local cleaned_count=0
+    local total_size=0
+    local cleaned_any=false
+
+    for app_path in "${app_paths[@]}"; do
+        [[ -d "$app_path" ]] || continue
+
+        local versions_dir="$app_path/Contents/Frameworks/Google Chrome Framework.framework/Versions"
+        [[ -d "$versions_dir" ]] || continue
+
+        local current_link="$versions_dir/Current"
+        [[ -L "$current_link" ]] || continue
+
+        local current_version
+        current_version=$(readlink "$current_link" 2> /dev/null || true)
+        current_version="${current_version##*/}"
+        [[ -n "$current_version" ]] || continue
+
+        local -a old_versions=()
+        local dir name
+        for dir in "$versions_dir"/*; do
+            [[ -d "$dir" ]] || continue
+            name=$(basename "$dir")
+            [[ "$name" == "Current" ]] && continue
+            [[ "$name" == "$current_version" ]] && continue
+            if is_path_whitelisted "$dir"; then
+                continue
+            fi
+            old_versions+=("$dir")
+        done
+
+        if [[ ${#old_versions[@]} -eq 0 ]]; then
+            continue
+        fi
+
+        for dir in "${old_versions[@]}"; do
+            local size_kb
+            size_kb=$(get_path_size_kb "$dir" || echo 0)
+            size_kb="${size_kb:-0}"
+            total_size=$((total_size + size_kb))
+            ((cleaned_count++))
+            cleaned_any=true
+            if [[ "$DRY_RUN" != "true" ]]; then
+                if has_sudo_session; then
+                    safe_sudo_remove "$dir" > /dev/null 2>&1 || true
+                else
+                    safe_remove "$dir" true > /dev/null 2>&1 || true
+                fi
+            fi
+        done
+    done
+
+    if [[ "$cleaned_any" == "true" ]]; then
+        local size_human
+        size_human=$(bytes_to_human "$((total_size * 1024))")
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Chrome old versions ${YELLOW}(${cleaned_count} dirs, $size_human dry)${NC}"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Chrome old versions ${GREEN}(${cleaned_count} dirs, $size_human)${NC}"
+        fi
+        ((files_cleaned += cleaned_count))
+        ((total_size_cleaned += total_size))
+        ((total_items++))
+        note_activity
+    fi
+}
 scan_external_volumes() {
     [[ -d "/Volumes" ]] || return 0
     local -a candidate_volumes=()
@@ -243,6 +323,7 @@ clean_browsers() {
     safe_clean ~/Library/Caches/com.kagi.kagimacOS/* "Orion cache"
     safe_clean ~/Library/Caches/zen/* "Zen cache"
     safe_clean ~/Library/Application\ Support/Firefox/Profiles/*/cache2/* "Firefox profile cache"
+    clean_chrome_old_versions
 }
 # Cloud storage caches.
 clean_cloud_storage() {
