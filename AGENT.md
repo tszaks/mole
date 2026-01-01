@@ -13,8 +13,11 @@ Use this file as the single source of truth for how to work on Mole.
 - Comments must be English, concise, and intent-focused.
   - Use comments for safety boundaries, non-obvious logic, or flow context.
   - Entry scripts start with ~3 short lines describing purpose/behavior.
+- Shell code must use shell-only helpers (no Python).
+- Go code must use Go-only helpers (no Python).
 - Do not remove installer flags `--prefix`/`--config` (update flow depends on them).
 - Do not commit or submit code changes unless explicitly requested.
+- You may use `gh` to access GitHub information when needed.
 
 ## Architecture
 

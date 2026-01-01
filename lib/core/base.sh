@@ -171,7 +171,12 @@ detect_architecture() {
 # Get free disk space on root volume
 # Returns: human-readable string (e.g., "100G")
 get_free_space() {
-    command df -h / | awk 'NR==2 {print $4}'
+    local target="/"
+    if [[ -d "/System/Volumes/Data" ]]; then
+        target="/System/Volumes/Data"
+    fi
+
+    df -h "$target" | awk 'NR==2 {print $4}'
 }
 
 # Get Darwin kernel major version (e.g., 24 for 24.2.0)
