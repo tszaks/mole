@@ -221,6 +221,7 @@ is_safe_project_artifact() {
     return 0
 }
 
+# Detect if directory is a Rails project root
 is_rails_project_root() {
     local dir="$1"
     [[ -f "$dir/config/application.rb" ]] || return 1
@@ -228,25 +229,58 @@ is_rails_project_root() {
     [[ -f "$dir/bin/rails" || -f "$dir/config/environment.rb" ]]
 }
 
-is_rails_vendor_dir() {
-    local path="$1"
-    local base
-    base=$(basename "$path")
-    [[ "$base" == "vendor" ]] || return 1
-    is_rails_project_root "$(dirname "$path")"
+# Detect if directory is a Go project root
+is_go_project_root() {
+    local dir="$1"
+    [[ -f "$dir/go.mod" ]]
 }
 
+# Detect if directory is a PHP Composer project root
+is_php_project_root() {
+    local dir="$1"
+    [[ -f "$dir/composer.json" ]]
+}
+
+# Check if a vendor directory should be protected from purge
+# Strategy: Only clean PHP Composer vendor, protect all others
+is_protected_vendor_dir() {
+    local path="$1"
+    local parent_dir
+    parent_dir=$(dirname "$path")
+
+    # PHP Composer vendor can be safely regenerated with 'composer install'
+    # Do NOT protect it (return 1 = not protected = can be cleaned)
+    if is_php_project_root "$parent_dir"; then
+        return 1
+    fi
+
+    # Rails vendor (importmap dependencies) - should be protected
+    if is_rails_project_root "$parent_dir"; then
+        return 0
+    fi
+
+    # Go vendor (optional vendoring) - protect to avoid accidental deletion
+    if is_go_project_root "$parent_dir"; then
+        return 0
+    fi
+
+    # Unknown vendor type - protect by default (conservative approach)
+    return 0
+}
+
+# Check if an artifact should be protected from purge
 is_protected_purge_artifact() {
     local path="$1"
     local base
     base=$(basename "$path")
+
     case "$base" in
         vendor)
-            if is_rails_vendor_dir "$path"; then
-                return 0
-            fi
+            is_protected_vendor_dir "$path"
+            return $?
             ;;
     esac
+
     return 1
 }
 

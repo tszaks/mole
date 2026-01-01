@@ -127,7 +127,7 @@ setup() {
     [[ "$result" == "SKIPPED" ]]
 }
 
-@test "scan_purge_targets: keeps non-Rails vendor directory" {
+@test "scan_purge_targets: cleans PHP Composer vendor directory" {
     mkdir -p "$HOME/www/php-app/vendor"
     touch "$HOME/www/php-app/composer.json"
 
@@ -147,6 +147,52 @@ setup() {
     rm -f "$scan_output"
 
     [[ "$result" == "FOUND" ]]
+}
+
+@test "scan_purge_targets: skips Go vendor directory" {
+    mkdir -p "$HOME/www/go-app/vendor"
+    touch "$HOME/www/go-app/go.mod"
+    touch "$HOME/www/go-app/go.sum"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/go-app/vendor' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'SKIPPED'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "SKIPPED" ]]
+}
+
+@test "scan_purge_targets: skips unknown vendor directory" {
+    # Create a vendor directory without any project file
+    mkdir -p "$HOME/www/unknown-app/vendor"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/unknown-app/vendor' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'SKIPPED'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    # Unknown vendor should be protected (conservative approach)
+    [[ "$result" == "SKIPPED" ]]
 }
 
 @test "is_recently_modified: detects recent projects" {
