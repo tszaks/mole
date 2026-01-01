@@ -242,9 +242,13 @@ is_php_project_root() {
 }
 
 # Check if a vendor directory should be protected from purge
+# Expects path to be a vendor directory (basename == vendor)
 # Strategy: Only clean PHP Composer vendor, protect all others
 is_protected_vendor_dir() {
     local path="$1"
+    local base
+    base=$(basename "$path")
+    [[ "$base" == "vendor" ]] || return 1
     local parent_dir
     parent_dir=$(dirname "$path")
 
