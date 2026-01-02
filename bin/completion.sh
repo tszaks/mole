@@ -37,7 +37,7 @@ if [[ $# -eq 0 ]]; then
     # Detect current shell
     current_shell="${SHELL##*/}"
     if [[ -z "$current_shell" ]]; then
-        current_shell="$(ps -p "$PPID" -o comm= 2>/dev/null | awk '{print $1}')"
+        current_shell="$(ps -p "$PPID" -o comm= 2> /dev/null | awk '{print $1}')"
     fi
 
     completion_name=""
@@ -72,9 +72,9 @@ if [[ $# -eq 0 ]]; then
     esac
 
     if [[ -z "$completion_name" ]]; then
-        if [[ -f "$config_file" ]] && grep -Eq "(^# Mole shell completion$|(mole|mo)[[:space:]]+completion)" "$config_file" 2>/dev/null; then
+        if [[ -f "$config_file" ]] && grep -Eq "(^# Mole shell completion$|(mole|mo)[[:space:]]+completion)" "$config_file" 2> /dev/null; then
             original_mode=""
-            original_mode="$(stat -f '%Mp%Lp' "$config_file" 2>/dev/null || true)"
+            original_mode="$(stat -f '%Mp%Lp' "$config_file" 2> /dev/null || true)"
             temp_file="$(mktemp)"
             grep -Ev "(^# Mole shell completion$|(mole|mo)[[:space:]]+completion)" "$config_file" > "$temp_file" || true
             mv "$temp_file" "$config_file"
@@ -89,9 +89,9 @@ if [[ $# -eq 0 ]]; then
     fi
 
     # Check if already installed and normalize to latest line
-    if [[ -f "$config_file" ]] && grep -Eq "(mole|mo)[[:space:]]+completion" "$config_file" 2>/dev/null; then
+    if [[ -f "$config_file" ]] && grep -Eq "(mole|mo)[[:space:]]+completion" "$config_file" 2> /dev/null; then
         original_mode=""
-        original_mode="$(stat -f '%Mp%Lp' "$config_file" 2>/dev/null || true)"
+        original_mode="$(stat -f '%Mp%Lp' "$config_file" 2> /dev/null || true)"
         temp_file="$(mktemp)"
         grep -Ev "(^# Mole shell completion$|(mole|mo)[[:space:]]+completion)" "$config_file" > "$temp_file" || true
         mv "$temp_file" "$config_file"
@@ -124,8 +124,7 @@ if [[ $# -eq 0 ]]; then
             echo -e "${YELLOW}Cancelled${NC}"
             exit 0
             ;;
-        "" | $'\n' | $'\r' | [Yy])
-            ;;
+        "" | $'\n' | $'\r' | [Yy]) ;;
         *)
             log_error "Invalid key"
             exit 1
@@ -141,7 +140,7 @@ if [[ $# -eq 0 ]]; then
     # Remove previous Mole completion lines to avoid duplicates
     if [[ -f "$config_file" ]]; then
         original_mode=""
-        original_mode="$(stat -f '%Mp%Lp' "$config_file" 2>/dev/null || true)"
+        original_mode="$(stat -f '%Mp%Lp' "$config_file" 2> /dev/null || true)"
         temp_file="$(mktemp)"
         grep -Ev "(^# Mole shell completion$|(mole|mo)[[:space:]]+completion)" "$config_file" > "$temp_file" || true
         mv "$temp_file" "$config_file"
