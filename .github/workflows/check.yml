@@ -1,4 +1,4 @@
-name: Quality
+name: Check
 
 on:
   push:
@@ -10,18 +10,18 @@ permissions:
 
 jobs:
   format:
-    name: Auto Format
+    name: Format
     runs-on: macos-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref) || github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Homebrew
-        uses: actions/cache@v4
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: |
             ~/Library/Caches/Homebrew
@@ -35,19 +35,16 @@ jobs:
         run: brew install shfmt shellcheck
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v5
         with:
-          go-version: '1.24'
+          go-version: '1.24.6'
 
       - name: Format all code
         run: |
-          echo "Formatting shell scripts..."
-          ./scripts/format.sh
-          echo "Formatting Go code..."
-          gofmt -w ./cmd
-          echo "✓ All code formatted"
+          ./scripts/check.sh --format
 
       - name: Commit formatting changes
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           git config user.name "Tw93"
           git config user.email "tw93@qq.com"
@@ -61,18 +58,18 @@ jobs:
           fi
 
   quality:
-    name: Code Quality
+    name: Check
     runs-on: macos-latest
     needs: format
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref) || github.ref }}
 
       - name: Cache Homebrew
-        uses: actions/cache@v4
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
         with:
           path: |
             ~/Library/Caches/Homebrew
@@ -85,22 +82,5 @@ jobs:
       - name: Install tools
         run: brew install shfmt shellcheck
 
-      - name: ShellCheck
-        run: |
-          echo "Running ShellCheck on all shell scripts..."
-          shellcheck mole
-          shellcheck bin/*.sh
-          find lib -name "*.sh" -exec shellcheck {} +
-          echo "✓ ShellCheck passed"
-
-      - name: Syntax check
-        run: |
-          echo "Checking Bash syntax..."
-          bash -n mole
-          for script in bin/*.sh; do
-            bash -n "$script"
-          done
-          find lib -name "*.sh" | while read -r script; do
-            bash -n "$script"
-          done
-          echo "✓ All scripts have valid syntax"
+      - name: Run check script
+        run: ./scripts/check.sh --no-format
