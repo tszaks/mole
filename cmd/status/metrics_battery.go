@@ -32,9 +32,9 @@ func collectBatteries() (batts []BatteryStatus, err error) {
 	// macOS: pmset for real-time percentage/status.
 	if runtime.GOOS == "darwin" && commandExists("pmset") {
 		if out, err := runCmd(context.Background(), "pmset", "-g", "batt"); err == nil {
-			// Health/cycles from cached system_profiler.
-			health, cycles := getCachedPowerData()
-			if batts := parsePMSet(out, health, cycles); len(batts) > 0 {
+			// Health/cycles/capacity from cached system_profiler.
+			health, cycles, capacity := getCachedPowerData()
+			if batts := parsePMSet(out, health, cycles, capacity); len(batts) > 0 {
 				return batts, nil
 			}
 		}
@@ -67,7 +67,7 @@ func collectBatteries() (batts []BatteryStatus, err error) {
 	return nil, errors.New("no battery data found")
 }
 
-func parsePMSet(raw string, health string, cycles int) []BatteryStatus {
+func parsePMSet(raw string, health string, cycles int, capacity int) []BatteryStatus {
 	lines := strings.Split(raw, "\n")
 	var out []BatteryStatus
 	var timeLeft string
@@ -115,16 +115,17 @@ func parsePMSet(raw string, health string, cycles int) []BatteryStatus {
 			TimeLeft:   timeLeft,
 			Health:     health,
 			CycleCount: cycles,
+			Capacity:   capacity,
 		})
 	}
 	return out
 }
 
-// getCachedPowerData returns condition and cycles from cached system_profiler.
-func getCachedPowerData() (health string, cycles int) {
+// getCachedPowerData returns condition, cycles, and capacity from cached system_profiler.
+func getCachedPowerData() (health string, cycles int, capacity int) {
 	out := getSystemPowerOutput()
 	if out == "" {
-		return "", 0
+		return "", 0, 0
 	}
 
 	lines := strings.Split(out, "\n")
@@ -140,8 +141,15 @@ func getCachedPowerData() (health string, cycles int) {
 				health = strings.TrimSpace(after)
 			}
 		}
+		if strings.Contains(lower, "maximum capacity") {
+			if _, after, found := strings.Cut(line, ":"); found {
+				capacityStr := strings.TrimSpace(after)
+				capacityStr = strings.TrimSuffix(capacityStr, "%")
+				capacity, _ = strconv.Atoi(strings.TrimSpace(capacityStr))
+			}
+		}
 	}
-	return health, cycles
+	return health, cycles, capacity
 }
 
 func getSystemPowerOutput() string {
