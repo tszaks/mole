@@ -56,21 +56,6 @@ readonly MOLE_MAX_DS_STORE_FILES=500     # Max .DS_Store files to clean per scan
 readonly MOLE_MAX_ORPHAN_ITERATIONS=100  # Max iterations for orphaned app data scan
 
 # ============================================================================
-# Seasonal Functions
-# ============================================================================
-is_christmas_season() {
-    local month day
-    month=$(date +%-m)
-    day=$(date +%-d)
-
-    # December 10 to December 31
-    if [[ $month -eq 12 && $day -ge 10 && $day -le 31 ]]; then
-        return 0
-    fi
-    return 1
-}
-
-# ============================================================================
 # Whitelist Configuration
 # ============================================================================
 readonly FINDER_METADATA_SENTINEL="FINDER_METADATA"

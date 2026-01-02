@@ -129,24 +129,9 @@ animate_mole_intro() {
 
     local -a mole_lines=()
 
-    if is_christmas_season; then
-        while IFS= read -r line; do
-            mole_lines+=("$line")
-        done << 'EOF'
-       *
-      /o\
-     {/\_/\}
-   ____/ o o \
- /~____  =o= /
-(______)__m_m)
-        /   \
-     __/ /\ \__
-    /__/  \__\_
-EOF
-    else
-        while IFS= read -r line; do
-            mole_lines+=("$line")
-        done << 'EOF'
+    while IFS= read -r line; do
+        mole_lines+=("$line")
+    done << 'EOF'
         /\_/\
    ____/ o o \
  /~____  =o= /
@@ -155,37 +140,20 @@ EOF
      __/ /\ \__
     /__/  \__\_
 EOF
-    fi
 
     local idx
-    local hat_color="${RED}"
-    local body_cutoff
+    local body_cutoff=4
     local body_color="${PURPLE}"
     local ground_color="${GREEN}"
 
-    if is_christmas_season; then
-        body_cutoff=6
-        for idx in "${!mole_lines[@]}"; do
-            if ((idx < 3)); then
-                printf "%s\n" "${hat_color}${mole_lines[$idx]}${NC}"
-            elif ((idx < body_cutoff)); then
-                printf "%s\n" "${body_color}${mole_lines[$idx]}${NC}"
-            else
-                printf "%s\n" "${ground_color}${mole_lines[$idx]}${NC}"
-            fi
-            sleep 0.1
-        done
-    else
-        body_cutoff=4
-        for idx in "${!mole_lines[@]}"; do
-            if ((idx < body_cutoff)); then
-                printf "%s\n" "${body_color}${mole_lines[$idx]}${NC}"
-            else
-                printf "%s\n" "${ground_color}${mole_lines[$idx]}${NC}"
-            fi
-            sleep 0.1
-        done
-    fi
+    for idx in "${!mole_lines[@]}"; do
+        if ((idx < body_cutoff)); then
+            printf "%s\n" "${body_color}${mole_lines[$idx]}${NC}"
+        else
+            printf "%s\n" "${ground_color}${mole_lines[$idx]}${NC}"
+        fi
+        sleep 0.1
+    done
 
     printf '\n'
     sleep 0.5
