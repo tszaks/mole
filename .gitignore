@@ -51,10 +51,9 @@ GEMINI.md
 # Go build artifacts (development)
 cmd/analyze/analyze
 cmd/status/status
-/status
-/analyze
-mole-analyze
-# Note: bin/analyze-go and bin/status-go are released binaries and should be tracked
+# Go binaries
+bin/analyze-go
+bin/status-go
 bin/analyze-darwin-*
 bin/status-darwin-*
 
