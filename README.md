@@ -51,6 +51,7 @@ mo status                    # Live system health dashboard
 mo purge                     # Clean project build artifacts
 
 mo touchid                   # Configure Touch ID for sudo
+mo completion                # Setup shell tab completion
 mo update                    # Update Mole
 mo remove                    # Remove Mole from system
 mo --help                    # Show help
@@ -70,6 +71,7 @@ mo purge --paths             # Configure project scan directories
 - **Safety**: Built with strict protections. See our [Security Audit](SECURITY_AUDIT.md). Preview changes with `mo clean --dry-run`.
 - **Whitelist**: Manage protected paths with `mo clean --whitelist`.
 - **Touch ID**: Enable Touch ID for sudo commands by running `mo touchid`.
+- **Shell Completion**: Enable tab completion by running `mo completion` (auto-detect and install).
 - **Navigation**: Supports standard arrow keys and Vim bindings (`h/j/k/l`).
 - **Debug**: View detailed logs by appending the `--debug` flag (e.g., `mo clean --debug`).
 

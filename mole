@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "$SCRIPT_DIR/lib/core/common.sh"
+source "$SCRIPT_DIR/lib/core/commands.sh"
 
 trap cleanup_temp_files EXIT INT TERM
 
@@ -238,17 +239,14 @@ show_help() {
     echo
     printf "%s%s%s\n" "$BLUE" "COMMANDS" "$NC"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo" "$NC" "Main menu"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo clean" "$NC" "Free up disk space"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo uninstall" "$NC" "Remove apps completely"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize" "$NC" "Check and maintain system"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo analyze" "$NC" "Explore disk usage"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo status" "$NC" "Monitor system health"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo purge" "$NC" "Remove old project artifacts"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo touchid" "$NC" "Configure Touch ID for sudo"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo update" "$NC" "Update to latest version"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo remove" "$NC" "Remove Mole from system"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo --help" "$NC" "Show help"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo --version" "$NC" "Show version"
+    for entry in "${MOLE_COMMANDS[@]}"; do
+        local name="${entry%%:*}"
+        local desc="${entry#*:}"
+        local display="mo $name"
+        [[ "$name" == "help" ]] && display="mo --help"
+        [[ "$name" == "version" ]] && display="mo --version"
+        printf "  %s%-28s%s %s\n" "$GREEN" "$display" "$NC" "$desc"
+    done
     echo
     printf "  %s%-28s%s %s\n" "$GREEN" "mo clean --dry-run" "$NC" "Preview cleanup"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo clean --whitelist" "$NC" "Manage protected caches"
@@ -256,8 +254,6 @@ show_help() {
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --dry-run" "$NC" "Preview optimization"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --whitelist" "$NC" "Manage protected items"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --paths" "$NC" "Configure scan directories"
-    echo
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo completion" "$NC" "Configure shell completion"
     echo
     printf "%s%s%s\n" "$BLUE" "OPTIONS" "$NC"
     printf "  %s%-28s%s %s\n" "$GREEN" "--debug" "$NC" "Show detailed operation logs"
@@ -786,6 +782,9 @@ main() {
             ;;
         "touchid")
             exec "$SCRIPT_DIR/bin/touchid.sh" "${args[@]:1}"
+            ;;
+        "completion")
+            exec "$SCRIPT_DIR/bin/completion.sh" "${args[@]:1}"
             ;;
         "update")
             update_mole
