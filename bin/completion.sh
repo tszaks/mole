@@ -51,14 +51,17 @@ if [[ $# -eq 0 ]]; then
         bash)
             config_file="${HOME}/.bashrc"
             [[ -f "${HOME}/.bash_profile" ]] && config_file="${HOME}/.bash_profile"
+            # shellcheck disable=SC2016
             completion_line='if output="$('"$completion_name"' completion bash 2>/dev/null)"; then eval "$output"; fi'
             ;;
         zsh)
             config_file="${HOME}/.zshrc"
+            # shellcheck disable=SC2016
             completion_line='if output="$('"$completion_name"' completion zsh 2>/dev/null)"; then eval "$output"; fi'
             ;;
         fish)
             config_file="${HOME}/.config/fish/config.fish"
+            # shellcheck disable=SC2016
             completion_line='set -l output ('"$completion_name"' completion fish 2>/dev/null); and echo "$output" | source'
             ;;
         *)
@@ -95,9 +98,11 @@ if [[ $# -eq 0 ]]; then
         if [[ -n "$original_mode" ]]; then
             chmod "$original_mode" "$config_file" 2> /dev/null || true
         fi
-        echo "" >> "$config_file"
-        echo "# Mole shell completion" >> "$config_file"
-        echo "$completion_line" >> "$config_file"
+        {
+            echo ""
+            echo "# Mole shell completion"
+            echo "$completion_line"
+        } >> "$config_file"
         echo ""
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Shell completion updated in $config_file"
         echo ""
@@ -146,9 +151,11 @@ if [[ $# -eq 0 ]]; then
     fi
 
     # Add completion line
-    echo "" >> "$config_file"
-    echo "# Mole shell completion" >> "$config_file"
-    echo "$completion_line" >> "$config_file"
+    {
+        echo ""
+        echo "# Mole shell completion"
+        echo "$completion_line"
+    } >> "$config_file"
 
     echo -e "${GREEN}${ICON_SUCCESS}${NC} Completion added to $config_file"
     echo ""
@@ -201,6 +208,7 @@ EOF
         emit_fish_completions mo
         printf '\nfunction __fish_mole_no_subcommand\n'
         printf '    for i in (commandline -opc)\n'
+        # shellcheck disable=SC2016
         printf '        if contains -- $i %s\n' "$command_words"
         printf '            return 1\n'
         printf '        end\n'
