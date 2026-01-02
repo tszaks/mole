@@ -23,11 +23,11 @@ clean_dev_npm() {
     # Clean pnpm store cache
     local pnpm_default_store=~/Library/pnpm/store
     # Check if pnpm is actually usable (not just Corepack shim)
-    if command -v pnpm > /dev/null 2>&1 && env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm --version > /dev/null 2>&1; then
-        clean_tool_cache "pnpm cache" env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm store prune
+    if command -v pnpm > /dev/null 2>&1 && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm --version > /dev/null 2>&1; then
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "pnpm cache" pnpm store prune
         local pnpm_store_path
         start_section_spinner "Checking store path..."
-        pnpm_store_path=$(run_with_timeout 2 env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm store path 2> /dev/null) || pnpm_store_path=""
+        pnpm_store_path=$(COREPACK_ENABLE_DOWNLOAD_PROMPT=0 run_with_timeout 2 pnpm store path 2> /dev/null) || pnpm_store_path=""
         stop_section_spinner
         if [[ -n "$pnpm_store_path" && "$pnpm_store_path" != "$pnpm_default_store" ]]; then
             safe_clean "$pnpm_default_store"/* "Orphaned pnpm store"
