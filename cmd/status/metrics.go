@@ -83,7 +83,8 @@ type MemoryStatus struct {
 	UsedPercent float64
 	SwapUsed    uint64
 	SwapTotal   uint64
-	Pressure    string // macOS memory pressure: normal/warn/critical
+	Cached      uint64  // File cache that can be freed if needed
+	Pressure    string  // macOS memory pressure: normal/warn/critical
 }
 
 type DiskStatus struct {
@@ -115,6 +116,7 @@ type BatteryStatus struct {
 	TimeLeft   string
 	Health     string
 	CycleCount int
+	Capacity   int // Maximum capacity percentage (e.g., 85 means 85% of original)
 }
 
 type ThermalStatus struct {

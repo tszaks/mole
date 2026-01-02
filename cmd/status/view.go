@@ -129,7 +129,7 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 		infoParts = append(infoParts, m.Hardware.OSVersion)
 	}
 
-	headerLine := title + "  " + scoreText + "  " + subtleStyle.Render(strings.Join(infoParts, " · "))
+	headerLine := title + "  " + scoreText + "  " + strings.Join(infoParts, " · ")
 
 	mole := getMoleFrame(animFrame, termWidth)
 
@@ -181,14 +181,6 @@ func renderCPUCard(cpu CPUStatus) cardData {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("Total  %s  %5.1f%%", progressBar(cpu.Usage), cpu.Usage))
 
-	if cpu.PCoreCount > 0 && cpu.ECoreCount > 0 {
-		lines = append(lines, subtleStyle.Render(fmt.Sprintf("Load   %.2f / %.2f / %.2f  (%dP+%dE)",
-			cpu.Load1, cpu.Load5, cpu.Load15, cpu.PCoreCount, cpu.ECoreCount)))
-	} else {
-		lines = append(lines, subtleStyle.Render(fmt.Sprintf("%.2f / %.2f / %.2f  (%d cores)",
-			cpu.Load1, cpu.Load5, cpu.Load15, cpu.LogicalCPU)))
-	}
-
 	if cpu.PerCoreEstimated {
 		lines = append(lines, subtleStyle.Render("Per-core data unavailable (using averaged load)"))
 	} else if len(cpu.PerCore) > 0 {
@@ -212,6 +204,15 @@ func renderCPUCard(cpu CPUStatus) cardData {
 		}
 	}
 
+	// Load line at the end
+	if cpu.PCoreCount > 0 && cpu.ECoreCount > 0 {
+		lines = append(lines, fmt.Sprintf("Load   %.2f / %.2f / %.2f (%dP+%dE)",
+			cpu.Load1, cpu.Load5, cpu.Load15, cpu.PCoreCount, cpu.ECoreCount))
+	} else {
+		lines = append(lines, fmt.Sprintf("Load   %.2f / %.2f / %.2f (%d cores)",
+			cpu.Load1, cpu.Load5, cpu.Load15, cpu.LogicalCPU))
+	}
+
 	return cardData{icon: iconCPU, title: "CPU", lines: lines}
 }
 
@@ -226,9 +227,9 @@ func renderGPUCard(gpus []GPUStatus) cardData {
 			}
 			coreInfo := ""
 			if g.CoreCount > 0 {
-				coreInfo = fmt.Sprintf("  (%d cores)", g.CoreCount)
+				coreInfo = fmt.Sprintf(" (%d cores)", g.CoreCount)
 			}
-			lines = append(lines, subtleStyle.Render(g.Name+coreInfo))
+			lines = append(lines, g.Name+coreInfo)
 			if g.Usage < 0 {
 				lines = append(lines, subtleStyle.Render("Run with sudo for usage metrics"))
 			}
@@ -238,22 +239,48 @@ func renderGPUCard(gpus []GPUStatus) cardData {
 }
 
 func renderMemoryCard(mem MemoryStatus) cardData {
+	// Check if swap is being used (or at least allocated).
+	hasSwap := mem.SwapTotal > 0 || mem.SwapUsed > 0
+
 	var lines []string
+	// Line 1: Used
 	lines = append(lines, fmt.Sprintf("Used   %s  %5.1f%%", progressBar(mem.UsedPercent), mem.UsedPercent))
-	lines = append(lines, subtleStyle.Render(fmt.Sprintf("%s / %s total", humanBytes(mem.Used), humanBytes(mem.Total))))
-	available := mem.Total - mem.Used
+
+	// Line 2: Free
 	freePercent := 100 - mem.UsedPercent
 	lines = append(lines, fmt.Sprintf("Free   %s  %5.1f%%", progressBar(freePercent), freePercent))
-	lines = append(lines, subtleStyle.Render(fmt.Sprintf("%s available", humanBytes(available))))
-	if mem.SwapTotal > 0 || mem.SwapUsed > 0 {
+
+	if hasSwap {
+		// Layout with Swap:
+		// 3. Swap (progress bar + text)
+		// 4. Total
+		// 5. Avail
 		var swapPercent float64
 		if mem.SwapTotal > 0 {
 			swapPercent = (float64(mem.SwapUsed) / float64(mem.SwapTotal)) * 100.0
 		}
-		swapText := subtleStyle.Render(fmt.Sprintf("(%s/%s)", humanBytesCompact(mem.SwapUsed), humanBytesCompact(mem.SwapTotal)))
+		swapText := fmt.Sprintf("(%s/%s)", humanBytesCompact(mem.SwapUsed), humanBytesCompact(mem.SwapTotal))
 		lines = append(lines, fmt.Sprintf("Swap   %s  %5.1f%% %s", progressBar(swapPercent), swapPercent, swapText))
+
+		lines = append(lines, fmt.Sprintf("Total  %s / %s", humanBytes(mem.Used), humanBytes(mem.Total)))
+		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(mem.Total-mem.Used))) // Simplified avail logic for consistency
 	} else {
-		lines = append(lines, fmt.Sprintf("Swap   %s", subtleStyle.Render("not in use")))
+		// Layout without Swap:
+		// 3. Total
+		// 4. Cached (if > 0)
+		// 5. Avail
+		lines = append(lines, fmt.Sprintf("Total  %s / %s", humanBytes(mem.Used), humanBytes(mem.Total)))
+
+		if mem.Cached > 0 {
+			lines = append(lines, fmt.Sprintf("Cached %s", humanBytes(mem.Cached)))
+		}
+		// Calculate available if not provided directly, or use Total-Used as proxy if needed,
+		// but typically available is more nuanced. Using what we have.
+		// Re-calculating available based on logic if needed, but mem.Total - mem.Used is often "Avail"
+		// in simple terms for this view or we could use the passed definition.
+		// Original code calculated: available := mem.Total - mem.Used
+		available := mem.Total - mem.Used
+		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(available)))
 	}
 	// Memory pressure status.
 	if mem.Pressure != "" {
@@ -400,7 +427,7 @@ func renderNetworkCard(netStats []NetworkStatus, proxy ProxyStatus) cardData {
 			infoParts = append(infoParts, primaryIP)
 		}
 		if len(infoParts) > 0 {
-			lines = append(lines, subtleStyle.Render(strings.Join(infoParts, " · ")))
+			lines = append(lines, strings.Join(infoParts, " · "))
 		}
 	}
 	return cardData{icon: iconNetwork, title: "Network", lines: lines}
@@ -436,6 +463,17 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 			percentText = dangerStyle.Render(percentText)
 		}
 		lines = append(lines, fmt.Sprintf("Level  %s  %s", batteryProgressBar(b.Percent), percentText))
+
+		// Add capacity line if available.
+		if b.Capacity > 0 {
+			capacityText := fmt.Sprintf("%5d%%", b.Capacity)
+			if b.Capacity < 70 {
+				capacityText = dangerStyle.Render(capacityText)
+			} else if b.Capacity < 85 {
+				capacityText = warnStyle.Render(capacityText)
+			}
+			lines = append(lines, fmt.Sprintf("Health %s  %s", batteryProgressBar(float64(b.Capacity)), capacityText))
+		}
 
 		statusIcon := ""
 		statusStyle := subtleStyle
@@ -473,13 +511,13 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 		}
 
 		if thermal.CPUTemp > 0 {
-			tempStyle := subtleStyle
+			tempText := fmt.Sprintf("%.0f°C", thermal.CPUTemp)
 			if thermal.CPUTemp > 80 {
-				tempStyle = dangerStyle
+				tempText = dangerStyle.Render(tempText)
 			} else if thermal.CPUTemp > 60 {
-				tempStyle = warnStyle
+				tempText = warnStyle.Render(tempText)
 			}
-			healthParts = append(healthParts, tempStyle.Render(fmt.Sprintf("%.0f°C", thermal.CPUTemp)))
+			healthParts = append(healthParts, tempText)
 		}
 
 		if thermal.FanSpeed > 0 {
@@ -487,7 +525,7 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 		}
 
 		if len(healthParts) > 0 {
-			lines = append(lines, subtleStyle.Render(strings.Join(healthParts, " · ")))
+			lines = append(lines, strings.Join(healthParts, " · "))
 		}
 	}
 
