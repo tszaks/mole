@@ -94,8 +94,8 @@ setup() {
 @test "completion zsh includes command descriptions" {
     run "$PROJECT_ROOT/bin/completion.sh" zsh
     [ "$status" -eq 0 ]
-    [[ "$output" == *"optimize:Free up disk space"* ]]
-    [[ "$output" == *"clean:Remove apps completely"* ]]
+    [[ "$output" == *"optimize:Check and maintain system"* ]]
+    [[ "$output" == *"clean:Free up disk space"* ]]
 }
 
 @test "completion fish generates valid fish script" {
@@ -115,6 +115,7 @@ setup() {
 }
 
 @test "completion auto-install detects zsh" {
+    # shellcheck disable=SC2030,SC2031
     export SHELL=/bin/zsh
 
     # Simulate auto-install (no interaction)
@@ -131,8 +132,10 @@ setup() {
 }
 
 @test "completion auto-install detects already installed" {
+    # shellcheck disable=SC2031
     export SHELL=/bin/zsh
     mkdir -p "$HOME"
+    # shellcheck disable=SC2016
     echo 'eval "$(mole completion zsh)"' > "$HOME/.zshrc"
 
     run "$PROJECT_ROOT/bin/completion.sh"

@@ -50,14 +50,14 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
         set -- tests
     fi
     if [[ -t 1 ]]; then
-        if bats -p "$@"; then
+        if bats -p "$@" | sed -e 's/^ok /OK /' -e 's/^not ok /FAIL /'; then
             printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
         else
             printf "${RED}${ICON_ERROR} Unit tests failed${NC}\n"
             ((FAILED++))
         fi
     else
-        if TERM="${TERM:-xterm-256color}" bats --tap "$@"; then
+        if TERM="${TERM:-xterm-256color}" bats --tap "$@" | sed -e 's/^ok /OK /' -e 's/^not ok /FAIL /'; then
             printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
         else
             printf "${RED}${ICON_ERROR} Unit tests failed${NC}\n"

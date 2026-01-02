@@ -307,9 +307,14 @@ scan_purge_targets() {
         return
     fi
     if command -v fd > /dev/null 2>&1; then
+        # Escape regex special characters in target names for fd patterns
+        local escaped_targets=()
+        for target in "${PURGE_TARGETS[@]}"; do
+            escaped_targets+=("$(printf '%s' "$target" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')")
+        done
         local pattern="($(
             IFS='|'
-            echo "${PURGE_TARGETS[*]}"
+            echo "${escaped_targets[*]}"
         ))"
         local fd_args=(
             "--absolute-path"

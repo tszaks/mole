@@ -32,10 +32,10 @@
 brew install mole
 ```
 
-**or by Script:**
+**or by Script, for older macOS or latest code:**
 
 ```bash
-# Append '-s latest' for latest code or '-s 1.17.0' for specific version
+# Use for older macOS or latest code; add '-s latest' for newest, or '-s 1.17.0' for a fixed version.
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 ```
 
