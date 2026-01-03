@@ -22,6 +22,7 @@ clean_empty_library_items() {
         return 0
     fi
 
+    # 1. Clean top-level empty directories in Library
     local -a empty_dirs=()
     while IFS= read -r -d '' dir; do
         [[ -d "$dir" ]] && empty_dirs+=("$dir")
@@ -30,6 +31,48 @@ clean_empty_library_items() {
     if [[ ${#empty_dirs[@]} -gt 0 ]]; then
         safe_clean "${empty_dirs[@]}" "Empty Library folders"
     fi
+
+    # 2. Clean empty subdirectories in Application Support and other key locations
+    # Iteratively remove empty directories until no more are found
+    local -a key_locations=(
+        "$HOME/Library/Application Support"
+        "$HOME/Library/Caches"
+    )
+
+    for location in "${key_locations[@]}"; do
+        [[ -d "$location" ]] || continue
+
+        # Limit passes to keep cleanup fast; one extra pass catches most parents.
+        local max_iterations=2
+        local iteration=0
+
+        while [[ $iteration -lt $max_iterations ]]; do
+            local -a nested_empty_dirs=()
+            # Find empty directories
+            while IFS= read -r -d '' dir; do
+                # Skip if whitelisted
+                if is_path_whitelisted "$dir"; then
+                    continue
+                fi
+                # Skip protected system components
+                local dir_name=$(basename "$dir")
+                if is_critical_system_component "$dir_name"; then
+                    continue
+                fi
+                [[ -d "$dir" ]] && nested_empty_dirs+=("$dir")
+            done < <(find "$location" -mindepth 1 -type d -empty -print0 2> /dev/null)
+
+            # If no empty dirs found, we're done with this location
+            if [[ ${#nested_empty_dirs[@]} -eq 0 ]]; then
+                break
+            fi
+
+            local location_name=$(basename "$location")
+            safe_clean "${nested_empty_dirs[@]}" "Empty $location_name subdirs"
+
+            ((iteration++))
+        done
+    done
 
     # Empty file cleanup is skipped to avoid removing app sentinel files.
 }
@@ -194,6 +237,68 @@ clean_edge_old_versions() {
     fi
 }
 
+# Remove old Microsoft EdgeUpdater versions while keeping latest.
+clean_edge_updater_old_versions() {
+    local updater_dir="$HOME/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
+    [[ -d "$updater_dir" ]] || return 0
+
+    if pgrep -f "Microsoft Edge" > /dev/null 2>&1; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Microsoft Edge running · updater cleanup skipped"
+        return 0
+    fi
+
+    local -a version_dirs=()
+    local dir
+    for dir in "$updater_dir"/*; do
+        [[ -d "$dir" ]] || continue
+        version_dirs+=("$dir")
+    done
+
+    if [[ ${#version_dirs[@]} -lt 2 ]]; then
+        return 0
+    fi
+
+    local latest_version
+    latest_version=$(printf '%s\n' "${version_dirs[@]##*/}" | sort -V | tail -n 1)
+    [[ -n "$latest_version" ]] || return 0
+
+    local cleaned_count=0
+    local total_size=0
+    local cleaned_any=false
+
+    for dir in "${version_dirs[@]}"; do
+        local name
+        name=$(basename "$dir")
+        [[ "$name" == "$latest_version" ]] && continue
+        if is_path_whitelisted "$dir"; then
+            continue
+        fi
+        local size_kb
+        size_kb=$(get_path_size_kb "$dir" || echo 0)
+        size_kb="${size_kb:-0}"
+        total_size=$((total_size + size_kb))
+        ((cleaned_count++))
+        cleaned_any=true
+        if [[ "$DRY_RUN" != "true" ]]; then
+            safe_remove "$dir" true > /dev/null 2>&1 || true
+        fi
+    done
+
+    if [[ "$cleaned_any" == "true" ]]; then
+        local size_human
+        size_human=$(bytes_to_human "$((total_size * 1024))")
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Edge updater old versions ${YELLOW}(${cleaned_count} dirs, $size_human dry)${NC}"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Edge updater old versions ${GREEN}(${cleaned_count} dirs, $size_human)${NC}"
+        fi
+        ((files_cleaned += cleaned_count))
+        ((total_size_cleaned += total_size))
+        ((total_items++))
+        note_activity
+    fi
+}
+
 scan_external_volumes() {
     [[ -d "/Volumes" ]] || return 0
     local -a candidate_volumes=()
@@ -296,7 +401,7 @@ clean_recent_items() {
 }
 clean_mail_downloads() {
     stop_section_spinner
-    local mail_age_days=${MOLE_MAIL_AGE_DAYS:-30}
+    local mail_age_days=$MOLE_MAIL_AGE_DAYS
     if ! [[ "$mail_age_days" =~ ^[0-9]+$ ]]; then
         mail_age_days=30
     fi
@@ -313,7 +418,7 @@ clean_mail_downloads() {
             if ! [[ "$dir_size_kb" =~ ^[0-9]+$ ]]; then
                 dir_size_kb=0
             fi
-            local min_kb="${MOLE_MAIL_DOWNLOADS_MIN_KB:-5120}"
+            local min_kb="$MOLE_MAIL_DOWNLOADS_MIN_KB"
             if ! [[ "$min_kb" =~ ^[0-9]+$ ]]; then
                 min_kb=5120
             fi
@@ -426,6 +531,7 @@ clean_browsers() {
     safe_clean ~/Library/Application\ Support/Firefox/Profiles/*/cache2/* "Firefox profile cache"
     clean_chrome_old_versions
     clean_edge_old_versions
+    clean_edge_updater_old_versions
 }
 # Cloud storage caches.
 clean_cloud_storage() {
