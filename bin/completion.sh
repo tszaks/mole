@@ -199,6 +199,7 @@ EOF
         printf '    )\n'
         printf "    _describe 'subcommand' subcommands\n"
         printf '}\n\n'
+        printf 'compdef _mole mole mo\n'
         ;;
     fish)
         printf '# Completions for mole\n'
