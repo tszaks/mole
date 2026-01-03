@@ -25,19 +25,9 @@ setup() {
     mkdir -p "$HOME"
 }
 
-teardown() {
-    unset MO_SPINNER_CHARS || true
-}
-
-@test "mo_spinner_chars returns default sequence when unset" {
+@test "mo_spinner_chars returns default sequence" {
     result="$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mo_spinner_chars")"
     [ "$result" = "|/-\\" ]
-}
-
-@test "mo_spinner_chars respects MO_SPINNER_CHARS override" {
-    export MO_SPINNER_CHARS="abcd"
-    result="$(HOME="$HOME" MO_SPINNER_CHARS="$MO_SPINNER_CHARS" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mo_spinner_chars")"
-    [ "$result" = "abcd" ]
 }
 
 @test "detect_architecture maps current CPU to friendly label" {

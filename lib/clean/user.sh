@@ -42,8 +42,8 @@ clean_empty_library_items() {
     for location in "${key_locations[@]}"; do
         [[ -d "$location" ]] || continue
 
-        # Limit passes to keep cleanup fast; one extra pass catches most parents.
-        local max_iterations=2
+        # Limit passes to keep cleanup fast; 3 iterations handle most nested scenarios.
+        local max_iterations=3
         local iteration=0
 
         while [[ $iteration -lt $max_iterations ]]; do
