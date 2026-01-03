@@ -84,8 +84,8 @@ type MemoryStatus struct {
 	UsedPercent float64
 	SwapUsed    uint64
 	SwapTotal   uint64
-	Cached      uint64  // File cache that can be freed if needed
-	Pressure    string  // macOS memory pressure: normal/warn/critical
+	Cached      uint64 // File cache that can be freed if needed
+	Pressure    string // macOS memory pressure: normal/warn/critical
 }
 
 type DiskStatus struct {
