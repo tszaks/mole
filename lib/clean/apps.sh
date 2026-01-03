@@ -159,8 +159,8 @@ is_bundle_orphaned() {
     esac
     if [[ -e "$directory_path" ]]; then
         local last_modified_epoch=$(get_file_mtime "$directory_path")
-    local current_epoch
-    current_epoch=$(get_epoch_seconds)
+        local current_epoch
+        current_epoch=$(get_epoch_seconds)
         local days_since_modified=$(((current_epoch - last_modified_epoch) / 86400))
         if [[ $days_since_modified -lt ${ORPHAN_AGE_THRESHOLD:-60} ]]; then
             return 1
