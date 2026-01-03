@@ -35,7 +35,7 @@ brew install mole
 **or by Script, for older macOS or latest code:**
 
 ```bash
-# Use for older macOS or latest code; add '-s latest' for newest, or '-s 1.17.0' for a fixed version.
+# Add '-s latest' for newest, '-s dev' for development, or '-s 1.17.0' for a version.
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 ```
 
