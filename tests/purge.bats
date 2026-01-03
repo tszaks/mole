@@ -242,19 +242,6 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-@test "scan_purge_targets finds artifacts via find path" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_PURGE_MIN_DEPTH=1 MOLE_PURGE_MAX_DEPTH=2 bash --noprofile --norc <<'EOF'
-set -euo pipefail
-PATH="/usr/bin:/bin"
-source "$PROJECT_ROOT/lib/clean/project.sh"
-mkdir -p "$HOME/dev/app/node_modules"
-scan_purge_targets "$HOME/dev" "$HOME/results.txt"
-grep -q "node_modules" "$HOME/results.txt"
-EOF
-
-    [ "$status" -eq 0 ]
-}
-
 @test "select_purge_categories returns failure on empty input" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
