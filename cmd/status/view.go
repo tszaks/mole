@@ -125,6 +125,9 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 	if len(specs) > 0 {
 		infoParts = append(infoParts, strings.Join(specs, "/"))
 	}
+	if m.Hardware.RefreshRate != "" {
+		infoParts = append(infoParts, m.Hardware.RefreshRate)
+	}
 	if m.Hardware.OSVersion != "" {
 		infoParts = append(infoParts, m.Hardware.OSVersion)
 	}

@@ -37,11 +37,12 @@ type MetricsSnapshot struct {
 }
 
 type HardwareInfo struct {
-	Model     string // MacBook Pro 14-inch, 2021
-	CPUModel  string // Apple M1 Pro / Intel Core i7
-	TotalRAM  string // 16GB
-	DiskSize  string // 512GB
-	OSVersion string // macOS Sonoma 14.5
+	Model       string // MacBook Pro 14-inch, 2021
+	CPUModel    string // Apple M1 Pro / Intel Core i7
+	TotalRAM    string // 16GB
+	DiskSize    string // 512GB
+	OSVersion   string // macOS Sonoma 14.5
+	RefreshRate string // 120Hz / 60Hz
 }
 
 type DiskIOStatus struct {
