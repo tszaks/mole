@@ -98,3 +98,28 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"LaunchServices repaired"* ]]
 }
+
+@test "opt_msg uses dry-run output" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+opt_msg "dry"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"dry"* ]]
+}
+
+@test "run_launchctl_unload skips in dry-run" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+launchctl() { echo "called"; }
+export -f launchctl
+run_launchctl_unload "/tmp/test.plist" false
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"called"* ]]
+}

@@ -217,3 +217,24 @@ EOF
 
     [ "$status" -eq 0 ]
 }
+
+@test "remove_mole deletes manual binaries and caches" {
+    mkdir -p "$HOME/.local/bin"
+    touch "$HOME/.local/bin/mole"
+    touch "$HOME/.local/bin/mo"
+    mkdir -p "$HOME/.config/mole" "$HOME/.cache/mole"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+export -f start_inline_spinner stop_inline_spinner
+printf '\n' | "$PROJECT_ROOT/mole" remove
+EOF
+
+    [ "$status" -eq 0 ]
+    [ ! -f "$HOME/.local/bin/mole" ]
+    [ ! -f "$HOME/.local/bin/mo" ]
+    [ ! -d "$HOME/.config/mole" ]
+    [ ! -d "$HOME/.cache/mole" ]
+}

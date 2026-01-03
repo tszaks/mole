@@ -49,20 +49,11 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
     if [[ $# -eq 0 ]]; then
         set -- tests
     fi
-    if [[ -t 1 ]]; then
-        if bats -p "$@" | sed -e 's/^ok /OK /' -e 's/^not ok /FAIL /'; then
-            printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
-        else
-            printf "${RED}${ICON_ERROR} Unit tests failed${NC}\n"
-            ((FAILED++))
-        fi
+    if TERM="${TERM:-xterm-256color}" bats --formatter "${BATS_FORMATTER:-pretty}" "$@"; then
+        printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
     else
-        if TERM="${TERM:-xterm-256color}" bats --tap "$@" | sed -e 's/^ok /OK /' -e 's/^not ok /FAIL /'; then
-            printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
-        else
-            printf "${RED}${ICON_ERROR} Unit tests failed${NC}\n"
-            ((FAILED++))
-        fi
+        printf "${RED}${ICON_ERROR} Unit tests failed${NC}\n"
+        ((FAILED++))
     fi
 else
     printf "${YELLOW}${ICON_WARNING} bats not installed or no tests found, skipping${NC}\n"
