@@ -20,6 +20,15 @@ echo ""
 
 FAILED=0
 
+report_unit_result() {
+    if [[ $1 -eq 0 ]]; then
+        printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
+    else
+        printf "${RED}${ICON_ERROR} Unit tests failed${NC}\n"
+        ((FAILED++))
+    fi
+}
+
 echo "1. Linting test scripts..."
 if command -v shellcheck > /dev/null 2>&1; then
     TEST_FILES=()
@@ -49,19 +58,53 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
     if [[ $# -eq 0 ]]; then
         set -- tests
     fi
+    use_color=false
+    if [[ -t 1 && "${TERM:-}" != "dumb" ]]; then
+        use_color=true
+    fi
     if bats --help 2>&1 | grep -q -- "--formatter"; then
-        if TERM="${TERM:-xterm-256color}" bats --formatter "${BATS_FORMATTER:-pretty}" "$@"; then
-            printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
+        formatter="${BATS_FORMATTER:-pretty}"
+        if [[ "$formatter" == "tap" ]]; then
+            if $use_color; then
+                esc=$'\033'
+                if bats --formatter tap "$@" | \
+                    sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
+                        -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /"; then
+                    report_unit_result 0
+                else
+                    report_unit_result 1
+                fi
+            else
+                if bats --formatter tap "$@"; then
+                    report_unit_result 0
+                else
+                    report_unit_result 1
+                fi
+            fi
         else
-            printf "${RED}${ICON_ERROR} Unit tests failed${NC}\n"
-            ((FAILED++))
+            # Pretty format for local development
+            if bats --formatter "$formatter" "$@"; then
+                report_unit_result 0
+            else
+                report_unit_result 1
+            fi
         fi
     else
-        if TERM="${TERM:-xterm-256color}" bats --tap "$@" | sed -e 's/^ok /OK /' -e 's/^not ok /FAIL /'; then
-            printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
+        if $use_color; then
+            esc=$'\033'
+            if bats --tap "$@" | \
+                sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
+                    -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /"; then
+                report_unit_result 0
+            else
+                report_unit_result 1
+            fi
         else
-            printf "${RED}${ICON_ERROR} Unit tests failed${NC}\n"
-            ((FAILED++))
+            if bats --tap "$@"; then
+                report_unit_result 0
+            else
+                report_unit_result 1
+            fi
         fi
     fi
 else
