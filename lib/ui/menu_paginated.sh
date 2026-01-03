@@ -628,9 +628,6 @@ paginated_multi_select() {
                     printf "\033[%d;1H" "$((items_per_page + 4))" >&2
 
                     prev_cursor_pos=$cursor_pos
-
-                    # Drain pending input for smoother fast scrolling
-                    drain_pending_input
                     continue # Skip full redraw
                 elif [[ $top_index -gt 0 ]]; then
                     ((top_index--))
@@ -669,9 +666,6 @@ paginated_multi_select() {
                             printf "\033[%d;1H" "$((items_per_page + 4))" >&2
 
                             prev_cursor_pos=$cursor_pos
-
-                            # Drain pending input for smoother fast scrolling
-                            drain_pending_input
                             continue # Skip full redraw
                         elif [[ $((top_index + visible_count)) -lt ${#view_indices[@]} ]]; then
                             ((top_index++))
