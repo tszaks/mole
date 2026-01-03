@@ -590,9 +590,9 @@ opt_spotlight_index_optimize() {
         local slow_count=0
         local test_start test_end test_duration
         for _ in 1 2; do
-            test_start=$(date +%s)
+            test_start=$(get_epoch_seconds)
             mdfind "kMDItemFSName == 'Applications'" > /dev/null 2>&1 || true
-            test_end=$(date +%s)
+            test_end=$(get_epoch_seconds)
             test_duration=$((test_end - test_start))
             if [[ $test_duration -gt 3 ]]; then
                 ((slow_count++))

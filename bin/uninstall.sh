@@ -38,8 +38,8 @@ scan_applications() {
     ensure_user_dir "$cache_dir"
 
     if [[ $force_rescan == false && -f "$cache_file" ]]; then
-        local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
-        [[ $cache_age -eq $(date +%s) ]] && cache_age=86401 # Handle mtime read failure
+        local cache_age=$(($(get_epoch_seconds) - $(get_file_mtime "$cache_file")))
+        [[ $cache_age -eq $(get_epoch_seconds) ]] && cache_age=86401 # Handle mtime read failure
         if [[ $cache_age -lt $cache_ttl ]]; then
             if [[ -t 2 ]]; then
                 echo -e "${GREEN}Loading from cache...${NC}" >&2
@@ -60,7 +60,7 @@ scan_applications() {
     temp_file=$(create_temp_file)
 
     local current_epoch
-    current_epoch=$(date "+%s")
+    current_epoch=$(get_epoch_seconds)
 
     # Pass 1: collect app paths and bundle IDs (no mdls).
     local -a app_data_tuples=()
@@ -377,8 +377,8 @@ main() {
         local needs_scanning=true
         local cache_file="$HOME/.cache/mole/app_scan_cache"
         if [[ $force_rescan == false && -f "$cache_file" ]]; then
-            local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
-            [[ $cache_age -eq $(date +%s) ]] && cache_age=86401
+            local cache_age=$(($(get_epoch_seconds) - $(get_file_mtime "$cache_file")))
+            [[ $cache_age -eq $(get_epoch_seconds) ]] && cache_age=86401
             [[ $cache_age -lt 86400 ]] && needs_scanning=false
         fi
 

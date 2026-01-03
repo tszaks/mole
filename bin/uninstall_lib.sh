@@ -79,8 +79,8 @@ scan_applications() {
 
     # Check if cache exists and is fresh
     if [[ $force_rescan == false && -f "$cache_file" ]]; then
-        local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
-        [[ $cache_age -eq $(date +%s) ]] && cache_age=86401 # Handle missing file
+        local cache_age=$(($(get_epoch_seconds) - $(get_file_mtime "$cache_file")))
+        [[ $cache_age -eq $(get_epoch_seconds) ]] && cache_age=86401 # Handle missing file
         if [[ $cache_age -lt $cache_ttl ]]; then
             # Cache hit - return immediately
             # Show brief flash of cache usage if in interactive mode
@@ -107,7 +107,7 @@ scan_applications() {
 
     # Pre-cache current epoch to avoid repeated calls
     local current_epoch
-    current_epoch=$(date "+%s")
+    current_epoch=$(get_epoch_seconds)
 
     # First pass: quickly collect all valid app paths and bundle IDs (NO mdls calls)
     local -a app_data_tuples=()
@@ -454,8 +454,8 @@ main() {
         local needs_scanning=true
         local cache_file="$HOME/.cache/mole/app_scan_cache"
         if [[ $force_rescan == false && -f "$cache_file" ]]; then
-            local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
-            [[ $cache_age -eq $(date +%s) ]] && cache_age=86401 # Handle missing file
+            local cache_age=$(($(get_epoch_seconds) - $(get_file_mtime "$cache_file")))
+            [[ $cache_age -eq $(get_epoch_seconds) ]] && cache_age=86401 # Handle missing file
             [[ $cache_age -lt 86400 ]] && needs_scanning=false
         fi
 

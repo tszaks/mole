@@ -485,7 +485,7 @@ process_container_cache() {
     if is_critical_system_component "$bundle_id"; then
         return 0
     fi
-    if should_protect_data "$bundle_id" || should_protect_data "$(echo "$bundle_id" | tr '[:upper:]' '[:lower:]')"; then
+    if should_protect_data "$bundle_id" || should_protect_data "$(echo "$bundle_id" | LC_ALL=C tr '[:upper:]' '[:lower:]')"; then
         return 0
     fi
     local cache_dir="$container_dir/Data/Library/Caches"
@@ -583,7 +583,7 @@ clean_application_support_logs() {
     for app_dir in ~/Library/Application\ Support/*; do
         [[ -d "$app_dir" ]] || continue
         local app_name=$(basename "$app_dir")
-        local app_name_lower=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+        local app_name_lower=$(echo "$app_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
         local is_protected=false
         if should_protect_data "$app_name"; then
             is_protected=true

@@ -200,7 +200,7 @@ is_cache_valid() {
         return 1
     fi
 
-    local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
+    local cache_age=$(($(get_epoch_seconds) - $(get_file_mtime "$cache_file")))
     [[ $cache_age -lt $ttl ]]
 }
 

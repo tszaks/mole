@@ -66,7 +66,8 @@ scan_installed_apps() {
     local cache_age_seconds=300 # 5 minutes
     if [[ -f "$cache_file" ]]; then
         local cache_mtime=$(get_file_mtime "$cache_file")
-        local current_time=$(date +%s)
+        local current_time
+        current_time=$(get_epoch_seconds)
         local age=$((current_time - cache_mtime))
         if [[ $age -lt $cache_age_seconds ]]; then
             debug_log "Using cached app list (age: ${age}s)"
@@ -158,7 +159,8 @@ is_bundle_orphaned() {
     esac
     if [[ -e "$directory_path" ]]; then
         local last_modified_epoch=$(get_file_mtime "$directory_path")
-        local current_epoch=$(date +%s)
+    local current_epoch
+    current_epoch=$(get_epoch_seconds)
         local days_since_modified=$(((current_epoch - last_modified_epoch) / 86400))
         if [[ $days_since_modified -lt ${ORPHAN_AGE_THRESHOLD:-60} ]]; then
             return 1

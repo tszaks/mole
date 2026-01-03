@@ -16,7 +16,7 @@ clean_homebrew() {
         local last_cleanup
         last_cleanup=$(cat "$brew_cache_file" 2> /dev/null || echo "0")
         local current_time
-        current_time=$(date +%s)
+        current_time=$(get_epoch_seconds)
         local time_diff=$((current_time - last_cleanup))
         local days_diff=$((time_diff / 86400))
         if [[ $days_diff -lt $cache_valid_days ]]; then
@@ -112,6 +112,6 @@ clean_homebrew() {
     # Update cache timestamp when any work succeeded or was intentionally skipped.
     if [[ "$skip_cleanup" == "true" ]] || [[ "$brew_success" == "true" ]] || [[ "$autoremove_success" == "true" ]]; then
         ensure_user_file "$brew_cache_file"
-        date +%s > "$brew_cache_file"
+        get_epoch_seconds > "$brew_cache_file"
     fi
 }

@@ -40,7 +40,7 @@ clean_deep_system() {
     fi
     if [[ -d "/macOS Install Data" ]]; then
         local mtime=$(get_file_mtime "/macOS Install Data")
-        local age_days=$((($(date +%s) - mtime) / 86400))
+        local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
         debug_log "Found macOS Install Data (age: ${age_days} days)"
         if [[ $age_days -ge 30 ]]; then
             local size_kb=$(get_path_size_kb "/macOS Install Data")
@@ -58,17 +58,23 @@ clean_deep_system() {
     start_section_spinner "Scanning system caches..."
     local code_sign_cleaned=0
     local found_count=0
-    local last_update_time=$(date +%s)
+    local last_update_time
+    last_update_time=$(get_epoch_seconds)
     local update_interval=2
     while IFS= read -r -d '' cache_dir; do
         if safe_remove "$cache_dir" true; then
             ((code_sign_cleaned++))
         fi
         ((found_count++))
-        local current_time=$(date +%s)
-        if [[ $((current_time - last_update_time)) -ge $update_interval ]]; then
-            start_section_spinner "Scanning system caches... ($found_count found)"
-            last_update_time=$current_time
+
+        # Optimize: only check time every 50 files
+        if ((found_count % 50 == 0)); then
+            local current_time
+            current_time=$(get_epoch_seconds)
+            if [[ $((current_time - last_update_time)) -ge $update_interval ]]; then
+                start_section_spinner "Scanning system caches... ($found_count found)"
+                last_update_time=$current_time
+            fi
         fi
     done < <(run_with_timeout 5 command find /private/var/folders -type d -name "*.code_sign_clone" -path "*/X/*" -print0 2> /dev/null || true)
     stop_section_spinner
@@ -155,7 +161,8 @@ clean_time_machine_failed_backups() {
                 [[ -d "$inprogress_file" ]] || continue
                 # Only delete old incomplete backups (safety window).
                 local file_mtime=$(get_file_mtime "$inprogress_file")
-                local current_time=$(date +%s)
+                local current_time
+                current_time=$(get_epoch_seconds)
                 local hours_old=$(((current_time - file_mtime) / 3600))
                 if [[ $hours_old -lt $MOLE_TM_BACKUP_SAFE_HOURS ]]; then
                     continue
@@ -200,7 +207,8 @@ clean_time_machine_failed_backups() {
                 while IFS= read -r inprogress_file; do
                     [[ -d "$inprogress_file" ]] || continue
                     local file_mtime=$(get_file_mtime "$inprogress_file")
-                    local current_time=$(date +%s)
+                    local current_time
+                    current_time=$(get_epoch_seconds)
                     local hours_old=$(((current_time - file_mtime) / 3600))
                     if [[ $hours_old -lt $MOLE_TM_BACKUP_SAFE_HOURS ]]; then
                         continue

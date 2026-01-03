@@ -302,7 +302,7 @@ create_alfred_workflow() {
 
     for entry in "${workflows[@]}"; do
         IFS="|" read -r bundle name keyword subtitle command <<< "$entry"
-        local workflow_uid="user.workflow.$(uuid | tr '[:upper:]' '[:lower:]')"
+        local workflow_uid="user.workflow.$(uuid | LC_ALL=C tr '[:upper:]' '[:lower:]')"
         local input_uid
         local action_uid
         input_uid="$(uuid)"

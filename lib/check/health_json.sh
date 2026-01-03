@@ -73,7 +73,8 @@ get_uptime_days() {
     boot_time=$(echo "$boot_output" | awk -F 'sec = |, usec' '{print $2}' 2> /dev/null || echo "")
 
     if [[ -n "$boot_time" && "$boot_time" =~ ^[0-9]+$ ]]; then
-        local now=$(date +%s 2> /dev/null || echo "0")
+        local now
+        now=$(get_epoch_seconds)
         local uptime_sec=$((now - boot_time))
         uptime_days=$(LC_ALL=C awk "BEGIN {printf \"%.1f\", $uptime_sec / 86400}" 2> /dev/null || echo "0")
     else

@@ -425,7 +425,7 @@ is_critical_system_component() {
     [[ -z "$token" ]] && return 1
 
     local lower
-    lower=$(echo "$token" | tr '[:upper:]' '[:lower:]')
+    lower=$(echo "$token" | LC_ALL=C tr '[:upper:]' '[:lower:]')
 
     case "$lower" in
         *backgroundtaskmanagement* | *loginitems* | *systempreferences* | *systemsettings* | *settings* | *preferences* | *controlcenter* | *biometrickit* | *sfl* | *tcc*)
@@ -489,7 +489,7 @@ should_protect_path() {
     [[ -z "$path" ]] && return 1
 
     local path_lower
-    path_lower=$(echo "$path" | tr '[:upper:]' '[:lower:]')
+    path_lower=$(echo "$path" | LC_ALL=C tr '[:upper:]' '[:lower:]')
 
     # 1. Keyword-based matching for system components
     # Protect System Settings, Preferences, Control Center, and related XPC services

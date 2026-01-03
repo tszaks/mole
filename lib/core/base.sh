@@ -108,8 +108,30 @@ get_file_mtime() {
         return
     }
     local result
-    result=$($STAT_BSD -f%m "$file" 2> /dev/null)
-    echo "${result:-0}"
+    result=$($STAT_BSD -f%m "$file" 2> /dev/null || echo "")
+    if [[ "$result" =~ ^[0-9]+$ ]]; then
+        echo "$result"
+    else
+        echo "0"
+    fi
+}
+
+# Determine date command once
+if [[ -x /bin/date ]]; then
+    _DATE_CMD="/bin/date"
+else
+    _DATE_CMD="date"
+fi
+
+# Get current time in epoch seconds (defensive against locale/aliases)
+get_epoch_seconds() {
+    local result
+    result=$($_DATE_CMD +%s 2> /dev/null || echo "")
+    if [[ "$result" =~ ^[0-9]+$ ]]; then
+        echo "$result"
+    else
+        echo "0"
+    fi
 }
 
 # Get file owner username
@@ -635,11 +657,13 @@ update_progress_if_needed() {
     local interval="${4:-2}"   # Default: update every 2 seconds
 
     # Get current time
-    local current_time=$(date +%s)
+    local current_time
+    current_time=$(get_epoch_seconds)
 
     # Get last update time from variable
     local last_time
     eval "last_time=\${$last_update_var:-0}"
+    [[ "$last_time" =~ ^[0-9]+$ ]] || last_time=0
 
     # Check if enough time has elapsed
     if [[ $((current_time - last_time)) -ge $interval ]]; then

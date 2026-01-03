@@ -179,7 +179,7 @@ show_version() {
     local sip_status
     if command -v csrutil > /dev/null; then
         sip_status=$(csrutil status 2> /dev/null | grep -o "enabled\|disabled" || echo "Unknown")
-        sip_status="$(tr '[:lower:]' '[:upper:]' <<< "${sip_status:0:1}")${sip_status:1}"
+        sip_status="$(LC_ALL=C tr '[:lower:]' '[:upper:]' <<< "${sip_status:0:1}")${sip_status:1}"
     else
         sip_status="Unknown"
     fi
@@ -613,7 +613,7 @@ interactive_main_menu() {
             local flag_file
             local cache_dir="$HOME/.cache/mole"
             ensure_user_dir "$cache_dir"
-            flag_file="$cache_dir/intro_$(echo "$tty_name" | tr -c '[:alnum:]_' '_')"
+            flag_file="$cache_dir/intro_$(echo "$tty_name" | LC_ALL=C tr -c '[:alnum:]_' '_')"
             if [[ ! -f "$flag_file" ]]; then
                 animate_mole_intro
                 ensure_user_file "$flag_file"

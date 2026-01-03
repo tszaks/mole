@@ -214,7 +214,7 @@ is_safe_project_artifact() {
     fi
     # Must not be a direct child of the search root.
     local relative_path="${path#"$search_path"/}"
-    local depth=$(echo "$relative_path" | tr -cd '/' | wc -c)
+    local depth=$(echo "$relative_path" | LC_ALL=C tr -cd '/' | wc -c)
     if [[ $depth -lt 1 ]]; then
         return 1
     fi
@@ -398,7 +398,8 @@ is_recently_modified() {
     fi
     local mod_time
     mod_time=$(get_file_mtime "$path")
-    local current_time=$(date +%s)
+    local current_time
+    current_time=$(get_epoch_seconds)
     local age_seconds=$((current_time - mod_time))
     local age_in_days=$((age_seconds / 86400))
     if [[ $age_in_days -lt $age_days ]]; then

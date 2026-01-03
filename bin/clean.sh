@@ -369,7 +369,8 @@ safe_clean() {
             fi
 
             local idx=0
-            local last_progress_update=$(date +%s)
+            local last_progress_update
+            last_progress_update=$(get_epoch_seconds)
             for path in "${existing_paths[@]}"; do
                 local size
                 size=$(get_cleanup_path_size_kb "$path")
@@ -384,14 +385,15 @@ safe_clean() {
                 ((idx++))
                 if [[ $((idx % 20)) -eq 0 && "$show_spinner" == "true" && -t 1 ]]; then
                     update_progress_if_needed "$idx" "${#existing_paths[@]}" last_progress_update 1 || true
-                    last_progress_update=$(date +%s)
+                    last_progress_update=$(get_epoch_seconds)
                 fi
             done
         else
             local -a pids=()
             local idx=0
             local completed=0
-            local last_progress_update=$(date +%s)
+            local last_progress_update
+            last_progress_update=$(get_epoch_seconds)
             local total_paths=${#existing_paths[@]}
 
             if [[ ${#existing_paths[@]} -gt 0 ]]; then
