@@ -234,18 +234,24 @@ source "$PROJECT_ROOT/lib/clean/brew.sh"
 mkdir -p "$HOME/.cache/mole"
 rm -f "$HOME/.cache/mole/brew_last_cleanup"
 
-mkdir -p "$HOME/Library/Caches/Homebrew"
-dd if=/dev/zero of="$HOME/Library/Caches/Homebrew/test.tar.gz" bs=1024 count=51200 2>/dev/null
+    start_inline_spinner(){ :; }
+    stop_inline_spinner(){ :; }
+    note_activity(){ :; }
+    run_with_timeout() {
+        local duration="$1"
+        shift
+        if [[ "$1" == "du" ]]; then
+            echo "51201 $3"
+            return 0
+        fi
+        "$@"
+    }
 
-MO_BREW_TIMEOUT=2
+    MO_BREW_TIMEOUT=2
 
-start_inline_spinner(){ :; }
-stop_inline_spinner(){ :; }
-note_activity(){ :; }
-
-brew() {
-    case "$1" in
-        cleanup)
+    brew() {
+        case "$1" in
+            cleanup)
             echo "Removing: package"
             return 0
             ;;
@@ -259,9 +265,7 @@ brew() {
     esac
 }
 
-clean_homebrew
-
-rm -rf "$HOME/Library/Caches/Homebrew"
+    clean_homebrew
 EOF
 
     [ "$status" -eq 0 ]

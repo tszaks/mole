@@ -74,8 +74,27 @@ EOF
         skip "Homebrew not installed"
     fi
 
-    run env HOME="$HOME" MO_BREW_TIMEOUT=5 "$PROJECT_ROOT/bin/clean.sh" --dry-run
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/brew.sh"
+
+MO_BREW_TIMEOUT=5
+CALL_LOG="$HOME/timeout.log"
+
+run_with_timeout() {
+    echo "$1" >> "$CALL_LOG"
+    shift
+    "$@"
+}
+
+brew() { return 0; }
+
+clean_homebrew
+cat "$CALL_LOG"
+EOF
     [ "$status" -eq 0 ]
+    [[ "$output" == *"5"* ]]
 }
 
 @test "FINDER_METADATA_SENTINEL in whitelist protects .DS_Store files" {

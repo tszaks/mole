@@ -25,6 +25,7 @@ temp/
 *.tmp
 *.temp
 *.dmg
+tests/tmp-*
 
 # Cache
 .cache/
