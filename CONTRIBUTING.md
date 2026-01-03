@@ -169,10 +169,12 @@ For releases, GitHub Actions builds architecture-specific binaries automatically
 
 ## Pull Requests
 
-1. Fork and create branch
+> **Important:** Please submit PRs to the `dev` branch, not `main`. We merge `dev` into `main` after testing.
+
+1. Fork and create branch from `dev`
 2. Make changes
 3. Run checks: `./scripts/check.sh`
 4. Commit and push
-5. Open PR
+5. Open PR targeting `dev`
 
 CI will verify formatting, linting, and tests.
