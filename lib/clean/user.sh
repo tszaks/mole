@@ -18,6 +18,10 @@ clean_user_essentials() {
 }
 
 clean_empty_library_items() {
+    if [[ ! -d "$HOME/Library" ]]; then
+        return 0
+    fi
+
     local -a empty_dirs=()
     while IFS= read -r -d '' dir; do
         [[ -d "$dir" ]] && empty_dirs+=("$dir")
