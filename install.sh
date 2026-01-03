@@ -18,7 +18,7 @@ start_line_spinner() {
         echo -e "${BLUE}|${NC} $msg"
         return
     }
-    local chars="${MO_SPINNER_CHARS:-|/-\\}"
+    local chars="|/-\\"
     [[ -z "$chars" ]] && chars='|/-\\'
     local i=0
     (while true; do
@@ -434,6 +434,12 @@ download_binary() {
         chmod +x "$target_path"
         log_success "Installed local ${binary_name} binary"
         return 0
+    fi
+
+    if [[ "${MOLE_EDGE_INSTALL:-}" == "true" ]]; then
+        if build_binary_from_source "$binary_name" "$target_path"; then
+            return 0
+        fi
     fi
 
     local version
