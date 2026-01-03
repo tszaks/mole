@@ -67,7 +67,7 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
         if [[ "$formatter" == "tap" ]]; then
             if $use_color; then
                 esc=$'\033'
-                if bats --formatter tap "$@" | \
+                if bats --formatter tap "$@" |
                     sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
                         -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /"; then
                     report_unit_result 0
@@ -92,7 +92,7 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
     else
         if $use_color; then
             esc=$'\033'
-            if bats --tap "$@" | \
+            if bats --tap "$@" |
                 sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
                     -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /"; then
                 report_unit_result 0

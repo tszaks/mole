@@ -88,7 +88,7 @@ paginated_multi_select() {
     local cursor_pos=0
     local top_index=0
     local filter_query=""
-    local filter_mode="false"                         # filter mode toggle
+    local filter_mode="false"                                                 # filter mode toggle
     local sort_mode="${MOLE_MENU_SORT_MODE:-${MOLE_MENU_SORT_DEFAULT:-date}}" # date|name|size
     local sort_reverse="${MOLE_MENU_SORT_REVERSE:-false}"
     # Live query vs applied query
