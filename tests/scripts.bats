@@ -71,3 +71,10 @@ setup() {
     run bash -c "grep -q 'write_raycast_script' '$PROJECT_ROOT/scripts/setup-quick-launchers.sh'"
     [ "$status" -eq 0 ]
 }
+
+@test "install.sh supports dev branch installs" {
+    run bash -c "grep -q 'refs/heads/dev.tar.gz' '$PROJECT_ROOT/install.sh'"
+    [ "$status" -eq 0 ]
+    run bash -c "grep -q 'MOLE_VERSION=\"dev\"' '$PROJECT_ROOT/install.sh'"
+    [ "$status" -eq 0 ]
+}

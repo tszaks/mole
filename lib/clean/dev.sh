@@ -131,7 +131,23 @@ clean_dev_frontend() {
     safe_clean ~/.cache/prettier/* "Prettier cache"
 }
 # Mobile dev caches (can be large).
+# Check for multiple Android NDK versions.
+check_android_ndk() {
+    local ndk_dir="$HOME/Library/Android/sdk/ndk"
+    if [[ -d "$ndk_dir" ]]; then
+        local count
+        count=$(find "$ndk_dir" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l | tr -d ' ')
+        if [[ "$count" -gt 1 ]]; then
+            note_activity
+            echo -e "  Found ${GREEN}${count}${NC} Android NDK versions"
+            echo -e "  You can delete unused versions manually: ${ndk_dir}"
+        fi
+    fi
+}
+
 clean_dev_mobile() {
+    check_android_ndk
+
     if command -v xcrun > /dev/null 2>&1; then
         debug_log "Checking for unavailable Xcode simulators"
         if [[ "$DRY_RUN" == "true" ]]; then

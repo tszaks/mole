@@ -102,3 +102,19 @@ EOF
 
     [ "$status" -eq 0 ]
 }
+
+@test "clean_empty_library_items only cleans empty dirs" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { echo "$2"; }
+mkdir -p "$HOME/Library/EmptyDir"
+touch "$HOME/Library/empty.txt"
+clean_empty_library_items
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Empty Library folders"* ]]
+    [[ "$output" != *"Empty Library files"* ]]
+}

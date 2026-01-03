@@ -5,6 +5,9 @@ clean_user_essentials() {
     start_section_spinner "Scanning caches..."
     safe_clean ~/Library/Caches/* "User app cache"
     stop_section_spinner
+    start_section_spinner "Scanning empty items..."
+    clean_empty_library_items
+    stop_section_spinner
     safe_clean ~/Library/Logs/* "User app logs"
     if is_path_whitelisted "$HOME/.Trash"; then
         note_activity
@@ -12,6 +15,19 @@ clean_user_essentials() {
     else
         safe_clean ~/.Trash/* "Trash"
     fi
+}
+
+clean_empty_library_items() {
+    local -a empty_dirs=()
+    while IFS= read -r -d '' dir; do
+        [[ -d "$dir" ]] && empty_dirs+=("$dir")
+    done < <(find "$HOME/Library" -mindepth 1 -maxdepth 1 -type d -empty -print0 2> /dev/null)
+
+    if [[ ${#empty_dirs[@]} -gt 0 ]]; then
+        safe_clean "${empty_dirs[@]}" "Empty Library folders"
+    fi
+
+    # Empty file cleanup is skipped to avoid removing app sentinel files.
 }
 
 # Remove old Google Chrome versions while keeping Current.
