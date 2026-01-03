@@ -401,7 +401,7 @@ clean_recent_items() {
 }
 clean_mail_downloads() {
     stop_section_spinner
-    local mail_age_days=$MOLE_MAIL_AGE_DAYS
+    local mail_age_days=${MOLE_MAIL_AGE_DAYS:-}
     if ! [[ "$mail_age_days" =~ ^[0-9]+$ ]]; then
         mail_age_days=30
     fi
@@ -418,7 +418,7 @@ clean_mail_downloads() {
             if ! [[ "$dir_size_kb" =~ ^[0-9]+$ ]]; then
                 dir_size_kb=0
             fi
-            local min_kb="$MOLE_MAIL_DOWNLOADS_MIN_KB"
+            local min_kb="${MOLE_MAIL_DOWNLOADS_MIN_KB:-}"
             if ! [[ "$min_kb" =~ ^[0-9]+$ ]]; then
                 min_kb=5120
             fi
