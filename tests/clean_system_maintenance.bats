@@ -247,8 +247,6 @@ rm -f "$HOME/.cache/mole/brew_last_cleanup"
         "$@"
     }
 
-    MO_BREW_TIMEOUT=2
-
     brew() {
         case "$1" in
             cleanup)

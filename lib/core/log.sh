@@ -38,7 +38,7 @@ rotate_log_once() {
     [[ -n "${MOLE_LOG_ROTATED:-}" ]] && return 0
     export MOLE_LOG_ROTATED=1
 
-    local max_size="${MOLE_MAX_LOG_SIZE:-$LOG_MAX_SIZE_DEFAULT}"
+    local max_size="$LOG_MAX_SIZE_DEFAULT"
     if [[ -f "$LOG_FILE" ]] && [[ $(get_file_size "$LOG_FILE") -gt "$max_size" ]]; then
         mv "$LOG_FILE" "${LOG_FILE}.old" 2> /dev/null || true
         ensure_user_file "$LOG_FILE"

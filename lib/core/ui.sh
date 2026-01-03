@@ -321,7 +321,7 @@ stop_inline_spinner() {
 with_spinner() {
     local msg="$1"
     shift || true
-    local timeout="${MOLE_CMD_TIMEOUT:-180}"
+    local timeout=180
     start_inline_spinner "$msg"
     local exit_code=0
     if [[ -n "${MOLE_TIMEOUT_BIN:-}" ]]; then
@@ -333,7 +333,7 @@ with_spinner() {
 
 # Get spinner characters
 mo_spinner_chars() {
-    local chars="${MO_SPINNER_CHARS:-|/-\\}"
+    local chars="|/-\\"
     [[ -z "$chars" ]] && chars="|/-\\"
     printf "%s" "$chars"
 }
