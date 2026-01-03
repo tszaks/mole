@@ -25,7 +25,7 @@ jobs:
         env:
           MOLE_PERF_BYTES_TO_HUMAN_LIMIT_MS: "6000"
           MOLE_PERF_GET_FILE_SIZE_LIMIT_MS: "3000"
-          BATS_FORMATTER: pretty
+          BATS_FORMATTER: tap
           LANG: en_US.UTF-8
           LC_ALL: en_US.UTF-8
         run: ./scripts/test.sh
