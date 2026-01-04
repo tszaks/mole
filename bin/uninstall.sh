@@ -67,6 +67,8 @@ scan_applications() {
     local -a app_dirs=(
         "/Applications"
         "$HOME/Applications"
+        "/Library/Input Methods"
+        "$HOME/Library/Input Methods"
     )
     local vol_app_dir
     local nullglob_was_set=0

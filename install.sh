@@ -493,8 +493,12 @@ install_files() {
             if needs_sudo; then
                 log_admin "Admin access required for /usr/local/bin"
             fi
-            maybe_sudo cp "$SOURCE_DIR/mole" "$INSTALL_DIR/mole"
-            maybe_sudo chmod +x "$INSTALL_DIR/mole"
+
+            # Atomic update: copy to temporary name first, then move
+            maybe_sudo cp "$SOURCE_DIR/mole" "$INSTALL_DIR/mole.new"
+            maybe_sudo chmod +x "$INSTALL_DIR/mole.new"
+            maybe_sudo mv -f "$INSTALL_DIR/mole.new" "$INSTALL_DIR/mole"
+
             log_success "Installed mole to $INSTALL_DIR"
         fi
     else
@@ -506,8 +510,9 @@ install_files() {
         if [[ "$source_dir_abs" == "$install_dir_abs" ]]; then
             log_success "mo alias already present"
         else
-            maybe_sudo cp "$SOURCE_DIR/mo" "$INSTALL_DIR/mo"
-            maybe_sudo chmod +x "$INSTALL_DIR/mo"
+            maybe_sudo cp "$SOURCE_DIR/mo" "$INSTALL_DIR/mo.new"
+            maybe_sudo chmod +x "$INSTALL_DIR/mo.new"
+            maybe_sudo mv -f "$INSTALL_DIR/mo.new" "$INSTALL_DIR/mo"
             log_success "Installed mo alias"
         fi
     fi
