@@ -44,6 +44,8 @@ if [[ -f "$HOME/.config/mole/whitelist" ]]; then
         [[ -z "$line" || "$line" =~ ^# ]] && continue
 
         [[ "$line" == ~* ]] && line="${line/#~/$HOME}"
+        line="${line//\$HOME/$HOME}"
+        line="${line//\$\{HOME\}/$HOME}"
         if [[ "$line" =~ \.\. ]]; then
             WHITELIST_WARNINGS+=("Path traversal not allowed: $line")
             continue
@@ -260,6 +262,46 @@ get_cleanup_path_size_kb() {
     get_path_size_kb "$path"
 }
 
+# Classification helper for cleanup risk levels
+# shellcheck disable=SC2329
+classify_cleanup_risk() {
+    local description="$1"
+    local path="${2:-}"
+
+    # HIGH RISK: System files, preference files, require sudo
+    if [[ "$description" =~ [Ss]ystem || "$description" =~ [Ss]udo || "$path" =~ ^/System || "$path" =~ ^/Library ]]; then
+        echo "HIGH|System files or requires admin access"
+        return
+    fi
+
+    # HIGH RISK: Preference files that might affect app functionality
+    if [[ "$description" =~ [Pp]reference || "$path" =~ /Preferences/ ]]; then
+        echo "HIGH|Preference files may affect app settings"
+        return
+    fi
+
+    # MEDIUM RISK: Installers, large files, app bundles
+    if [[ "$description" =~ [Ii]nstaller || "$description" =~ [Aa]pp.*[Bb]undle || "$description" =~ [Ll]arge ]]; then
+        echo "MEDIUM|Installer packages or app data"
+        return
+    fi
+
+    # MEDIUM RISK: Old backups, downloads
+    if [[ "$description" =~ [Bb]ackup || "$description" =~ [Dd]ownload || "$description" =~ [Oo]rphan ]]; then
+        echo "MEDIUM|Backup or downloaded files"
+        return
+    fi
+
+    # LOW RISK: Caches, logs, temporary files (automatically regenerated)
+    if [[ "$description" =~ [Cc]ache || "$description" =~ [Ll]og || "$description" =~ [Tt]emp || "$description" =~ [Tt]humbnail ]]; then
+        echo "LOW|Cache/log files, automatically regenerated"
+        return
+    fi
+
+    # DEFAULT: MEDIUM
+    echo "MEDIUM|User data files"
+}
+
 # shellcheck disable=SC2329
 safe_clean() {
     if [[ $# -eq 0 ]]; then
@@ -318,6 +360,26 @@ safe_clean() {
     fi
 
     debug_log "Cleaning: $description (${#existing_paths[@]} items)"
+
+    # Enhanced debug output with risk level and details
+    if [[ "${MO_DEBUG:-}" == "1" && ${#existing_paths[@]} -gt 0 ]]; then
+        # Determine risk level for this cleanup operation
+        local risk_info
+        risk_info=$(classify_cleanup_risk "$description" "${existing_paths[0]}")
+        local risk_level="${risk_info%%|*}"
+        local risk_reason="${risk_info#*|}"
+
+        debug_operation_start "$description"
+        debug_risk_level "$risk_level" "$risk_reason"
+        debug_operation_detail "Item count" "${#existing_paths[@]}"
+
+        # Log sample of files (first 10) with details
+        if [[ ${#existing_paths[@]} -le 10 ]]; then
+            debug_operation_detail "Files to be removed" "All files listed below"
+        else
+            debug_operation_detail "Files to be removed" "Showing first 10 of ${#existing_paths[@]} files"
+        fi
+    fi
 
     if [[ $skipped_count -gt 0 ]]; then
         ((whitelist_skipped_count += skipped_count))

@@ -522,13 +522,25 @@ clean_browsers() {
     safe_clean ~/Library/Caches/company.thebrowser.Browser/* "Arc cache"
     safe_clean ~/Library/Caches/company.thebrowser.dia/* "Dia cache"
     safe_clean ~/Library/Caches/BraveSoftware/Brave-Browser/* "Brave cache"
-    safe_clean ~/Library/Caches/Firefox/* "Firefox cache"
+    local firefox_running=false
+    if pgrep -x "Firefox" > /dev/null 2>&1; then
+        firefox_running=true
+    fi
+    if [[ "$firefox_running" == "true" ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Firefox is running · cache cleanup skipped"
+    else
+        safe_clean ~/Library/Caches/Firefox/* "Firefox cache"
+    fi
     safe_clean ~/Library/Caches/com.operasoftware.Opera/* "Opera cache"
     safe_clean ~/Library/Caches/com.vivaldi.Vivaldi/* "Vivaldi cache"
     safe_clean ~/Library/Caches/Comet/* "Comet cache"
     safe_clean ~/Library/Caches/com.kagi.kagimacOS/* "Orion cache"
     safe_clean ~/Library/Caches/zen/* "Zen cache"
-    safe_clean ~/Library/Application\ Support/Firefox/Profiles/*/cache2/* "Firefox profile cache"
+    if [[ "$firefox_running" == "true" ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Firefox is running · profile cache cleanup skipped"
+    else
+        safe_clean ~/Library/Application\ Support/Firefox/Profiles/*/cache2/* "Firefox profile cache"
+    fi
     clean_chrome_old_versions
     clean_edge_old_versions
     clean_edge_updater_old_versions
