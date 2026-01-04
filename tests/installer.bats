@@ -37,41 +37,13 @@ setup() {
     rm -rf "${HOME:?}/Documents"/*
 }
 
-# Test help and arguments
+# Test arguments
 
-@test "installers.sh --help shows usage information" {
-    run "$PROJECT_ROOT/bin/installers.sh" --help
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Mole Installers"* ]]
-    [[ "$output" == *"Usage:"* ]]
-    [[ "$output" == *"mo installers"* ]]
-}
-
-@test "installers.sh --help lists options and paths" {
-    run "$PROJECT_ROOT/bin/installers.sh" --help
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"--debug"* ]]
-    [[ "$output" == *"--help"* ]]
-    [[ "$output" == *"mo installers"* ]]
-}
-
-@test "installers.sh --help shows scan scope" {
-    run "$PROJECT_ROOT/bin/installers.sh" --help
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Downloads"* ]]
-    [[ "$output" == *"Desktop"* ]]
-    [[ "$output" == *"Documents"* ]]
-}
-
-@test "installers.sh rejects unknown options" {
-    run "$PROJECT_ROOT/bin/installers.sh" --unknown-option
+@test "installer.sh rejects unknown options" {
+    run "$PROJECT_ROOT/bin/installer.sh" --unknown-option
 
     [ "$status" -eq 1 ]
     [[ "$output" == *"Unknown option"* ]]
-    [[ "$output" == *"--help"* ]]
 }
 
 # Test scan_installers_in_path function directly
@@ -92,7 +64,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Chrome.dmg"* ]]
@@ -112,7 +84,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"App1.dmg"* ]]
@@ -136,7 +108,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     # Default max depth is 2
@@ -159,7 +131,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"top.dmg"* ]]
@@ -175,7 +147,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/NonExistent"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/NonExistent"
 
     [ "$status" -eq 0 ]
     [[ -z "$output" ]]
@@ -195,7 +167,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"document.pdf"* ]]
@@ -215,7 +187,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"My App Installer.dmg"* ]]
@@ -232,7 +204,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"App-v1.2.3_beta.pkg"* ]]
@@ -251,7 +223,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ -z "$output" ]]
@@ -268,7 +240,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Chrome.dmg"* ]]
@@ -284,7 +256,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"App1.dmg"* ]]
@@ -304,7 +276,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     # Default max depth is 2
@@ -323,7 +295,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"top.dmg"* ]]
@@ -335,7 +307,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/NonExistent"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/NonExistent"
 
     [ "$status" -eq 0 ]
     [[ -z "$output" ]]
@@ -351,7 +323,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"document.pdf"* ]]
@@ -384,7 +356,7 @@ setup() {
         else
             echo "NOT_INSTALLER"
         fi
-    ' bash "$PROJECT_ROOT/bin/installers.sh"
+    ' bash "$PROJECT_ROOT/bin/installer.sh"
 
     [ "$status" -eq 0 ]
     [[ "$output" == "NOT_INSTALLER" ]]
@@ -407,7 +379,7 @@ setup() {
         else
             echo "NOT_INSTALLER"
         fi
-    ' bash "$PROJECT_ROOT/bin/installers.sh"
+    ' bash "$PROJECT_ROOT/bin/installer.sh"
 
     [ "$status" -eq 0 ]
     [[ "$output" == "INSTALLER" ]]
@@ -431,7 +403,7 @@ setup() {
         else
             echo "NOT_INSTALLER"
         fi
-    ' bash "$PROJECT_ROOT/bin/installers.sh"
+    ' bash "$PROJECT_ROOT/bin/installer.sh"
 
     [ "$status" -eq 0 ]
     [[ "$output" == "NOT_INSTALLER" ]]
@@ -453,7 +425,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_all_installers
-    ' bash "$PROJECT_ROOT/bin/installers.sh"
+    ' bash "$PROJECT_ROOT/bin/installer.sh"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"installer.zip"* ]]
@@ -474,7 +446,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_all_installers
-    ' bash "$PROJECT_ROOT/bin/installers.sh"
+    ' bash "$PROJECT_ROOT/bin/installer.sh"
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"data.zip"* ]]
@@ -497,7 +469,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_all_installers
-    ' bash "$PROJECT_ROOT/bin/installers.sh"
+    ' bash "$PROJECT_ROOT/bin/installer.sh"
 
     # Should succeed even with missing paths
     [ "$status" -eq 0 ]
@@ -514,7 +486,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"My App Installer.dmg"* ]]
@@ -527,7 +499,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"App-v1.2.3_beta.pkg"* ]]
@@ -542,7 +514,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ -z "$output" ]]
@@ -562,7 +534,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     # Should succeed (return 0) and silently skip the corrupt ZIP
     [ "$status" -eq 0 ]
@@ -592,7 +564,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     # Should succeed and find the readable.zip but skip restricted.zip
     [ "$status" -eq 0 ]
@@ -620,7 +592,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     # Should find the valid ZIP and silently skip the corrupt one
     [ "$status" -eq 0 ]
@@ -643,7 +615,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
-    ' bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"real.dmg"* ]]
@@ -660,7 +632,7 @@ setup() {
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
-    " bash "$PROJECT_ROOT/bin/installers.sh" "$HOME/Downloads"
+    " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"real.dmg"* ]]

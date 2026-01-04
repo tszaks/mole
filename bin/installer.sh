@@ -1,6 +1,6 @@
 #!/bin/bash
-# Mole - Installers command
-# Highlights and helps remove installer files (.dmg, .pkg, .mpkg, .iso, .xip, .zip)
+# Mole - Installer command
+# Find and remove installer files (.dmg, .pkg, .mpkg, .iso, .xip, .zip)
 
 set -euo pipefail
 
@@ -270,37 +270,15 @@ show_summary() {
     printf '\n'
 }
 
-show_help() {
-    echo -e "${PURPLE_BOLD}Mole Installers${NC} - Find and remove installer files"
-    echo ""
-    echo -e "${YELLOW}Usage:${NC} mo installers [options]"
-    echo ""
-    echo -e "${YELLOW}Options:${NC}"
-    echo "  --debug         Enable debug logging"
-    echo "  --help          Show this help message"
-    echo ""
-    echo -e "${YELLOW}Default Paths${NC}"
-    echo "  - ${HOME}/Downloads"
-    echo "  - ${HOME}/Desktop"
-    echo "  - ${HOME}/Documents"
-    echo "  - ${HOME}/Public"
-    echo "  - ${HOME}/Library/Downloads"
-    echo "  - /Users/Shared"
-}
 
 main() {
     for arg in "$@"; do
         case "$arg" in
-            "--help")
-                show_help
-                exit 0
-                ;;
             "--debug")
                 export MO_DEBUG=1
                 ;;
             *)
                 echo "Unknown option: $arg"
-                echo "Use 'mo installers --help' for usage information"
                 exit 1
                 ;;
         esac
@@ -311,7 +289,7 @@ main() {
         printf '\033[2J\033[H'
     fi
     printf '\n'
-    echo -e "${PURPLE_BOLD}Find & Remove Installers${NC}"
+    echo -e "${PURPLE_BOLD}Clean Installer Files${NC}"
 
     hide_cursor
     perform_installers
