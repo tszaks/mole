@@ -114,3 +114,18 @@ setup() {
     run grep -q "\\.m2/repository" "$whitelist_file"
     [ "$status" -eq 1 ]
 }
+
+@test "is_path_whitelisted protects parent directories of whitelisted nested paths" {
+    local status
+    if HOME="$HOME" bash --noprofile --norc -c "
+        source '$PROJECT_ROOT/lib/core/base.sh'
+        source '$PROJECT_ROOT/lib/core/app_protection.sh'
+        WHITELIST_PATTERNS=(\"\$HOME/Library/Caches/org.R-project.R/R/renv\")
+        is_path_whitelisted \"\$HOME/Library/Caches/org.R-project.R\"
+    "; then
+        status=0
+    else
+        status=$?
+    fi
+    [ "$status" -eq 0 ]
+}
