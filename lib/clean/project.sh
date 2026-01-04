@@ -18,6 +18,11 @@ readonly PURGE_TARGETS=(
     "dist"          # JS builds
     "venv"          # Python
     ".venv"         # Python
+    ".pytest_cache" # Python (pytest)
+    ".mypy_cache"   # Python (mypy)
+    ".tox"          # Python (tox virtualenvs)
+    ".nox"          # Python (nox virtualenvs)
+    ".ruff_cache"   # Python (ruff)
     ".gradle"       # Gradle local
     "__pycache__"   # Python
     ".next"         # Next.js
