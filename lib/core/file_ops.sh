@@ -96,7 +96,36 @@ safe_remove() {
 
     # Dry-run mode: log but don't delete
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
-        debug_log "[DRY RUN] Would remove: $path"
+        if [[ "${MO_DEBUG:-}" == "1" ]]; then
+            local file_type="file"
+            [[ -d "$path" ]] && file_type="directory"
+            [[ -L "$path" ]] && file_type="symlink"
+
+            local file_size=""
+            local file_age=""
+
+            if [[ -e "$path" ]]; then
+                local size_kb
+                size_kb=$(get_path_size_kb "$path" 2>/dev/null || echo "0")
+                if [[ "$size_kb" -gt 0 ]]; then
+                    file_size=$(bytes_to_human "$((size_kb * 1024))")
+                fi
+
+                if [[ -f "$path" || -d "$path" ]] && ! [[ -L "$path" ]]; then
+                    local mod_time
+                    mod_time=$(stat -f%m "$path" 2>/dev/null || echo "0")
+                    local now
+                    now=$(date +%s 2>/dev/null || echo "0")
+                    if [[ "$mod_time" -gt 0 && "$now" -gt 0 ]]; then
+                        file_age=$(( (now - mod_time) / 86400 ))
+                    fi
+                fi
+            fi
+
+            debug_file_action "[DRY RUN] Would remove" "$path" "$file_size" "$file_age"
+        else
+            debug_log "[DRY RUN] Would remove: $path"
+        fi
         return 0
     fi
 
@@ -147,7 +176,35 @@ safe_sudo_remove() {
 
     # Dry-run mode: log but don't delete
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
-        debug_log "[DRY RUN] Would remove (sudo): $path"
+        if [[ "${MO_DEBUG:-}" == "1" ]]; then
+            local file_type="file"
+            [[ -d "$path" ]] && file_type="directory"
+
+            local file_size=""
+            local file_age=""
+
+            if sudo test -e "$path" 2>/dev/null; then
+                local size_kb
+                size_kb=$(sudo du -sk "$path" 2>/dev/null | awk '{print $1}' || echo "0")
+                if [[ "$size_kb" -gt 0 ]]; then
+                    file_size=$(bytes_to_human "$((size_kb * 1024))")
+                fi
+
+                if sudo test -f "$path" 2>/dev/null || sudo test -d "$path" 2>/dev/null; then
+                    local mod_time
+                    mod_time=$(sudo stat -f%m "$path" 2>/dev/null || echo "0")
+                    local now
+                    now=$(date +%s 2>/dev/null || echo "0")
+                    if [[ "$mod_time" -gt 0 && "$now" -gt 0 ]]; then
+                        file_age=$(( (now - mod_time) / 86400 ))
+                    fi
+                fi
+            fi
+
+            debug_file_action "[DRY RUN] Would remove (sudo)" "$path" "$file_size" "$file_age"
+        else
+            debug_log "[DRY RUN] Would remove (sudo): $path"
+        fi
         return 0
     fi
 
