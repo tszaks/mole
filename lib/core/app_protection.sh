@@ -605,6 +605,13 @@ is_path_whitelisted() {
             [[ "$normalized_target" == $check_pattern ]]; then
             return 0
         fi
+
+        # Check if target is a parent directory of a whitelisted path
+        # e.g., if pattern is /path/to/dir/subdir and target is /path/to/dir,
+        # the target should be protected to preserve its whitelisted children
+        if [[ "$check_pattern" == "$normalized_target"/* ]]; then
+            return 0
+        fi
     done
 
     return 1
