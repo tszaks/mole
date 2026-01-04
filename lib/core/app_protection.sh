@@ -601,7 +601,7 @@ is_path_whitelisted() {
         local check_pattern="${pattern%/}"
         local has_glob="false"
         case "$check_pattern" in
-            *\**|*\?*|*\[*)
+            *\** | *\?* | *\[*)
                 has_glob="true"
                 ;;
         esac

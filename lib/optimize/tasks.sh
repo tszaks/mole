@@ -133,7 +133,7 @@ opt_cache_refresh() {
         for target_path in "${cache_targets[@]}"; do
             if [[ -e "$target_path" ]]; then
                 local size_kb
-                size_kb=$(get_path_size_kb "$target_path" 2>/dev/null || echo "0")
+                size_kb=$(get_path_size_kb "$target_path" 2> /dev/null || echo "0")
                 local size_human="unknown"
                 if [[ "$size_kb" -gt 0 ]]; then
                     size_human=$(bytes_to_human "$((size_kb * 1024))")
