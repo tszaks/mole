@@ -18,6 +18,10 @@ source "$SCRIPT_DIR/../lib/ui/menu_paginated.sh"
 
 
 cleanup() {
+    if [[ "${IN_ALT_SCREEN:-0}" == "1" ]]; then
+        leave_alt_screen
+        IN_ALT_SCREEN=0
+    fi
     show_cursor
     cleanup_temp_files
 }

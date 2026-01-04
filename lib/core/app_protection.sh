@@ -598,6 +598,12 @@ is_path_whitelisted() {
     for pattern in "${WHITELIST_PATTERNS[@]}"; do
         # Pattern is already expanded/normalized in bin/clean.sh
         local check_pattern="${pattern%/}"
+        local has_glob="false"
+        case "$check_pattern" in
+            *\**|*\?*|*\[*)
+                has_glob="true"
+                ;;
+        esac
 
         # Check for exact match or glob pattern match
         # shellcheck disable=SC2053
@@ -610,6 +616,11 @@ is_path_whitelisted() {
         # e.g., if pattern is /path/to/dir/subdir and target is /path/to/dir,
         # the target should be protected to preserve its whitelisted children
         if [[ "$check_pattern" == "$normalized_target"/* ]]; then
+            return 0
+        fi
+
+        # Check if target is a child of a whitelisted directory path
+        if [[ "$has_glob" == "false" && "$normalized_target" == "$check_pattern"/* ]]; then
             return 0
         fi
     done
