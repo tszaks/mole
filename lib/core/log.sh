@@ -118,7 +118,7 @@ debug_operation_start() {
 
 # Log detailed operation information
 debug_operation_detail() {
-    local detail_type="$1"  # e.g., "Method", "Target", "Expected Outcome"
+    local detail_type="$1" # e.g., "Method", "Target", "Expected Outcome"
     local detail_value="$2"
 
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
@@ -132,7 +132,7 @@ debug_operation_detail() {
 
 # Log individual file action with metadata
 debug_file_action() {
-    local action="$1"      # e.g., "Would remove", "Removing"
+    local action="$1" # e.g., "Would remove", "Removing"
     local file_path="$2"
     local file_size="${3:-}"
     local file_age="${4:-}"
@@ -153,7 +153,7 @@ debug_file_action() {
 
 # Log risk level for operations
 debug_risk_level() {
-    local risk_level="$1"  # LOW, MEDIUM, HIGH
+    local risk_level="$1" # LOW, MEDIUM, HIGH
     local reason="$2"
 
     if [[ "${MO_DEBUG:-}" == "1" ]]; then

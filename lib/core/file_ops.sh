@@ -106,18 +106,18 @@ safe_remove() {
 
             if [[ -e "$path" ]]; then
                 local size_kb
-                size_kb=$(get_path_size_kb "$path" 2>/dev/null || echo "0")
+                size_kb=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
                 if [[ "$size_kb" -gt 0 ]]; then
                     file_size=$(bytes_to_human "$((size_kb * 1024))")
                 fi
 
                 if [[ -f "$path" || -d "$path" ]] && ! [[ -L "$path" ]]; then
                     local mod_time
-                    mod_time=$(stat -f%m "$path" 2>/dev/null || echo "0")
+                    mod_time=$(stat -f%m "$path" 2> /dev/null || echo "0")
                     local now
-                    now=$(date +%s 2>/dev/null || echo "0")
+                    now=$(date +%s 2> /dev/null || echo "0")
                     if [[ "$mod_time" -gt 0 && "$now" -gt 0 ]]; then
-                        file_age=$(( (now - mod_time) / 86400 ))
+                        file_age=$(((now - mod_time) / 86400))
                     fi
                 fi
             fi
@@ -183,20 +183,20 @@ safe_sudo_remove() {
             local file_size=""
             local file_age=""
 
-            if sudo test -e "$path" 2>/dev/null; then
+            if sudo test -e "$path" 2> /dev/null; then
                 local size_kb
-                size_kb=$(sudo du -sk "$path" 2>/dev/null | awk '{print $1}' || echo "0")
+                size_kb=$(sudo du -sk "$path" 2> /dev/null | awk '{print $1}' || echo "0")
                 if [[ "$size_kb" -gt 0 ]]; then
                     file_size=$(bytes_to_human "$((size_kb * 1024))")
                 fi
 
-                if sudo test -f "$path" 2>/dev/null || sudo test -d "$path" 2>/dev/null; then
+                if sudo test -f "$path" 2> /dev/null || sudo test -d "$path" 2> /dev/null; then
                     local mod_time
-                    mod_time=$(sudo stat -f%m "$path" 2>/dev/null || echo "0")
+                    mod_time=$(sudo stat -f%m "$path" 2> /dev/null || echo "0")
                     local now
-                    now=$(date +%s 2>/dev/null || echo "0")
+                    now=$(date +%s 2> /dev/null || echo "0")
                     if [[ "$mod_time" -gt 0 && "$now" -gt 0 ]]; then
-                        file_age=$(( (now - mod_time) / 86400 ))
+                        file_age=$(((now - mod_time) / 86400))
                     fi
                 fi
             fi

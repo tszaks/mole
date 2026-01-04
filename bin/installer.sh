@@ -16,7 +16,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/core/common.sh"
 source "$SCRIPT_DIR/../lib/ui/menu_paginated.sh"
 
-
 cleanup() {
     if [[ "${IN_ALT_SCREEN:-0}" == "1" ]]; then
         leave_alt_screen
@@ -31,18 +30,18 @@ trap 'trap - EXIT; cleanup; exit 130' INT TERM
 # Scan configuration
 readonly INSTALLER_SCAN_MAX_DEPTH_DEFAULT=2
 readonly INSTALLER_SCAN_PATHS=(
-  "$HOME/Downloads"
-  "$HOME/Desktop"
-  "$HOME/Documents"
-  "$HOME/Public"
-  "$HOME/Library/Downloads"
-  "/Users/Shared"
-  "/Users/Shared/Downloads"
-  "$HOME/Library/Caches/Homebrew"
-  "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Downloads"
-  "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
-  "$HOME/Library/Application Support/Telegram Desktop"
-  "$HOME/Downloads/Telegram Desktop"
+    "$HOME/Downloads"
+    "$HOME/Desktop"
+    "$HOME/Documents"
+    "$HOME/Public"
+    "$HOME/Library/Downloads"
+    "/Users/Shared"
+    "/Users/Shared/Downloads"
+    "$HOME/Library/Caches/Homebrew"
+    "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Downloads"
+    "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
+    "$HOME/Library/Application Support/Telegram Desktop"
+    "$HOME/Downloads/Telegram Desktop"
 )
 readonly MAX_ZIP_ENTRIES=5
 ZIP_LIST_CMD=()
@@ -63,9 +62,9 @@ is_installer_zip() {
 
     [[ ${#ZIP_LIST_CMD[@]} -gt 0 ]] || return 1
 
-    if ! "${ZIP_LIST_CMD[@]}" "$zip" 2>/dev/null \
-        | head -n $((cap + 1)) \
-        | awk -v cap="$cap" '
+    if ! "${ZIP_LIST_CMD[@]}" "$zip" 2> /dev/null |
+        head -n $((cap + 1)) |
+        awk -v cap="$cap" '
             /\.(app|pkg|dmg|xip)(\/|$)/ { found=1 }
             END {
                 if (NR > cap) exit 1
@@ -81,14 +80,14 @@ is_installer_zip() {
 handle_candidate_file() {
     local file="$1"
 
-    [[ -L "$file" ]] && return 0  # Skip symlinks explicitly
+    [[ -L "$file" ]] && return 0 # Skip symlinks explicitly
     case "$file" in
-        *.dmg|*.pkg|*.mpkg|*.iso|*.xip)
+        *.dmg | *.pkg | *.mpkg | *.iso | *.xip)
             echo "$file"
             ;;
         *.zip)
             [[ -r "$file" ]] || return 0
-            if is_installer_zip "$file" 2>/dev/null; then
+            if is_installer_zip "$file" 2> /dev/null; then
                 echo "$file"
             fi
             ;;
@@ -109,7 +108,7 @@ scan_installers_in_path() {
         done < <(
             fd --no-ignore --hidden --type f --max-depth "$max_depth" \
                 -e dmg -e pkg -e mpkg -e iso -e xip -e zip \
-                . "$path" 2>/dev/null || true
+                . "$path" 2> /dev/null || true
         )
     else
         while IFS= read -r file; do
@@ -117,8 +116,8 @@ scan_installers_in_path() {
         done < <(
             find "$path" -maxdepth "$max_depth" -type f \
                 \( -name '*.dmg' -o -name '*.pkg' -o -name '*.mpkg' \
-                   -o -name '*.iso' -o -name '*.xip' -o -name '*.zip' \) \
-                2>/dev/null || true
+                -o -name '*.iso' -o -name '*.xip' -o -name '*.zip' \) \
+                2> /dev/null || true
         )
     fi
 }
@@ -162,7 +161,7 @@ get_source_display() {
 
 get_terminal_width() {
     if [[ $TERMINAL_WIDTH -le 0 ]]; then
-        TERMINAL_WIDTH=$(tput cols 2>/dev/null || echo 80)
+        TERMINAL_WIDTH=$(tput cols 2> /dev/null || echo 80)
     fi
     echo "$TERMINAL_WIDTH"
 }
@@ -176,7 +175,7 @@ format_installer_display() {
     # Terminal width for alignment
     local terminal_width
     terminal_width=$(get_terminal_width)
-    local fixed_width=24  # Reserve for size and source
+    local fixed_width=24 # Reserve for size and source
     local available_width=$((terminal_width - fixed_width))
 
     # Bounds check: 20-40 chars for filename
@@ -280,11 +279,11 @@ select_installers() {
     _get_items_per_page() {
         local term_height=24
         if [[ -t 0 ]] || [[ -t 2 ]]; then
-            term_height=$(stty size </dev/tty 2>/dev/null | awk '{print $1}')
+            term_height=$(stty size < /dev/tty 2> /dev/null | awk '{print $1}')
         fi
         if [[ -z "$term_height" || $term_height -le 0 ]]; then
             if command -v tput > /dev/null 2>&1; then
-                term_height=$(tput lines 2>/dev/null || echo "24")
+                term_height=$(tput lines 2> /dev/null || echo "24")
             else
                 term_height=24
             fi
@@ -312,7 +311,7 @@ select_installers() {
 
     local original_stty=""
     if [[ -t 0 ]] && command -v stty > /dev/null 2>&1; then
-        original_stty=$(stty -g 2>/dev/null || echo "")
+        original_stty=$(stty -g 2> /dev/null || echo "")
     fi
 
     restore_terminal() {
@@ -323,10 +322,9 @@ select_installers() {
         fi
         show_cursor
         if [[ -n "${original_stty:-}" ]]; then
-            stty "${original_stty}" 2>/dev/null || stty sane 2>/dev/null || true
+            stty "${original_stty}" 2> /dev/null || stty sane 2> /dev/null || true
         fi
     }
-
 
     handle_interrupt() {
         restore_terminal
@@ -407,7 +405,7 @@ select_installers() {
 
     trap restore_terminal EXIT
     trap handle_interrupt INT TERM
-    stty -echo -icanon intr ^C 2>/dev/null || true
+    stty -echo -icanon intr ^C 2> /dev/null || true
     hide_cursor
     if [[ -t 1 ]]; then
         printf "\033[2J\033[H" >&2
@@ -459,12 +457,12 @@ select_installers() {
                     selected[idx]=true
                 fi
                 ;;
-            "a"|"A") # Select all
+            "a" | "A") # Select all
                 for ((i = 0; i < total_items; i++)); do
                     selected[i]=true
                 done
                 ;;
-            "i"|"I") # Invert selection
+            "i" | "I") # Invert selection
                 for ((i = 0; i < total_items; i++)); do
                     if [[ ${selected[i]} == true ]]; then
                         selected[i]=false
@@ -473,11 +471,11 @@ select_installers() {
                     fi
                 done
                 ;;
-            "q"|"Q"|$'\x03') # Quit or Ctrl-C
+            "q" | "Q" | $'\x03') # Quit or Ctrl-C
                 restore_terminal
                 return 1
                 ;;
-            ""|$'\n'|$'\r') # Enter - confirm
+            "" | $'\n' | $'\r') # Enter - confirm
                 MOLE_SELECTION_RESULT=""
                 for ((i = 0; i < total_items; i++)); do
                     if [[ ${selected[i]} == true ]]; then
@@ -512,7 +510,7 @@ show_installer_menu() {
 delete_selected_installers() {
     # Parse selection indices
     local -a selected_indices=()
-    [[ -n "$MOLE_SELECTION_RESULT" ]] && IFS=',' read -ra selected_indices <<<"$MOLE_SELECTION_RESULT"
+    [[ -n "$MOLE_SELECTION_RESULT" ]] && IFS=',' read -ra selected_indices <<< "$MOLE_SELECTION_RESULT"
 
     if [[ ${#selected_indices[@]} -eq 0 ]]; then
         return 1
@@ -546,12 +544,12 @@ delete_selected_installers() {
 
     IFS= read -r -s -n1 confirm || confirm=""
     case "$confirm" in
-        $'\e'|q|Q)
+        $'\e' | q | Q)
             return 1
             ;;
-        ""|$'\n'|$'\r')
-            printf "\r\033[K"  # Clear prompt line
-            echo ""  # Single line break
+        "" | $'\n' | $'\r')
+            printf "\r\033[K" # Clear prompt line
+            echo ""           # Single line break
             ;;
         *)
             return 1
@@ -611,7 +609,7 @@ perform_installers() {
         printf '\n'
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Great! No installer files to clean"
         printf '\n'
-        return 2  # Nothing to clean
+        return 2 # Nothing to clean
     fi
 
     # Show menu
@@ -620,7 +618,7 @@ perform_installers() {
             leave_alt_screen
             IN_ALT_SCREEN=0
         fi
-        return 1  # User cancelled
+        return 1 # User cancelled
     fi
 
     # Leave alt screen before deletion (so confirmation and results are on main screen)
@@ -654,7 +652,6 @@ show_summary() {
     print_summary_block "$summary_heading" "${summary_details[@]}"
     printf '\n'
 }
-
 
 main() {
     for arg in "$@"; do
