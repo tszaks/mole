@@ -228,7 +228,34 @@ EOF
 set -euo pipefail
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }
-export -f start_inline_spinner stop_inline_spinner
+rm() {
+    local -a flags=()
+    local -a paths=()
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == -* ]]; then
+            flags+=("$arg")
+        else
+            paths+=("$arg")
+        fi
+    done
+    local path
+    for path in "${paths[@]}"; do
+        if [[ "$path" == "$HOME" || "$path" == "$HOME/"* ]]; then
+            /bin/rm "${flags[@]}" "$path"
+        fi
+    done
+    return 0
+}
+sudo() {
+    if [[ "$1" == "rm" ]]; then
+        shift
+        rm "$@"
+        return 0
+    fi
+    return 0
+}
+export -f start_inline_spinner stop_inline_spinner rm sudo
 printf '\n' | "$PROJECT_ROOT/mole" remove
 EOF
 
