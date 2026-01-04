@@ -104,11 +104,11 @@ $ mo uninstall
 
 Select Apps to Remove
 ═══════════════════════════
-▶ ☑ Adobe Creative Cloud      (9.4G) | Old
-  ☐ WeChat                    (2.1G) | Recent
-  ☐ Final Cut Pro             (3.8G) | Recent
+▶ ☑ Photoshop 2024            (4.2G) | Old
+  ☐ IntelliJ IDEA             (2.8G) | Recent
+  ☐ Premiere Pro              (3.4G) | Recent
 
-Uninstalling: Adobe Creative Cloud
+Uninstalling: Photoshop 2024
 
   ✓ Removed application
   ✓ Cleaned 52 related files across 12 locations
@@ -155,7 +155,7 @@ Analyze Disk  ~/Documents  |  Total: 156.8GB
     4. ███░░░░░░░░░░░░░░░░  10.8%  |  📁 Documents                   16.9GB
     5. ██░░░░░░░░░░░░░░░░░   5.2%  |  📄 backup_2023.zip              8.2GB
 
-  ↑↓←→ Navigate  |  O Open  |  F Show  |  ⌫ Delete  |  L Large(24)  |  Q Quit
+  ↑↓←→ Navigate  |  O Open  |  F Show  |  ⌫ Delete  |  L Large files  |  Q Quit
 ```
 
 ### Live System Status
@@ -222,6 +222,23 @@ Run `mo purge --paths` to configure which directories to scan, or edit `~/.confi
 When custom paths are configured, only those directories are scanned. Otherwise, defaults to `~/Projects`, `~/GitHub`, `~/dev`, etc.
 
 </details>
+
+### Installer Cleanup
+
+Find and remove large installer files scattered across Downloads, Desktop, Homebrew caches, iCloud, and Mail. Each file is labeled by source to help you know where the space is hiding.
+
+```bash
+mo installer
+
+Select Installers to Remove - 3.8GB (5 selected)
+
+➤ ● Photoshop_2024.dmg     1.2GB | Downloads
+  ● IntelliJ_IDEA.dmg       850.6MB | Downloads
+  ● Illustrator_Setup.pkg   920.4MB | Downloads
+  ● PyCharm_Pro.dmg         640.5MB | Homebrew
+  ● Acrobat_Reader.dmg      220.4MB | Downloads
+  ○ AppCode_Legacy.zip      410.6MB | Downloads
+```
 
 ## Quick Launchers
 

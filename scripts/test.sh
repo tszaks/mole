@@ -56,7 +56,43 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
         export TERM="xterm-256color"
     fi
     if [[ $# -eq 0 ]]; then
-        set -- tests
+        fd_available=0
+        zip_available=0
+        zip_list_available=0
+        if command -v fd > /dev/null 2>&1; then
+            fd_available=1
+        fi
+        if command -v zip > /dev/null 2>&1; then
+            zip_available=1
+        fi
+        if command -v zipinfo > /dev/null 2>&1 || command -v unzip > /dev/null 2>&1; then
+            zip_list_available=1
+        fi
+
+        TEST_FILES=()
+        while IFS= read -r file; do
+            case "$file" in
+                tests/installer_fd.bats)
+                    if [[ $fd_available -eq 1 ]]; then
+                        TEST_FILES+=("$file")
+                    fi
+                    ;;
+                tests/installer_zip.bats)
+                    if [[ $zip_available -eq 1 && $zip_list_available -eq 1 ]]; then
+                        TEST_FILES+=("$file")
+                    fi
+                    ;;
+                *)
+                    TEST_FILES+=("$file")
+                    ;;
+            esac
+        done < <(find tests -type f -name '*.bats' | sort)
+
+        if [[ ${#TEST_FILES[@]} -gt 0 ]]; then
+            set -- "${TEST_FILES[@]}"
+        else
+            set -- tests
+        fi
     fi
     use_color=false
     if [[ -t 1 && "${TERM:-}" != "dumb" ]]; then
