@@ -29,6 +29,7 @@ readonly PURGE_TARGETS=(
     ".nuxt"         # Nuxt.js
     ".output"       # Nuxt.js
     "vendor"        # PHP Composer
+    "bin"           # .NET build output (guarded; see is_protected_purge_artifact)
     "obj"           # C# / Unity
     ".turbo"        # Turborepo cache
     ".parcel-cache" # Parcel bundler
@@ -246,6 +247,22 @@ is_php_project_root() {
     [[ -f "$dir/composer.json" ]]
 }
 
+# Decide whether a "bin" directory is a .NET directory
+is_dotnet_bin_dir() {
+    local path="$1"
+    [[ "$(basename "$path")" == "bin" ]] || return 1
+
+    # Check if parent directory has a .csproj/.fsproj/.vbproj file
+    local parent_dir
+    parent_dir="$(dirname "$path")"
+    find "$parent_dir" -maxdepth 1 \( -name "*.csproj" -o -name "*.fsproj" -o -name "*.vbproj" \) 2> /dev/null | grep -q . || return 1
+
+    # Check if bin directory contains Debug/ or Release/ subdirectories
+    [[ -d "$path/Debug" || -d "$path/Release" ]] || return 1
+
+    return 0
+}
+
 # Check if a vendor directory should be protected from purge
 # Expects path to be a vendor directory (basename == vendor)
 # Strategy: Only clean PHP Composer vendor, protect all others
@@ -284,6 +301,13 @@ is_protected_purge_artifact() {
     base=$(basename "$path")
 
     case "$base" in
+        bin)
+            # Only allow purging bin/ when we can detect .NET context.
+            if is_dotnet_bin_dir "$path"; then
+                return 1
+            fi
+            return 0
+            ;;
         vendor)
             is_protected_vendor_dir "$path"
             return $?
