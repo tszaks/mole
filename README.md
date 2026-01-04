@@ -60,8 +60,10 @@ mo --version                 # Show installed version
 
 mo clean --dry-run           # Preview the cleanup plan
 mo clean --whitelist         # Manage protected caches
+mo clean --dry-run --debug   # Detailed preview with risk levels and file info
 
 mo optimize --dry-run        # Preview optimization actions
+mo optimize --debug          # Run with detailed operation logs
 mo optimize --whitelist      # Manage protected optimization rules
 mo purge --paths             # Configure project scan directories
 ```
@@ -75,6 +77,7 @@ mo purge --paths             # Configure project scan directories
 - **Shell Completion**: Enable tab completion by running `mo completion` (auto-detect and install).
 - **Navigation**: Supports standard arrow keys and Vim bindings (`h/j/k/l`).
 - **Debug**: View detailed logs by appending the `--debug` flag (e.g., `mo clean --debug`).
+- **Detailed Preview**: Combine `--dry-run --debug` for comprehensive operation details including risk levels, file paths, sizes, and expected outcomes. Check `~/.config/mole/mole_debug_session.log` for full details.
 
 ## Features in Detail
 

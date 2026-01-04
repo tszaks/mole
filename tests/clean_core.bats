@@ -59,6 +59,20 @@ EOF
     [ -f "$HOME/Library/Caches/WhitelistedApp/data.tmp" ]
 }
 
+@test "mo clean honors whitelist entries with $HOME literal" {
+    mkdir -p "$HOME/Library/Caches/WhitelistedApp"
+    echo "keep me" > "$HOME/Library/Caches/WhitelistedApp/data.tmp"
+
+    cat > "$HOME/.config/mole/whitelist" << 'EOF'
+$HOME/Library/Caches/WhitelistedApp*
+EOF
+
+    run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Protected"* ]]
+    [ -f "$HOME/Library/Caches/WhitelistedApp/data.tmp" ]
+}
+
 @test "mo clean protects Maven repository by default" {
     mkdir -p "$HOME/.m2/repository/org/example"
     echo "dependency" > "$HOME/.m2/repository/org/example/lib.jar"
