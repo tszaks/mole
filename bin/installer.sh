@@ -205,12 +205,16 @@ collect_installers() {
         start_inline_spinner "Scanning for installers..."
     fi
 
+    # Start debug session
+    debug_operation_start "Collect Installers" "Scanning for redundant installer files"
+
     # Scan all paths, deduplicate, and sort results
     local -a all_files=()
 
     while IFS= read -r file; do
         [[ -z "$file" ]] && continue
         all_files+=("$file")
+        debug_file_action "Found installer" "$file"
     done < <(scan_all_installers | sort -u)
 
     if [[ -t 1 ]]; then
@@ -245,9 +249,20 @@ collect_installers() {
         local size_human
         size_human=$(bytes_to_human "$file_size")
 
+        # Get display filename - strip Homebrew hash prefix if present
+        local display_name
+        display_name=$(basename "$file")
+        if [[ "$source" == "Homebrew" ]]; then
+            # Homebrew names often look like: sha256--name--version
+            # Strip the leading hash if it matches [0-9a-f]{64}--
+            if [[ "$display_name" =~ ^[0-9a-f]{64}--(.*) ]]; then
+                display_name="${BASH_REMATCH[1]}"
+            fi
+        fi
+
         # Format display with alignment
         local display
-        display=$(format_installer_display "$(basename "$file")" "$size_human" "$source")
+        display=$(format_installer_display "$display_name" "$size_human" "$source")
 
         # Store installer data in parallel arrays
         INSTALLER_PATHS+=("$file")
