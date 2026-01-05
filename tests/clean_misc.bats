@@ -95,6 +95,10 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
 run_with_timeout() { return 1; }
+# Mock missing dependencies and UI to ensure test passes regardless of volumes
+clean_ds_store_tree() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
 scan_external_volumes
 EOF
 
