@@ -29,8 +29,9 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           svgPath: CONTRIBUTORS.svg
-          svgWidth: 1280
-          avatarMargin: 12
+          svgWidth: 1000
+          avatarSize: 72
+          avatarMargin: 28
           userNameHeight: 20
           noCommit: true
           includeBots: false
@@ -39,7 +40,7 @@ jobs:
             <g transform="translate({{ x }}, {{ y }})">
               <a xlink:href="{{{ url }}}" class="contributor-link" target="_blank" rel="nofollow sponsored" title="{{{ name }}}" id="{{{ name }}}">
                 <image width="{{ width }}" height="{{ height }}" xlink:href="{{{ avatar }}}" />
-                <text x="32" y="74" text-anchor="middle" alignment-baseline="middle" font-size="10">{{{ name }}}</text>
+                <text x="36" y="86" text-anchor="middle" alignment-baseline="middle" font-size="10">{{{ name }}}</text>
               </a>
             </g>
 
