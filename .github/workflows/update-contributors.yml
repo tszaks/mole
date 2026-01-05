@@ -25,14 +25,15 @@ jobs:
           fetch-depth: 0
 
       - name: Generate contributors SVG
-        uses: wow-actions/contributors-list@v1
+        uses: tw93/contributors-list@master
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           svgPath: CONTRIBUTORS.svg
           svgWidth: 1000
           avatarSize: 72
-          avatarMargin: 20
+          avatarMargin: 50
           userNameHeight: 20
+          noFetch: true
           noCommit: true
           includeBots: false
           excludeUsers: "github-actions web-flow dependabot claude"
