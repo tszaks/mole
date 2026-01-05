@@ -31,9 +31,9 @@ jobs:
           svgPath: CONTRIBUTORS.svg
           svgWidth: 1000
           avatarSize: 72
-          avatarMargin: 50
+          avatarMargin: 45
           userNameHeight: 20
-          noFetch: true
+          noFetch: false
           noCommit: true
           includeBots: false
           excludeUsers: "github-actions web-flow dependabot claude"
