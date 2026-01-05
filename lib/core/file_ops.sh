@@ -254,12 +254,10 @@ safe_find_delete() {
         find_args+=("-mtime" "+$age_days")
     fi
 
-    # Iterate results to respect should_protect_path when available
+    # Iterate results to respect should_protect_path
     while IFS= read -r -d '' match; do
-        if command -v should_protect_path > /dev/null 2>&1; then
-            if should_protect_path "$match"; then
-                continue
-            fi
+        if should_protect_path "$match"; then
+            continue
         fi
         safe_remove "$match" true || true
     done < <(command find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
@@ -298,12 +296,10 @@ safe_sudo_find_delete() {
         find_args+=("-mtime" "+$age_days")
     fi
 
-    # Iterate results to respect should_protect_path when available
+    # Iterate results to respect should_protect_path
     while IFS= read -r -d '' match; do
-        if command -v should_protect_path > /dev/null 2>&1; then
-            if should_protect_path "$match"; then
-                continue
-            fi
+        if should_protect_path "$match"; then
+            continue
         fi
         safe_sudo_remove "$match" || true
     done < <(sudo find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
