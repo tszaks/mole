@@ -253,21 +253,19 @@ curl -fsSL https://raw.githubusercontent.com/tw93/Mole/main/scripts/setup-quick-
 
 Adds 5 commands: `clean`, `uninstall`, `optimize`, `analyze`, `status`. Mole automatically detects your terminal, or you can set `MO_LAUNCHER_APP=<name>` to override. For Raycast, if this is your first script directory, add it in Raycast Extensions (Add Script Directory) and then run "Reload Script Directories" to load the new commands.
 
-## Community Love
-
-<p align="center">
-  <img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="800" />
-</p>
-
-Users from around the world are loving Mole! Join the community and share your experience.
-
-## Developers
+## Developers & Community Love
 
 Mole's development can not be without these Hackers. They contributed a lot of capabilities for Mole. Also, welcome to follow them! ❤️
 
 <a href="https://github.com/tw93/mole/graphs/contributors">
   <img src="https://raw.githubusercontent.com/tw93/mole/main/CONTRIBUTORS.svg?sanitize=true" alt="Contributors" width="1000" />
 </a>
+
+Users from around the world are loving Mole! Join the community and share your experience.
+
+<p align="center">
+  <img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="800" />
+</p>
 
 ## Support
 
