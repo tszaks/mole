@@ -52,7 +52,7 @@ jobs:
             </g>
 
       - name: Commit & Push
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore: update contributors [skip ci]"
           file_pattern: CONTRIBUTORS.svg
