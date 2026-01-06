@@ -213,28 +213,6 @@ func renderCPUCard(cpu CPUStatus) cardData {
 	return cardData{icon: iconCPU, title: "CPU", lines: lines}
 }
 
-func renderGPUCard(gpus []GPUStatus) cardData {
-	var lines []string
-	if len(gpus) == 0 {
-		lines = append(lines, subtleStyle.Render("No GPU detected"))
-	} else {
-		for _, g := range gpus {
-			if g.Usage >= 0 {
-				lines = append(lines, fmt.Sprintf("Total  %s  %5.1f%%", progressBar(g.Usage), g.Usage))
-			}
-			coreInfo := ""
-			if g.CoreCount > 0 {
-				coreInfo = fmt.Sprintf(" (%d cores)", g.CoreCount)
-			}
-			lines = append(lines, g.Name+coreInfo)
-			if g.Usage < 0 {
-				lines = append(lines, subtleStyle.Render("Run with sudo for usage metrics"))
-			}
-		}
-	}
-	return cardData{icon: iconGPU, title: "GPU", lines: lines}
-}
-
 func renderMemoryCard(mem MemoryStatus) cardData {
 	// Check if swap is being used (or at least allocated).
 	hasSwap := mem.SwapTotal > 0 || mem.SwapUsed > 0

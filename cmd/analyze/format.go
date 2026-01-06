@@ -179,10 +179,6 @@ func calculateNameWidth(termWidth int) int {
 	return available
 }
 
-func trimName(name string) string {
-	return trimNameWithWidth(name, 45) // Default width for backward compatibility
-}
-
 func trimNameWithWidth(name string, maxWidth int) string {
 	const (
 		ellipsis      = "..."
