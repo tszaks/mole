@@ -291,7 +291,7 @@ bats tests/security.bats # Run specific suite
 | Standard | Implementation |
 |----------|----------------|
 | OWASP Secure Coding | Input validation, least privilege, defense-in-depth |
-| CWE-22 (Path Traversal) | Absolute path enforcement, `../` rejection |
+| CWE-22 (Path Traversal) | Enhanced detection: rejects `/../` components while allowing `..` in directory names (Firefox compatibility) |
 | CWE-78 (Command Injection) | Control character filtering |
 | CWE-59 (Link Following) | Symlink detection before privileged operations |
 | Apple File System Guidelines | Respects SIP, Read-Only Volumes, TCC |

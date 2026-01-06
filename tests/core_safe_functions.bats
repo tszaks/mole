@@ -43,6 +43,26 @@ teardown() {
 @test "validate_path_for_deletion rejects path traversal" {
     run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/tmp/../etc'"
     [ "$status" -eq 1 ]
+
+    # Test other path traversal patterns
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/var/log/../../etc'"
+    [ "$status" -eq 1 ]
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/..'"
+    [ "$status" -eq 1 ]
+}
+
+@test "validate_path_for_deletion accepts Firefox-style ..files directories" {
+    # Firefox uses ..files suffix in IndexedDB directory names
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/2753419432nreetyfallipx..files'"
+    [ "$status" -eq 0 ]
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/storage/default/https+++www.netflix.com/idb/name..files/data'"
+    [ "$status" -eq 0 ]
+
+    # Directories with .. in the middle of names should be allowed
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/test..backup/file.txt'"
+    [ "$status" -eq 0 ]
 }
 
 @test "validate_path_for_deletion rejects system directories" {

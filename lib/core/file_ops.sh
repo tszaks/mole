@@ -46,7 +46,9 @@ validate_path_for_deletion() {
     fi
 
     # Check for path traversal attempts
-    if [[ "$path" =~ \.\. ]]; then
+    # Only reject .. when it appears as a complete path component (/../ or /.. or ../)
+    # This allows legitimate directory names containing .. (e.g., Firefox's "name..files")
+    if [[ "$path" =~ (^|/)\.\.(\/|$) ]]; then
         log_error "Path validation failed: path traversal not allowed: $path"
         return 1
     fi
