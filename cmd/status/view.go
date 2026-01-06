@@ -540,7 +540,10 @@ func renderCard(data cardData, width int, height int) string {
 	header := titleStyle.Render(titleText) + "  " + lineStyle.Render(strings.Repeat("╌", lineLen))
 	content := header + "\n" + strings.Join(data.lines, "\n")
 
-	lines := strings.Split(content, "\n")
+	var lines []string
+	for line := range strings.Lines(content) {
+		lines = append(lines, line)
+	}
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
