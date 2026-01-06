@@ -136,7 +136,7 @@ func animTickWithSpeed(cpuUsage float64) tea.Cmd {
 
 func main() {
 	p := tea.NewProgram(newModel(), tea.WithAltScreen())
-	if err := p.Start(); err != nil {
+	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "system status error: %v\n", err)
 		os.Exit(1)
 	}
