@@ -74,8 +74,12 @@ if [[ "$MODE" == "format" ]]; then
         exit 1
     fi
 
-    if command -v go > /dev/null 2>&1; then
-        echo -e "${YELLOW}Formatting Go code...${NC}"
+    if command -v goimports > /dev/null 2>&1; then
+        echo -e "${YELLOW}Formatting Go code (goimports)...${NC}"
+        goimports -w -local github.com/tw93/Mole ./cmd
+        echo -e "${GREEN}${ICON_SUCCESS} Go formatting complete${NC}\n"
+    elif command -v go > /dev/null 2>&1; then
+        echo -e "${YELLOW}Formatting Go code (gofmt)...${NC}"
         gofmt -w ./cmd
         echo -e "${GREEN}${ICON_SUCCESS} Go formatting complete${NC}\n"
     else
@@ -95,8 +99,12 @@ if [[ "$MODE" != "check" ]]; then
         echo -e "${YELLOW}${ICON_WARNING} shfmt not installed, skipping${NC}\n"
     fi
 
-    if command -v go > /dev/null 2>&1; then
-        echo -e "${YELLOW}2. Formatting Go code...${NC}"
+    if command -v goimports > /dev/null 2>&1; then
+        echo -e "${YELLOW}2. Formatting Go code (goimports)...${NC}"
+        goimports -w -local github.com/tw93/Mole ./cmd
+        echo -e "${GREEN}${ICON_SUCCESS} Go formatting applied${NC}\n"
+    elif command -v go > /dev/null 2>&1; then
+        echo -e "${YELLOW}2. Formatting Go code (gofmt)...${NC}"
         gofmt -w ./cmd
         echo -e "${GREEN}${ICON_SUCCESS} Go formatting applied${NC}\n"
     fi
