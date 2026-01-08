@@ -121,22 +121,25 @@ function Clear-WindowsUpdateFiles {
         }
     }
     
-    # Clean download cache
-    $wuDownloadPath = "$env:WINDIR\SoftwareDistribution\Download"
-    if (Test-Path $wuDownloadPath) {
-        Clear-DirectoryContents -Path $wuDownloadPath -Description "Windows Update download cache"
+    try {
+        # Clean download cache
+        $wuDownloadPath = "$env:WINDIR\SoftwareDistribution\Download"
+        if (Test-Path $wuDownloadPath) {
+            Clear-DirectoryContents -Path $wuDownloadPath -Description "Windows Update download cache"
+        }
+        
+        # Clean DataStore (old update history - be careful!)
+        # Only clean temp files, not the actual database
+        $wuDataStore = "$env:WINDIR\SoftwareDistribution\DataStore\Logs"
+        if (Test-Path $wuDataStore) {
+            Clear-DirectoryContents -Path $wuDataStore -Description "Windows Update logs"
+        }
     }
-    
-    # Clean DataStore (old update history - be careful!)
-    # Only clean temp files, not the actual database
-    $wuDataStore = "$env:WINDIR\SoftwareDistribution\DataStore\Logs"
-    if (Test-Path $wuDataStore) {
-        Clear-DirectoryContents -Path $wuDataStore -Description "Windows Update logs"
-    }
-    
-    # Restart service if it was running
-    if ($wasRunning) {
-        Start-Service -Name wuauserv -ErrorAction SilentlyContinue
+    finally {
+        # Always restart service if it was running, even if cleanup failed
+        if ($wasRunning) {
+            Start-Service -Name wuauserv -ErrorAction SilentlyContinue
+        }
     }
 }
 

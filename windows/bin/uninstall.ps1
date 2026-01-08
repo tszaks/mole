@@ -523,10 +523,10 @@ function Uninstall-SelectedApps {
                     }
                     
                     if (-not $uninstalled) {
-                        # Fallback to interactive
-                        Write-Host " $esc[33m(launching uninstaller)$esc[0m"
+                        # Fallback to interactive - don't count as automatic success
+                        Write-Host " $esc[33m(launching uninstaller - verify completion manually)$esc[0m"
                         Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$uninstallString`"" -Wait
-                        $successCount++
+                        # Note: Not incrementing $successCount since we can't verify if user completed or cancelled
                     }
                 }
             }

@@ -89,6 +89,59 @@ var skipPatterns = map[string]bool{
 	"Config.Msi":                true,
 }
 
+// Protected paths that should NEVER be deleted
+var protectedPaths = []string{
+	`C:\Windows`,
+	`C:\Program Files`,
+	`C:\Program Files (x86)`,
+	`C:\ProgramData`,
+	`C:\Users\Default`,
+	`C:\Users\Public`,
+	`C:\Recovery`,
+	`C:\System Volume Information`,
+}
+
+// isProtectedPath checks if a path is protected from deletion
+func isProtectedPath(path string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return true // If we can't resolve the path, treat it as protected
+	}
+	absPath = strings.ToLower(absPath)
+
+	// Check against protected paths
+	for _, protected := range protectedPaths {
+		protectedLower := strings.ToLower(protected)
+		if absPath == protectedLower || strings.HasPrefix(absPath, protectedLower+`\`) {
+			return true
+		}
+	}
+
+	// Check against skip patterns (system directories)
+	baseName := strings.ToLower(filepath.Base(absPath))
+	for pattern := range skipPatterns {
+		if strings.ToLower(pattern) == baseName {
+			// Only protect if it's at a root level (e.g., C:\Windows, not C:\Projects\Windows)
+			parent := filepath.Dir(absPath)
+			if len(parent) <= 3 { // e.g., "C:\"
+				return true
+			}
+		}
+	}
+
+	// Protect Windows directory itself
+	winDir := strings.ToLower(os.Getenv("WINDIR"))
+	sysRoot := strings.ToLower(os.Getenv("SYSTEMROOT"))
+	if winDir != "" && (absPath == winDir || strings.HasPrefix(absPath, winDir+`\`)) {
+		return true
+	}
+	if sysRoot != "" && (absPath == sysRoot || strings.HasPrefix(absPath, sysRoot+`\`)) {
+		return true
+	}
+
+	return false
+}
+
 // Entry types
 type dirEntry struct {
 	Name        string
@@ -462,9 +515,17 @@ func (m model) scanPath(path string) tea.Cmd {
 	}
 }
 
-// deletePath deletes a file or directory
+// deletePath deletes a file or directory with protection checks
 func (m model) deletePath(path string) tea.Cmd {
 	return func() tea.Msg {
+		// Safety check: never delete protected paths
+		if isProtectedPath(path) {
+			return deleteCompleteMsg{
+				path: path,
+				err:  fmt.Errorf("cannot delete protected system path: %s", path),
+			}
+		}
+
 		err := os.RemoveAll(path)
 		return deleteCompleteMsg{path: path, err: err}
 	}

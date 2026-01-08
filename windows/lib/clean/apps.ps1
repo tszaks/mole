@@ -88,10 +88,23 @@ function Find-OrphanedAppData {
             # Skip if recently modified
             if ($folder.LastWriteTime -gt $cutoffDate) { continue }
             
-            # Check if app is installed
+            # Check if app is installed using stricter matching
+            # Require exact match or that folder name is a clear prefix/suffix of app name
             $isInstalled = $false
+            $folderLower = $folder.Name.ToLower()
             foreach ($name in $installedNames) {
-                if ($name -like "*$($folder.Name.ToLower())*" -or $folder.Name.ToLower() -like "*$name*") {
+                # Exact match
+                if ($name -eq $folderLower) {
+                    $isInstalled = $true
+                    break
+                }
+                # Folder is prefix of app name (e.g., "chrome" matches "chrome browser")
+                if ($name.StartsWith($folderLower) -and $folderLower.Length -ge 4) {
+                    $isInstalled = $true
+                    break
+                }
+                # App name is prefix of folder (e.g., "vscode" matches "vscode-data")
+                if ($folderLower.StartsWith($name) -and $name.Length -ge 4) {
                     $isInstalled = $true
                     break
                 }
