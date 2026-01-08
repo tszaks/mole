@@ -124,7 +124,7 @@ function Get-SearchPaths {
     }
     
     # Add default paths if no custom paths or custom paths don't exist
-    if ($paths.Count -eq 0) {
+    if ($null -eq $paths -or @($paths).Count -eq 0) {
         foreach ($path in $script:DefaultSearchPaths) {
             if (Test-Path $path) {
                 $paths += $path
@@ -201,7 +201,10 @@ function Find-Projects {
     
     $esc = [char]27
     $pathCount = 0
-    $totalPaths = $SearchPaths.Count
+    $totalPaths = if ($null -eq $SearchPaths) { 0 } else { @($SearchPaths).Count }
+    if ($totalPaths -eq 0) {
+        return $projects
+    }
     
     foreach ($searchPath in $SearchPaths) {
         $pathCount++
@@ -217,16 +220,19 @@ function Find-Projects {
                     $projectPath = Split-Path -Parent $item.FullName
                     
                     # Skip if already found or if it's inside node_modules, etc.
-                    if ($projects.Path -contains $projectPath) { continue }
+                    $existingPaths = @($projects | ForEach-Object { $_.Path })
+                    if ($existingPaths -contains $projectPath) { continue }
                     if ($projectPath -like "*\node_modules\*") { continue }
                     if ($projectPath -like "*\vendor\*") { continue }
                     if ($projectPath -like "*\.git\*") { continue }
                     
                     # Find artifacts in this project
                     $artifacts = @(Find-ProjectArtifacts -ProjectPath $projectPath)
+                    $artifactCount = if ($null -eq $artifacts) { 0 } else { $artifacts.Count }
                     
-                    if ($artifacts.Count -gt 0) {
+                    if ($artifactCount -gt 0) {
                         $totalSize = ($artifacts | Measure-Object -Property SizeKB -Sum).Sum
+                        if ($null -eq $totalSize) { $totalSize = 0 }
                         
                         $projects += [PSCustomObject]@{
                             Path = $projectPath
@@ -305,7 +311,8 @@ function Show-ProjectSelectionMenu {
     #>
     param([array]$Projects)
     
-    if ($Projects.Count -eq 0) {
+    $projectCount = if ($null -eq $Projects) { 0 } else { @($Projects).Count }
+    if ($projectCount -eq 0) {
         Write-Warning "No projects with cleanable artifacts found"
         return @()
     }
@@ -316,7 +323,7 @@ function Show-ProjectSelectionMenu {
     $pageSize = 12
     $pageStart = 0
     
-    [Console]::CursorVisible = $false
+    try { [Console]::CursorVisible = $false } catch { }
     
     try {
         while ($true) {
@@ -330,7 +337,7 @@ function Show-ProjectSelectionMenu {
             Write-Host ""
             
             # Display projects
-            $pageEnd = [Math]::Min($pageStart + $pageSize, $Projects.Count)
+            $pageEnd = [Math]::Min($pageStart + $pageSize, $projectCount)
             
             for ($i = $pageStart; $i -lt $pageEnd; $i++) {
                 $project = $Projects[$i]
@@ -348,7 +355,7 @@ function Show-ProjectSelectionMenu {
                     $name = $name.Substring(0, 27) + "..."
                 }
                 
-                $artifactCount = $project.Artifacts.Count
+                $artifactCount = if ($null -eq $project.Artifacts) { 0 } else { @($project.Artifacts).Count }
                 
                 Write-Host ("  {0} {1,-32} {2,10} ({3} items)" -f $checkbox, $name, $project.TotalSizeHuman, $artifactCount) -NoNewline
                 
@@ -373,9 +380,9 @@ function Show-ProjectSelectionMenu {
             }
             
             # Page indicator
-            $totalPages = [Math]::Ceiling($Projects.Count / $pageSize)
+            $totalPages = [Math]::Ceiling($projectCount / $pageSize)
             $currentPage = [Math]::Floor($pageStart / $pageSize) + 1
-            Write-Host "$esc[90mPage $currentPage of $totalPages | Total: $($Projects.Count) projects$esc[0m"
+            Write-Host "$esc[90mPage $currentPage of $totalPages | Total: $projectCount projects$esc[0m"
             
             # Handle input
             $key = [Console]::ReadKey($true)
@@ -390,7 +397,7 @@ function Show-ProjectSelectionMenu {
                     }
                 }
                 'DownArrow' {
-                    if ($currentIndex -lt $Projects.Count - 1) {
+                    if ($currentIndex -lt $projectCount - 1) {
                         $currentIndex++
                         if ($currentIndex -ge $pageStart + $pageSize) {
                             $pageStart += $pageSize
@@ -402,7 +409,7 @@ function Show-ProjectSelectionMenu {
                     $currentIndex = $pageStart
                 }
                 'PageDown' {
-                    $pageStart = [Math]::Min($Projects.Count - $pageSize, $pageStart + $pageSize)
+                    $pageStart = [Math]::Min($projectCount - $pageSize, $pageStart + $pageSize)
                     if ($pageStart -lt 0) { $pageStart = 0 }
                     $currentIndex = $pageStart
                 }
@@ -416,11 +423,11 @@ function Show-ProjectSelectionMenu {
                 }
                 'A' {
                     # Select/deselect all
-                    if ($selectedIndices.Count -eq $Projects.Count) {
+                    if ($selectedIndices.Count -eq $projectCount) {
                         $selectedIndices.Clear()
                     }
                     else {
-                        for ($i = 0; $i -lt $Projects.Count; $i++) {
+                        for ($i = 0; $i -lt $projectCount; $i++) {
                             $selectedIndices[$i] = $true
                         }
                     }
@@ -440,7 +447,7 @@ function Show-ProjectSelectionMenu {
         }
     }
     finally {
-        [Console]::CursorVisible = $true
+        try { [Console]::CursorVisible = $true } catch { }
     }
 }
 
@@ -543,9 +550,9 @@ function Main {
     Write-Host ""
     
     # Get search paths
-    $searchPaths = Get-SearchPaths
+    $searchPaths = @(Get-SearchPaths)
     
-    if ($searchPaths.Count -eq 0) {
+    if ($null -eq $searchPaths -or $searchPaths.Count -eq 0) {
         Write-Warning "No valid search paths found"
         Write-Host "Run 'mole purge -Paths' to configure search directories"
         return
@@ -554,9 +561,9 @@ function Main {
     Write-Info "Searching in $($searchPaths.Count) directories..."
     
     # Find projects
-    $projects = Find-Projects -SearchPaths $searchPaths
+    $projects = @(Find-Projects -SearchPaths $searchPaths)
     
-    if ($projects.Count -eq 0) {
+    if ($null -eq $projects -or $projects.Count -eq 0) {
         Write-Host ""
         Write-Host "$esc[32m$($script:Icons.Success)$esc[0m No cleanable artifacts found"
         Write-Host ""
@@ -564,6 +571,7 @@ function Main {
     }
     
     $totalSize = ($projects | Measure-Object -Property TotalSizeKB -Sum).Sum
+    if ($null -eq $totalSize) { $totalSize = 0 }
     $totalSizeHuman = Format-ByteSize -Bytes ($totalSize * 1024)
     
     Write-Host ""
@@ -571,9 +579,9 @@ function Main {
     Write-Host ""
     
     # Project selection
-    $selected = Show-ProjectSelectionMenu -Projects $projects
+    $selected = @(Show-ProjectSelectionMenu -Projects $projects)
     
-    if ($selected.Count -eq 0) {
+    if ($null -eq $selected -or $selected.Count -eq 0) {
         Write-Info "No projects selected"
         return
     }
@@ -582,6 +590,7 @@ function Main {
     Clear-Host
     Write-Host ""
     $selectedSize = ($selected | Measure-Object -Property TotalSizeKB -Sum).Sum
+    if ($null -eq $selectedSize) { $selectedSize = 0 }
     $selectedSizeHuman = Format-ByteSize -Bytes ($selectedSize * 1024)
     
     Write-Host "$esc[33mThe following will be cleaned ($selectedSizeHuman):$esc[0m"

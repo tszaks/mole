@@ -130,43 +130,70 @@ function Get-InstalledApplications {
         $count++
         Write-Progress -Activity "Scanning applications" -Status "Registry path $count of $total" -PercentComplete (($count / $total) * 50)
         
-        $items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
-                 Where-Object { 
-                     $_.DisplayName -and 
-                     $_.UninstallString -and
-                     -not (Test-ProtectedApp $_.DisplayName)
-                 }
-        
-        foreach ($item in $items) {
-            # Calculate size
-            $sizeKB = 0
-            if ($item.EstimatedSize) {
-                $sizeKB = [long]$item.EstimatedSize
-            }
-            elseif ($item.InstallLocation -and (Test-Path $item.InstallLocation)) {
-                $sizeKB = Get-PathSizeKB -Path $item.InstallLocation
-            }
+        try {
+            $regItems = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
             
-            # Get install date
-            $installDate = $null
-            if ($item.InstallDate) {
+            foreach ($item in $regItems) {
+                # Skip items without required properties
+                $displayName = $null
+                $uninstallString = $null
+                
+                try { $displayName = $item.DisplayName } catch { }
+                try { $uninstallString = $item.UninstallString } catch { }
+                
+                if ([string]::IsNullOrWhiteSpace($displayName) -or [string]::IsNullOrWhiteSpace($uninstallString)) {
+                    continue
+                }
+                
+                if (Test-ProtectedApp $displayName) {
+                    continue
+                }
+                
+                # Calculate size
+                $sizeKB = 0
                 try {
-                    $installDate = [DateTime]::ParseExact($item.InstallDate, "yyyyMMdd", $null)
+                    if ($item.EstimatedSize) {
+                        $sizeKB = [long]$item.EstimatedSize
+                    }
+                    elseif ($item.InstallLocation -and (Test-Path $item.InstallLocation -ErrorAction SilentlyContinue)) {
+                        $sizeKB = Get-PathSizeKB -Path $item.InstallLocation
+                    }
                 }
                 catch { }
+                
+                # Get install date
+                $installDate = $null
+                try {
+                    if ($item.InstallDate) {
+                        $installDate = [DateTime]::ParseExact($item.InstallDate, "yyyyMMdd", $null)
+                    }
+                }
+                catch { }
+                
+                # Get other properties safely
+                $publisher = $null
+                $version = $null
+                $installLocation = $null
+                
+                try { $publisher = $item.Publisher } catch { }
+                try { $version = $item.DisplayVersion } catch { }
+                try { $installLocation = $item.InstallLocation } catch { }
+                
+                $apps += [PSCustomObject]@{
+                    Name = $displayName
+                    Publisher = $publisher
+                    Version = $version
+                    SizeKB = $sizeKB
+                    SizeHuman = Format-ByteSize -Bytes ($sizeKB * 1024)
+                    InstallLocation = $installLocation
+                    UninstallString = $uninstallString
+                    InstallDate = $installDate
+                    Source = "Registry"
+                }
             }
-            
-            $apps += [PSCustomObject]@{
-                Name = $item.DisplayName
-                Publisher = $item.Publisher
-                Version = $item.DisplayVersion
-                SizeKB = $sizeKB
-                SizeHuman = Format-ByteSize -Bytes ($sizeKB * 1024)
-                InstallLocation = $item.InstallLocation
-                UninstallString = $item.UninstallString
-                InstallDate = $installDate
-                Source = "Registry"
-            }
+        }
+        catch {
+            Write-Debug "Error scanning registry path $path : $_"
         }
     }
     
@@ -255,8 +282,8 @@ function Show-AppSelectionMenu {
     $searchTerm = ""
     $filteredApps = $Apps
     
-    # Hide cursor
-    [Console]::CursorVisible = $false
+    # Hide cursor (may fail in non-interactive terminals)
+    try { [Console]::CursorVisible = $false } catch { }
     
     try {
         while ($true) {
@@ -387,9 +414,9 @@ function Show-AppSelectionMenu {
                     # Search mode
                     Write-Host ""
                     Write-Host "Search: " -NoNewline
-                    [Console]::CursorVisible = $true
+                    try { [Console]::CursorVisible = $true } catch { }
                     $searchTerm = Read-Host
-                    [Console]::CursorVisible = $false
+                    try { [Console]::CursorVisible = $false } catch { }
                     
                     if ($searchTerm) {
                         $filteredApps = $Apps | Where-Object { $_.Name -like "*$searchTerm*" }
@@ -412,7 +439,7 @@ function Show-AppSelectionMenu {
         }
     }
     finally {
-        [Console]::CursorVisible = $true
+        try { [Console]::CursorVisible = $true } catch { }
     }
 }
 

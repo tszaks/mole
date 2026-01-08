@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -15,6 +16,13 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+)
+
+// Scanning limits to prevent infinite scanning
+const (
+	dirSizeTimeout = 5 * time.Second // Max time to calculate a single directory size
+	maxFilesPerDir = 50000           // Max files to scan per directory
+	maxScanDepth   = 50              // Max recursion depth
 )
 
 // ANSI color codes
@@ -555,21 +563,86 @@ func scanDirectory(path string) ([]dirEntry, []fileEntry, int64, error) {
 	return dirEntries, largeFiles, totalSize, nil
 }
 
-// calculateDirSize calculates the size of a directory
+// calculateDirSize calculates the size of a directory with timeout and limits
 func calculateDirSize(path string) int64 {
-	var size int64
+	ctx, cancel := context.WithTimeout(context.Background(), dirSizeTimeout)
+	defer cancel()
 
-	filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Skip errors
-		}
-		if !info.IsDir() {
-			size += info.Size()
-		}
-		return nil
-	})
+	var size int64
+	var fileCount int64
+
+	// Use a channel to signal completion
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		walkDirWithLimit(ctx, path, 0, &size, &fileCount)
+	}()
+
+	select {
+	case <-done:
+		// Completed normally
+	case <-ctx.Done():
+		// Timeout - return partial size
+	}
 
 	return size
+}
+
+// walkDirWithLimit walks a directory with depth limit and file count limit
+func walkDirWithLimit(ctx context.Context, path string, depth int, size *int64, fileCount *int64) {
+	// Check context cancellation
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
+	// Check depth limit
+	if depth > maxScanDepth {
+		return
+	}
+
+	// Check file count limit
+	if atomic.LoadInt64(fileCount) > maxFilesPerDir {
+		return
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		// Check cancellation frequently
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Check file count limit
+		if atomic.LoadInt64(fileCount) > maxFilesPerDir {
+			return
+		}
+
+		entryPath := filepath.Join(path, entry.Name())
+
+		if entry.IsDir() {
+			// Skip system/protected directories
+			name := entry.Name()
+			if skipPatterns[name] || strings.HasPrefix(name, ".") && len(name) > 1 {
+				continue
+			}
+			walkDirWithLimit(ctx, entryPath, depth+1, size, fileCount)
+		} else {
+			info, err := entry.Info()
+			if err == nil {
+				atomic.AddInt64(size, info.Size())
+				atomic.AddInt64(fileCount, 1)
+			}
+		}
+	}
 }
 
 // formatBytes formats bytes to human readable string

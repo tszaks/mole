@@ -163,7 +163,8 @@ function Invoke-MoleCommand {
     
     # Execute the command script with arguments using splatting
     # This properly handles switch parameters passed as strings
-    if ($Arguments -and $Arguments.Count -gt 0) {
+    $argCount = if ($null -eq $Arguments) { 0 } else { @($Arguments).Count }
+    if ($argCount -gt 0) {
         # Build a hashtable for splatting
         $splatParams = @{}
         $positionalArgs = @()
