@@ -238,8 +238,9 @@ func collectThermal() ThermalStatus {
 				valStr, _, _ = strings.Cut(valStr, ",")
 				valStr, _, _ = strings.Cut(valStr, "}")
 				valStr = strings.TrimSpace(valStr)
-				if powerMW, err := strconv.ParseFloat(valStr, 64); err == nil {
-					thermal.BatteryPower = powerMW / 1000.0
+				// Parse as int64 first to handle negative values (charging)
+				if powerMW, err := strconv.ParseInt(valStr, 10, 64); err == nil {
+					thermal.BatteryPower = float64(powerMW) / 1000.0
 				}
 			}
 		}

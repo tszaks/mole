@@ -32,7 +32,7 @@ const (
 	iconProcs   = "❊"
 )
 
-// Mole body frames.
+// Mole body frames (facing right).
 var moleBody = [][]string{
 	{
 		`     /\_/\`,
@@ -60,11 +60,36 @@ var moleBody = [][]string{
 	},
 }
 
+// Mirror mole body frames (facing left).
+var moleBodyMirror = [][]string{
+	{
+		`    /\_/\`,
+		`   / o o \___`,
+		`  \ =-=   ___\`,
+		`  (m-m-(____/`,
+	},
+	{
+		`    /\_/\`,
+		`   / o o \___`,
+		`  \ =-=   ___\`,
+		`  (__mm(____/`,
+	},
+	{
+		`    /\_/\`,
+		`   / · · \___`,
+		`  \ =-=   ___\`,
+		`  (m__m-(___/`,
+	},
+	{
+		`    /\_/\`,
+		`   / o o \___`,
+		`  \ =-=   ___\`,
+		`  (-mm-(____/`,
+	},
+}
+
 // getMoleFrame renders the animated mole.
 func getMoleFrame(animFrame int, termWidth int) string {
-	bodyIdx := animFrame % len(moleBody)
-	body := moleBody[bodyIdx]
-
 	moleWidth := 15
 	maxPos := max(termWidth-moleWidth, 0)
 
@@ -73,9 +98,21 @@ func getMoleFrame(animFrame int, termWidth int) string {
 		cycleLength = 1
 	}
 	pos := animFrame % cycleLength
-	if pos > maxPos {
+	movingLeft := pos > maxPos
+	if movingLeft {
 		pos = cycleLength - pos
 	}
+
+	// Use mirror frames when moving left
+	var frames [][]string
+	if movingLeft {
+		frames = moleBodyMirror
+	} else {
+		frames = moleBody
+	}
+
+	bodyIdx := animFrame % len(frames)
+	body := frames[bodyIdx]
 
 	padding := strings.Repeat(" ", pos)
 	var lines []string
@@ -93,7 +130,7 @@ type cardData struct {
 	lines []string
 }
 
-func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int) string {
+func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int, catHidden bool) string {
 	title := titleStyle.Render("Mole Status")
 
 	scoreStyle := getScoreStyle(m.HealthScore)
@@ -131,10 +168,20 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 
 	headerLine := title + "  " + scoreText + "  " + strings.Join(infoParts, " · ")
 
-	mole := getMoleFrame(animFrame, termWidth)
+	// Show cat unless hidden
+	var mole string
+	if !catHidden {
+		mole = getMoleFrame(animFrame, termWidth)
+	}
 
 	if errMsg != "" {
+		if mole == "" {
+			return lipgloss.JoinVertical(lipgloss.Left, headerLine, "", dangerStyle.Render("ERROR: "+errMsg), "")
+		}
 		return lipgloss.JoinVertical(lipgloss.Left, headerLine, "", mole, dangerStyle.Render("ERROR: "+errMsg), "")
+	}
+	if mole == "" {
+		return headerLine
 	}
 	return headerLine + "\n" + mole
 }
@@ -464,6 +511,7 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 				statusText += fmt.Sprintf(" · %.0fW Adapter", thermal.AdapterPower)
 			}
 		} else if thermal.BatteryPower > 0 {
+			// Only show battery power when discharging (positive value)
 			statusText += fmt.Sprintf(" · %.0fW", thermal.BatteryPower)
 		}
 		lines = append(lines, statusStyle.Render(statusText+statusIcon))
@@ -518,10 +566,7 @@ func renderCard(data cardData, width int, height int) string {
 	header := titleStyle.Render(titleText) + "  " + lineStyle.Render(strings.Repeat("╌", lineLen))
 	content := header + "\n" + strings.Join(data.lines, "\n")
 
-	var lines []string
-	for line := range strings.Lines(content) {
-		lines = append(lines, line)
-	}
+	lines := strings.Split(content, "\n")
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
