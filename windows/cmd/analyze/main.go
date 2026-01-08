@@ -20,9 +20,10 @@ import (
 
 // Scanning limits to prevent infinite scanning
 const (
-	dirSizeTimeout = 5 * time.Second // Max time to calculate a single directory size
-	maxFilesPerDir = 50000           // Max files to scan per directory
-	maxScanDepth   = 50              // Max recursion depth
+	dirSizeTimeout   = 500 * time.Millisecond // Max time to calculate a single directory size
+	maxFilesPerDir   = 10000                  // Max files to scan per directory
+	maxScanDepth     = 10                     // Max recursion depth (shallow scan)
+	shallowScanDepth = 3                      // Depth for quick size estimation
 )
 
 // ANSI color codes
@@ -564,6 +565,7 @@ func scanDirectory(path string) ([]dirEntry, []fileEntry, int64, error) {
 }
 
 // calculateDirSize calculates the size of a directory with timeout and limits
+// Uses shallow scanning for speed - estimates based on first few levels
 func calculateDirSize(path string) int64 {
 	ctx, cancel := context.WithTimeout(context.Background(), dirSizeTimeout)
 	defer cancel()
@@ -576,21 +578,21 @@ func calculateDirSize(path string) int64 {
 
 	go func() {
 		defer close(done)
-		walkDirWithLimit(ctx, path, 0, &size, &fileCount)
+		quickScanDir(ctx, path, 0, &size, &fileCount)
 	}()
 
 	select {
 	case <-done:
 		// Completed normally
 	case <-ctx.Done():
-		// Timeout - return partial size
+		// Timeout - return partial size (already accumulated)
 	}
 
 	return size
 }
 
-// walkDirWithLimit walks a directory with depth limit and file count limit
-func walkDirWithLimit(ctx context.Context, path string, depth int, size *int64, fileCount *int64) {
+// quickScanDir does a fast shallow scan for size estimation
+func quickScanDir(ctx context.Context, path string, depth int, size *int64, fileCount *int64) {
 	// Check context cancellation
 	select {
 	case <-ctx.Done():
@@ -598,12 +600,12 @@ func walkDirWithLimit(ctx context.Context, path string, depth int, size *int64, 
 	default:
 	}
 
-	// Check depth limit
-	if depth > maxScanDepth {
+	// Limit depth for speed
+	if depth > shallowScanDepth {
 		return
 	}
 
-	// Check file count limit
+	// Limit total files scanned
 	if atomic.LoadInt64(fileCount) > maxFilesPerDir {
 		return
 	}
@@ -614,14 +616,13 @@ func walkDirWithLimit(ctx context.Context, path string, depth int, size *int64, 
 	}
 
 	for _, entry := range entries {
-		// Check cancellation frequently
+		// Check cancellation
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
 
-		// Check file count limit
 		if atomic.LoadInt64(fileCount) > maxFilesPerDir {
 			return
 		}
@@ -629,12 +630,12 @@ func walkDirWithLimit(ctx context.Context, path string, depth int, size *int64, 
 		entryPath := filepath.Join(path, entry.Name())
 
 		if entry.IsDir() {
-			// Skip system/protected directories
 			name := entry.Name()
-			if skipPatterns[name] || strings.HasPrefix(name, ".") && len(name) > 1 {
+			// Skip hidden and system directories
+			if skipPatterns[name] || (strings.HasPrefix(name, ".") && len(name) > 1) {
 				continue
 			}
-			walkDirWithLimit(ctx, entryPath, depth+1, size, fileCount)
+			quickScanDir(ctx, entryPath, depth+1, size, fileCount)
 		} else {
 			info, err := entry.Info()
 			if err == nil {
