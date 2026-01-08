@@ -9,7 +9,7 @@ param(
     [switch]$CreateShortcut,
     [switch]$Uninstall,
     [switch]$Force,
-    [switch]$Help
+    [switch]$ShowHelp
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,18 +20,23 @@ Set-StrictMode -Version Latest
 # ============================================================================
 
 $script:VERSION = "1.0.0"
-$script:SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$script:SourceDir = if ($MyInvocation.MyCommand.Path) { 
+    Split-Path -Parent $MyInvocation.MyCommand.Path 
+} else { 
+    $PSScriptRoot 
+}
 $script:ShortcutName = "Mole"
 
-# Colors
+# Colors (using [char]27 for PowerShell 5.1 compatibility)
+$script:ESC = [char]27
 $script:Colors = @{
-    Red     = "`e[31m"
-    Green   = "`e[32m"
-    Yellow  = "`e[33m"
-    Blue    = "`e[34m"
-    Cyan    = "`e[36m"
-    Gray    = "`e[90m"
-    NC      = "`e[0m"
+    Red     = "$($script:ESC)[31m"
+    Green   = "$($script:ESC)[32m"
+    Yellow  = "$($script:ESC)[33m"
+    Blue    = "$($script:ESC)[34m"
+    Cyan    = "$($script:ESC)[36m"
+    Gray    = "$($script:ESC)[90m"
+    NC      = "$($script:ESC)[0m"
 }
 
 # ============================================================================
@@ -65,14 +70,12 @@ function Write-Error {
 function Show-Banner {
     $c = $script:Colors
     Write-Host ""
-    Write-Host "  $($c.Cyan)╔╦╗╔═╗╦  ╔═╗$($c.NC)"
-    Write-Host "  $($c.Cyan)║║║║ ║║  ║╣ $($c.NC)"
-    Write-Host "  $($c.Cyan)╩ ╩╚═╝╩═╝╚═╝$($c.NC)"
+    Write-Host "  $($c.Cyan)MOLE$($c.NC)"
     Write-Host "  $($c.Gray)Windows System Maintenance$($c.NC)"
     Write-Host ""
 }
 
-function Show-Help {
+function Show-InstallerHelp {
     Show-Banner
     
     $c = $script:Colors
@@ -93,7 +96,7 @@ function Show-Help {
     Write-Host ""
     Write-Host "    $($c.Cyan)-Force$($c.NC)               Overwrite existing installation"
     Write-Host ""
-    Write-Host "    $($c.Cyan)-Help$($c.NC)                Show this help message"
+    Write-Host "    $($c.Cyan)-ShowHelp$($c.NC)            Show this help message"
     Write-Host ""
     Write-Host "  $($c.Green)EXAMPLES:$($c.NC)"
     Write-Host ""
@@ -393,8 +396,8 @@ function Uninstall-Mole {
 # ============================================================================
 
 function Main {
-    if ($Help) {
-        Show-Help
+    if ($ShowHelp) {
+        Show-InstallerHelp
         return
     }
     
@@ -414,7 +417,7 @@ try {
 }
 catch {
     Write-Host ""
-    Write-Error "Installation failed: $_"
+    Write-Host "  $($script:Colors.Red)ERROR$($script:Colors.NC) Installation failed: $_"
     Write-Host ""
     exit 1
 }

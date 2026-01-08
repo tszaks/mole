@@ -334,19 +334,10 @@ function Show-Banner {
     $cyan = $script:Colors.Cyan
     $nc = $script:Colors.NC
     
-    $banner = @"
-
-  ${purple}███╗   ███╗ ██████╗ ██╗     ███████╗${nc}
-  ${purple}████╗ ████║██╔═══██╗██║     ██╔════╝${nc}
-  ${purple}██╔████╔██║██║   ██║██║     █████╗  ${nc}
-  ${purple}██║╚██╔╝██║██║   ██║██║     ██╔══╝  ${nc}
-  ${purple}██║ ╚═╝ ██║╚██████╔╝███████╗███████╗${nc}
-  ${purple}╚═╝     ╚═╝ ╚═════╝ ╚══════╝╚══════╝${nc}
-  ${cyan}Windows System Maintenance${nc}
-
-"@
-    
-    Write-Host $banner
+    Write-Host ""
+    Write-Host "  ${purple}MOLE${nc}"
+    Write-Host "  ${cyan}Windows System Maintenance${nc}"
+    Write-Host ""
 }
 
 function Show-Header {
