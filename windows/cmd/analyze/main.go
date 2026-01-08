@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -671,17 +672,9 @@ func truncatePath(path string, maxLen int) string {
 // openInExplorer opens a path in Windows Explorer
 func openInExplorer(path string) {
 	// Use explorer.exe to open the path
-	cmd := fmt.Sprintf("explorer.exe /select,\"%s\"", path)
 	go func() {
-		_ = runCommand("cmd", "/c", cmd)
+		exec.Command("explorer.exe", "/select,", path).Run()
 	}()
-}
-
-// runCommand runs a command and returns the output
-func runCommand(name string, args ...string) error {
-	cmd := fmt.Sprintf("%s %s", name, strings.Join(args, " "))
-	_ = cmd
-	return nil
 }
 
 func main() {

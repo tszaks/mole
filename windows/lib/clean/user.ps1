@@ -289,6 +289,9 @@ function Clear-ClipboardHistory {
     }
     
     try {
+        # Load Windows Forms assembly for clipboard access
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+        
         # Clear current clipboard
         [System.Windows.Forms.Clipboard]::Clear()
         

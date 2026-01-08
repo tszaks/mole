@@ -207,7 +207,7 @@ function Clear-OneDriveCache {
     }
 }
 
-function Clear-DroplboxCache {
+function Clear-DropboxCache {
     <#
     .SYNOPSIS
         Clean Dropbox cache
@@ -405,7 +405,7 @@ function Invoke-AppCleanup {
     # Productivity apps
     Clear-OfficeCache
     Clear-OneDriveCache
-    Clear-DroplboxCache
+    Clear-DropboxCache
     Clear-GoogleDriveCache
     
     # Creative apps
