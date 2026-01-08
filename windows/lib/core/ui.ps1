@@ -180,32 +180,59 @@ function Show-Menu {
             Write-Host ""
             Write-Host "  ${gray}Use arrows or j/k to navigate, Enter to select, q to quit${nc}"
             
-            # Read key
+            # Read key - handle both VirtualKeyCode and escape sequences
             $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             
-            switch ($key.VirtualKeyCode) {
-                38 { # Up arrow
-                    $selected = if ($selected -gt 0) { $selected - 1 } else { $maxIndex }
-                }
-                40 { # Down arrow
-                    $selected = if ($selected -lt $maxIndex) { $selected + 1 } else { 0 }
-                }
-                13 { # Enter
-                    # Show cursor
-                    Write-Host -NoNewline "$([char]27)[?25h"
-                    
-                    if ($AllowBack -and $selected -eq $maxIndex) {
-                        return $null  # Back selected
+            # Debug: uncomment to see key codes
+            # Write-Host "VKey: $($key.VirtualKeyCode), Char: $([int]$key.Character)"
+            
+            # Handle escape sequences for arrow keys (some terminals send these)
+            $moved = $false
+            if ($key.VirtualKeyCode -eq 0 -or $key.Character -eq [char]27) {
+                # Escape sequence - read the next characters
+                if ($Host.UI.RawUI.KeyAvailable) {
+                    $key2 = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                    if ($key2.Character -eq '[' -and $Host.UI.RawUI.KeyAvailable) {
+                        $key3 = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                        switch ($key3.Character) {
+                            'A' { # Up arrow escape sequence
+                                $selected = if ($selected -gt 0) { $selected - 1 } else { $maxIndex }
+                                $moved = $true
+                            }
+                            'B' { # Down arrow escape sequence
+                                $selected = if ($selected -lt $maxIndex) { $selected + 1 } else { 0 }
+                                $moved = $true
+                            }
+                        }
                     }
-                    return $Options[$selected]
                 }
-                default {
-                    switch ($key.Character) {
-                        'k' { $selected = if ($selected -gt 0) { $selected - 1 } else { $maxIndex } }
-                        'j' { $selected = if ($selected -lt $maxIndex) { $selected + 1 } else { 0 } }
-                        'q' { 
-                            Write-Host -NoNewline "$([char]27)[?25h"
-                            return $null 
+            }
+            
+            if (-not $moved) {
+                switch ($key.VirtualKeyCode) {
+                    38 { # Up arrow
+                        $selected = if ($selected -gt 0) { $selected - 1 } else { $maxIndex }
+                    }
+                    40 { # Down arrow
+                        $selected = if ($selected -lt $maxIndex) { $selected + 1 } else { 0 }
+                    }
+                    13 { # Enter
+                        # Show cursor
+                        Write-Host -NoNewline "$([char]27)[?25h"
+                        
+                        if ($AllowBack -and $selected -eq $maxIndex) {
+                            return $null  # Back selected
+                        }
+                        return $Options[$selected]
+                    }
+                    default {
+                        switch ($key.Character) {
+                            'k' { $selected = if ($selected -gt 0) { $selected - 1 } else { $maxIndex } }
+                            'j' { $selected = if ($selected -lt $maxIndex) { $selected + 1 } else { 0 } }
+                            'q' { 
+                                Write-Host -NoNewline "$([char]27)[?25h"
+                                return $null 
+                            }
                         }
                     }
                 }
@@ -274,42 +301,66 @@ function Show-SelectionList {
             
             $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             
-            switch ($key.VirtualKeyCode) {
-                38 { $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $maxIndex } }
-                40 { $cursor = if ($cursor -lt $maxIndex) { $cursor + 1 } else { 0 } }
-                32 { # Space
-                    if ($MultiSelect) {
-                        $selected[$cursor] = -not $selected[$cursor]
-                    }
-                    else {
-                        $selected = @{ $cursor = $true }
-                    }
-                }
-                13 { # Enter
-                    Write-Host -NoNewline "$([char]27)[?25h"
-                    $result = @()
-                    foreach ($key in $selected.Keys) {
-                        if ($selected[$key]) {
-                            $result += $Items[$key]
-                        }
-                    }
-                    return $result
-                }
-                default {
-                    switch ($key.Character) {
-                        'k' { $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $maxIndex } }
-                        'j' { $cursor = if ($cursor -lt $maxIndex) { $cursor + 1 } else { 0 } }
-                        ' ' { 
-                            if ($MultiSelect) {
-                                $selected[$cursor] = -not $selected[$cursor]
+            # Handle escape sequences for arrow keys (some terminals send these)
+            $moved = $false
+            if ($key.VirtualKeyCode -eq 0 -or $key.Character -eq [char]27) {
+                # Escape sequence - read the next characters
+                if ($Host.UI.RawUI.KeyAvailable) {
+                    $key2 = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                    if ($key2.Character -eq '[' -and $Host.UI.RawUI.KeyAvailable) {
+                        $key3 = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                        switch ($key3.Character) {
+                            'A' { # Up arrow escape sequence
+                                $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $maxIndex }
+                                $moved = $true
                             }
-                            else {
-                                $selected = @{ $cursor = $true }
+                            'B' { # Down arrow escape sequence
+                                $cursor = if ($cursor -lt $maxIndex) { $cursor + 1 } else { 0 }
+                                $moved = $true
                             }
                         }
-                        'q' {
-                            Write-Host -NoNewline "$([char]27)[?25h"
-                            return @()
+                    }
+                }
+            }
+            
+            if (-not $moved) {
+                switch ($key.VirtualKeyCode) {
+                    38 { $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $maxIndex } }
+                    40 { $cursor = if ($cursor -lt $maxIndex) { $cursor + 1 } else { 0 } }
+                    32 { # Space
+                        if ($MultiSelect) {
+                            $selected[$cursor] = -not $selected[$cursor]
+                        }
+                        else {
+                            $selected = @{ $cursor = $true }
+                        }
+                    }
+                    13 { # Enter
+                        Write-Host -NoNewline "$([char]27)[?25h"
+                        $result = @()
+                        foreach ($selKey in $selected.Keys) {
+                            if ($selected[$selKey]) {
+                                $result += $Items[$selKey]
+                            }
+                        }
+                        return $result
+                    }
+                    default {
+                        switch ($key.Character) {
+                            'k' { $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $maxIndex } }
+                            'j' { $cursor = if ($cursor -lt $maxIndex) { $cursor + 1 } else { 0 } }
+                            ' ' { 
+                                if ($MultiSelect) {
+                                    $selected[$cursor] = -not $selected[$cursor]
+                                }
+                                else {
+                                    $selected = @{ $cursor = $true }
+                                }
+                            }
+                            'q' {
+                                Write-Host -NoNewline "$([char]27)[?25h"
+                                return @()
+                            }
                         }
                     }
                 }
