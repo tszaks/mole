@@ -112,6 +112,10 @@ fi
 
 echo -e "${YELLOW}3. Running Go linters...${NC}"
 if command -v golangci-lint > /dev/null 2>&1; then
+    if ! golangci-lint config verify; then
+        echo -e "${RED}${ICON_ERROR} golangci-lint config invalid${NC}\n"
+        exit 1
+    fi
     if golangci-lint run ./cmd/...; then
         echo -e "${GREEN}${ICON_SUCCESS} golangci-lint passed${NC}\n"
     else
