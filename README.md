@@ -35,11 +35,8 @@ brew install mole
 **Or via script:**
 
 ```bash
-# Default install
+# Optional args: -s latest for main branch code, -s 1.17.0 for specific version
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
-
-# Install specific version (e.g. 1.17.0 or dev)
-curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash -s 1.17.0
 ```
 
 **Run:**
