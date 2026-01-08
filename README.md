@@ -32,11 +32,14 @@
 brew install mole
 ```
 
-**Or via script — for older macOS versions or latest code:**
+**Or via script:**
 
 ```bash
-# Add '-s latest' for the latest, '-s dev' for development, or '-s 1.17.0' for a specific version.
+# Default install
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
+
+# Install specific version (e.g. 1.17.0 or dev)
+curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash -s 1.17.0
 ```
 
 **Run:**
