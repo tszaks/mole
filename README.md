@@ -24,6 +24,24 @@
 - **Disk insights**: Visualizes usage, manages large files, **rebuilds caches**, and refreshes system services
 - **Live monitoring**: Real-time stats for CPU, GPU, memory, disk, and network to **diagnose performance issues**
 
+## Platform Support
+
+Mole is designed for **macOS**. For Windows users, check out the `windows/` directory which provides a native Windows port with the same features:
+
+**Windows Installation:**
+```powershell
+irm https://raw.githubusercontent.com/tw93/Mole/main/windows/install.ps1 | iex
+```
+
+**Windows Features:**
+- Deep system cleanup (temp files, caches, logs, Windows Update cache)
+- Smart app uninstaller with leftover detection
+- System optimization and service refresh
+- Developer artifact cleanup (node_modules, target, .venv, etc.)
+- Disk analysis and real-time monitoring tools (TUI)
+
+Built with PowerShell and Go for native Windows performance. Run `mole` after installation.
+
 ## Quick Start
 
 **Install by Brew, recommended:**
