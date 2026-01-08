@@ -473,15 +473,15 @@ function Remove-ProjectArtifacts {
         
         foreach ($artifact in $project.Artifacts) {
             if (Test-Path $artifact.Path) {
-                # Use safe removal with protection checks
-                $result = Remove-SafeItem -Path $artifact.Path -Description $artifact.Name -Recurse
+                # Use safe removal with protection checks (returns boolean)
+                $success = Remove-SafeItem -Path $artifact.Path -Description $artifact.Name -Recurse
                 
-                if ($result.Removed -gt 0) {
+                if ($success) {
                     Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m $($artifact.Name) ($($artifact.SizeHuman))"
                     $script:TotalSizeCleaned += $artifact.SizeKB
                     $script:ItemsCleaned++
                 }
-                elseif ($result.Failed -gt 0) {
+                else {
                     Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m $($artifact.Name) - removal failed"
                 }
             }

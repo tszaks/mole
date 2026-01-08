@@ -188,7 +188,7 @@ jobs:
           )
           
           foreach ($path in $protectedPaths) {
-              if (-not (Test-IsProtectedPath -Path $path)) {
+              if (-not (Test-ProtectedPath -Path $path)) {
                   Write-Host "✗ $path should be protected!" -ForegroundColor Red
                   exit 1
               }

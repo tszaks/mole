@@ -87,6 +87,8 @@ $script:ProtectedPaths = @(
     "C:\Windows"
     "C:\Windows\System32"
     "C:\Windows\SysWOW64"
+    "C:\Program Files"
+    "C:\Program Files (x86)"
     "C:\Program Files\Windows Defender"
     "C:\Program Files (x86)\Windows Defender"
     "C:\ProgramData\Microsoft\Windows Defender"
