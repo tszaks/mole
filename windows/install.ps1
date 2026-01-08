@@ -270,6 +270,10 @@ function Install-Mole {
         if (Test-Path $src) {
             try {
                 if ((Get-Item $src).PSIsContainer) {
+                    # For directories, remove destination first if exists to avoid nesting
+                    if (Test-Path $dst) {
+                        Remove-Item -Path $dst -Recurse -Force
+                    }
                     Copy-Item -Path $src -Destination $dst -Recurse -Force
                 }
                 else {
