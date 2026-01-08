@@ -96,9 +96,8 @@ ask_for_updates() {
     fi
 
     echo ""
-    echo -e "${YELLOW}Tip:${NC} Homebrew: brew upgrade / brew upgrade --cask"
-    echo -e "${YELLOW}Tip:${NC} App Store: open App Store → Updates"
-    echo -e "${YELLOW}Tip:${NC} macOS: System Settings → General → Software Update"
+    echo -e "${YELLOW}💡 To update, please run:${NC} ${GREEN}brew upgrade${NC}"
+
     return 1
 }
 
