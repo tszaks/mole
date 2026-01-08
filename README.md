@@ -30,7 +30,7 @@ Mole is designed for **macOS**. For Windows users, check out the `windows/` dire
 
 **Windows Installation:**
 ```powershell
-irm https://raw.githubusercontent.com/tw93/Mole/main/windows/install.ps1 | iex
+irm https://raw.githubusercontent.com/tw93/mole/main/windows/install.ps1 | iex
 ```
 
 **Windows Features:**
