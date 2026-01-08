@@ -1,0 +1,16 @@
+# Windows Mole - .gitignore
+
+# Build artifacts
+bin/*.exe
+
+# Go build cache
+.gocache/
+
+# IDE files
+.idea/
+.vscode/
+*.code-workspace
+
+# Test artifacts
+*.test
+coverage.out
