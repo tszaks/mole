@@ -530,7 +530,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Delete confirm flow.
 	if m.deleteConfirm {
 		switch msg.String() {
-		case "delete", "backspace":
+		case "enter":
 			m.deleteConfirm = false
 			m.deleting = true
 			var deleteCount int64

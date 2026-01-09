@@ -123,7 +123,8 @@ The analyzer (`mo analyze`) uses a distinct security model:
 
 - Runs with standard user permissions only.
 - Respects macOS System Integrity Protection (SIP).
-- Requires explicit user confirmation for all deletions.
+- **Two-Key Confirmation:** Deletion requires ⌫ (Delete) to enter confirmation mode, then Enter to confirm. Prevents accidental double-press of the same key.
+- **Trash Instead of Delete:** Files are moved to macOS Trash using Finder's native API, allowing easy recovery if needed.
 - OS-level enforcement (cannot delete `/System` due to Read-Only Volume).
 
 **Code:** `cmd/analyze/*.go`
