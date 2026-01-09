@@ -30,6 +30,7 @@ func snapshotFromModel(m model) historyEntry {
 		Entries:       cloneDirEntries(m.entries),
 		LargeFiles:    cloneFileEntries(m.largeFiles),
 		TotalSize:     m.totalSize,
+		TotalFiles:    m.totalFiles,
 		Selected:      m.selected,
 		EntryOffset:   m.offset,
 		LargeSelected: m.largeSelected,
@@ -49,7 +50,7 @@ func cloneDirEntries(entries []dirEntry) []dirEntry {
 		return nil
 	}
 	copied := make([]dirEntry, len(entries))
-	copy(copied, entries)
+	copy(copied, entries) //nolint:all
 	return copied
 }
 
@@ -58,7 +59,7 @@ func cloneFileEntries(files []fileEntry) []fileEntry {
 		return nil
 	}
 	copied := make([]fileEntry, len(files))
-	copy(copied, files)
+	copy(copied, files) //nolint:all
 	return copied
 }
 
@@ -208,7 +209,7 @@ func loadCacheFromDisk(path string) (*cacheEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	var entry cacheEntry
 	decoder := gob.NewDecoder(file)
@@ -250,6 +251,7 @@ func saveCacheToDisk(path string, result scanResult) error {
 		Entries:    result.Entries,
 		LargeFiles: result.LargeFiles,
 		TotalSize:  result.TotalSize,
+		TotalFiles: result.TotalFiles,
 		ModTime:    info.ModTime(),
 		ScanTime:   time.Now(),
 	}
@@ -258,10 +260,33 @@ func saveCacheToDisk(path string, result scanResult) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	encoder := gob.NewEncoder(file)
 	return encoder.Encode(entry)
+}
+
+// peekCacheTotalFiles attempts to read the total file count from cache,
+// ignoring expiration. Used for initial scan progress estimates.
+func peekCacheTotalFiles(path string) (int64, error) {
+	cachePath, err := getCachePath(path)
+	if err != nil {
+		return 0, err
+	}
+
+	file, err := os.Open(cachePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close() //nolint:errcheck
+
+	var entry cacheEntry
+	decoder := gob.NewDecoder(file)
+	if err := decoder.Decode(&entry); err != nil {
+		return 0, err
+	}
+
+	return entry.TotalFiles, nil
 }
 
 func invalidateCache(path string) {

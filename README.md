@@ -13,12 +13,12 @@
 </p>
 
 <p align="center">
-  <img src="https://cdn.tw93.fun/img/mole.jpeg" alt="Mole - 95.50GB freed" width="800" />
+  <img src="https://cdn.tw93.fun/img/mole.jpeg" alt="Mole - 95.50GB freed" width="1000" />
 </p>
 
 ## Features
 
-- **Unified toolkit**: Consolidated features of CleanMyMac, AppCleaner, DaisyDisk, and iStat into a **single binary**
+- **All-in-one toolkit**: CleanMyMac, AppCleaner, DaisyDisk, and iStat Menus combined into a **single binary**
 - **Deep cleaning**: Scans and removes caches, logs, and browser leftovers to **reclaim gigabytes of space**
 - **Smart uninstaller**: Thoroughly removes apps along with launch agents, preferences, and **hidden remnants**
 - **Disk insights**: Visualizes usage, manages large files, **rebuilds caches**, and refreshes system services
@@ -44,16 +44,16 @@ Built with PowerShell and Go for native Windows performance. Run `mole` after in
 
 ## Quick Start
 
-**Install by Brew, recommended:**
+**Install via Homebrew — recommended:**
 
 ```bash
 brew install mole
 ```
 
-**or by Script, for older macOS or latest code:**
+**Or via script:**
 
 ```bash
-# Add '-s latest' for newest, '-s dev' for development, or '-s 1.17.0' for a version.
+# Optional args: -s latest for main branch code, -s 1.17.0 for specific version
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 ```
 
@@ -70,7 +70,7 @@ mo purge                     # Clean project build artifacts
 mo installer                 # Find and remove installer files
 
 mo touchid                   # Configure Touch ID for sudo
-mo completion                # Setup shell tab completion
+mo completion                # Set up shell tab completion
 mo update                    # Update Mole
 mo remove                    # Remove Mole from system
 mo --help                    # Show help
@@ -92,6 +92,7 @@ mo purge --paths             # Configure project scan directories
 - **Safety**: Built with strict protections. See [Security Audit](SECURITY_AUDIT.md). Preview changes with `mo clean --dry-run`.
 - **Debug Mode**: Use `--debug` for detailed logs (e.g., `mo clean --debug`). Combine with `--dry-run` for comprehensive preview including risk levels and file details.
 - **Navigation**: Supports arrow keys and Vim bindings (`h/j/k/l`).
+- **Status Shortcuts**: In `mo status`, press `k` to toggle cat visibility and save preference, `q` to quit.
 - **Configuration**: Run `mo touchid` for Touch ID sudo, `mo completion` for shell tab completion, `mo clean --whitelist` to manage protected paths.
 
 ## Features in Detail
@@ -157,7 +158,7 @@ System: 5/32 GB RAM | 333/460 GB Disk (72%) | Uptime 6d
 System optimization completed
 ====================================================================
 
-Use `mo optimize --whitelist` to protect specific optimization items from being run.
+Use `mo optimize --whitelist` to exclude specific optimizations.
 ```
 
 ### Disk Space Analyzer
@@ -203,7 +204,7 @@ Up      ▮▯▯▯▯  0.8 MB/s                  Chrome     ▮▮▮▯▯  2
 Proxy   HTTP · 192.168.1.100             Terminal   ▮▯▯▯▯  12.5%
 ```
 
-Health score based on CPU, memory, disk, temperature, and I/O load. Color-coded by range. Press `k` to hide/show cat, `q` to quit.
+Health score based on CPU, memory, disk, temperature, and I/O load. Color-coded by range.
 
 ### Project Artifact Purge
 
@@ -224,7 +225,7 @@ Select Categories to Clean - 18.5GB (8 selected)
   ● backend-service    2.5GB | node_modules
 ```
 
-> **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects (< 7 days) are marked and unselected by default.
+> **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects — less than 7 days old — are marked and unselected by default.
 
 <details>
 <summary><strong>Custom Scan Paths</strong></summary>
@@ -237,7 +238,7 @@ Run `mo purge --paths` to configure which directories to scan, or edit `~/.confi
 ~/Work/ClientB
 ```
 
-When custom paths are configured, only those directories are scanned. Otherwise, defaults to `~/Projects`, `~/GitHub`, `~/dev`, etc.
+When custom paths are configured, only those directories are scanned. Otherwise, it defaults to `~/Projects`, `~/GitHub`, `~/dev`, etc.
 
 </details>
 
@@ -266,24 +267,34 @@ Launch Mole commands instantly from Raycast or Alfred:
 curl -fsSL https://raw.githubusercontent.com/tw93/Mole/main/scripts/setup-quick-launchers.sh | bash
 ```
 
-Adds 5 commands: `clean`, `uninstall`, `optimize`, `analyze`, `status`. Mole automatically detects your terminal, or you can set `MO_LAUNCHER_APP=<name>` to override. For Raycast, if this is your first script directory, add it in Raycast Extensions (Add Script Directory) and then run "Reload Script Directories" to load the new commands.
+Adds 5 commands: `clean`, `uninstall`, `optimize`, `analyze`, `status`.
+
+Mole automatically detects your terminal, or set `MO_LAUNCHER_APP=<name>` to override. For Raycast users: if this is your first script directory, add it via Raycast Extensions → Add Script Directory, then run "Reload Script Directories".
 
 ## Community Love
 
-<p align="center">
-  <img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="800" />
-</p>
+Mole wouldn't be possible without these amazing contributors. They've built countless features that make Mole what it is today. Go follow them! ❤️
 
-Users from around the world are loving Mole! Join the community and share your experience.
+<a href="https://github.com/tw93/Mole/graphs/contributors">
+  <img src="./CONTRIBUTORS.svg?v=2" width="1000" />
+</a>
+
+Join thousands of users worldwide who trust Mole to keep their Macs clean and optimized.
+
+<img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="1000" />
 
 ## Support
 
-<a href="https://miaoyan.app/cats.html?name=Mole"><img src="https://miaoyan.app/assets/sponsors.svg" width="1000px" /></a>
-
-- If Mole saved you space, consider starring the repo or sharing it with friends who need a cleaner Mac.
+- If Mole saved you disk space, consider starring the repo or [sharing it](https://twitter.com/intent/tweet?url=https://github.com/tw93/Mole&text=Mole%20-%20Deep%20clean%20and%20optimize%20your%20Mac.) with friends.
 - Have ideas or fixes? Check our [Contributing Guide](CONTRIBUTING.md), then open an issue or PR to help shape Mole's future.
-- Love cats? Treat Tangyuan and Cola to canned food via <a href="https://miaoyan.app/cats.html?name=Mole" target="_blank">this link</a> to keep our mascots purring.
+- Love Mole? <a href="https://miaoyan.app/cats.html?name=Mole" target="_blank">Buy Tw93 an ice-cold Coke</a> to keep the project alive and kicking! 🥤
+
+<details>
+<summary><strong>Friends who bought me Coke</strong></summary>
+<br/>
+<a href="https://miaoyan.app/cats.html?name=Mole"><img src="https://miaoyan.app/assets/sponsors.svg" width="1000" /></a>
+</details>
 
 ## License
 
-MIT License - feel free to enjoy and participate in open source.
+MIT License — feel free to enjoy and participate in open source.

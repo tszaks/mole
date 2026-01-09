@@ -59,6 +59,24 @@ scan_applications() {
     local temp_file
     temp_file=$(create_temp_file)
 
+    # Local spinner_pid for cleanup
+    local spinner_pid=""
+
+    # Trap to handle Ctrl+C during scan
+    local scan_interrupted=false
+    # shellcheck disable=SC2329  # Function invoked indirectly via trap
+    trap_scan_cleanup() {
+        scan_interrupted=true
+        if [[ -n "$spinner_pid" ]]; then
+            kill -TERM "$spinner_pid" 2> /dev/null || true
+            wait "$spinner_pid" 2> /dev/null || true
+        fi
+        printf "\r\033[K" >&2
+        rm -f "$temp_file" "${temp_file}.sorted" "${temp_file}.progress" 2> /dev/null || true
+        exit 130
+    }
+    trap trap_scan_cleanup INT
+
     local current_epoch
     current_epoch=$(get_epoch_seconds)
 
@@ -228,7 +246,6 @@ scan_applications() {
     local progress_file="${temp_file}.progress"
     echo "0" > "$progress_file"
 
-    local spinner_pid=""
     (
         # shellcheck disable=SC2329  # Function invoked indirectly via trap
         cleanup_spinner() { exit 0; }

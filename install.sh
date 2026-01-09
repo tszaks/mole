@@ -100,7 +100,7 @@ resolve_source_dir() {
 
     local tmp
     tmp="$(mktemp -d)"
-    trap "stop_line_spinner 2>/dev/null; rm -rf '$tmp'" EXIT
+    trap 'stop_line_spinner 2>/dev/null; rm -rf "$tmp"' EXIT
 
     local branch="${MOLE_VERSION:-}"
     if [[ -z "$branch" ]]; then

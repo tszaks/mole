@@ -46,7 +46,9 @@ validate_path_for_deletion() {
     fi
 
     # Check for path traversal attempts
-    if [[ "$path" =~ \.\. ]]; then
+    # Only reject .. when it appears as a complete path component (/../ or /.. or ../)
+    # This allows legitimate directory names containing .. (e.g., Firefox's "name..files")
+    if [[ "$path" =~ (^|/)\.\.(\/|$) ]]; then
         log_error "Path validation failed: path traversal not allowed: $path"
         return 1
     fi
@@ -254,12 +256,10 @@ safe_find_delete() {
         find_args+=("-mtime" "+$age_days")
     fi
 
-    # Iterate results to respect should_protect_path when available
+    # Iterate results to respect should_protect_path
     while IFS= read -r -d '' match; do
-        if command -v should_protect_path > /dev/null 2>&1; then
-            if should_protect_path "$match"; then
-                continue
-            fi
+        if should_protect_path "$match"; then
+            continue
         fi
         safe_remove "$match" true || true
     done < <(command find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
@@ -298,12 +298,10 @@ safe_sudo_find_delete() {
         find_args+=("-mtime" "+$age_days")
     fi
 
-    # Iterate results to respect should_protect_path when available
+    # Iterate results to respect should_protect_path
     while IFS= read -r -d '' match; do
-        if command -v should_protect_path > /dev/null 2>&1; then
-            if should_protect_path "$match"; then
-                continue
-            fi
+        if should_protect_path "$match"; then
+            continue
         fi
         safe_sudo_remove "$match" || true
     done < <(sudo find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)

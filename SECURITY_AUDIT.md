@@ -4,7 +4,7 @@
 
 **Security Audit & Compliance Report**
 
-Version 1.17.0 | December 31, 2025
+Version 1.19.0 | January 5, 2026
 
 ---
 
@@ -33,7 +33,7 @@ Version 1.17.0 | December 31, 2025
 |-----------|---------|
 | Audit Date | December 31, 2025 |
 | Audit Conclusion | **PASSED** |
-| Mole Version | V1.17.0 |
+| Mole Version | V1.19.0 |
 | Audited Branch | `main` (HEAD) |
 | Scope | Shell scripts, Go binaries, Configuration |
 | Methodology | Static analysis, Threat modeling, Code review |
@@ -47,6 +47,7 @@ Version 1.17.0 | December 31, 2025
 - Comprehensive protection for VPN, AI tools, and system components
 - Atomic operations with crash recovery mechanisms
 - Full user control with dry-run and whitelist capabilities
+- Installer cleanup safely scans common locations with user confirmation
 
 ---
 
@@ -290,7 +291,7 @@ bats tests/security.bats # Run specific suite
 | Standard | Implementation |
 |----------|----------------|
 | OWASP Secure Coding | Input validation, least privilege, defense-in-depth |
-| CWE-22 (Path Traversal) | Absolute path enforcement, `../` rejection |
+| CWE-22 (Path Traversal) | Enhanced detection: rejects `/../` components while allowing `..` in directory names (Firefox compatibility) |
 | CWE-78 (Command Injection) | Control character filtering |
 | CWE-59 (Link Following) | Symlink detection before privileged operations |
 | Apple File System Guidelines | Respects SIP, Read-Only Volumes, TCC |

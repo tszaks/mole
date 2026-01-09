@@ -70,10 +70,12 @@ func calculateHealthScore(cpu CPUStatus, mem MemoryStatus, disks []DiskStatus, d
 	}
 
 	// Memory pressure penalty.
-	if mem.Pressure == "warn" {
+	// Memory pressure penalty.
+	switch mem.Pressure {
+	case "warn":
 		score -= memPressureWarnPenalty
 		issues = append(issues, "Memory Pressure")
-	} else if mem.Pressure == "critical" {
+	case "critical":
 		score -= memPressureCritPenalty
 		issues = append(issues, "Critical Memory")
 	}
@@ -131,16 +133,17 @@ func calculateHealthScore(cpu CPUStatus, mem MemoryStatus, disks []DiskStatus, d
 	}
 
 	// Build message.
-	msg := "Excellent"
-	if score >= 90 {
+	var msg string
+	switch {
+	case score >= 90:
 		msg = "Excellent"
-	} else if score >= 75 {
+	case score >= 75:
 		msg = "Good"
-	} else if score >= 60 {
+	case score >= 60:
 		msg = "Fair"
-	} else if score >= 40 {
+	case score >= 40:
 		msg = "Poor"
-	} else {
+	default:
 		msg = "Critical"
 	}
 

@@ -4,7 +4,10 @@
 
 ```bash
 # Install development tools
-brew install shfmt shellcheck bats-core
+brew install shfmt shellcheck bats-core golangci-lint
+
+# Install goimports for better Go formatting
+go install golang.org/x/tools/cmd/goimports@latest
 ```
 
 ## Development

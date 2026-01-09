@@ -308,9 +308,8 @@ safe_clean() {
         return 0
     fi
 
-    if [[ "${TRACK_SECTION:-0}" == "1" && "${SECTION_ACTIVITY:-0}" == "0" ]]; then
-        stop_section_spinner
-    fi
+    # Always stop spinner before outputting results
+    stop_section_spinner
 
     local description
     local -a targets
