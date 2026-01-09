@@ -6,10 +6,10 @@
 param(
     [Parameter(Position = 0)]
     [string]$Command,
-    
+
     [Parameter(Position = 1, ValueFromRemainingArguments)]
     [string[]]$CommandArgs,
-    
+
     [switch]$Version,
     [switch]$ShowHelp
 )
@@ -49,9 +49,9 @@ function Show-MainHelp {
     $gray = $script:Colors.Gray
     $green = $script:Colors.Green
     $nc = $script:Colors.NC
-    
+
     Show-Banner
-    
+
     Write-Host "  ${cyan}Windows System Maintenance Toolkit${nc}"
     Write-Host "  ${gray}Clean, optimize, and maintain your Windows system${nc}"
     Write-Host ""
@@ -95,50 +95,50 @@ function Show-MainHelp {
 
 function Show-MainMenu {
     $options = @(
-        @{ 
-            Name = "Clean" 
-            Description = "Deep system cleanup" 
+        @{
+            Name = "Clean"
+            Description = "Deep system cleanup"
             Command = "clean"
             Icon = $script:Icons.Trash
         }
-        @{ 
-            Name = "Uninstall" 
-            Description = "Remove applications" 
+        @{
+            Name = "Uninstall"
+            Description = "Remove applications"
             Command = "uninstall"
             Icon = $script:Icons.Folder
         }
-        @{ 
-            Name = "Analyze" 
-            Description = "Disk space analyzer" 
+        @{
+            Name = "Analyze"
+            Description = "Disk space analyzer"
             Command = "analyze"
             Icon = $script:Icons.File
         }
-        @{ 
-            Name = "Status" 
-            Description = "System monitor" 
+        @{
+            Name = "Status"
+            Description = "System monitor"
             Command = "status"
             Icon = $script:Icons.Solid
         }
-        @{ 
-            Name = "Optimize" 
-            Description = "System optimization" 
+        @{
+            Name = "Optimize"
+            Description = "System optimization"
             Command = "optimize"
             Icon = $script:Icons.Arrow
         }
-        @{ 
-            Name = "Purge" 
-            Description = "Clean dev artifacts" 
+        @{
+            Name = "Purge"
+            Description = "Clean dev artifacts"
             Command = "purge"
             Icon = $script:Icons.List
         }
     )
-    
+
     $selected = Show-Menu -Title "What would you like to do?" -Options $options -AllowBack
-    
+
     if ($null -eq $selected) {
         return $null
     }
-    
+
     return $selected.Command
 }
 
@@ -151,16 +151,16 @@ function Invoke-MoleCommand {
         [string]$CommandName,
         [string[]]$Arguments
     )
-    
+
     $scriptPath = Join-Path $script:MOLE_BIN "$CommandName.ps1"
-    
+
     if (-not (Test-Path $scriptPath)) {
-        Write-Error "Unknown command: $CommandName"
+        Write-MoleError "Unknown command: $CommandName"
         Write-Host ""
         Write-Host "Run 'mole -ShowHelp' for available commands"
         return
     }
-    
+
     # Execute the command script with arguments using splatting
     # This properly handles switch parameters passed as strings
     $argCount = if ($null -eq $Arguments) { 0 } else { @($Arguments).Count }
@@ -168,11 +168,11 @@ function Invoke-MoleCommand {
         # Build a hashtable for splatting
         $splatParams = @{}
         $positionalArgs = @()
-        
+
         foreach ($arg in $Arguments) {
             # Remove surrounding quotes if present
             $cleanArg = $arg.Trim("'`"")
-            
+
             if ($cleanArg -match '^-(\w+)$') {
                 # It's a switch parameter (e.g., -DryRun)
                 $paramName = $Matches[1]
@@ -189,7 +189,7 @@ function Invoke-MoleCommand {
                 $positionalArgs += $cleanArg
             }
         }
-        
+
         # Execute with splatting
         if ($positionalArgs.Count -gt 0) {
             & $scriptPath @splatParams @positionalArgs
@@ -212,11 +212,11 @@ function Show-SystemInfo {
     $gray = $script:Colors.Gray
     $green = $script:Colors.Green
     $nc = $script:Colors.NC
-    
+
     $winInfo = Get-WindowsVersion
     $freeSpace = Get-FreeSpace
     $isAdmin = if (Test-IsAdmin) { "${green}Yes${nc}" } else { "${gray}No${nc}" }
-    
+
     Write-Host ""
     Write-Host "  ${gray}System:${nc} $($winInfo.Name)"
     Write-Host "  ${gray}Free Space:${nc} $freeSpace on $($env:SystemDrive)"
@@ -231,13 +231,13 @@ function Show-SystemInfo {
 function Main {
     # Initialize
     Initialize-Mole
-    
+
     # Handle switches passed as strings (when called via batch file with quoted args)
     # e.g., mole '-ShowHelp' becomes $Command = "-ShowHelp" instead of $ShowHelp = $true
     $effectiveShowHelp = $ShowHelp
     $effectiveVersion = $Version
     $effectiveCommand = $Command
-    
+
     if ($Command -match '^-(.+)$') {
         $switchName = $Matches[1]
         switch ($switchName) {
@@ -248,43 +248,43 @@ function Main {
             'v' { $effectiveVersion = $true; $effectiveCommand = $null }
         }
     }
-    
+
     # Handle version flag
     if ($effectiveVersion) {
         Show-Version
         return
     }
-    
+
     # Handle help flag
     if ($effectiveShowHelp -and -not $effectiveCommand) {
         Show-MainHelp
         return
     }
-    
+
     # If command specified, route to it
     if ($effectiveCommand) {
         $validCommands = @("clean", "uninstall", "analyze", "status", "optimize", "purge")
-        
+
         if ($effectiveCommand -in $validCommands) {
             Invoke-MoleCommand -CommandName $effectiveCommand -Arguments $CommandArgs
         }
         else {
-            Write-Error "Unknown command: $effectiveCommand"
+            Write-MoleError "Unknown command: $effectiveCommand"
             Write-Host ""
             Write-Host "Available commands: $($validCommands -join ', ')"
             Write-Host "Run 'mole -ShowHelp' for more information"
         }
         return
     }
-    
+
     # Interactive mode
     Clear-Host
     Show-Banner
     Show-SystemInfo
-    
+
     while ($true) {
         $selectedCommand = Show-MainMenu
-        
+
         if ($null -eq $selectedCommand) {
             Clear-Host
             Write-Host ""
@@ -292,10 +292,10 @@ function Main {
             Write-Host ""
             break
         }
-        
+
         Clear-Host
         Invoke-MoleCommand -CommandName $selectedCommand -Arguments @()
-        
+
         Write-Host ""
         Write-Host "  Press any key to continue..."
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
@@ -311,7 +311,7 @@ try {
 }
 catch {
     Write-Host ""
-    Write-Error "An error occurred: $_"
+    Write-MoleError "An error occurred: $_"
     Write-Host ""
     exit 1
 }

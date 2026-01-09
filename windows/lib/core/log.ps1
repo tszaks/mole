@@ -37,16 +37,16 @@ function Write-LogMessage {
         [string]$Color,
         [string]$Icon
     )
-    
+
     $timestamp = Get-Date -Format "HH:mm:ss"
     $colorCode = $script:Colors[$Color]
     $nc = $script:Colors.NC
-    
+
     $formattedIcon = if ($Icon) { "$Icon " } else { "" }
     $output = "  ${colorCode}${formattedIcon}${nc}${Message}"
-    
+
     Write-Host $output
-    
+
     # Also write to log file if configured
     if ($script:LogConfig.LogFile) {
         "$timestamp [$Level] $Message" | Out-File -Append -FilePath $script:LogConfig.LogFile -Encoding UTF8
@@ -71,7 +71,8 @@ function Write-Success {
     Write-LogMessage -Message $Message -Level "SUCCESS" -Color "Green" -Icon $script:Icons.Success
 }
 
-function Write-Warning {
+
+function Write-MoleWarning {
     <#
     .SYNOPSIS
         Write a warning message
@@ -80,7 +81,7 @@ function Write-Warning {
     Write-LogMessage -Message $Message -Level "WARN" -Color "Yellow" -Icon $script:Icons.Warning
 }
 
-function Write-Error {
+function Write-MoleError {
     <#
     .SYNOPSIS
         Write an error message
@@ -89,13 +90,14 @@ function Write-Error {
     Write-LogMessage -Message $Message -Level "ERROR" -Color "Red" -Icon $script:Icons.Error
 }
 
+
 function Write-Debug {
     <#
     .SYNOPSIS
         Write a debug message (only if debug mode is enabled)
     #>
     param([string]$Message)
-    
+
     if ($script:LogConfig.DebugEnabled) {
         $gray = $script:Colors.Gray
         $nc = $script:Colors.NC
@@ -128,15 +130,15 @@ function Start-Section {
         Start a new section with a title
     #>
     param([string]$Title)
-    
+
     $script:CurrentSection.Active = $true
     $script:CurrentSection.Activity = $false
     $script:CurrentSection.Name = $Title
-    
+
     $purple = $script:Colors.PurpleBold
     $nc = $script:Colors.NC
     $arrow = $script:Icons.Arrow
-    
+
     Write-Host ""
     Write-Host "${purple}${arrow} ${Title}${nc}"
 }
@@ -176,11 +178,11 @@ function Start-Spinner {
         Start an inline spinner with message
     #>
     param([string]$Message = "Working...")
-    
+
     $script:SpinnerIndex = 0
     $gray = $script:Colors.Gray
     $nc = $script:Colors.NC
-    
+
     Write-Host -NoNewline "  ${gray}$($script:SpinnerFrames[0]) $Message${nc}"
 }
 
@@ -190,12 +192,12 @@ function Update-Spinner {
         Update the spinner animation
     #>
     param([string]$Message)
-    
+
     $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $script:SpinnerFrames.Count
     $frame = $script:SpinnerFrames[$script:SpinnerIndex]
     $gray = $script:Colors.Gray
     $nc = $script:Colors.NC
-    
+
     # Move cursor to beginning of line and clear
     Write-Host -NoNewline "`r  ${gray}$frame $Message${nc}    "
 }
@@ -223,15 +225,15 @@ function Write-Progress {
         [string]$Message = "",
         [int]$Width = 30
     )
-    
+
     $percent = if ($Total -gt 0) { [Math]::Round(($Current / $Total) * 100) } else { 0 }
     $filled = [Math]::Round(($Width * $Current) / [Math]::Max($Total, 1))
     $empty = $Width - $filled
-    
+
     $bar = ("[" + ("=" * $filled) + (" " * $empty) + "]")
     $cyan = $script:Colors.Cyan
     $nc = $script:Colors.NC
-    
+
     Write-Host -NoNewline "`r  ${cyan}$bar${nc} ${percent}% $Message    "
 }
 
@@ -253,7 +255,7 @@ function Set-LogFile {
         Set a log file for persistent logging
     #>
     param([string]$Path)
-    
+
     $script:LogConfig.LogFile = $Path
     $dir = Split-Path -Parent $Path
     if ($dir -and -not (Test-Path $dir)) {

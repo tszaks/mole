@@ -69,12 +69,12 @@ function Show-CleanHelp {
 function Edit-Whitelist {
     $whitelistPath = $script:Config.WhitelistFile
     $whitelistDir = Split-Path -Parent $whitelistPath
-    
+
     # Ensure directory exists
     if (-not (Test-Path $whitelistDir)) {
         New-Item -ItemType Directory -Path $whitelistDir -Force | Out-Null
     }
-    
+
     # Create default whitelist if doesn't exist
     if (-not (Test-Path $whitelistPath)) {
         $defaultContent = @"
@@ -91,11 +91,11 @@ function Edit-Whitelist {
 "@
         Set-Content -Path $whitelistPath -Value $defaultContent
     }
-    
+
     # Open in default editor
     Write-Info "Opening whitelist file: $whitelistPath"
     Start-Process notepad.exe -ArgumentList $whitelistPath -Wait
-    
+
     Write-Success "Whitelist saved"
 }
 
@@ -108,9 +108,9 @@ function Show-CleanupSummary {
         [hashtable]$Stats,
         [bool]$IsDryRun
     )
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[1;35m" -NoNewline
     if ($IsDryRun) {
@@ -121,10 +121,10 @@ function Show-CleanupSummary {
     }
     Write-Host "$esc[0m"
     Write-Host ""
-    
+
     if ($Stats.TotalSizeKB -gt 0) {
         $sizeGB = [Math]::Round($Stats.TotalSizeKB / 1024 / 1024, 2)
-        
+
         if ($IsDryRun) {
             Write-Host "  Potential space: $esc[32m${sizeGB}GB$esc[0m"
             Write-Host "  Items found: $($Stats.FilesCleaned)"
@@ -150,7 +150,7 @@ function Show-CleanupSummary {
         }
         Write-Host "  Free space now: $(Get-FreeSpace)"
     }
-    
+
     Write-Host ""
 }
 
@@ -163,26 +163,26 @@ function Start-Cleanup {
         [bool]$IsDryRun,
         [bool]$IncludeSystem
     )
-    
+
     $esc = [char]27
-    
+
     # Clear screen
     Clear-Host
     Write-Host ""
     Write-Host "$esc[1;35mClean Your Windows$esc[0m"
     Write-Host ""
-    
+
     # Show mode
     if ($IsDryRun) {
         Write-Host "$esc[33mDry Run Mode$esc[0m - Preview only, no deletions"
         Write-Host ""
-        
+
         # Prepare export file
         $exportDir = Split-Path -Parent $script:ExportListFile
         if (-not (Test-Path $exportDir)) {
             New-Item -ItemType Directory -Path $exportDir -Force | Out-Null
         }
-        
+
         $header = @"
 # Mole Cleanup Preview - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 #
@@ -198,11 +198,11 @@ function Start-Cleanup {
         Write-Host "$esc[90m$($script:Icons.Solid) Use -DryRun to preview, -Whitelist to manage protected paths$esc[0m"
         Write-Host ""
     }
-    
+
     # System cleanup confirmation
     if ($IncludeSystem -and -not $IsDryRun) {
         if (-not (Test-IsAdmin)) {
-            Write-Warning "System cleanup requires administrator privileges"
+            Write-MoleWarning "System cleanup requires administrator privileges"
             Write-Host "  Run PowerShell as Administrator for full cleanup"
             Write-Host ""
             $IncludeSystem = $false
@@ -212,45 +212,45 @@ function Start-Cleanup {
             Write-Host ""
         }
     }
-    
+
     # Show system info
     $winVer = Get-WindowsVersion
     Write-Host "$esc[34m$($script:Icons.Admin)$esc[0m $($winVer.Name) | Free space: $(Get-FreeSpace)"
     Write-Host ""
-    
+
     # Reset stats
     Reset-CleanupStats
     Set-DryRunMode -Enabled $IsDryRun
-    
+
     # Run cleanup modules
     try {
         # User essentials (temp, logs, etc.)
         Invoke-UserCleanup -TempDaysOld 7 -LogDaysOld 7
-        
+
         # Browser caches
         Clear-BrowserCaches
-        
+
         # Application caches
         Clear-AppCaches
-        
+
         # Developer tools
         Invoke-DevToolsCleanup
-        
+
         # Applications cleanup
         Invoke-AppCleanup
-        
+
         # System cleanup (if requested and admin)
         if ($IncludeSystem -and (Test-IsAdmin)) {
             Invoke-SystemCleanup
         }
     }
     catch {
-        Write-Error "Cleanup error: $_"
+        Write-MoleError "Cleanup error: $_"
     }
-    
+
     # Get final stats
     $stats = Get-CleanupStats
-    
+
     # Show summary
     Show-CleanupSummary -Stats $stats -IsDryRun $IsDryRun
 }
@@ -265,19 +265,19 @@ function Main {
         $env:MOLE_DEBUG = "1"
         $DebugPreference = "Continue"
     }
-    
+
     # Show help
     if ($ShowHelp) {
         Show-CleanHelp
         return
     }
-    
+
     # Manage whitelist
     if ($Whitelist) {
         Edit-Whitelist
         return
     }
-    
+
     # Set dry-run mode
     if ($DryRun) {
         $env:MOLE_DRY_RUN = "1"
@@ -285,7 +285,7 @@ function Main {
     else {
         $env:MOLE_DRY_RUN = "0"
     }
-    
+
     # Run cleanup
     try {
         Start-Cleanup -IsDryRun $DryRun -IncludeSystem $System

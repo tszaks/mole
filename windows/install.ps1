@@ -20,10 +20,10 @@ Set-StrictMode -Version Latest
 # ============================================================================
 
 $script:VERSION = "1.0.0"
-$script:SourceDir = if ($MyInvocation.MyCommand.Path) { 
-    Split-Path -Parent $MyInvocation.MyCommand.Path 
-} else { 
-    $PSScriptRoot 
+$script:SourceDir = if ($MyInvocation.MyCommand.Path) {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    $PSScriptRoot
 }
 $script:ShortcutName = "Mole"
 
@@ -55,13 +55,13 @@ function Write-Success {
     Write-Host "  $($c.Green)OK$($c.NC)    $Message"
 }
 
-function Write-Warning {
+function Write-MoleWarning {
     param([string]$Message)
     $c = $script:Colors
     Write-Host "  $($c.Yellow)WARN$($c.NC)  $Message"
 }
 
-function Write-Error {
+function Write-MoleError {
     param([string]$Message)
     $c = $script:Colors
     Write-Host "  $($c.Red)ERROR$($c.NC) $Message"
@@ -77,7 +77,7 @@ function Show-Banner {
 
 function Show-InstallerHelp {
     Show-Banner
-    
+
     $c = $script:Colors
     Write-Host "  $($c.Green)USAGE:$($c.NC)"
     Write-Host ""
@@ -125,49 +125,49 @@ function Test-IsAdmin {
 
 function Add-ToUserPath {
     param([string]$Directory)
-    
+
     $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-    
+
     if ($currentPath -split ";" | Where-Object { $_ -eq $Directory }) {
         Write-Info "Already in PATH: $Directory"
         return $true
     }
-    
+
     $newPath = if ($currentPath) { "$currentPath;$Directory" } else { $Directory }
-    
+
     try {
         [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
         Write-Success "Added to PATH: $Directory"
-        
+
         # Update current session
         $env:PATH = "$env:PATH;$Directory"
         return $true
     }
     catch {
-        Write-Error "Failed to update PATH: $_"
+        Write-MoleError "Failed to update PATH: $_"
         return $false
     }
 }
 
 function Remove-FromUserPath {
     param([string]$Directory)
-    
+
     $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-    
+
     if (-not $currentPath) {
         return $true
     }
-    
+
     $paths = $currentPath -split ";" | Where-Object { $_ -ne $Directory -and $_ -ne "" }
     $newPath = $paths -join ";"
-    
+
     try {
         [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
         Write-Success "Removed from PATH: $Directory"
         return $true
     }
     catch {
-        Write-Error "Failed to update PATH: $_"
+        Write-MoleError "Failed to update PATH: $_"
         return $false
     }
 }
@@ -178,11 +178,11 @@ function New-StartMenuShortcut {
         [string]$ShortcutName,
         [string]$Description
     )
-    
+
     $startMenuPath = [Environment]::GetFolderPath("StartMenu")
     $programsPath = Join-Path $startMenuPath "Programs"
     $shortcutPath = Join-Path $programsPath "$ShortcutName.lnk"
-    
+
     try {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
@@ -191,23 +191,23 @@ function New-StartMenuShortcut {
         $shortcut.Description = $Description
         $shortcut.WorkingDirectory = Split-Path -Parent $TargetPath
         $shortcut.Save()
-        
+
         Write-Success "Created shortcut: $shortcutPath"
         return $true
     }
     catch {
-        Write-Error "Failed to create shortcut: $_"
+        Write-MoleError "Failed to create shortcut: $_"
         return $false
     }
 }
 
 function Remove-StartMenuShortcut {
     param([string]$ShortcutName)
-    
+
     $startMenuPath = [Environment]::GetFolderPath("StartMenu")
     $programsPath = Join-Path $startMenuPath "Programs"
     $shortcutPath = Join-Path $programsPath "$ShortcutName.lnk"
-    
+
     if (Test-Path $shortcutPath) {
         try {
             Remove-Item $shortcutPath -Force
@@ -215,11 +215,11 @@ function Remove-StartMenuShortcut {
             return $true
         }
         catch {
-            Write-Error "Failed to remove shortcut: $_"
+            Write-MoleError "Failed to remove shortcut: $_"
             return $false
         }
     }
-    
+
     return $true
 }
 
@@ -230,16 +230,16 @@ function Remove-StartMenuShortcut {
 function Install-Mole {
     Write-Info "Installing Mole v$script:VERSION..."
     Write-Host ""
-    
+
     # Check if already installed
     if ((Test-Path $InstallDir) -and -not $Force) {
-        Write-Error "Mole is already installed at: $InstallDir"
+        Write-MoleError "Mole is already installed at: $InstallDir"
         Write-Host ""
         Write-Host "  Use -Force to overwrite or -Uninstall to remove first"
         Write-Host ""
         return $false
     }
-    
+
     # Create install directory
     if (-not (Test-Path $InstallDir)) {
         try {
@@ -247,14 +247,14 @@ function Install-Mole {
             Write-Success "Created directory: $InstallDir"
         }
         catch {
-            Write-Error "Failed to create directory: $_"
+            Write-MoleError "Failed to create directory: $_"
             return $false
         }
     }
-    
+
     # Copy files
     Write-Info "Copying files..."
-    
+
     $filesToCopy = @(
         "mole.ps1"
         "go.mod"
@@ -262,11 +262,11 @@ function Install-Mole {
         "lib"
         "cmd"
     )
-    
+
     foreach ($item in $filesToCopy) {
         $src = Join-Path $script:SourceDir $item
         $dst = Join-Path $InstallDir $item
-        
+
         if (Test-Path $src) {
             try {
                 if ((Get-Item $src).PSIsContainer) {
@@ -282,12 +282,12 @@ function Install-Mole {
                 Write-Success "Copied: $item"
             }
             catch {
-                Write-Error "Failed to copy $item`: $_"
+                Write-MoleError "Failed to copy $item`: $_"
                 return $false
             }
         }
     }
-    
+
     # Create scripts and tests directories if they don't exist
     $extraDirs = @("scripts", "tests")
     foreach ($dir in $extraDirs) {
@@ -296,7 +296,7 @@ function Install-Mole {
             New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
         }
     }
-    
+
     # Create launcher batch file for easier access
     # Note: Store %~dp0 immediately to avoid issues with delayed expansion in the parse loop
     $batchContent = @"
@@ -318,26 +318,26 @@ powershell.exe -ExecutionPolicy Bypass -NoLogo -NoProfile -Command "& '%MOLE_DIR
     $batchPath = Join-Path $InstallDir "mole.cmd"
     Set-Content -Path $batchPath -Value $batchContent -Encoding ASCII
     Write-Success "Created launcher: mole.cmd"
-    
+
     # Add to PATH if requested
     if ($AddToPath) {
         Write-Host ""
         Add-ToUserPath -Directory $InstallDir
     }
-    
+
     # Create shortcut if requested
     if ($CreateShortcut) {
         Write-Host ""
         $targetPath = Join-Path $InstallDir "mole.ps1"
         New-StartMenuShortcut -TargetPath $targetPath -ShortcutName $script:ShortcutName -Description "Windows System Maintenance Toolkit"
     }
-    
+
     Write-Host ""
     Write-Success "Mole installed successfully!"
     Write-Host ""
     Write-Host "  Location: $InstallDir"
     Write-Host ""
-    
+
     if ($AddToPath) {
         Write-Host "  Run 'mole' from any terminal to start"
     }
@@ -348,7 +348,7 @@ powershell.exe -ExecutionPolicy Bypass -NoLogo -NoProfile -Command "& '%MOLE_DIR
         Write-Host "  Or add to PATH with:"
         Write-Host "    .\install.ps1 -AddToPath"
     }
-    
+
     Write-Host ""
     return $true
 }
@@ -360,32 +360,32 @@ powershell.exe -ExecutionPolicy Bypass -NoLogo -NoProfile -Command "& '%MOLE_DIR
 function Uninstall-Mole {
     Write-Info "Uninstalling Mole..."
     Write-Host ""
-    
+
     # Check for existing installation
     $configPath = Join-Path $env:LOCALAPPDATA "Mole"
     $installPath = if (Test-Path $InstallDir) { $InstallDir } elseif (Test-Path $configPath) { $configPath } else { $null }
-    
+
     if (-not $installPath) {
-        Write-Warning "Mole is not installed"
+        Write-MoleWarning "Mole is not installed"
         return $true
     }
-    
+
     # Remove from PATH
     Remove-FromUserPath -Directory $installPath
-    
+
     # Remove shortcut
     Remove-StartMenuShortcut -ShortcutName $script:ShortcutName
-    
+
     # Remove installation directory
     try {
         Remove-Item -Path $installPath -Recurse -Force
         Write-Success "Removed directory: $installPath"
     }
     catch {
-        Write-Error "Failed to remove directory: $_"
+        Write-MoleError "Failed to remove directory: $_"
         return $false
     }
-    
+
     # Remove config directory if different from install
     $configDir = Join-Path $env:USERPROFILE ".config\mole"
     if (Test-Path $configDir) {
@@ -397,11 +397,11 @@ function Uninstall-Mole {
                 Write-Success "Removed config: $configDir"
             }
             catch {
-                Write-Warning "Failed to remove config: $_"
+                Write-MoleWarning "Failed to remove config: $_"
             }
         }
     }
-    
+
     Write-Host ""
     Write-Success "Mole uninstalled successfully!"
     Write-Host ""
@@ -417,9 +417,9 @@ function Main {
         Show-InstallerHelp
         return
     }
-    
+
     Show-Banner
-    
+
     if ($Uninstall) {
         Uninstall-Mole
     }

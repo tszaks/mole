@@ -5,7 +5,7 @@ BeforeAll {
     # Get the windows directory path (tests are in windows/tests/)
     $script:WindowsDir = Split-Path -Parent $PSScriptRoot
     $script:LibDir = Join-Path $script:WindowsDir "lib"
-    
+
     # Import core modules
     . "$script:LibDir\core\base.ps1"
     . "$script:LibDir\core\log.ps1"
@@ -22,7 +22,7 @@ Describe "Base Module" {
             $script:Colors.Red | Should -Not -BeNullOrEmpty
             $script:Colors.NC | Should -Not -BeNullOrEmpty
         }
-        
+
         It "Should define icon set" {
             $script:Icons | Should -Not -BeNullOrEmpty
             $script:Icons.Success | Should -Not -BeNullOrEmpty
@@ -30,14 +30,14 @@ Describe "Base Module" {
             $script:Icons.Warning | Should -Not -BeNullOrEmpty
         }
     }
-    
+
     Context "Test-IsAdmin" {
         It "Should return a boolean" {
             $result = Test-IsAdmin
             $result | Should -BeOfType [bool]
         }
     }
-    
+
     Context "Get-WindowsVersion" {
         It "Should return version info" {
             $result = Get-WindowsVersion
@@ -47,7 +47,7 @@ Describe "Base Module" {
             $result.Build | Should -Not -BeNullOrEmpty
         }
     }
-    
+
     Context "Get-FreeSpace" {
         It "Should return free space string" {
             $result = Get-FreeSpace
@@ -55,7 +55,7 @@ Describe "Base Module" {
             # Format is like "100.00GB" or "50.5MB" (no space between number and unit)
             $result | Should -Match "\d+(\.\d+)?(B|KB|MB|GB|TB)"
         }
-        
+
         It "Should accept drive parameter" {
             $result = Get-FreeSpace -Drive "C:"
             $result | Should -Not -BeNullOrEmpty
@@ -69,14 +69,14 @@ Describe "File Operations Module" {
         $script:TestDir = Join-Path $env:TEMP "mole_test_$(Get-Random)"
         New-Item -ItemType Directory -Path $script:TestDir -Force | Out-Null
     }
-    
+
     AfterAll {
         # Cleanup test directory
         if (Test-Path $script:TestDir) {
             Remove-Item -Path $script:TestDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    
+
     Context "Format-ByteSize" {
         It "Should format bytes correctly" {
             # Actual format: no space, uses N0/N1/N2 formatting
@@ -85,81 +85,81 @@ Describe "File Operations Module" {
             Format-ByteSize -Bytes 1048576 | Should -Be "1.0MB"
             Format-ByteSize -Bytes 1073741824 | Should -Be "1.00GB"
         }
-        
+
         It "Should handle large numbers" {
             Format-ByteSize -Bytes 1099511627776 | Should -Be "1.00TB"
         }
     }
-    
+
     Context "Get-PathSize" {
         BeforeEach {
             # Create test file
             $testFile = Join-Path $script:TestDir "testfile.txt"
             "Hello World" | Set-Content -Path $testFile
         }
-        
+
         It "Should return size for file" {
             $testFile = Join-Path $script:TestDir "testfile.txt"
             $result = Get-PathSize -Path $testFile
             $result | Should -BeGreaterThan 0
         }
-        
+
         It "Should return size for directory" {
             $result = Get-PathSize -Path $script:TestDir
             $result | Should -BeGreaterThan 0
         }
-        
+
         It "Should return 0 for non-existent path" {
             $result = Get-PathSize -Path "C:\NonExistent\Path\12345"
             $result | Should -Be 0
         }
     }
-    
+
     Context "Test-ProtectedPath" {
         It "Should protect Windows directory" {
             Test-ProtectedPath -Path "C:\Windows" | Should -Be $true
             Test-ProtectedPath -Path "C:\Windows\System32" | Should -Be $true
         }
-        
+
         It "Should protect Windows Defender paths" {
             Test-ProtectedPath -Path "C:\Program Files\Windows Defender" | Should -Be $true
             Test-ProtectedPath -Path "C:\ProgramData\Microsoft\Windows Defender" | Should -Be $true
         }
-        
+
         It "Should not protect temp directories" {
             Test-ProtectedPath -Path $env:TEMP | Should -Be $false
         }
     }
-    
+
     Context "Test-SafePath" {
         It "Should return false for protected paths" {
             Test-SafePath -Path "C:\Windows" | Should -Be $false
             Test-SafePath -Path "C:\Windows\System32" | Should -Be $false
         }
-        
+
         It "Should return true for safe paths" {
             Test-SafePath -Path $env:TEMP | Should -Be $true
         }
-        
+
         It "Should return false for empty paths" {
             # Test-SafePath has mandatory path parameter, so empty/null throws
             # But internally it should handle empty strings gracefully
             { Test-SafePath -Path "" } | Should -Throw
         }
     }
-    
+
     Context "Remove-SafeItem" {
         BeforeEach {
             $script:TestFile = Join-Path $script:TestDir "safe_remove_test.txt"
             "Test content" | Set-Content -Path $script:TestFile
         }
-        
+
         It "Should remove file successfully" {
             $result = Remove-SafeItem -Path $script:TestFile
             $result | Should -Be $true
             Test-Path $script:TestFile | Should -Be $false
         }
-        
+
         It "Should respect DryRun mode" {
             $env:MOLE_DRY_RUN = "1"
             try {
@@ -174,7 +174,7 @@ Describe "File Operations Module" {
                 Set-DryRunMode -Enabled $false
             }
         }
-        
+
         It "Should not remove protected paths" {
             $result = Remove-SafeItem -Path "C:\Windows\System32"
             $result | Should -Be $false
@@ -187,22 +187,22 @@ Describe "Logging Module" {
         It "Should have Write-Info function" {
             { Write-Info "Test message" } | Should -Not -Throw
         }
-        
+
         It "Should have Write-Success function" {
             { Write-Success "Test message" } | Should -Not -Throw
         }
-        
-        It "Should have Write-Warning function" {
-            # Note: The actual function is Write-Warning (conflicts with built-in)
-            { Write-Warning "Test message" } | Should -Not -Throw
+
+        It "Should have Write-MoleWarning function" {
+            # Note: The actual function is Write-MoleWarning
+            { Write-MoleWarning "Test message" } | Should -Not -Throw
         }
-        
-        It "Should have Write-Error function" {
-            # Note: The actual function is Write-Error (conflicts with built-in)
-            { Write-Error "Test message" } | Should -Not -Throw
+
+        It "Should have Write-MoleError function" {
+            # Note: The actual function is Write-MoleError
+            { Write-MoleError "Test message" } | Should -Not -Throw
         }
     }
-    
+
     Context "Section Functions" {
         It "Should start and stop sections without error" {
             { Start-Section -Title "Test Section" } | Should -Not -Throw
@@ -217,23 +217,23 @@ Describe "UI Module" {
             { Show-Banner } | Should -Not -Throw
         }
     }
-    
+
     Context "Show-Header" {
         It "Should display header without error" {
             { Show-Header -Title "Test Header" } | Should -Not -Throw
         }
-        
+
         It "Should accept subtitle parameter" {
             { Show-Header -Title "Test" -Subtitle "Subtitle" } | Should -Not -Throw
         }
     }
-    
+
     Context "Show-Summary" {
         It "Should display summary without error" {
             { Show-Summary -SizeBytes 1024 -ItemCount 5 } | Should -Not -Throw
         }
     }
-    
+
     Context "Read-Confirmation" {
         It "Should have Read-Confirmation function" {
             Get-Command Read-Confirmation -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty

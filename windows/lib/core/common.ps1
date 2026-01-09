@@ -6,8 +6,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # Prevent multiple sourcing
-if ((Get-Variable -Name 'MOLE_COMMON_LOADED' -Scope Script -ErrorAction SilentlyContinue) -and $script:MOLE_COMMON_LOADED) { 
-    return 
+if ((Get-Variable -Name 'MOLE_COMMON_LOADED' -Scope Script -ErrorAction SilentlyContinue) -and $script:MOLE_COMMON_LOADED) {
+    return
 }
 $script:MOLE_COMMON_LOADED = $true
 
@@ -61,18 +61,18 @@ function Initialize-Mole {
     .SYNOPSIS
         Initialize Mole environment
     #>
-    
+
     # Ensure config directory exists
     $configPath = Get-ConfigPath
-    
+
     # Ensure cache directory exists
     $cachePath = Get-CachePath
-    
+
     # Set up cleanup trap
     $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
         Clear-TempFiles
     }
-    
+
     Write-Debug "Mole initialized"
     Write-Debug "Config: $configPath"
     Write-Debug "Cache: $cachePath"
@@ -90,8 +90,8 @@ function Request-AdminPrivileges {
         Restarts the script with elevated privileges using UAC
     #>
     if (-not (Test-IsAdmin)) {
-        Write-Warning "Some operations require administrator privileges."
-        
+        Write-MoleWarning "Some operations require administrator privileges."
+
         if (Read-Confirmation -Prompt "Restart with admin privileges?" -Default $true) {
             $scriptPath = $MyInvocation.PSCommandPath
             if ($scriptPath) {
@@ -113,7 +113,7 @@ function Invoke-AsAdmin {
         [Parameter(Mandatory)]
         [scriptblock]$ScriptBlock
     )
-    
+
     if (Test-IsAdmin) {
         & $ScriptBlock
     }
@@ -126,5 +126,5 @@ function Invoke-AsAdmin {
 # ============================================================================
 # Exports (functions are available via dot-sourcing)
 # ============================================================================
-# All functions from base.ps1, log.ps1, file_ops.ps1, and ui.ps1 are 
+# All functions from base.ps1, log.ps1, file_ops.ps1, and ui.ps1 are
 # automatically available when this file is dot-sourced.
