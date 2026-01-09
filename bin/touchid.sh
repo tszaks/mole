@@ -85,17 +85,17 @@ enable_touchid() {
     if grep -q "sudo_local" "$PAM_SUDO_FILE"; then
         # Check if already correctly configured in sudo_local
         if [[ -f "$PAM_SUDO_LOCAL_FILE" ]] && grep -q "pam_tid.so" "$PAM_SUDO_LOCAL_FILE"; then
-             # It is in sudo_local, but let's check if it's ALSO in sudo (incomplete migration)
-             if grep -q "pam_tid.so" "$PAM_SUDO_FILE"; then
-                 # Clean up legacy config
-                 temp_file=$(mktemp)
-                 grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
-                 if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2> /dev/null; then
-                     echo -e "${GREEN}${ICON_SUCCESS} Cleanup legacy configuration${NC}"
-                 fi
-             fi
-             echo -e "${GREEN}${ICON_SUCCESS} Touch ID is already enabled${NC}"
-             return 0
+            # It is in sudo_local, but let's check if it's ALSO in sudo (incomplete migration)
+            if grep -q "pam_tid.so" "$PAM_SUDO_FILE"; then
+                # Clean up legacy config
+                temp_file=$(mktemp)
+                grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
+                if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2> /dev/null; then
+                    echo -e "${GREEN}${ICON_SUCCESS} Cleanup legacy configuration${NC}"
+                fi
+            fi
+            echo -e "${GREEN}${ICON_SUCCESS} Touch ID is already enabled${NC}"
+            return 0
         fi
 
         # Not configured in sudo_local yet.
@@ -132,12 +132,12 @@ enable_touchid() {
         if $write_success; then
             # If we migrated from legacy, clean it up now
             if $is_legacy_configured; then
-                 temp_file=$(mktemp)
-                 grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
-                 sudo mv "$temp_file" "$PAM_SUDO_FILE"
-                 log_success "Touch ID migrated to sudo_local"
+                temp_file=$(mktemp)
+                grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
+                sudo mv "$temp_file" "$PAM_SUDO_FILE"
+                log_success "Touch ID migrated to sudo_local"
             else
-                 log_success "Touch ID enabled (via sudo_local) - try: sudo ls"
+                log_success "Touch ID enabled (via sudo_local) - try: sudo ls"
             fi
             return 0
         else
@@ -210,15 +210,15 @@ disable_touchid() {
         grep -v "pam_tid.so" "$PAM_SUDO_LOCAL_FILE" > "$temp_file"
 
         if sudo mv "$temp_file" "$PAM_SUDO_LOCAL_FILE" 2> /dev/null; then
-             # Since we modified sudo_local, we should also check if it's in sudo file (legacy cleanup)
-             if grep -q "pam_tid.so" "$PAM_SUDO_FILE"; then
-                 temp_file=$(mktemp)
-                 grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
-                 sudo mv "$temp_file" "$PAM_SUDO_FILE"
-             fi
-             echo -e "${GREEN}${ICON_SUCCESS} Touch ID disabled (removed from sudo_local)${NC}"
-             echo ""
-             return 0
+            # Since we modified sudo_local, we should also check if it's in sudo file (legacy cleanup)
+            if grep -q "pam_tid.so" "$PAM_SUDO_FILE"; then
+                temp_file=$(mktemp)
+                grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
+                sudo mv "$temp_file" "$PAM_SUDO_FILE"
+            fi
+            echo -e "${GREEN}${ICON_SUCCESS} Touch ID disabled (removed from sudo_local)${NC}"
+            echo ""
+            return 0
         else
             log_error "Failed to disable Touch ID from sudo_local"
             return 1
