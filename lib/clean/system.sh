@@ -119,7 +119,7 @@ clean_time_machine_failed_backups() {
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
-    if tmutil status 2> /dev/null | grep -q "Running = 1"; then
+    if tm_is_running; then
         if [[ "$spinner_active" == "true" ]]; then
             stop_section_spinner
         fi
@@ -251,11 +251,60 @@ clean_time_machine_failed_backups() {
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
     fi
 }
+# Returns 0 if a backup is actively running.
+# Returns 1 if not running.
+# Returns 2 if status cannot be determined
+tm_is_running() {
+    local st
+    st="$(tmutil status 2> /dev/null)" || return 2
+
+    # If we can't find a Running field at all, treat as unknown.
+    if ! grep -qE '(^|[[:space:]])("Running"|Running)[[:space:]]*=' <<< "$st"; then
+        return 2
+    fi
+
+    # Match: Running = 1;   OR   "Running" = 1   (with or without trailing ;)
+    grep -qE '(^|[[:space:]])("Running"|Running)[[:space:]]*=[[:space:]]*1([[:space:]]*;|$)' <<< "$st"
+}
+
+# Returns 0 if snapshot mounts exist under local snapshot paths
+# Returns 1 if none found
+# Returns 2 if mount state cannot be determined
+tm_snapshots_mounted() {
+    local m
+    if ! m="$(run_with_timeout 3 mount 2> /dev/null)"; then
+        return 2
+    fi
+    # Match modern and legacy local-snapshot browse mounts:
+    # - /Volumes/com.apple.TimeMachine.localsnapshots/... (APFS)
+    # - /.TimeMachine (APFS)
+    # - /Volumes/MobileBackups (HFS+, legacy)
+    grep -qE '[[:space:]]on[[:space:]](/\.TimeMachine(/|[[:space:]])|/Volumes/com\.apple\.TimeMachine\.localsnapshots(/|[[:space:]])|/Volumes/MobileBackups(/|[[:space:]]))' <<< "$m"
+}
+
 # Local APFS snapshots (keep the most recent).
 clean_local_snapshots() {
     if ! command -v tmutil > /dev/null 2>&1; then
         return 0
     fi
+
+    local rc_running rc_mounted
+    rc_running=0
+    tm_is_running || rc_running=$?
+
+    rc_mounted=0
+    tm_snapshots_mounted || rc_mounted=$?
+
+    if [[ $rc_running -eq 2 || $rc_mounted -eq 2 ]]; then
+        echo -e "  ${YELLOW}!${NC} Could not determine Time Machine status; skipping snapshot cleanup"
+        return 0
+    fi
+
+    if [[ $rc_running -eq 0 || $rc_mounted -eq 0 ]]; then
+        echo -e "  ${YELLOW}!${NC} Time Machine is active; skipping snapshot cleanup"
+        return 0
+    fi
+
     start_section_spinner "Checking local snapshots..."
     local snapshot_list
     snapshot_list=$(tmutil listlocalsnapshots / 2> /dev/null)

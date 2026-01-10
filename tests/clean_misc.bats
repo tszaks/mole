@@ -100,6 +100,9 @@ run_with_timeout() { return 1; }
 clean_ds_store_tree() { :; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
+is_path_whitelisted() { return 1; }
+WHITELIST_PATTERNS=()
+PROTECT_FINDER_METADATA="false"
 scan_external_volumes
 EOF
 
