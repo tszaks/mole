@@ -157,10 +157,8 @@ readonly ORPHAN_NEVER_DELETE_PATTERNS=(
     "*keepass*" "*KeePass*"
     "*dashlane*" "*Dashlane*"
     "*enpass*" "*Enpass*"
-    "*credential*" "*Credential*"
-    "*token*" "*Token*"
-    "*wallet*" "*Wallet*"
     "*ssh*" "*gpg*" "*gnupg*"
+    "com.apple.keychain*"
 )
 
 # Cache file for mdfind results (Bash 3.2 compatible, no associative arrays)
