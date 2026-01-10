@@ -1,28 +1,155 @@
-//go:build darwin
+//go:build windows
 
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Scanning limits to prevent infinite scanning
+const (
+	dirSizeTimeout   = 500 * time.Millisecond // Max time to calculate a single directory size
+	maxFilesPerDir   = 10000                  // Max files to scan per directory
+	maxScanDepth     = 10                     // Max recursion depth (shallow scan)
+	shallowScanDepth = 3                      // Depth for quick size estimation
+)
+
+// ANSI color codes
+const (
+	colorReset      = "\033[0m"
+	colorBold       = "\033[1m"
+	colorDim        = "\033[2m"
+	colorPurple     = "\033[35m"
+	colorPurpleBold = "\033[1;35m"
+	colorCyan       = "\033[36m"
+	colorCyanBold   = "\033[1;36m"
+	colorYellow     = "\033[33m"
+	colorGreen      = "\033[32m"
+	colorRed        = "\033[31m"
+	colorGray       = "\033[90m"
+	colorWhite      = "\033[97m"
+)
+
+// Icons
+const (
+	iconFolder   = "📁"
+	iconFile     = "📄"
+	iconDisk     = "💾"
+	iconClean    = "🧹"
+	iconTrash    = "🗑️"
+	iconBack     = "⬅️"
+	iconSelected = "✓"
+	iconArrow    = "➤"
+)
+
+// Cleanable directory patterns
+var cleanablePatterns = map[string]bool{
+	"node_modules":  true,
+	"vendor":        true,
+	".venv":         true,
+	"venv":          true,
+	"__pycache__":   true,
+	".pytest_cache": true,
+	"target":        true,
+	"build":         true,
+	"dist":          true,
+	".next":         true,
+	".nuxt":         true,
+	".turbo":        true,
+	".parcel-cache": true,
+	"bin":           true,
+	"obj":           true,
+	".gradle":       true,
+	".idea":         true,
+	".vs":           true,
+}
+
+// Skip patterns for scanning
+var skipPatterns = map[string]bool{
+	"$Recycle.Bin":              true,
+	"System Volume Information": true,
+	"Windows":                   true,
+	"Program Files":             true,
+	"Program Files (x86)":       true,
+	"ProgramData":               true,
+	"Recovery":                  true,
+	"Config.Msi":                true,
+}
+
+// Protected paths that should NEVER be deleted
+var protectedPaths = []string{
+	`C:\Windows`,
+	`C:\Program Files`,
+	`C:\Program Files (x86)`,
+	`C:\ProgramData`,
+	`C:\Users\Default`,
+	`C:\Users\Public`,
+	`C:\Recovery`,
+	`C:\System Volume Information`,
+}
+
+// isProtectedPath checks if a path is protected from deletion
+func isProtectedPath(path string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return true // If we can't resolve the path, treat it as protected
+	}
+	absPath = strings.ToLower(absPath)
+
+	// Check against protected paths
+	for _, protected := range protectedPaths {
+		protectedLower := strings.ToLower(protected)
+		if absPath == protectedLower || strings.HasPrefix(absPath, protectedLower+`\`) {
+			return true
+		}
+	}
+
+	// Check against skip patterns (system directories)
+	baseName := strings.ToLower(filepath.Base(absPath))
+	for pattern := range skipPatterns {
+		if strings.ToLower(pattern) == baseName {
+			// Only protect if it's at a root level (e.g., C:\Windows, not C:\Projects\Windows)
+			parent := filepath.Dir(absPath)
+			if len(parent) <= 3 { // e.g., "C:\"
+				return true
+			}
+		}
+	}
+
+	// Protect Windows directory itself
+	winDir := strings.ToLower(os.Getenv("WINDIR"))
+	sysRoot := strings.ToLower(os.Getenv("SYSTEMROOT"))
+	if winDir != "" && (absPath == winDir || strings.HasPrefix(absPath, winDir+`\`)) {
+		return true
+	}
+	if sysRoot != "" && (absPath == sysRoot || strings.HasPrefix(absPath, sysRoot+`\`)) {
+		return true
+	}
+
+	return false
+}
+
+// Entry types
 type dirEntry struct {
-	Name       string
-	Path       string
-	Size       int64
-	IsDir      bool
-	LastAccess time.Time
+	Name        string
+	Path        string
+	Size        int64
+	IsDir       bool
+	LastAccess  time.Time
+	IsCleanable bool
 }
 
 type fileEntry struct {
@@ -31,1101 +158,623 @@ type fileEntry struct {
 	Size int64
 }
 
-type scanResult struct {
-	Entries    []dirEntry
-	LargeFiles []fileEntry
-	TotalSize  int64
-	TotalFiles int64
-}
-
-type cacheEntry struct {
-	Entries    []dirEntry
-	LargeFiles []fileEntry
-	TotalSize  int64
-	TotalFiles int64
-	ModTime    time.Time
-	ScanTime   time.Time
-}
-
 type historyEntry struct {
-	Path          string
-	Entries       []dirEntry
-	LargeFiles    []fileEntry
-	TotalSize     int64
-	TotalFiles    int64
-	Selected      int
-	EntryOffset   int
-	LargeSelected int
-	LargeOffset   int
-	Dirty         bool
-	IsOverview    bool
+	Path       string
+	Entries    []dirEntry
+	LargeFiles []fileEntry
+	TotalSize  int64
+	Selected   int
 }
 
-type scanResultMsg struct {
-	result scanResult
-	err    error
-}
-
-type overviewSizeMsg struct {
-	Path  string
-	Index int
-	Size  int64
-	Err   error
-}
-
-type tickMsg time.Time
-
-type deleteProgressMsg struct {
-	done  bool
-	err   error
-	count int64
-	path  string
-}
-
+// Model for Bubble Tea
 type model struct {
-	path                 string
-	history              []historyEntry
-	entries              []dirEntry
-	largeFiles           []fileEntry
-	selected             int
-	offset               int
-	status               string
-	totalSize            int64
-	scanning             bool
-	spinner              int
-	filesScanned         *int64
-	dirsScanned          *int64
-	bytesScanned         *int64
-	currentPath          *string
-	showLargeFiles       bool
-	isOverview           bool
-	deleteConfirm        bool
-	deleteTarget         *dirEntry
-	deleting             bool
-	deleteCount          *int64
-	cache                map[string]historyEntry
-	largeSelected        int
-	largeOffset          int
-	overviewSizeCache    map[string]int64
-	overviewFilesScanned *int64
-	overviewDirsScanned  *int64
-	overviewBytesScanned *int64
-	overviewCurrentPath  *string
-	overviewScanning     bool
-	overviewScanningSet  map[string]bool // Track which paths are currently being scanned
-	width                int             // Terminal width
-	height               int             // Terminal height
-	multiSelected        map[string]bool // Track multi-selected items by path (safer than index)
-	largeMultiSelected   map[string]bool // Track multi-selected large files by path (safer than index)
-	totalFiles           int64           // Total files found in current/last scan
-	lastTotalFiles       int64           // Total files from previous scan (for progress bar)
+	path           string
+	entries        []dirEntry
+	largeFiles     []fileEntry
+	history        []historyEntry
+	selected       int
+	totalSize      int64
+	scanning       bool
+	showLargeFiles bool
+	multiSelected  map[string]bool
+	deleteConfirm  bool
+	deleteTarget   string
+	scanProgress   int64
+	scanTotal      int64
+	width          int
+	height         int
+	err            error
+	cache          map[string]historyEntry
 }
 
-func (m model) inOverviewMode() bool {
-	return m.isOverview && m.path == "/"
+// Messages
+type scanCompleteMsg struct {
+	entries    []dirEntry
+	largeFiles []fileEntry
+	totalSize  int64
 }
 
-func main() {
-	target := os.Getenv("MO_ANALYZE_PATH")
-	if target == "" && len(os.Args) > 1 {
-		target = os.Args[1]
-	}
-
-	var abs string
-	var isOverview bool
-
-	if target == "" {
-		isOverview = true
-		abs = "/"
-	} else {
-		var err error
-		abs, err = filepath.Abs(target)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "cannot resolve %q: %v\n", target, err)
-			os.Exit(1)
-		}
-		isOverview = false
-	}
-
-	// Warm overview cache in background.
-	prefetchCtx, prefetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer prefetchCancel()
-	go prefetchOverviewCache(prefetchCtx)
-
-	p := tea.NewProgram(newModel(abs, isOverview), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "analyzer error: %v\n", err)
-		os.Exit(1)
-	}
+type scanProgressMsg struct {
+	current int64
+	total   int64
 }
 
-func newModel(path string, isOverview bool) model {
-	var filesScanned, dirsScanned, bytesScanned int64
-	currentPath := ""
-	var overviewFilesScanned, overviewDirsScanned, overviewBytesScanned int64
-	overviewCurrentPath := ""
-
-	m := model{
-		path:                 path,
-		selected:             0,
-		status:               "Preparing scan...",
-		scanning:             !isOverview,
-		filesScanned:         &filesScanned,
-		dirsScanned:          &dirsScanned,
-		bytesScanned:         &bytesScanned,
-		currentPath:          &currentPath,
-		showLargeFiles:       false,
-		isOverview:           isOverview,
-		cache:                make(map[string]historyEntry),
-		overviewFilesScanned: &overviewFilesScanned,
-		overviewDirsScanned:  &overviewDirsScanned,
-		overviewBytesScanned: &overviewBytesScanned,
-		overviewCurrentPath:  &overviewCurrentPath,
-		overviewSizeCache:    make(map[string]int64),
-		overviewScanningSet:  make(map[string]bool),
-		multiSelected:        make(map[string]bool),
-		largeMultiSelected:   make(map[string]bool),
-	}
-
-	if isOverview {
-		m.scanning = false
-		m.hydrateOverviewEntries()
-		m.selected = 0
-		m.offset = 0
-		if nextPendingOverviewIndex(m.entries) >= 0 {
-			m.overviewScanning = true
-			m.status = "Checking system folders..."
-		} else {
-			m.status = "Ready"
-		}
-	}
-
-	// Try to peek last total files for progress bar, even if cache is stale
-	if !isOverview {
-		if total, err := peekCacheTotalFiles(path); err == nil && total > 0 {
-			m.lastTotalFiles = total
-		}
-	}
-
-	return m
+type scanErrorMsg struct {
+	err error
 }
 
-func createOverviewEntries() []dirEntry {
-	home := os.Getenv("HOME")
-	entries := []dirEntry{}
-
-	// Separate Home and ~/Library to avoid double counting.
-	if home != "" {
-		entries = append(entries, dirEntry{Name: "Home", Path: home, IsDir: true, Size: -1})
-
-		userLibrary := filepath.Join(home, "Library")
-		if _, err := os.Stat(userLibrary); err == nil {
-			entries = append(entries, dirEntry{Name: "App Library", Path: userLibrary, IsDir: true, Size: -1})
-		}
-	}
-
-	entries = append(entries,
-		dirEntry{Name: "Applications", Path: "/Applications", IsDir: true, Size: -1},
-		dirEntry{Name: "System Library", Path: "/Library", IsDir: true, Size: -1},
-	)
-
-	// Include Volumes only when real mounts exist.
-	if hasUsefulVolumeMounts("/Volumes") {
-		entries = append(entries, dirEntry{Name: "Volumes", Path: "/Volumes", IsDir: true, Size: -1})
-	}
-
-	return entries
+type deleteCompleteMsg struct {
+	path string
+	err  error
 }
 
-func hasUsefulVolumeMounts(path string) bool {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return false
+func newModel(startPath string) model {
+	return model{
+		path:          startPath,
+		entries:       []dirEntry{},
+		largeFiles:    []fileEntry{},
+		history:       []historyEntry{},
+		selected:      0,
+		scanning:      true,
+		multiSelected: make(map[string]bool),
+		cache:         make(map[string]historyEntry),
 	}
-
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-
-		info, err := os.Lstat(filepath.Join(path, name))
-		if err != nil {
-			continue
-		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			continue // Ignore the synthetic MacintoshHD link
-		}
-		if info.IsDir() {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *model) hydrateOverviewEntries() {
-	m.entries = createOverviewEntries()
-	if m.overviewSizeCache == nil {
-		m.overviewSizeCache = make(map[string]int64)
-	}
-	for i := range m.entries {
-		if size, ok := m.overviewSizeCache[m.entries[i].Path]; ok {
-			m.entries[i].Size = size
-			continue
-		}
-		if size, err := loadOverviewCachedSize(m.entries[i].Path); err == nil {
-			m.entries[i].Size = size
-			m.overviewSizeCache[m.entries[i].Path] = size
-		}
-	}
-	m.totalSize = sumKnownEntrySizes(m.entries)
-}
-
-func (m *model) sortOverviewEntriesBySize() {
-	// Stable sort by size.
-	sort.SliceStable(m.entries, func(i, j int) bool {
-		return m.entries[i].Size > m.entries[j].Size
-	})
-}
-
-func (m *model) scheduleOverviewScans() tea.Cmd {
-	if !m.inOverviewMode() {
-		return nil
-	}
-
-	var pendingIndices []int
-	for i, entry := range m.entries {
-		if entry.Size < 0 && !m.overviewScanningSet[entry.Path] {
-			pendingIndices = append(pendingIndices, i)
-			if len(pendingIndices) >= maxConcurrentOverview {
-				break
-			}
-		}
-	}
-
-	if len(pendingIndices) == 0 {
-		m.overviewScanning = false
-		if !hasPendingOverviewEntries(m.entries) {
-			m.sortOverviewEntriesBySize()
-			m.status = "Ready"
-		}
-		return nil
-	}
-
-	var cmds []tea.Cmd
-	for _, idx := range pendingIndices {
-		entry := m.entries[idx]
-		m.overviewScanningSet[entry.Path] = true
-		cmd := scanOverviewPathCmd(entry.Path, idx)
-		cmds = append(cmds, cmd)
-	}
-
-	m.overviewScanning = true
-	remaining := 0
-	for _, e := range m.entries {
-		if e.Size < 0 {
-			remaining++
-		}
-	}
-	if len(pendingIndices) > 0 {
-		firstEntry := m.entries[pendingIndices[0]]
-		if len(pendingIndices) == 1 {
-			m.status = fmt.Sprintf("Scanning %s... (%d left)", firstEntry.Name, remaining)
-		} else {
-			m.status = fmt.Sprintf("Scanning %d directories... (%d left)", len(pendingIndices), remaining)
-		}
-	}
-
-	cmds = append(cmds, tickCmd())
-	return tea.Batch(cmds...)
-}
-
-func (m *model) getScanProgress() (files, dirs, bytes int64) {
-	if m.filesScanned != nil {
-		files = atomic.LoadInt64(m.filesScanned)
-	}
-	if m.dirsScanned != nil {
-		dirs = atomic.LoadInt64(m.dirsScanned)
-	}
-	if m.bytesScanned != nil {
-		bytes = atomic.LoadInt64(m.bytesScanned)
-	}
-	return
 }
 
 func (m model) Init() tea.Cmd {
-	if m.inOverviewMode() {
-		return m.scheduleOverviewScans()
-	}
-	return tea.Batch(m.scanCmd(m.path), tickCmd())
-}
-
-func (m model) scanCmd(path string) tea.Cmd {
-	return func() tea.Msg {
-		if cached, err := loadCacheFromDisk(path); err == nil {
-			result := scanResult{
-				Entries:    cached.Entries,
-				LargeFiles: cached.LargeFiles,
-				TotalSize:  cached.TotalSize,
-				TotalFiles: 0, // Cache doesn't store file count currently, minor UI limitation
-			}
-			return scanResultMsg{result: result, err: nil}
-		}
-
-		v, err, _ := scanGroup.Do(path, func() (any, error) {
-			return scanPathConcurrent(path, m.filesScanned, m.dirsScanned, m.bytesScanned, m.currentPath)
-		})
-
-		if err != nil {
-			return scanResultMsg{err: err}
-		}
-
-		result := v.(scanResult)
-
-		go func(p string, r scanResult) {
-			if err := saveCacheToDisk(p, r); err != nil {
-				_ = err // Cache save failure is not critical
-			}
-		}(path, result)
-
-		return scanResultMsg{result: result, err: nil}
-	}
-}
-
-func tickCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*80, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
+	return m.scanPath(m.path)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		return m.updateKey(msg)
+		return m.handleKeyPress(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
-	case deleteProgressMsg:
-		if msg.done {
-			m.deleting = false
-			m.multiSelected = make(map[string]bool)
-			m.largeMultiSelected = make(map[string]bool)
-			if msg.err != nil {
-				m.status = fmt.Sprintf("Failed to delete: %v", msg.err)
-			} else {
-				if msg.path != "" {
-					m.removePathFromView(msg.path)
-					invalidateCache(msg.path)
-				}
-				invalidateCache(m.path)
-				m.status = fmt.Sprintf("Deleted %d items", msg.count)
-				for i := range m.history {
-					m.history[i].Dirty = true
-				}
-				for path := range m.cache {
-					entry := m.cache[path]
-					entry.Dirty = true
-					m.cache[path] = entry
-				}
-				m.scanning = true
-				atomic.StoreInt64(m.filesScanned, 0)
-				atomic.StoreInt64(m.dirsScanned, 0)
-				atomic.StoreInt64(m.bytesScanned, 0)
-				if m.currentPath != nil {
-					*m.currentPath = ""
-				}
-				return m, tea.Batch(m.scanCmd(m.path), tickCmd())
-			}
-		}
-		return m, nil
-	case scanResultMsg:
+	case scanCompleteMsg:
+		m.entries = msg.entries
+		m.largeFiles = msg.largeFiles
+		m.totalSize = msg.totalSize
 		m.scanning = false
+		m.selected = 0
+		// Cache result
+		m.cache[m.path] = historyEntry{
+			Path:       m.path,
+			Entries:    msg.entries,
+			LargeFiles: msg.largeFiles,
+			TotalSize:  msg.totalSize,
+		}
+		return m, nil
+	case scanProgressMsg:
+		m.scanProgress = msg.current
+		m.scanTotal = msg.total
+		return m, nil
+	case scanErrorMsg:
+		m.err = msg.err
+		m.scanning = false
+		return m, nil
+	case deleteCompleteMsg:
+		m.deleteConfirm = false
+		m.deleteTarget = ""
 		if msg.err != nil {
-			m.status = fmt.Sprintf("Scan failed: %v", msg.err)
-			return m, nil
+			m.err = msg.err
+		} else {
+			// Rescan after delete
+			m.scanning = true
+			delete(m.cache, m.path)
+			return m, m.scanPath(m.path)
 		}
-		filteredEntries := make([]dirEntry, 0, len(msg.result.Entries))
-		for _, e := range msg.result.Entries {
-			if e.Size > 0 {
-				filteredEntries = append(filteredEntries, e)
-			}
-		}
-		m.entries = filteredEntries
-		m.largeFiles = msg.result.LargeFiles
-		m.totalSize = msg.result.TotalSize
-		m.totalFiles = msg.result.TotalFiles
-		m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
-		m.clampEntrySelection()
-		m.clampLargeSelection()
-		m.cache[m.path] = cacheSnapshot(m)
-		if m.totalSize > 0 {
-			if m.overviewSizeCache == nil {
-				m.overviewSizeCache = make(map[string]int64)
-			}
-			m.overviewSizeCache[m.path] = m.totalSize
-			go func(path string, size int64) {
-				_ = storeOverviewSize(path, size)
-			}(m.path, m.totalSize)
-		}
-		return m, nil
-	case overviewSizeMsg:
-		delete(m.overviewScanningSet, msg.Path)
-
-		if msg.Err == nil {
-			if m.overviewSizeCache == nil {
-				m.overviewSizeCache = make(map[string]int64)
-			}
-			m.overviewSizeCache[msg.Path] = msg.Size
-		}
-
-		if m.inOverviewMode() {
-			for i := range m.entries {
-				if m.entries[i].Path == msg.Path {
-					if msg.Err == nil {
-						m.entries[i].Size = msg.Size
-					} else {
-						m.entries[i].Size = 0
-					}
-					break
-				}
-			}
-			m.totalSize = sumKnownEntrySizes(m.entries)
-
-			if msg.Err != nil {
-				m.status = fmt.Sprintf("Unable to measure %s: %v", displayPath(msg.Path), msg.Err)
-			}
-
-			cmd := m.scheduleOverviewScans()
-			return m, cmd
-		}
-		return m, nil
-	case tickMsg:
-		hasPending := false
-		if m.inOverviewMode() {
-			for _, entry := range m.entries {
-				if entry.Size < 0 {
-					hasPending = true
-					break
-				}
-			}
-		}
-		if m.scanning || m.deleting || (m.inOverviewMode() && (m.overviewScanning || hasPending)) {
-			m.spinner = (m.spinner + 1) % len(spinnerFrames)
-			if m.deleting && m.deleteCount != nil {
-				count := atomic.LoadInt64(m.deleteCount)
-				if count > 0 {
-					m.status = fmt.Sprintf("Moving to Trash... %s items", formatNumber(count))
-				}
-			}
-			return m, tickCmd()
-		}
-		return m, nil
-	default:
 		return m, nil
 	}
+	return m, nil
 }
 
-func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Delete confirm flow.
+func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle delete confirmation
 	if m.deleteConfirm {
 		switch msg.String() {
-		case "enter":
+		case "y", "Y":
+			target := m.deleteTarget
 			m.deleteConfirm = false
-			m.deleting = true
-			var deleteCount int64
-			m.deleteCount = &deleteCount
-
-			// Collect paths (safer than indices).
-			var pathsToDelete []string
-			if m.showLargeFiles {
-				if len(m.largeMultiSelected) > 0 {
-					for path := range m.largeMultiSelected {
-						pathsToDelete = append(pathsToDelete, path)
-					}
-				} else if m.deleteTarget != nil {
-					pathsToDelete = append(pathsToDelete, m.deleteTarget.Path)
-				}
-			} else {
-				if len(m.multiSelected) > 0 {
-					for path := range m.multiSelected {
-						pathsToDelete = append(pathsToDelete, path)
-					}
-				} else if m.deleteTarget != nil {
-					pathsToDelete = append(pathsToDelete, m.deleteTarget.Path)
-				}
-			}
-
-			m.deleteTarget = nil
-			if len(pathsToDelete) == 0 {
-				m.deleting = false
-				m.status = "Nothing to delete"
-				return m, nil
-			}
-
-			if len(pathsToDelete) == 1 {
-				targetPath := pathsToDelete[0]
-				m.status = fmt.Sprintf("Deleting %s...", filepath.Base(targetPath))
-				return m, tea.Batch(deletePathCmd(targetPath, m.deleteCount), tickCmd())
-			}
-
-			m.status = fmt.Sprintf("Deleting %d items...", len(pathsToDelete))
-			return m, tea.Batch(deleteMultiplePathsCmd(pathsToDelete, m.deleteCount), tickCmd())
-		case "esc", "q":
-			m.status = "Cancelled"
+			return m, m.deletePath(target)
+		case "n", "N", "esc":
 			m.deleteConfirm = false
-			m.deleteTarget = nil
-			return m, nil
-		default:
+			m.deleteTarget = ""
 			return m, nil
 		}
+		return m, nil
 	}
 
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "esc":
-		if m.showLargeFiles {
-			m.showLargeFiles = false
-			return m, nil
-		}
-		return m, tea.Quit
 	case "up", "k":
-		if m.showLargeFiles {
-			if m.largeSelected > 0 {
-				m.largeSelected--
-				if m.largeSelected < m.largeOffset {
-					m.largeOffset = m.largeSelected
-				}
-			}
-		} else if len(m.entries) > 0 && m.selected > 0 {
+		if m.selected > 0 {
 			m.selected--
-			if m.selected < m.offset {
-				m.offset = m.selected
-			}
 		}
 	case "down", "j":
-		if m.showLargeFiles {
-			if m.largeSelected < len(m.largeFiles)-1 {
-				m.largeSelected++
-				viewport := calculateViewport(m.height, true)
-				if m.largeSelected >= m.largeOffset+viewport {
-					m.largeOffset = m.largeSelected - viewport + 1
-				}
-			}
-		} else if len(m.entries) > 0 && m.selected < len(m.entries)-1 {
+		if m.selected < len(m.entries)-1 {
 			m.selected++
-			viewport := calculateViewport(m.height, false)
-			if m.selected >= m.offset+viewport {
-				m.offset = m.selected - viewport + 1
-			}
 		}
 	case "enter", "right", "l":
-		if m.showLargeFiles {
-			return m, nil
-		}
-		return m.enterSelectedDir()
-	case "b", "left", "h":
-		if m.showLargeFiles {
-			m.showLargeFiles = false
-			return m, nil
-		}
-		if len(m.history) == 0 {
-			if !m.inOverviewMode() {
-				return m, m.switchToOverviewMode()
-			}
-			return m, nil
-		}
-		last := m.history[len(m.history)-1]
-		m.history = m.history[:len(m.history)-1]
-		m.path = last.Path
-		m.selected = last.Selected
-		m.offset = last.EntryOffset
-		m.largeSelected = last.LargeSelected
-		m.largeOffset = last.LargeOffset
-		m.isOverview = last.IsOverview
-		if last.Dirty {
-			// On overview return, refresh cached entries.
-			if last.IsOverview {
-				m.hydrateOverviewEntries()
-				m.totalSize = sumKnownEntrySizes(m.entries)
-				m.status = "Ready"
-				m.scanning = false
-				if nextPendingOverviewIndex(m.entries) >= 0 {
-					m.overviewScanning = true
-					return m, m.scheduleOverviewScans()
-				}
-				return m, nil
-			}
-			m.status = "Scanning..."
-			m.scanning = true
-			return m, tea.Batch(m.scanCmd(m.path), tickCmd())
-		}
-		m.entries = last.Entries
-		m.largeFiles = last.LargeFiles
-		m.totalSize = last.TotalSize
-		m.clampEntrySelection()
-		m.clampLargeSelection()
-		if len(m.entries) == 0 {
-			m.selected = 0
-		} else if m.selected >= len(m.entries) {
-			m.selected = len(m.entries) - 1
-		}
-		if m.selected < 0 {
-			m.selected = 0
-		}
-		m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
-		m.scanning = false
-		return m, nil
-	case "r":
-		m.multiSelected = make(map[string]bool)
-		m.largeMultiSelected = make(map[string]bool)
-
-		if m.inOverviewMode() {
-			m.overviewSizeCache = make(map[string]int64)
-			m.overviewScanningSet = make(map[string]bool)
-			m.hydrateOverviewEntries() // Reset sizes to pending
-
-			for i := range m.entries {
-				m.entries[i].Size = -1
-			}
-			m.totalSize = 0
-
-			m.status = "Refreshing..."
-			m.overviewScanning = true
-			return m, tea.Batch(m.scheduleOverviewScans(), tickCmd())
-		}
-
-		invalidateCache(m.path)
-		m.status = "Refreshing..."
-		m.scanning = true
-		if m.totalFiles > 0 {
-			m.lastTotalFiles = m.totalFiles
-		}
-		atomic.StoreInt64(m.filesScanned, 0)
-		atomic.StoreInt64(m.dirsScanned, 0)
-		atomic.StoreInt64(m.bytesScanned, 0)
-		if m.currentPath != nil {
-			*m.currentPath = ""
-		}
-		return m, tea.Batch(m.scanCmd(m.path), tickCmd())
-	case "t", "T":
-		if !m.inOverviewMode() {
-			m.showLargeFiles = !m.showLargeFiles
-			if m.showLargeFiles {
-				m.largeSelected = 0
-				m.largeOffset = 0
-				m.largeMultiSelected = make(map[string]bool)
-			} else {
+		if !m.scanning && len(m.entries) > 0 {
+			entry := m.entries[m.selected]
+			if entry.IsDir {
+				// Save current state to history
+				m.history = append(m.history, historyEntry{
+					Path:       m.path,
+					Entries:    m.entries,
+					LargeFiles: m.largeFiles,
+					TotalSize:  m.totalSize,
+					Selected:   m.selected,
+				})
+				m.path = entry.Path
+				m.selected = 0
 				m.multiSelected = make(map[string]bool)
-			}
-			m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
-		}
-	case "o":
-		// Open selected entries (multi-select aware).
-		const maxBatchOpen = 20
-		if m.showLargeFiles {
-			if len(m.largeFiles) > 0 {
-				if len(m.largeMultiSelected) > 0 {
-					count := len(m.largeMultiSelected)
-					if count > maxBatchOpen {
-						m.status = fmt.Sprintf("Too many items to open (max %d, selected %d)", maxBatchOpen, count)
-						return m, nil
-					}
-					for path := range m.largeMultiSelected {
-						go func(p string) {
-							ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-							defer cancel()
-							_ = exec.CommandContext(ctx, "open", p).Run()
-						}(path)
-					}
-					m.status = fmt.Sprintf("Opening %d items...", count)
-				} else {
-					selected := m.largeFiles[m.largeSelected]
-					go func(path string) {
-						ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-						defer cancel()
-						_ = exec.CommandContext(ctx, "open", path).Run()
-					}(selected.Path)
-					m.status = fmt.Sprintf("Opening %s...", selected.Name)
-				}
-			}
-		} else if len(m.entries) > 0 {
-			if len(m.multiSelected) > 0 {
-				count := len(m.multiSelected)
-				if count > maxBatchOpen {
-					m.status = fmt.Sprintf("Too many items to open (max %d, selected %d)", maxBatchOpen, count)
+
+				// Check cache
+				if cached, ok := m.cache[entry.Path]; ok {
+					m.entries = cached.Entries
+					m.largeFiles = cached.LargeFiles
+					m.totalSize = cached.TotalSize
 					return m, nil
 				}
-				for path := range m.multiSelected {
-					go func(p string) {
-						ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-						defer cancel()
-						_ = exec.CommandContext(ctx, "open", p).Run()
-					}(path)
-				}
-				m.status = fmt.Sprintf("Opening %d items...", count)
-			} else {
-				selected := m.entries[m.selected]
-				go func(path string) {
-					ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-					defer cancel()
-					_ = exec.CommandContext(ctx, "open", path).Run()
-				}(selected.Path)
-				m.status = fmt.Sprintf("Opening %s...", selected.Name)
-			}
-		}
-	case "f", "F":
-		// Reveal in Finder (multi-select aware).
-		const maxBatchReveal = 20
-		if m.showLargeFiles {
-			if len(m.largeFiles) > 0 {
-				if len(m.largeMultiSelected) > 0 {
-					count := len(m.largeMultiSelected)
-					if count > maxBatchReveal {
-						m.status = fmt.Sprintf("Too many items to reveal (max %d, selected %d)", maxBatchReveal, count)
-						return m, nil
-					}
-					for path := range m.largeMultiSelected {
-						go func(p string) {
-							ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-							defer cancel()
-							_ = exec.CommandContext(ctx, "open", "-R", p).Run()
-						}(path)
-					}
-					m.status = fmt.Sprintf("Showing %d items in Finder...", count)
-				} else {
-					selected := m.largeFiles[m.largeSelected]
-					go func(path string) {
-						ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-						defer cancel()
-						_ = exec.CommandContext(ctx, "open", "-R", path).Run()
-					}(selected.Path)
-					m.status = fmt.Sprintf("Showing %s in Finder...", selected.Name)
-				}
-			}
-		} else if len(m.entries) > 0 {
-			if len(m.multiSelected) > 0 {
-				count := len(m.multiSelected)
-				if count > maxBatchReveal {
-					m.status = fmt.Sprintf("Too many items to reveal (max %d, selected %d)", maxBatchReveal, count)
-					return m, nil
-				}
-				for path := range m.multiSelected {
-					go func(p string) {
-						ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-						defer cancel()
-						_ = exec.CommandContext(ctx, "open", "-R", p).Run()
-					}(path)
-				}
-				m.status = fmt.Sprintf("Showing %d items in Finder...", count)
-			} else {
-				selected := m.entries[m.selected]
-				go func(path string) {
-					ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-					defer cancel()
-					_ = exec.CommandContext(ctx, "open", "-R", path).Run()
-				}(selected.Path)
-				m.status = fmt.Sprintf("Showing %s in Finder...", selected.Name)
-			}
-		}
-	case " ":
-		// Toggle multi-select (paths as keys).
-		if m.showLargeFiles {
-			if len(m.largeFiles) > 0 && m.largeSelected < len(m.largeFiles) {
-				if m.largeMultiSelected == nil {
-					m.largeMultiSelected = make(map[string]bool)
-				}
-				selectedPath := m.largeFiles[m.largeSelected].Path
-				if m.largeMultiSelected[selectedPath] {
-					delete(m.largeMultiSelected, selectedPath)
-				} else {
-					m.largeMultiSelected[selectedPath] = true
-				}
-				count := len(m.largeMultiSelected)
-				if count > 0 {
-					var totalSize int64
-					for path := range m.largeMultiSelected {
-						for _, file := range m.largeFiles {
-							if file.Path == path {
-								totalSize += file.Size
-								break
-							}
-						}
-					}
-					m.status = fmt.Sprintf("%d selected (%s)", count, humanizeBytes(totalSize))
-				} else {
-					m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
-				}
-			}
-		} else if len(m.entries) > 0 && !m.inOverviewMode() && m.selected < len(m.entries) {
-			if m.multiSelected == nil {
-				m.multiSelected = make(map[string]bool)
-			}
-			selectedPath := m.entries[m.selected].Path
-			if m.multiSelected[selectedPath] {
-				delete(m.multiSelected, selectedPath)
-			} else {
-				m.multiSelected[selectedPath] = true
-			}
-			count := len(m.multiSelected)
-			if count > 0 {
-				var totalSize int64
-				for path := range m.multiSelected {
-					for _, entry := range m.entries {
-						if entry.Path == path {
-							totalSize += entry.Size
-							break
-						}
-					}
-				}
-				m.status = fmt.Sprintf("%d selected (%s)", count, humanizeBytes(totalSize))
-			} else {
-				m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
-			}
-		}
-	case "delete", "backspace":
-		if m.showLargeFiles {
-			if len(m.largeFiles) > 0 {
-				if len(m.largeMultiSelected) > 0 {
-					m.deleteConfirm = true
-					for path := range m.largeMultiSelected {
-						for _, file := range m.largeFiles {
-							if file.Path == path {
-								m.deleteTarget = &dirEntry{
-									Name:  file.Name,
-									Path:  file.Path,
-									Size:  file.Size,
-									IsDir: false,
-								}
-								break
-							}
-						}
-						break // Only need first one for display
-					}
-				} else if m.largeSelected < len(m.largeFiles) {
-					selected := m.largeFiles[m.largeSelected]
-					m.deleteConfirm = true
-					m.deleteTarget = &dirEntry{
-						Name:  selected.Name,
-						Path:  selected.Path,
-						Size:  selected.Size,
-						IsDir: false,
-					}
-				}
-			}
-		} else if len(m.entries) > 0 && !m.inOverviewMode() {
-			if len(m.multiSelected) > 0 {
-				m.deleteConfirm = true
-				for path := range m.multiSelected {
-					// Resolve entry by path.
-					for i := range m.entries {
-						if m.entries[i].Path == path {
-							m.deleteTarget = &m.entries[i]
-							break
-						}
-					}
-					break // Only need first one for display
-				}
-			} else if m.selected < len(m.entries) {
-				selected := m.entries[m.selected]
-				m.deleteConfirm = true
-				m.deleteTarget = &selected
-			}
-		}
-	}
-	return m, nil
-}
 
-func (m *model) switchToOverviewMode() tea.Cmd {
-	m.isOverview = true
-	m.path = "/"
-	m.scanning = false
-	m.showLargeFiles = false
-	m.largeFiles = nil
-	m.largeSelected = 0
-	m.largeOffset = 0
-	m.deleteConfirm = false
-	m.deleteTarget = nil
-	m.selected = 0
-	m.offset = 0
-	m.hydrateOverviewEntries()
-	cmd := m.scheduleOverviewScans()
-	if cmd == nil {
-		m.status = "Ready"
-		return nil
-	}
-	return tea.Batch(cmd, tickCmd())
-}
-
-func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
-	if len(m.entries) == 0 {
-		return m, nil
-	}
-	selected := m.entries[m.selected]
-	if selected.IsDir {
-		m.history = append(m.history, snapshotFromModel(m))
-		m.path = selected.Path
-		m.selected = 0
-		m.offset = 0
-		m.status = "Scanning..."
-		m.scanning = true
-		m.isOverview = false
-		m.multiSelected = make(map[string]bool)
-		m.largeMultiSelected = make(map[string]bool)
-
-		atomic.StoreInt64(m.filesScanned, 0)
-		atomic.StoreInt64(m.dirsScanned, 0)
-		atomic.StoreInt64(m.bytesScanned, 0)
-		if m.currentPath != nil {
-			*m.currentPath = ""
+				m.scanning = true
+				return m, m.scanPath(entry.Path)
+			}
 		}
-
-		if cached, ok := m.cache[m.path]; ok && !cached.Dirty {
-			m.entries = cloneDirEntries(cached.Entries)
-			m.largeFiles = cloneFileEntries(cached.LargeFiles)
-			m.totalSize = cached.TotalSize
-			m.totalFiles = cached.TotalFiles
-			m.selected = cached.Selected
-			m.offset = cached.EntryOffset
-			m.largeSelected = cached.LargeSelected
-			m.largeOffset = cached.LargeOffset
-			m.clampEntrySelection()
-			m.clampLargeSelection()
-			m.status = fmt.Sprintf("Cached view for %s", displayPath(m.path))
+	case "left", "h", "backspace":
+		if len(m.history) > 0 {
+			last := m.history[len(m.history)-1]
+			m.history = m.history[:len(m.history)-1]
+			m.path = last.Path
+			m.entries = last.Entries
+			m.largeFiles = last.LargeFiles
+			m.totalSize = last.TotalSize
+			m.selected = last.Selected
+			m.multiSelected = make(map[string]bool)
 			m.scanning = false
-			return m, nil
 		}
-		m.lastTotalFiles = 0
-		if total, err := peekCacheTotalFiles(m.path); err == nil && total > 0 {
-			m.lastTotalFiles = total
+	case "space":
+		if len(m.entries) > 0 {
+			entry := m.entries[m.selected]
+			if m.multiSelected[entry.Path] {
+				delete(m.multiSelected, entry.Path)
+			} else {
+				m.multiSelected[entry.Path] = true
+			}
 		}
-		return m, tea.Batch(m.scanCmd(m.path), tickCmd())
-	}
-	m.status = fmt.Sprintf("File: %s (%s)", selected.Name, humanizeBytes(selected.Size))
-	return m, nil
-}
-
-func (m *model) clampEntrySelection() {
-	if len(m.entries) == 0 {
+	case "d", "delete":
+		if len(m.entries) > 0 {
+			entry := m.entries[m.selected]
+			m.deleteConfirm = true
+			m.deleteTarget = entry.Path
+		}
+	case "D":
+		// Delete all selected
+		if len(m.multiSelected) > 0 {
+			m.deleteConfirm = true
+			m.deleteTarget = fmt.Sprintf("%d items", len(m.multiSelected))
+		}
+	case "f":
+		m.showLargeFiles = !m.showLargeFiles
+	case "r":
+		// Refresh
+		delete(m.cache, m.path)
+		m.scanning = true
+		return m, m.scanPath(m.path)
+	case "o":
+		// Open in Explorer
+		if len(m.entries) > 0 {
+			entry := m.entries[m.selected]
+			openInExplorer(entry.Path)
+		}
+	case "g":
 		m.selected = 0
-		m.offset = 0
-		return
-	}
-	if m.selected >= len(m.entries) {
+	case "G":
 		m.selected = len(m.entries) - 1
 	}
-	if m.selected < 0 {
-		m.selected = 0
-	}
-	viewport := calculateViewport(m.height, false)
-	maxOffset := max(len(m.entries)-viewport, 0)
-	if m.offset > maxOffset {
-		m.offset = maxOffset
-	}
-	if m.selected < m.offset {
-		m.offset = m.selected
-	}
-	if m.selected >= m.offset+viewport {
-		m.offset = m.selected - viewport + 1
-	}
+	return m, nil
 }
 
-func (m *model) clampLargeSelection() {
-	if len(m.largeFiles) == 0 {
-		m.largeSelected = 0
-		m.largeOffset = 0
-		return
-	}
-	if m.largeSelected >= len(m.largeFiles) {
-		m.largeSelected = len(m.largeFiles) - 1
-	}
-	if m.largeSelected < 0 {
-		m.largeSelected = 0
-	}
-	viewport := calculateViewport(m.height, true)
-	maxOffset := max(len(m.largeFiles)-viewport, 0)
-	if m.largeOffset > maxOffset {
-		m.largeOffset = maxOffset
-	}
-	if m.largeSelected < m.largeOffset {
-		m.largeOffset = m.largeSelected
-	}
-	if m.largeSelected >= m.largeOffset+viewport {
-		m.largeOffset = m.largeSelected - viewport + 1
-	}
-}
+func (m model) View() string {
+	var b strings.Builder
 
-func sumKnownEntrySizes(entries []dirEntry) int64 {
-	var total int64
-	for _, entry := range entries {
-		if entry.Size > 0 {
-			total += entry.Size
+	// Header
+	b.WriteString(fmt.Sprintf("%s%s Mole Disk Analyzer %s\n", colorPurpleBold, iconDisk, colorReset))
+	b.WriteString(fmt.Sprintf("%s%s%s\n", colorGray, m.path, colorReset))
+	b.WriteString("\n")
+
+	// Show delete confirmation
+	if m.deleteConfirm {
+		b.WriteString(fmt.Sprintf("%s%s Delete %s? (y/n)%s\n", colorRed, iconTrash, m.deleteTarget, colorReset))
+		return b.String()
+	}
+
+	// Scanning indicator
+	if m.scanning {
+		b.WriteString(fmt.Sprintf("%s⠋ Scanning...%s\n", colorCyan, colorReset))
+		if m.scanTotal > 0 {
+			b.WriteString(fmt.Sprintf("%s  %d / %d items%s\n", colorGray, m.scanProgress, m.scanTotal, colorReset))
 		}
-	}
-	return total
-}
-
-func nextPendingOverviewIndex(entries []dirEntry) int {
-	for i, entry := range entries {
-		if entry.Size < 0 {
-			return i
-		}
-	}
-	return -1
-}
-
-func hasPendingOverviewEntries(entries []dirEntry) bool {
-	for _, entry := range entries {
-		if entry.Size < 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *model) removePathFromView(path string) {
-	if path == "" {
-		return
+		return b.String()
 	}
 
-	var removedSize int64
-	for i, entry := range m.entries {
-		if entry.Path == path {
-			if entry.Size > 0 {
-				removedSize = entry.Size
+	// Error display
+	if m.err != nil {
+		b.WriteString(fmt.Sprintf("%sError: %v%s\n", colorRed, m.err, colorReset))
+		b.WriteString("\n")
+	}
+
+	// Total size
+	b.WriteString(fmt.Sprintf("  Total: %s%s%s\n", colorYellow, formatBytes(m.totalSize), colorReset))
+	b.WriteString("\n")
+
+	// Large files toggle
+	if m.showLargeFiles && len(m.largeFiles) > 0 {
+		b.WriteString(fmt.Sprintf("%s%s Large Files (>100MB):%s\n", colorCyanBold, iconFile, colorReset))
+		for i, f := range m.largeFiles {
+			if i >= 10 {
+				b.WriteString(fmt.Sprintf("  %s... and %d more%s\n", colorGray, len(m.largeFiles)-10, colorReset))
+				break
 			}
-			m.entries = append(m.entries[:i], m.entries[i+1:]...)
-			break
+			b.WriteString(fmt.Sprintf("  %s%s%s %s\n", colorYellow, formatBytes(f.Size), colorReset, truncatePath(f.Path, 60)))
 		}
+		b.WriteString("\n")
 	}
 
-	for i := 0; i < len(m.largeFiles); i++ {
-		if m.largeFiles[i].Path == path {
-			m.largeFiles = append(m.largeFiles[:i], m.largeFiles[i+1:]...)
-			break
-		}
+	// Directory entries
+	visibleEntries := m.height - 12
+	if visibleEntries < 5 {
+		visibleEntries = 20
 	}
 
-	if removedSize > 0 {
-		if removedSize > m.totalSize {
-			m.totalSize = 0
-		} else {
-			m.totalSize -= removedSize
-		}
-		m.clampEntrySelection()
+	start := 0
+	if m.selected >= visibleEntries {
+		start = m.selected - visibleEntries + 1
 	}
-	m.clampLargeSelection()
+
+	for i := start; i < len(m.entries) && i < start+visibleEntries; i++ {
+		entry := m.entries[i]
+		prefix := "  "
+
+		// Selection indicator
+		if i == m.selected {
+			prefix = fmt.Sprintf("%s%s%s ", colorCyan, iconArrow, colorReset)
+		} else if m.multiSelected[entry.Path] {
+			prefix = fmt.Sprintf("%s%s%s ", colorGreen, iconSelected, colorReset)
+		}
+
+		// Icon
+		icon := iconFile
+		if entry.IsDir {
+			icon = iconFolder
+		}
+		if entry.IsCleanable {
+			icon = iconClean
+		}
+
+		// Size and percentage
+		pct := float64(0)
+		if m.totalSize > 0 {
+			pct = float64(entry.Size) / float64(m.totalSize) * 100
+		}
+
+		// Bar
+		barWidth := 20
+		filled := int(pct / 100 * float64(barWidth))
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+
+		// Color based on selection
+		nameColor := colorReset
+		if i == m.selected {
+			nameColor = colorCyanBold
+		}
+
+		b.WriteString(fmt.Sprintf("%s%s %s%8s%s %s%s%s %s%.1f%%%s %s\n",
+			prefix,
+			icon,
+			colorYellow, formatBytes(entry.Size), colorReset,
+			colorGray, bar, colorReset,
+			colorDim, pct, colorReset,
+			nameColor+entry.Name+colorReset,
+		))
+	}
+
+	// Footer with keybindings
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("%s↑↓%s navigate  %s↵%s enter  %s←%s back  %sf%s files  %sd%s delete  %sr%s refresh  %sq%s quit%s\n",
+		colorCyan, colorReset,
+		colorCyan, colorReset,
+		colorCyan, colorReset,
+		colorCyan, colorReset,
+		colorCyan, colorReset,
+		colorCyan, colorReset,
+		colorCyan, colorReset,
+		colorReset,
+	))
+
+	return b.String()
 }
 
-func scanOverviewPathCmd(path string, index int) tea.Cmd {
+// scanPath scans a directory and returns entries
+func (m model) scanPath(path string) tea.Cmd {
 	return func() tea.Msg {
-		size, err := measureOverviewSize(path)
-		return overviewSizeMsg{
-			Path:  path,
-			Index: index,
-			Size:  size,
-			Err:   err,
+		entries, largeFiles, totalSize, err := scanDirectory(path)
+		if err != nil {
+			return scanErrorMsg{err: err}
 		}
+		return scanCompleteMsg{
+			entries:    entries,
+			largeFiles: largeFiles,
+			totalSize:  totalSize,
+		}
+	}
+}
+
+// deletePath deletes a file or directory with protection checks
+func (m model) deletePath(path string) tea.Cmd {
+	return func() tea.Msg {
+		// Safety check: never delete protected paths
+		if isProtectedPath(path) {
+			return deleteCompleteMsg{
+				path: path,
+				err:  fmt.Errorf("cannot delete protected system path: %s", path),
+			}
+		}
+
+		err := os.RemoveAll(path)
+		return deleteCompleteMsg{path: path, err: err}
+	}
+}
+
+// scanDirectory scans a directory concurrently
+func scanDirectory(path string) ([]dirEntry, []fileEntry, int64, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	var (
+		dirEntries []dirEntry
+		largeFiles []fileEntry
+		totalSize  int64
+		mu         sync.Mutex
+		wg         sync.WaitGroup
+	)
+
+	numWorkers := runtime.NumCPU() * 2
+	if numWorkers > 32 {
+		numWorkers = 32
+	}
+
+	sem := make(chan struct{}, numWorkers)
+	var processedCount int64
+
+	for _, entry := range entries {
+		name := entry.Name()
+		entryPath := filepath.Join(path, name)
+
+		// Skip system directories
+		if skipPatterns[name] {
+			continue
+		}
+
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(name, entryPath string, isDir bool) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			var size int64
+			var lastAccess time.Time
+			var isCleanable bool
+
+			if isDir {
+				size = calculateDirSize(entryPath)
+				isCleanable = cleanablePatterns[name]
+			} else {
+				info, err := os.Stat(entryPath)
+				if err == nil {
+					size = info.Size()
+					lastAccess = info.ModTime()
+				}
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			dirEntries = append(dirEntries, dirEntry{
+				Name:        name,
+				Path:        entryPath,
+				Size:        size,
+				IsDir:       isDir,
+				LastAccess:  lastAccess,
+				IsCleanable: isCleanable,
+			})
+
+			totalSize += size
+
+			// Track large files
+			if !isDir && size >= 100*1024*1024 {
+				largeFiles = append(largeFiles, fileEntry{
+					Name: name,
+					Path: entryPath,
+					Size: size,
+				})
+			}
+
+			atomic.AddInt64(&processedCount, 1)
+		}(name, entryPath, entry.IsDir())
+	}
+
+	wg.Wait()
+
+	// Sort by size descending
+	sort.Slice(dirEntries, func(i, j int) bool {
+		return dirEntries[i].Size > dirEntries[j].Size
+	})
+
+	sort.Slice(largeFiles, func(i, j int) bool {
+		return largeFiles[i].Size > largeFiles[j].Size
+	})
+
+	return dirEntries, largeFiles, totalSize, nil
+}
+
+// calculateDirSize calculates the size of a directory with timeout and limits
+// Uses shallow scanning for speed - estimates based on first few levels
+func calculateDirSize(path string) int64 {
+	ctx, cancel := context.WithTimeout(context.Background(), dirSizeTimeout)
+	defer cancel()
+
+	var size int64
+	var fileCount int64
+
+	// Use a channel to signal completion
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		quickScanDir(ctx, path, 0, &size, &fileCount)
+	}()
+
+	select {
+	case <-done:
+		// Completed normally
+	case <-ctx.Done():
+		// Timeout - return partial size (already accumulated)
+	}
+
+	return size
+}
+
+// quickScanDir does a fast shallow scan for size estimation
+func quickScanDir(ctx context.Context, path string, depth int, size *int64, fileCount *int64) {
+	// Check context cancellation
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
+	// Limit depth for speed
+	if depth > shallowScanDepth {
+		return
+	}
+
+	// Limit total files scanned
+	if atomic.LoadInt64(fileCount) > maxFilesPerDir {
+		return
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		// Check cancellation
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if atomic.LoadInt64(fileCount) > maxFilesPerDir {
+			return
+		}
+
+		entryPath := filepath.Join(path, entry.Name())
+
+		if entry.IsDir() {
+			name := entry.Name()
+			// Skip hidden and system directories
+			if skipPatterns[name] || (strings.HasPrefix(name, ".") && len(name) > 1) {
+				continue
+			}
+			quickScanDir(ctx, entryPath, depth+1, size, fileCount)
+		} else {
+			info, err := entry.Info()
+			if err == nil {
+				atomic.AddInt64(size, info.Size())
+				atomic.AddInt64(fileCount, 1)
+			}
+		}
+	}
+}
+
+// formatBytes formats bytes to human readable string
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// truncatePath truncates a path to fit in maxLen
+func truncatePath(path string, maxLen int) string {
+	if len(path) <= maxLen {
+		return path
+	}
+	return "..." + path[len(path)-maxLen+3:]
+}
+
+// openInExplorer opens a path in Windows Explorer
+func openInExplorer(path string) {
+	// Use explorer.exe to open the path
+	go func() {
+		exec.Command("explorer.exe", "/select,", path).Run()
+	}()
+}
+
+func main() {
+	var startPath string
+
+	flag.StringVar(&startPath, "path", "", "Path to analyze")
+	flag.Parse()
+
+	// Check environment variable
+	if startPath == "" {
+		startPath = os.Getenv("MO_ANALYZE_PATH")
+	}
+
+	// Use command line argument
+	if startPath == "" && len(flag.Args()) > 0 {
+		startPath = flag.Args()[0]
+	}
+
+	// Default to user profile
+	if startPath == "" {
+		startPath = os.Getenv("USERPROFILE")
+	}
+
+	// Resolve to absolute path
+	absPath, err := filepath.Abs(startPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Check if path exists
+	if _, err := os.Stat(absPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: Path does not exist: %s\n", absPath)
+		os.Exit(1)
+	}
+
+	p := tea.NewProgram(newModel(absPath), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }

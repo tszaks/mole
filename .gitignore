@@ -1,70 +1,16 @@
-# macOS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+# Windows Mole - .gitignore
 
-# Editor files
-*~
-*.swp
-*.swo
-.idea/
-.vscode/*.code-workspace
-.vscode/settings.json
+# Build artifacts
+bin/*.exe
 
-# Logs
-*.log
-logs/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.temp
-*.dmg
-tests/tmp-*
-
-# Cache
-.cache/
-*.cache
+# Go build cache
 .gocache/
-.gomod/
 
-# Backup files
-*.bak
-*.backup
-
-# System files
-*.pid
-*.lock
-
-# AI Assistant Instructions
-.claude/
-.gemini/
-.kiro/
-CLAUDE.md
-GEMINI.md
-.cursorrules
-
-# Go build artifacts (development)
-cmd/analyze/analyze
-cmd/status/status
-/status
-/analyze
-mole-analyze
-# Go binaries
-bin/analyze-go
-bin/status-go
-bin/analyze-darwin-*
-bin/status-darwin-*
+# IDE files
+.idea/
+.vscode/
+*.code-workspace
 
 # Test artifacts
-tests/tmp-*/
-tests/*.tmp
-tests/*.log
-
-session.json
-run_tests.ps1
+*.test
+coverage.out

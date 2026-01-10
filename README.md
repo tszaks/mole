@@ -1,301 +1,169 @@
-<div align="center">
-  <h1>Mole</h1>
-  <p><em>Deep clean and optimize your Mac.</em></p>
-</div>
+# Mole for Windows
 
-<p align="center">
-  <a href="https://github.com/tw93/mole/stargazers"><img src="https://img.shields.io/github/stars/tw93/mole?style=flat-square" alt="Stars"></a>
-  <a href="https://github.com/tw93/mole/releases"><img src="https://img.shields.io/github/v/tag/tw93/mole?label=version&style=flat-square" alt="Version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
-  <a href="https://github.com/tw93/mole/commits"><img src="https://img.shields.io/github/commit-activity/m/tw93/mole?style=flat-square" alt="Commits"></a>
-  <a href="https://twitter.com/HiTw93"><img src="https://img.shields.io/badge/follow-Tw93-red?style=flat-square&logo=Twitter" alt="Twitter"></a>
-  <a href="https://t.me/+GclQS9ZnxyI2ODQ1"><img src="https://img.shields.io/badge/chat-Telegram-blueviolet?style=flat-square&logo=Telegram" alt="Telegram"></a>
-</p>
+Windows support for [Mole](https://github.com/tw93/Mole) - A system maintenance toolkit.
 
-<p align="center">
-  <img src="https://cdn.tw93.fun/img/mole.jpeg" alt="Mole - 95.50GB freed" width="1000" />
-</p>
+## Requirements
 
-## Features
+- Windows 10/11
+- PowerShell 5.1 or later (pre-installed on Windows 10/11)
+- Go 1.24+ (for building TUI tools)
 
-- **All-in-one toolkit**: CleanMyMac, AppCleaner, DaisyDisk, and iStat Menus combined into a **single binary**
-- **Deep cleaning**: Scans and removes caches, logs, and browser leftovers to **reclaim gigabytes of space**
-- **Smart uninstaller**: Thoroughly removes apps along with launch agents, preferences, and **hidden remnants**
-- **Disk insights**: Visualizes usage, manages large files, **rebuilds caches**, and refreshes system services
-- **Live monitoring**: Real-time stats for CPU, GPU, memory, disk, and network to **diagnose performance issues**
+## Installation
 
-## Platform Support
+### Quick Install
 
-Mole is designed for **macOS**. For Windows users, check out the `windows/` directory which provides a native Windows port with the same features:
-
-**Windows Installation:**
 ```powershell
-irm https://raw.githubusercontent.com/tw93/mole/main/windows/install.ps1 | iex
+# Clone the repository
+git clone https://github.com/tw93/Mole.git
+cd Mole/windows
+
+# Run the installer
+.\install.ps1 -AddToPath
 ```
 
-**Windows Features:**
-- Deep system cleanup (temp files, caches, logs, Windows Update cache)
-- Smart app uninstaller with leftover detection
-- System optimization and service refresh
-- Developer artifact cleanup (node_modules, target, .venv, etc.)
-- Disk analysis and real-time monitoring tools (TUI)
+### Manual Installation
 
-Built with PowerShell and Go for native Windows performance. Run `mole` after installation.
+```powershell
+# Install to custom location
+.\install.ps1 -InstallDir C:\Tools\Mole -AddToPath
 
-## Quick Start
-
-**Install via Homebrew — recommended:**
-
-```bash
-brew install mole
+# Create Start Menu shortcut
+.\install.ps1 -AddToPath -CreateShortcut
 ```
 
-**Or via script:**
+### Uninstall
 
-```bash
-# Optional args: -s latest for main branch code, -s 1.17.0 for specific version
-curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
+```powershell
+.\install.ps1 -Uninstall
 ```
 
-**Run:**
+## Usage
 
-```bash
-mo                           # Interactive menu
-mo clean                     # Deep cleanup
-mo uninstall                 # Remove apps + leftovers
-mo optimize                  # Refresh caches & services
-mo analyze                   # Visual disk explorer
-mo status                    # Live system health dashboard
-mo purge                     # Clean project build artifacts
-mo installer                 # Find and remove installer files
+```powershell
+# Interactive menu
+mole
 
-mo touchid                   # Configure Touch ID for sudo
-mo completion                # Set up shell tab completion
-mo update                    # Update Mole
-mo remove                    # Remove Mole from system
-mo --help                    # Show help
-mo --version                 # Show installed version
+# Show help
+mole -ShowHelp
 
-mo clean --dry-run           # Preview the cleanup plan
-mo clean --whitelist         # Manage protected caches
-mo clean --dry-run --debug   # Detailed preview with risk levels and file info
+# Show version
+mole -Version
 
-mo optimize --dry-run        # Preview optimization actions
-mo optimize --debug          # Run with detailed operation logs
-mo optimize --whitelist      # Manage protected optimization rules
-mo purge --paths             # Configure project scan directories
+# Commands
+mole clean              # Deep system cleanup
+mole clean -DryRun      # Preview cleanup without deleting
+mole uninstall          # Interactive app uninstaller
+mole optimize           # System optimization
+mole purge              # Clean developer artifacts
+mole analyze            # Disk space analyzer
+mole status             # System health monitor
 ```
 
-## Tips
+## Commands
 
-- **Terminal**: iTerm2 has known compatibility issues; we recommend Alacritty, kitty, WezTerm, Ghostty, or Warp.
-- **Safety**: Built with strict protections. See [Security Audit](SECURITY_AUDIT.md). Preview changes with `mo clean --dry-run`.
-- **Be Careful**: Although safe by design, file deletion is permanent. Please review operations carefully.
-- **Debug Mode**: Use `--debug` for detailed logs (e.g., `mo clean --debug`). Combine with `--dry-run` for comprehensive preview including risk levels and file details.
-- **Navigation**: Supports arrow keys and Vim bindings (`h/j/k/l`).
-- **Status Shortcuts**: In `mo status`, press `k` to toggle cat visibility and save preference, `q` to quit.
-- **Configuration**: Run `mo touchid` for Touch ID sudo, `mo completion` for shell tab completion, `mo clean --whitelist` to manage protected paths.
+| Command | Description |
+|---------|-------------|
+| `clean` | Deep cleanup of temp files, caches, and logs |
+| `uninstall` | Interactive application uninstaller |
+| `optimize` | System optimization and health checks |
+| `purge` | Clean project build artifacts (node_modules, etc.) |
+| `analyze` | Interactive disk space analyzer (TUI) |
+| `status` | Real-time system health monitor (TUI) |
 
-## Features in Detail
+## Environment Variables
 
-### Deep System Cleanup
+| Variable | Description |
+|----------|-------------|
+| `MOLE_DRY_RUN=1` | Preview changes without making them |
+| `MOLE_DEBUG=1` | Enable debug output |
+| `MO_ANALYZE_PATH` | Starting path for analyze tool |
 
-```bash
-$ mo clean
+## Directory Structure
 
-Scanning cache directories...
-
-  ✓ User app cache                                           45.2GB
-  ✓ Browser cache (Chrome, Safari, Firefox)                  10.5GB
-  ✓ Developer tools (Xcode, Node.js, npm)                    23.3GB
-  ✓ System logs and temp files                                3.8GB
-  ✓ App-specific cache (Spotify, Dropbox, Slack)              8.4GB
-  ✓ Trash                                                    12.3GB
-
-====================================================================
-Space freed: 95.5GB | Free space now: 223.5GB
-====================================================================
+```
+windows/
+├── mole.ps1          # Main CLI entry point
+├── install.ps1       # Windows installer
+├── Makefile          # Build automation for Go tools
+├── go.mod            # Go module definition
+├── go.sum            # Go dependencies
+├── bin/
+│   ├── clean.ps1     # Deep cleanup orchestrator
+│   ├── uninstall.ps1 # Interactive app uninstaller
+│   ├── optimize.ps1  # System optimization
+│   ├── purge.ps1     # Project artifact cleanup
+│   ├── analyze.ps1   # Disk analyzer wrapper
+│   └── status.ps1    # Status monitor wrapper
+├── cmd/
+│   ├── analyze/      # Disk analyzer (Go TUI)
+│   │   └── main.go
+│   └── status/       # System status (Go TUI)
+│       └── main.go
+└── lib/
+    ├── core/
+    │   ├── base.ps1      # Core definitions and utilities
+    │   ├── common.ps1    # Common functions loader
+    │   ├── file_ops.ps1  # Safe file operations
+    │   ├── log.ps1       # Logging functions
+    │   └── ui.ps1        # Interactive UI components
+    └── clean/
+        ├── user.ps1      # User cleanup (temp, downloads, etc.)
+        ├── caches.ps1    # Browser and app caches
+        ├── dev.ps1       # Developer tool caches
+        ├── apps.ps1      # Application leftovers
+        └── system.ps1    # System cleanup (requires admin)
 ```
 
-### Smart App Uninstaller
+## Building TUI Tools
 
-```bash
-$ mo uninstall
+The analyze and status commands require Go to be installed:
 
-Select Apps to Remove
-═══════════════════════════
-▶ ☑ Photoshop 2024            (4.2G) | Old
-  ☐ IntelliJ IDEA             (2.8G) | Recent
-  ☐ Premiere Pro              (3.4G) | Recent
+```powershell
+cd windows
 
-Uninstalling: Photoshop 2024
+# Build both tools
+make build
 
-  ✓ Removed application
-  ✓ Cleaned 52 related files across 12 locations
-    - Application Support, Caches, Preferences
-    - Logs, WebKit storage, Cookies
-    - Extensions, Plugins, Launch daemons
+# Or build individually
+go build -o bin/analyze.exe ./cmd/analyze/
+go build -o bin/status.exe ./cmd/status/
 
-====================================================================
-Space freed: 12.8GB
-====================================================================
+# The wrapper scripts will auto-build if Go is available
 ```
 
-### System Optimization
+## Configuration
 
-```bash
-$ mo optimize
+Mole stores its configuration in:
+- Config: `~\.config\mole\`
+- Cache: `~\.cache\mole\`
+- Whitelist: `~\.config\mole\whitelist.txt`
+- Purge paths: `~\.config\mole\purge_paths.txt`
 
-System: 5/32 GB RAM | 333/460 GB Disk (72%) | Uptime 6d
+## Development Phases
 
-  ✓ Rebuild system databases and clear caches
-  ✓ Reset network services
-  ✓ Refresh Finder and Dock
-  ✓ Clean diagnostic and crash logs
-  ✓ Remove swap files and restart dynamic pager
-  ✓ Rebuild launch services and spotlight index
+### Phase 1: Core Infrastructure ✅
+- [x] `install.ps1` - Windows installer
+- [x] `mole.ps1` - Main CLI entry point
+- [x] `lib/core/*` - Core utility libraries
 
-====================================================================
-System optimization completed
-====================================================================
+### Phase 2: Cleanup Features ✅
+- [x] `bin/clean.ps1` - Deep cleanup orchestrator
+- [x] `bin/uninstall.ps1` - App removal with leftover detection
+- [x] `bin/optimize.ps1` - System optimization
+- [x] `bin/purge.ps1` - Project artifact cleanup
+- [x] `lib/clean/*` - Cleanup modules
 
-Use `mo optimize --whitelist` to exclude specific optimizations.
-```
+### Phase 3: TUI Tools ✅
+- [x] `cmd/analyze/` - Disk usage analyzer (Go)
+- [x] `cmd/status/` - Real-time system monitor (Go)
+- [x] `bin/analyze.ps1` - Analyzer wrapper
+- [x] `bin/status.ps1` - Status wrapper
 
-### Disk Space Analyzer
-
-```bash
-$ mo analyze
-
-Analyze Disk  ~/Documents  |  Total: 156.8GB
-
- ▶  1. ███████████████████  48.2%  |  📁 Library                     75.4GB  >6mo
-    2. ██████████░░░░░░░░░  22.1%  |  📁 Downloads                   34.6GB
-    3. ████░░░░░░░░░░░░░░░  14.3%  |  📁 Movies                      22.4GB
-    4. ███░░░░░░░░░░░░░░░░  10.8%  |  📁 Documents                   16.9GB
-    5. ██░░░░░░░░░░░░░░░░░   5.2%  |  📄 backup_2023.zip              8.2GB
-
-  ↑↓←→ Navigate  |  O Open  |  F Show  |  ⌫ Delete  |  L Large files  |  Q Quit
-```
-
-### Live System Status
-
-Real-time dashboard with system health score, hardware info, and performance metrics.
-
-```bash
-$ mo status
-
-Mole Status  Health ● 92  MacBook Pro · M4 Pro · 32GB · macOS 14.5
-
-⚙ CPU                                    ▦ Memory
-Total   ████████████░░░░░░░  45.2%       Used    ███████████░░░░░░░  58.4%
-Load    0.82 / 1.05 / 1.23 (8 cores)     Total   14.2 / 24.0 GB
-Core 1  ███████████████░░░░  78.3%       Free    ████████░░░░░░░░░░  41.6%
-Core 2  ████████████░░░░░░░  62.1%       Avail   9.8 GB
-
-▤ Disk                                   ⚡ Power
-Used    █████████████░░░░░░  67.2%       Level   ██████████████████  100%
-Free    156.3 GB                         Status  Charged
-Read    ▮▯▯▯▯  2.1 MB/s                  Health  Normal · 423 cycles
-Write   ▮▮▮▯▯  18.3 MB/s                 Temp    58°C · 1200 RPM
-
-⇅ Network                                ▶ Processes
-Down    ▮▮▯▯▯  3.2 MB/s                  Code       ▮▮▮▮▯  42.1%
-Up      ▮▯▯▯▯  0.8 MB/s                  Chrome     ▮▮▮▯▯  28.3%
-Proxy   HTTP · 192.168.1.100             Terminal   ▮▯▯▯▯  12.5%
-```
-
-Health score based on CPU, memory, disk, temperature, and I/O load. Color-coded by range.
-
-### Project Artifact Purge
-
-Clean old build artifacts (`node_modules`, `target`, `build`, `dist`, etc.) from your projects to free up disk space.
-
-```bash
-mo purge
-
-Select Categories to Clean - 18.5GB (8 selected)
-
-➤ ● my-react-app       3.2GB | node_modules
-  ● old-project        2.8GB | node_modules
-  ● rust-app           4.1GB | target
-  ● next-blog          1.9GB | node_modules
-  ○ current-work       856MB | node_modules  | Recent
-  ● django-api         2.3GB | venv
-  ● vue-dashboard      1.7GB | node_modules
-  ● backend-service    2.5GB | node_modules
-```
-
-> **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects — less than 7 days old — are marked and unselected by default.
-
-<details>
-<summary><strong>Custom Scan Paths</strong></summary>
-
-Run `mo purge --paths` to configure which directories to scan, or edit `~/.config/mole/purge_paths` directly:
-
-```shell
-~/Documents/MyProjects
-~/Work/ClientA
-~/Work/ClientB
-```
-
-When custom paths are configured, only those directories are scanned. Otherwise, it defaults to `~/Projects`, `~/GitHub`, `~/dev`, etc.
-
-</details>
-
-### Installer Cleanup
-
-Find and remove large installer files scattered across Downloads, Desktop, Homebrew caches, iCloud, and Mail. Each file is labeled by source to help you know where the space is hiding.
-
-```bash
-mo installer
-
-Select Installers to Remove - 3.8GB (5 selected)
-
-➤ ● Photoshop_2024.dmg     1.2GB | Downloads
-  ● IntelliJ_IDEA.dmg       850.6MB | Downloads
-  ● Illustrator_Setup.pkg   920.4MB | Downloads
-  ● PyCharm_Pro.dmg         640.5MB | Homebrew
-  ● Acrobat_Reader.dmg      220.4MB | Downloads
-  ○ AppCode_Legacy.zip      410.6MB | Downloads
-```
-
-## Quick Launchers
-
-Launch Mole commands instantly from Raycast or Alfred:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/tw93/Mole/main/scripts/setup-quick-launchers.sh | bash
-```
-
-Adds 5 commands: `clean`, `uninstall`, `optimize`, `analyze`, `status`.
-
-Mole automatically detects your terminal, or set `MO_LAUNCHER_APP=<name>` to override. For Raycast users: if this is your first script directory, add it via Raycast Extensions → Add Script Directory, then run "Reload Script Directories".
-
-## Community Love
-
-Mole wouldn't be possible without these amazing contributors. They've built countless features that make Mole what it is today. Go follow them! ❤️
-
-<a href="https://github.com/tw93/Mole/graphs/contributors">
-  <img src="./CONTRIBUTORS.svg?v=2" width="1000" />
-</a>
-
-Join thousands of users worldwide who trust Mole to keep their Macs clean and optimized.
-
-<img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="1000" />
-
-## Support
-
-- If Mole saved you disk space, consider starring the repo or [sharing it](https://twitter.com/intent/tweet?url=https://github.com/tw93/Mole&text=Mole%20-%20Deep%20clean%20and%20optimize%20your%20Mac.) with friends.
-- Have ideas or fixes? Check our [Contributing Guide](CONTRIBUTING.md), then open an issue or PR to help shape Mole's future.
-- Love Mole? <a href="https://miaoyan.app/cats.html?name=Mole" target="_blank">Buy Tw93 an ice-cold Coke</a> to keep the project alive and kicking! 🥤
-
-<details>
-<summary><strong>Friends who bought me Coke</strong></summary>
-<br/>
-<a href="https://miaoyan.app/cats.html?name=Mole"><img src="https://miaoyan.app/assets/sponsors.svg" width="1000" /></a>
-</details>
+### Phase 4: Testing & CI (Planned)
+- [ ] `tests/` - Pester tests
+- [ ] GitHub Actions workflows
+- [ ] `scripts/build.ps1` - Build automation
 
 ## License
 
-MIT License — feel free to enjoy and participate in open source.
+Same license as the main Mole project.

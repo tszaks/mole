@@ -1,40 +1,44 @@
-# Makefile for Mole
+# Mole Windows - Makefile
+# Build Go tools for Windows
 
-.PHONY: all build clean release
+.PHONY: all build clean analyze status
 
-# Output directory
-BIN_DIR := bin
-
-# Binaries
-ANALYZE := analyze
-STATUS := status
-
-# Source directories
-ANALYZE_SRC := ./cmd/analyze
-STATUS_SRC := ./cmd/status
-
-# Build flags
-LDFLAGS := -s -w
-
+# Default target
 all: build
 
-# Local build (current architecture)
-build:
-	@echo "Building for local architecture..."
-	go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(ANALYZE)-go $(ANALYZE_SRC)
-	go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(STATUS)-go $(STATUS_SRC)
+# Build both tools
+build: analyze status
 
-# Release build targets (run on native architectures for CGO support)
-release-amd64:
-	@echo "Building release binaries (amd64)..."
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(ANALYZE)-darwin-amd64 $(ANALYZE_SRC)
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(STATUS)-darwin-amd64 $(STATUS_SRC)
+# Build analyze tool
+analyze:
+	@echo "Building analyze..."
+	@go build -o bin/analyze.exe ./cmd/analyze/
 
-release-arm64:
-	@echo "Building release binaries (arm64)..."
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(ANALYZE)-darwin-arm64 $(ANALYZE_SRC)
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(STATUS)-darwin-arm64 $(STATUS_SRC)
+# Build status tool
+status:
+	@echo "Building status..."
+	@go build -o bin/status.exe ./cmd/status/
 
+# Clean build artifacts
 clean:
-	@echo "Cleaning binaries..."
-	rm -f $(BIN_DIR)/$(ANALYZE)-* $(BIN_DIR)/$(STATUS)-* $(BIN_DIR)/$(ANALYZE)-go $(BIN_DIR)/$(STATUS)-go
+	@echo "Cleaning..."
+	@rm -f bin/analyze.exe bin/status.exe
+
+# Install (copy to PATH)
+install: build
+	@echo "Installing to $(USERPROFILE)/bin..."
+	@mkdir -p "$(USERPROFILE)/bin"
+	@cp bin/analyze.exe "$(USERPROFILE)/bin/"
+	@cp bin/status.exe "$(USERPROFILE)/bin/"
+
+# Run tests
+test:
+	@go test -v ./...
+
+# Format code
+fmt:
+	@go fmt ./...
+
+# Vet code
+vet:
+	@go vet ./...
