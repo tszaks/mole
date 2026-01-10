@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -27,8 +28,8 @@ var (
 func snapshotFromModel(m model) historyEntry {
 	return historyEntry{
 		Path:          m.path,
-		Entries:       cloneDirEntries(m.entries),
-		LargeFiles:    cloneFileEntries(m.largeFiles),
+		Entries:       slices.Clone(m.entries),
+		LargeFiles:    slices.Clone(m.largeFiles),
 		TotalSize:     m.totalSize,
 		TotalFiles:    m.totalFiles,
 		Selected:      m.selected,
@@ -43,24 +44,6 @@ func cacheSnapshot(m model) historyEntry {
 	entry := snapshotFromModel(m)
 	entry.Dirty = false
 	return entry
-}
-
-func cloneDirEntries(entries []dirEntry) []dirEntry {
-	if len(entries) == 0 {
-		return nil
-	}
-	copied := make([]dirEntry, len(entries))
-	copy(copied, entries) //nolint:all
-	return copied
-}
-
-func cloneFileEntries(files []fileEntry) []fileEntry {
-	if len(files) == 0 {
-		return nil
-	}
-	copied := make([]fileEntry, len(files))
-	copy(copied, files) //nolint:all
-	return copied
 }
 
 func ensureOverviewSnapshotCacheLocked() error {

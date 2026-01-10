@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -982,8 +983,8 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 		}
 
 		if cached, ok := m.cache[m.path]; ok && !cached.Dirty {
-			m.entries = cloneDirEntries(cached.Entries)
-			m.largeFiles = cloneFileEntries(cached.LargeFiles)
+			m.entries = slices.Clone(cached.Entries)
+			m.largeFiles = slices.Clone(cached.LargeFiles)
 			m.totalSize = cached.TotalSize
 			m.totalFiles = cached.TotalFiles
 			m.selected = cached.Selected
