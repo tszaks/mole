@@ -2,28 +2,9 @@
 
 <div align="center">
 
-**Security Audit & Compliance Report**
-
-Version 1.19.0 | January 5, 2026
-
----
-
-**Audit Status:** PASSED | **Risk Level:** LOW
+**Status:** PASSED | **Risk Level:** LOW | **Version:** 1.19.0 (2026-01-09)
 
 </div>
-
----
-
-## Table of Contents
-
-1. [Audit Overview](#audit-overview)
-2. [Security Philosophy](#security-philosophy)
-3. [Threat Model](#threat-model)
-4. [Defense Architecture](#defense-architecture)
-5. [Safety Mechanisms](#safety-mechanisms)
-6. [User Controls](#user-controls)
-7. [Testing & Compliance](#testing--compliance)
-8. [Dependencies](#dependencies)
 
 ---
 
@@ -31,7 +12,7 @@ Version 1.19.0 | January 5, 2026
 
 | Attribute | Details |
 |-----------|---------|
-| Audit Date | December 31, 2025 |
+| Audit Date | January 9, 2026 |
 | Audit Conclusion | **PASSED** |
 | Mole Version | V1.19.0 |
 | Audited Branch | `main` (HEAD) |
@@ -42,12 +23,12 @@ Version 1.19.0 | January 5, 2026
 
 **Key Findings:**
 
-- Multi-layered validation prevents critical system modifications
-- Conservative cleaning logic with 60-day dormancy rules
-- Comprehensive protection for VPN, AI tools, and system components
-- Atomic operations with crash recovery mechanisms
-- Full user control with dry-run and whitelist capabilities
-- Installer cleanup safely scans common locations with user confirmation
+- Multi-layer validation effectively blocks risky system modifications.
+- Conservative cleaning logic ensures safety (e.g., 60-day dormancy rule).
+- Comprehensive protection for VPNs, AI tools, and core system components.
+- Atomic operations prevent state corruption during crashes.
+- Dry-run and whitelist features give users full control.
+- Installer cleanup scans safely and requires user confirmation.
 
 ---
 
@@ -55,14 +36,14 @@ Version 1.19.0 | January 5, 2026
 
 **Core Principle: "Do No Harm"**
 
-Mole operates under a **Zero Trust** architecture for all filesystem operations. Every modification request is treated as potentially dangerous until passing strict validation.
+We built Mole on a **Zero Trust** architecture for filesystem operations. Every modification request is treated as dangerous until it passes strict validation.
 
 **Guiding Priorities:**
 
-1. **System Stability First** - Prefer leaving 1GB of junk over deleting 1KB of critical data
-2. **Conservative by Default** - Require explicit user confirmation for high-risk operations
-3. **Fail Safe** - When in doubt, abort rather than proceed
-4. **Transparency** - All operations are logged and can be previewed via dry-run mode
+1. **System Stability First** - We'd rather leave 1GB of junk than delete 1KB of your data.
+2. **Conservative by Default** - High-risk operations always require explicit confirmation.
+3. **Fail Safe** - When in doubt, we abort immediately.
+4. **Transparency** - Every operation is logged and allows a preview via dry-run mode.
 
 ---
 
@@ -89,7 +70,7 @@ Mole operates under a **Zero Trust** architecture for all filesystem operations.
 
 ### Multi-Layered Validation System
 
-All automated operations pass through hardened middleware (`lib/core/file_ops.sh`) with 4 validation layers:
+All automated operations pass through hardened middleware (`lib/core/file_ops.sh`) with 4 layers of validation:
 
 #### Layer 1: Input Sanitization
 
@@ -114,7 +95,7 @@ Even with `sudo`, these paths are **unconditionally blocked**:
 /Library/Extensions  # Kernel extensions
 ```
 
-**Exception:** `/System/Library/Caches/com.apple.coresymbolicationd/data` (safe, rebuildable cache)
+**Exception:** `/System/Library/Caches/com.apple.coresymbolicationd/data` (safe, rebuildable cache).
 
 **Code:** `lib/core/file_ops.sh:60-78`
 
@@ -122,9 +103,9 @@ Even with `sudo`, these paths are **unconditionally blocked**:
 
 For privileged operations, pre-flight checks prevent symlink-based attacks:
 
-- Detects symlinks pointing from cache folders to system files
-- Refuses recursive deletion of symbolic links in sudo mode
-- Validates real path vs symlink target
+- Detects symlinks from cache folders pointing to system files.
+- Refuses recursive deletion of symbolic links in sudo mode.
+- Validates real path vs. symlink target.
 
 **Code:** `lib/core/file_ops.sh:safe_sudo_recursive_delete()`
 
@@ -132,18 +113,19 @@ For privileged operations, pre-flight checks prevent symlink-based attacks:
 
 When running with `sudo`:
 
-- Auto-corrects ownership back to user (`chown -R`)
-- Operations restricted to user's home directory
-- Multiple validation checkpoints
+- Auto-corrects ownership back to user (`chown -R`).
+- Restricts operations to the user's home directory.
+- Enforces multiple validation checkpoints.
 
 ### Interactive Analyzer (Go)
 
-The analyzer (`mo analyze`) uses a different security model:
+The analyzer (`mo analyze`) uses a distinct security model:
 
-- Runs with standard user permissions only
-- Respects macOS System Integrity Protection (SIP)
-- All deletions require explicit user confirmation
-- OS-level enforcement (cannot delete `/System` due to Read-Only Volume)
+- Runs with standard user permissions only.
+- Respects macOS System Integrity Protection (SIP).
+- **Two-Key Confirmation:** Deletion requires ⌫ (Delete) to enter confirmation mode, then Enter to confirm. Prevents accidental double-press of the same key.
+- **Trash Instead of Delete:** Files are moved to macOS Trash using Finder's native API, allowing easy recovery if needed.
+- OS-level enforcement (cannot delete `/System` due to Read-Only Volume).
 
 **Code:** `cmd/analyze/*.go`
 
@@ -159,7 +141,7 @@ The analyzer (`mo analyze`) uses a different security model:
 |------|--------------|-----------|
 | 1. App Check | All installation locations | Must be missing from `/Applications`, `~/Applications`, `/System/Applications` |
 | 2. Dormancy | Modification timestamps | Untouched for ≥60 days |
-| 3. Vendor Whitelist | Cross-reference database | Adobe, Microsoft, Google resources protected |
+| 3. Vendor Whitelist | Cross-reference database | Adobe, Microsoft, and Google resources are protected |
 
 **Code:** `lib/clean/apps.sh:orphan_detection()`
 
@@ -169,8 +151,8 @@ For user-selected app removal:
 
 - **Sanitized Name Matching:** "Visual Studio Code" → `VisualStudioCode`, `.vscode`
 - **Safety Limit:** 3-char minimum (prevents "Go" matching "Google")
-- **Disabled:** Fuzzy matching, wildcard expansion for short names
-- **User Confirmation:** Required before deletion
+- **Disabled:** Fuzzy matching and wildcard expansion for short names.
+- **User Confirmation:** Required before deletion.
 
 **Code:** `lib/clean/apps.sh:uninstall_app()`
 
@@ -183,19 +165,19 @@ For user-selected app removal:
 | System Components | Control Center, System Settings, TCC | Centralized detection via `is_critical_system_component()` |
 | Time Machine | Local snapshots, backups | Checks `backupd` process, aborts if active |
 | VPN & Proxy | Shadowsocks, V2Ray, Tailscale, Clash | Protects network configs |
-| AI & LLM Tools | Cursor, Claude, ChatGPT, Ollama, LM Studio | Protects models, tokens, sessions |
+| AI & LLM Tools | Cursor, Claude, ChatGPT, Ollama, LM Studio | Protects models, tokens, and sessions |
 | Startup Items | `com.apple.*` LaunchAgents/Daemons | System items unconditionally skipped |
 
 **Orphaned Helper Cleanup (`opt_startup_items_cleanup`):**
 
 Removes LaunchAgents/Daemons whose associated app has been uninstalled:
 
-- Checks `AssociatedBundleIdentifiers` to detect orphans
-- Skips all `com.apple.*` system items
-- Skips paths under `/System/*`, `/usr/bin/*`, `/usr/lib/*`, `/usr/sbin/*`, `/Library/Apple/*`
-- Uses `safe_remove` / `safe_sudo_remove` with path validation
-- Unloads service via `launchctl` before deletion
-- `mdfind` operations have 10-second timeout protection
+- Checks `AssociatedBundleIdentifiers` to detect orphans.
+- Skips all `com.apple.*` system items.
+- Skips paths under `/System/*`, `/usr/bin/*`, `/usr/lib/*`, `/usr/sbin/*`, `/Library/Apple/*`.
+- Uses `safe_remove` / `safe_sudo_remove` with path validation.
+- Unloads service via `launchctl` before deletion.
+- **Timeout Protection:** 10-second limit on `mdfind` operations.
 
 **Code:** `lib/optimize/tasks.sh:opt_startup_items_cleanup()`
 
@@ -206,9 +188,9 @@ Removes LaunchAgents/Daemons whose associated app has been uninstalled:
 | Network Interface Reset | Atomic execution blocks | Wi-Fi/AirDrop restored to pre-operation state |
 | Swap Clearing | Daemon restart | `dynamic_pager` handles recovery safely |
 | Volume Scanning | Timeout + filesystem check | Auto-skip unresponsive NFS/SMB/AFP mounts |
-| Homebrew Cache | Pre-flight size check | Skip if <50MB (avoids 30-120s delay) |
+| Homebrew Cache | Pre-flight size check | Skip if <50MB (avoids long delays) |
 | Network Volume Check | `diskutil info` with timeout | Prevents hangs on slow/dead mounts |
-| SQLite Vacuum | App-running check + 20s timeout | Skips if Mail/Safari/Messages running |
+| SQLite Vacuum | App-running check + 20s timeout | Skips if Mail/Safari/Messages active |
 | dyld Cache Update | 24-hour freshness check + 180s timeout | Skips if recently updated |
 | App Bundle Search | 10s timeout on mdfind | Fallback to standard paths |
 
@@ -230,10 +212,10 @@ run_with_timeout 5 diskutil info "$mount_point" || skip_volume
 
 **Behavior:**
 
-- Simulates entire operation without filesystem modifications
-- Lists every file/directory that **would** be deleted
-- Calculates total space that **would** be freed
-- Zero risk - no actual deletion commands executed
+- Simulates the entire operation without modifying a single file.
+- Lists every file/directory that **would** be deleted.
+- Calculates total space that **would** be freed.
+- **Zero risk** - no actual deletion commands are executed.
 
 ### Custom Whitelists
 
@@ -247,19 +229,19 @@ run_with_timeout 5 diskutil info "$mount_point" || skip_volume
 ~/Library/Application Support/CriticalApp
 ```
 
-- Paths are **unconditionally protected**
-- Applies to all operations (clean, optimize, uninstall)
-- Supports absolute paths and `~` expansion
+- Paths are **unconditionally protected**.
+- Applies to all operations (clean, optimize, uninstall).
+- Supports absolute paths and `~` expansion.
 
 **Code:** `lib/core/file_ops.sh:is_whitelisted()`
 
 ### Interactive Confirmations
 
-Required for:
+We mandate confirmation for:
 
-- Uninstalling system-scope applications
-- Removing large data directories (>1GB)
-- Deleting items from shared vendor folders
+- Uninstalling system-scope applications.
+- Removing large data directories (>1GB).
+- Deleting items from shared vendor folders.
 
 ---
 
@@ -291,33 +273,33 @@ bats tests/security.bats # Run specific suite
 | Standard | Implementation |
 |----------|----------------|
 | OWASP Secure Coding | Input validation, least privilege, defense-in-depth |
-| CWE-22 (Path Traversal) | Enhanced detection: rejects `/../` components while allowing `..` in directory names (Firefox compatibility) |
+| CWE-22 (Path Traversal) | Enhanced detection: rejects `/../` components, safely handles `..` in directory names |
 | CWE-78 (Command Injection) | Control character filtering |
 | CWE-59 (Link Following) | Symlink detection before privileged operations |
 | Apple File System Guidelines | Respects SIP, Read-Only Volumes, TCC |
 
 ### Security Development Lifecycle
 
-- **Static Analysis:** shellcheck for all shell scripts
-- **Code Review:** All changes reviewed by maintainers
-- **Dependency Scanning:** Minimal external dependencies, all vetted
+- **Static Analysis:** `shellcheck` runs on all shell scripts.
+- **Code Review:** All changes are manually reviewed by maintainers.
+- **Dependency Scanning:** Minimal external dependencies, all carefully vetted.
 
 ### Known Limitations
 
 | Limitation | Impact | Mitigation |
 |------------|--------|------------|
-| Requires `sudo` for system caches | Initial friction | Clear documentation |
-| 60-day rule may delay cleanup | Some orphans remain longer | Manual `mo uninstall` available |
-| No undo functionality | Deleted files unrecoverable | Dry-run mode, warnings |
-| English-only name matching | May miss non-English apps | Bundle ID fallback |
+| Requires `sudo` for system caches | Initial friction | Clear documentation explaining why |
+| 60-day rule may delay cleanup | Some orphans remain longer | Manual `mo uninstall` is always available |
+| No undo functionality | Deleted files are unrecoverable | Dry-run mode and warnings are clear |
+| English-only name matching | May miss non-English apps | Fallback to Bundle ID matching |
 
 **Intentionally Out of Scope (Safety):**
 
-- Automatic deletion of user documents/media
-- Encryption key stores or password managers
-- System configuration files (`/etc/*`)
-- Browser history or cookies
-- Git repository cleanup
+- Automatic deletion of user documents/media.
+- Encryption key stores or password managers.
+- System configuration files (`/etc/*`).
+- Browser history or cookies.
+- Git repository cleanup.
 
 ---
 
@@ -325,7 +307,7 @@ bats tests/security.bats # Run specific suite
 
 ### System Binaries
 
-Mole relies on standard macOS system binaries (all SIP-protected):
+Mole relies on standard, SIP-protected macOS system binaries:
 
 | Binary | Purpose | Fallback |
 |--------|---------|----------|
@@ -347,14 +329,14 @@ The compiled Go binary (`analyze-go`) includes:
 
 **Supply Chain Security:**
 
-- All dependencies pinned to specific versions
-- Regular security audits
-- No transitive dependencies with known CVEs
-- **Automated Releases**: Binaries compiled via GitHub Actions and signed
-- **Source Only**: Repository contains no pre-compiled binaries
+- All dependencies are pinned to specific versions.
+- Regular security audits.
+- No transitive dependencies with known CVEs.
+- **Automated Releases**: Binaries are compiled and signed via GitHub Actions.
+- **Source Only**: The repository contains no pre-compiled binaries.
 
 ---
 
-**Certification:** This security audit certifies that Mole implements industry-standard defensive programming practices and adheres to macOS security guidelines. The architecture prioritizes system stability and data integrity over aggressive optimization.
+**Our Commitment:** This document certifies that Mole implements industry-standard defensive programming practices and strictly adheres to macOS security guidelines. We prioritize system stability and data integrity above all else.
 
-*For security concerns or vulnerability reports, please contact the maintainers via GitHub Issues.*
+*For security concerns or vulnerability reports, please open an issue or contact the maintainers directly.*

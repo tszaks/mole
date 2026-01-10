@@ -390,12 +390,12 @@ func (m model) View() string {
 		}
 
 		if deleteCount > 1 {
-			fmt.Fprintf(&b, "%sDelete:%s %d items (%s)  %sPress ⌫ again  |  ESC cancel%s\n",
+			fmt.Fprintf(&b, "%sDelete:%s %d items (%s)  %sPress Enter to confirm  |  ESC cancel%s\n",
 				colorRed, colorReset,
 				deleteCount, humanizeBytes(totalDeleteSize),
 				colorGray, colorReset)
 		} else {
-			fmt.Fprintf(&b, "%sDelete:%s %s (%s)  %sPress ⌫ again  |  ESC cancel%s\n",
+			fmt.Fprintf(&b, "%sDelete:%s %s (%s)  %sPress Enter to confirm  |  ESC cancel%s\n",
 				colorRed, colorReset,
 				m.deleteTarget.Name, humanizeBytes(m.deleteTarget.Size),
 				colorGray, colorReset)

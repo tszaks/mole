@@ -87,6 +87,11 @@ scan_installed_apps() {
         "/Applications"
         "/System/Applications"
         "$HOME/Applications"
+        # Homebrew Cask locations
+        "/opt/homebrew/Caskroom"
+        "/usr/local/Caskroom"
+        # Setapp applications
+        "$HOME/Library/Application Support/Setapp/Applications"
     )
     # Temp dir avoids write contention across parallel scans.
     local scan_tmp_dir=$(create_temp_dir)
@@ -117,6 +122,10 @@ scan_installed_apps() {
     (
         local running_apps=$(run_with_timeout 5 osascript -e 'tell application "System Events" to get bundle identifier of every application process' 2> /dev/null || echo "")
         echo "$running_apps" | tr ',' '\n' | sed -e 's/^ *//;s/ *$//' -e '/^$/d' > "$scan_tmp_dir/running.txt"
+        # Fallback: lsappinfo is more reliable than osascript
+        if command -v lsappinfo > /dev/null 2>&1; then
+            run_with_timeout 3 lsappinfo list 2> /dev/null | grep -o '"CFBundleIdentifier"="[^"]*"' | cut -d'"' -f4 >> "$scan_tmp_dir/running.txt" 2> /dev/null || true
+        fi
     ) &
     pids+=($!)
     (
@@ -138,25 +147,57 @@ scan_installed_apps() {
     local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')
     debug_log "Scanned $app_count unique applications"
 }
+# Sensitive data patterns that should never be treated as orphaned
+# These patterns protect security-critical application data
+readonly ORPHAN_NEVER_DELETE_PATTERNS=(
+    "*1password*" "*1Password*"
+    "*keychain*" "*Keychain*"
+    "*bitwarden*" "*Bitwarden*"
+    "*lastpass*" "*LastPass*"
+    "*keepass*" "*KeePass*"
+    "*dashlane*" "*Dashlane*"
+    "*enpass*" "*Enpass*"
+    "*ssh*" "*gpg*" "*gnupg*"
+    "com.apple.keychain*"
+)
+
+# Cache file for mdfind results (Bash 3.2 compatible, no associative arrays)
+ORPHAN_MDFIND_CACHE_FILE=""
+
 # Usage: is_bundle_orphaned "bundle_id" "directory_path" "installed_bundles_file"
 is_bundle_orphaned() {
     local bundle_id="$1"
     local directory_path="$2"
     local installed_bundles="$3"
+
+    # 1. Fast path: check protection list (in-memory, instant)
     if should_protect_data "$bundle_id"; then
         return 1
     fi
+
+    # 2. Fast path: check sensitive data patterns (in-memory, instant)
+    local bundle_lower
+    bundle_lower=$(echo "$bundle_id" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+    for pattern in "${ORPHAN_NEVER_DELETE_PATTERNS[@]}"; do
+        # shellcheck disable=SC2053
+        if [[ "$bundle_lower" == $pattern ]]; then
+            return 1
+        fi
+    done
+
+    # 3. Fast path: check installed bundles file (file read, fast)
     if grep -Fxq "$bundle_id" "$installed_bundles" 2> /dev/null; then
         return 1
     fi
-    if should_protect_data "$bundle_id"; then
-        return 1
-    fi
+
+    # 4. Fast path: hardcoded system components
     case "$bundle_id" in
         loginwindow | dock | systempreferences | systemsettings | settings | controlcenter | finder | safari)
             return 1
             ;;
     esac
+
+    # 5. Fast path: 60-day modification check (stat call, fast)
     if [[ -e "$directory_path" ]]; then
         local last_modified_epoch=$(get_file_mtime "$directory_path")
         local current_epoch
@@ -166,6 +207,37 @@ is_bundle_orphaned() {
             return 1
         fi
     fi
+
+    # 6. Slow path: mdfind fallback with file-based caching (Bash 3.2 compatible)
+    # This catches apps installed in non-standard locations
+    if [[ -n "$bundle_id" ]] && [[ "$bundle_id" =~ ^[a-zA-Z0-9._-]+$ ]] && [[ ${#bundle_id} -ge 5 ]]; then
+        # Initialize cache file if needed
+        if [[ -z "$ORPHAN_MDFIND_CACHE_FILE" ]]; then
+            ORPHAN_MDFIND_CACHE_FILE=$(mktemp "${TMPDIR:-/tmp}/mole_mdfind_cache.XXXXXX")
+            register_temp_file "$ORPHAN_MDFIND_CACHE_FILE"
+        fi
+
+        # Check cache first (grep is fast for small files)
+        if grep -Fxq "FOUND:$bundle_id" "$ORPHAN_MDFIND_CACHE_FILE" 2> /dev/null; then
+            return 1
+        fi
+        if grep -Fxq "NOTFOUND:$bundle_id" "$ORPHAN_MDFIND_CACHE_FILE" 2> /dev/null; then
+            # Already checked, not found - continue to return 0
+            :
+        else
+            # Query mdfind with strict timeout (2 seconds max)
+            local app_exists
+            app_exists=$(run_with_timeout 2 mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2> /dev/null | head -1 || echo "")
+            if [[ -n "$app_exists" ]]; then
+                echo "FOUND:$bundle_id" >> "$ORPHAN_MDFIND_CACHE_FILE"
+                return 1
+            else
+                echo "NOTFOUND:$bundle_id" >> "$ORPHAN_MDFIND_CACHE_FILE"
+            fi
+        fi
+    fi
+
+    # All checks passed - this is an orphan
     return 0
 }
 # Orphaned app data sweep.
