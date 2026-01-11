@@ -126,10 +126,10 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 
 			// ~/Library is scanned separately; reuse cache when possible.
 			if isHomeDir && child.Name() == "Library" {
+				sem <- struct{}{}
 				wg.Add(1)
 				go func(name, path string) {
 					defer wg.Done()
-					sem <- struct{}{}
 					defer func() { <-sem }()
 
 					var size int64
@@ -156,10 +156,10 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 
 			// Folded dirs: fast size without expanding.
 			if shouldFoldDirWithPath(child.Name(), fullPath) {
+				sem <- struct{}{}
 				wg.Add(1)
 				go func(name, path string) {
 					defer wg.Done()
-					sem <- struct{}{}
 					defer func() { <-sem }()
 
 					size, err := getDirectorySizeFromDu(path)
@@ -180,10 +180,10 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 				continue
 			}
 
+			sem <- struct{}{}
 			wg.Add(1)
 			go func(name, path string) {
 				defer wg.Done()
-				sem <- struct{}{}
 				defer func() { <-sem }()
 
 				size := calculateDirSizeConcurrent(path, largeFileChan, filesScanned, dirsScanned, bytesScanned, currentPath)
@@ -311,11 +311,11 @@ func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *
 
 		for _, entry := range entries {
 			if entry.IsDir() {
-				wg.Add(1)
 				subDir := filepath.Join(dirPath, entry.Name())
+				sem <- struct{}{}
+				wg.Add(1)
 				go func(p string) {
 					defer wg.Done()
-					sem <- struct{}{}
 					defer func() { <-sem }()
 					walk(p)
 				}(subDir)
@@ -446,9 +446,11 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, fil
 
 		if child.IsDir() {
 			if shouldFoldDirWithPath(child.Name(), fullPath) {
+				sem <- struct{}{}
 				wg.Add(1)
 				go func(path string) {
 					defer wg.Done()
+					defer func() { <-sem }()
 					size, err := getDirectorySizeFromDu(path)
 					if err == nil && size > 0 {
 						atomic.AddInt64(&total, size)
@@ -459,10 +461,10 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, fil
 				continue
 			}
 
+			sem <- struct{}{}
 			wg.Add(1)
 			go func(path string) {
 				defer wg.Done()
-				sem <- struct{}{}
 				defer func() { <-sem }()
 
 				size := calculateDirSizeConcurrent(path, largeFileChan, filesScanned, dirsScanned, bytesScanned, currentPath)
