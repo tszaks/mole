@@ -342,7 +342,11 @@ safe_clean() {
         valid_targets+=("$target")
     done
 
-    targets=("${valid_targets[@]}")
+    if [[ ${#valid_targets[@]} -gt 0 ]]; then
+        targets=("${valid_targets[@]}")
+    else
+        targets=()
+    fi
     if [[ ${#targets[@]} -eq 0 ]]; then
         return 0
     fi
