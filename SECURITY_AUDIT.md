@@ -163,7 +163,7 @@ For user-selected app removal:
 | System Integrity Protection | `/Library/Updates`, `/System/*` | Respects macOS Read-Only Volume |
 | Spotlight & System UI | `~/Library/Metadata/CoreSpotlight` | Prevents UI corruption |
 | System Components | Control Center, System Settings, TCC | Centralized detection via `is_critical_system_component()` |
-| Time Machine | Local snapshots, backups | Checks `backupd` process, aborts if active |
+| Time Machine | Local snapshots, backups | Runtime activity detection (backup running, snapshots mounted), fails safe if status indeterminate |
 | VPN & Proxy | Shadowsocks, V2Ray, Tailscale, Clash | Protects network configs |
 | AI & LLM Tools | Cursor, Claude, ChatGPT, Ollama, LM Studio | Protects models, tokens, and sessions |
 | Startup Items | `com.apple.*` LaunchAgents/Daemons | System items unconditionally skipped |
