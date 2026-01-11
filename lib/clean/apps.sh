@@ -284,26 +284,26 @@ clean_orphaned_app_data() {
         if [[ ${#file_patterns[@]} -gt 0 ]]; then
             for item_path in "${file_patterns[@]}"; do
                 local iteration_count=0
-            for match in $item_path; do
-                [[ -e "$match" ]] || continue
-                ((iteration_count++))
-                if [[ $iteration_count -gt $MOLE_MAX_ORPHAN_ITERATIONS ]]; then
-                    break
-                fi
-                local bundle_id=$(basename "$match")
-                bundle_id="${bundle_id%.savedState}"
-                bundle_id="${bundle_id%.binarycookies}"
-                if is_bundle_orphaned "$bundle_id" "$match" "$installed_bundles"; then
-                    local size_kb
-                    size_kb=$(get_path_size_kb "$match")
-                    if [[ -z "$size_kb" || "$size_kb" == "0" ]]; then
-                        continue
+                for match in $item_path; do
+                    [[ -e "$match" ]] || continue
+                    ((iteration_count++))
+                    if [[ $iteration_count -gt $MOLE_MAX_ORPHAN_ITERATIONS ]]; then
+                        break
                     fi
-                    safe_clean "$match" "Orphaned $label: $bundle_id"
-                    ((orphaned_count++))
-                    ((total_orphaned_kb += size_kb))
-                fi
-            done
+                    local bundle_id=$(basename "$match")
+                    bundle_id="${bundle_id%.savedState}"
+                    bundle_id="${bundle_id%.binarycookies}"
+                    if is_bundle_orphaned "$bundle_id" "$match" "$installed_bundles"; then
+                        local size_kb
+                        size_kb=$(get_path_size_kb "$match")
+                        if [[ -z "$size_kb" || "$size_kb" == "0" ]]; then
+                            continue
+                        fi
+                        safe_clean "$match" "Orphaned $label: $bundle_id"
+                        ((orphaned_count++))
+                        ((total_orphaned_kb += size_kb))
+                    fi
+                done
             done
         fi
     done
