@@ -255,6 +255,37 @@ clean_dev_network() {
 clean_sqlite_temp_files() {
     return 0
 }
+# Elixir/Erlang ecosystem.
+clean_dev_elixir() {
+    if [[ -d ~/.mix ]] || [[ -d ~/.hex ]]; then
+        # safe_clean ~/.mix/archives/* "Mix cache"
+        safe_clean ~/.hex/cache/* "Hex cache"
+    fi
+}
+# Haskell ecosystem.
+clean_dev_haskell() {
+    if [[ -d ~/.cabal ]] || [[ -d ~/.stack ]]; then
+        safe_clean ~/.cabal/packages/* "Cabal install cache"
+        # safe_clean ~/.stack/programs/* "Stack cache"
+    fi
+}
+# OCaml ecosystem.
+clean_dev_ocaml() {
+    if [[ -d ~/.opam ]]; then
+        safe_clean ~/.opam/download-cache/* "Opam cache"
+    fi
+}
+# Editor caches.
+clean_dev_editors() {
+    if [[ -d ~/Library/Caches/com.microsoft.VSCode ]] || [[ -d ~/Library/Application\ Support/Code ]]; then
+        safe_clean ~/Library/Caches/com.microsoft.VSCode/Cache/* "VS Code cached data"
+        safe_clean ~/Library/Application\ Support/Code/CachedData/* "VS Code cached data"
+        # safe_clean ~/Library/Application\ Support/Code/User/workspaceStorage/* "VS Code workspace storage"
+    fi
+    if [[ -d ~/Library/Caches/Zed ]]; then
+        safe_clean ~/Library/Caches/Zed/* "Zed cache"
+    fi
+}
 # Main developer tools cleanup sequence.
 clean_developer_tools() {
     stop_section_spinner
@@ -277,6 +308,10 @@ clean_developer_tools() {
     clean_dev_api_tools
     clean_dev_network
     clean_dev_misc
+    clean_dev_elixir
+    clean_dev_haskell
+    clean_dev_ocaml
+    clean_dev_editors
     safe_clean ~/Library/Caches/Homebrew/* "Homebrew cache"
     # Clean Homebrew locks without repeated sudo prompts.
     local brew_lock_dirs=(
