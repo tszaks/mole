@@ -145,13 +145,13 @@ The analyzer (`mo analyze`) uses a distinct security model:
 
 **Code:** `lib/clean/apps.sh:orphan_detection()`
 
-#### New Language Ecosystem Support (v1.19.1+)
+#### Developer Tool Ecosystems (Consolidated)
 
-Added support for Elixir, Haskell, OCaml, and Editors (VS Code, Zed) with strict safety checks:
+Support for 20+ languages (Rust, Go, Node, Python, JVM, Mobile, Elixir, Haskell, OCaml, etc.) with strict safety checks:
 
-- **Existence Checks:** Cleanup logic only runs if the tool is installed (directory exists).
-- **Safe Targets:** Only volatile caches are cleaned (e.g., `~/.hex/cache`).
-- **Protected Paths:** Critical directories like `~/.mix/archives` (installed tools) and `~/.stack/programs` (installed compilers) are explicitly **excluded**.
+- **Global Optimization:** The core `safe_clean` function now intelligently checks parent directories before attempting wildcard cleanups, eliminating overhead for missing tools across the entire system.
+- **Safe Targets:** Only volatile caches are cleaned (e.g., `~/.cargo/registry/cache`, `~/.gradle/caches`).
+- **Protected Paths:** Critical directories like `~/.cargo/bin`, `~/.mix/archives`, `~/.rustup` toolchains, and `~/.stack/programs` are explicitly **excluded**.
 
 #### Active Uninstallation Heuristics
 

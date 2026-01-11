@@ -322,6 +322,31 @@ safe_clean() {
         targets=("${@:1:$#-1}")
     fi
 
+    local -a valid_targets=()
+    for target in "${targets[@]}"; do
+        # Optimization: If target is a glob literal and parent dir missing, skip it.
+        if [[ "$target" == *"*"* && ! -e "$target" ]]; then
+            local base_path="${target%%\**}"
+            local parent_dir
+            if [[ "$base_path" == */ ]]; then
+                parent_dir="${base_path%/}"
+            else
+                parent_dir=$(dirname "$base_path")
+            fi
+
+            if [[ ! -d "$parent_dir" ]]; then
+                # debug_log "Skipping nonexistent parent: $parent_dir for $target"
+                continue
+            fi
+        fi
+        valid_targets+=("$target")
+    done
+
+    targets=("${valid_targets[@]}")
+    if [[ ${#targets[@]} -eq 0 ]]; then
+        return 0
+    fi
+
     local removed_any=0
     local total_size_kb=0
     local total_count=0
