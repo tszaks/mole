@@ -257,24 +257,34 @@ clean_sqlite_temp_files() {
 }
 # Elixir/Erlang ecosystem.
 clean_dev_elixir() {
-    safe_clean ~/.mix/archives/* "Mix cache"
-    safe_clean ~/.hex/cache/* "Hex cache"
+    if [[ -d ~/.mix ]] || [[ -d ~/.hex ]]; then
+        # safe_clean ~/.mix/archives/* "Mix cache"
+        safe_clean ~/.hex/cache/* "Hex cache"
+    fi
 }
 # Haskell ecosystem.
 clean_dev_haskell() {
-    safe_clean ~/.cabal/packages/* "Cabal install cache"
-    safe_clean ~/.stack/programs/* "Stack cache"
+    if [[ -d ~/.cabal ]] || [[ -d ~/.stack ]]; then
+        safe_clean ~/.cabal/packages/* "Cabal install cache"
+        # safe_clean ~/.stack/programs/* "Stack cache"
+    fi
 }
 # OCaml ecosystem.
 clean_dev_ocaml() {
-    safe_clean ~/.opam/download-cache/* "Opam cache"
+    if [[ -d ~/.opam ]]; then
+        safe_clean ~/.opam/download-cache/* "Opam cache"
+    fi
 }
 # Editor caches.
 clean_dev_editors() {
-    safe_clean ~/Library/Caches/com.microsoft.VSCode/Cache/* "VS Code cached data"
-    safe_clean ~/Library/Application\ Support/Code/CachedData/* "VS Code cached data"
-    safe_clean ~/Library/Application\ Support/Code/User/workspaceStorage/* "VS Code workspace storage"
-    safe_clean ~/Library/Caches/Zed/* "Zed cache"
+    if [[ -d ~/Library/Caches/com.microsoft.VSCode ]] || [[ -d ~/Library/Application\ Support/Code ]]; then
+        safe_clean ~/Library/Caches/com.microsoft.VSCode/Cache/* "VS Code cached data"
+        safe_clean ~/Library/Application\ Support/Code/CachedData/* "VS Code cached data"
+        # safe_clean ~/Library/Application\ Support/Code/User/workspaceStorage/* "VS Code workspace storage"
+    fi
+    if [[ -d ~/Library/Caches/Zed ]]; then
+        safe_clean ~/Library/Caches/Zed/* "Zed cache"
+    fi
 }
 # Main developer tools cleanup sequence.
 clean_developer_tools() {
