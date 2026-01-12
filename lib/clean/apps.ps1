@@ -506,6 +506,36 @@ function Clear-GameMediaFiles {
     }
     
     # -------------------------------------------------------------------------
+    # Windows Snipping Tool / Snip & Sketch Screenshots
+    # -------------------------------------------------------------------------
+    $windowsScreenshotsPath = "$env:USERPROFILE\Pictures\Screenshots"
+    if (Test-Path $windowsScreenshotsPath) {
+        foreach ($ext in @('*.png', '*.jpg', '*.jpeg', '*.gif', '*.bmp')) {
+            $oldFiles = Get-ChildItem -Path $windowsScreenshotsPath -Filter $ext -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldFiles) {
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "Windows screenshots (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Windows Screen Recordings (Snipping Tool / Win+Alt+R)
+    # -------------------------------------------------------------------------
+    $windowsRecordingsPath = "$env:USERPROFILE\Videos\Screen Recordings"
+    if (Test-Path $windowsRecordingsPath) {
+        foreach ($ext in @('*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv')) {
+            $oldFiles = Get-ChildItem -Path $windowsRecordingsPath -Filter $ext -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldFiles) {
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "Windows screen recordings (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
     # Steam Screenshots
     # -------------------------------------------------------------------------
     # Steam stores screenshots in userdata\<userid>\760\remote\<appid>\screenshots
