@@ -422,10 +422,12 @@ function Clear-ElixirCaches {
         Clean Elixir Mix and Hex caches
     #>
     
-    # Mix archives cache
+    # Mix archives - skip auto-cleanup to preserve globally installed Mix tools
+    # NOTE: This directory contains globally installed Mix tools and tasks (e.g., phx_new, hex).
+    # Clearing it would remove user-installed tools requiring reinstallation.
     $mixArchivesPath = "$env:USERPROFILE\.mix\archives"
     if (Test-Path $mixArchivesPath) {
-        Clear-DirectoryContents -Path $mixArchivesPath -Description "Mix archives cache"
+        Write-Debug "Skipping Mix archives at '$mixArchivesPath' - contains globally installed tools"
     }
     
     # Hex cache
@@ -434,10 +436,17 @@ function Clear-ElixirCaches {
         Clear-DirectoryContents -Path $hexCachePath -Description "Hex cache"
     }
     
-    # Hex packages
+    # Hex packages - use age-based cleanup to preserve actively used packages
     $hexPackagesPath = "$env:USERPROFILE\.hex\packages"
     if (Test-Path $hexPackagesPath) {
-        Clear-DirectoryContents -Path $hexPackagesPath -Description "Hex packages cache"
+        $cutoffDate = (Get-Date).AddDays(-90)
+        $oldHexPackages = Get-ChildItem -Path $hexPackagesPath -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+        if ($oldHexPackages) {
+            foreach ($pkg in $oldHexPackages) {
+                Remove-SafeItem -Path $pkg.FullName -Description "Old Hex package ($($pkg.Name))" -Recurse
+            }
+        }
     }
 }
 
@@ -451,10 +460,16 @@ function Clear-HaskellCaches {
         Clean Haskell Cabal and Stack caches
     #>
     
-    # Cabal packages cache
+    # Cabal packages cache - use age-based cleanup to preserve recently used packages
     $cabalPackagesPath = "$env:USERPROFILE\.cabal\packages"
     if (Test-Path $cabalPackagesPath) {
-        Clear-DirectoryContents -Path $cabalPackagesPath -Description "Cabal packages cache"
+        $cutoffDate = (Get-Date).AddDays(-90)
+        $oldCacheItems = Get-ChildItem -Path $cabalPackagesPath -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+        if ($oldCacheItems) {
+            $paths = $oldCacheItems | ForEach-Object { $_.FullName }
+            Remove-SafeItems -Paths $paths -Description "Cabal old packages cache"
+        }
     }
     
     # Cabal store
@@ -470,10 +485,18 @@ function Clear-HaskellCaches {
         }
     }
     
-    # Stack programs cache
+    # Stack programs cache - use age-based cleanup (contains GHC installations)
+    # These can be large and time-consuming to re-download
     $stackProgramsPath = "$env:USERPROFILE\.stack\programs"
     if (Test-Path $stackProgramsPath) {
-        Clear-DirectoryContents -Path $stackProgramsPath -Description "Stack programs cache"
+        $cutoffDate = (Get-Date).AddDays(-90)
+        $oldProgramDirs = Get-ChildItem -Path $stackProgramsPath -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+        if ($oldProgramDirs) {
+            foreach ($dir in $oldProgramDirs) {
+                Remove-SafeItem -Path $dir.FullName -Description "Stack old program ($($dir.Name))" -Recurse
+            }
+        }
     }
     
     # Stack snapshots (be careful - these are needed for builds)
@@ -525,6 +548,7 @@ function Clear-EditorCaches {
     #>
     
     # VS Code cached data
+    # NOTE: workspaceStorage excluded - contains workspace-specific settings and extension data
     $vscodeCachePaths = @(
         "$env:APPDATA\Code\Cache"
         "$env:APPDATA\Code\CachedData"
@@ -532,7 +556,6 @@ function Clear-EditorCaches {
         "$env:APPDATA\Code\CachedExtensionVSIXs"
         "$env:APPDATA\Code\Code Cache"
         "$env:APPDATA\Code\GPUCache"
-        "$env:APPDATA\Code\User\workspaceStorage"
         "$env:LOCALAPPDATA\Microsoft\vscode-cpptools"
     )
     foreach ($path in $vscodeCachePaths) {
@@ -542,10 +565,14 @@ function Clear-EditorCaches {
     }
     
     # VS Code Insiders
+    # NOTE: workspaceStorage excluded - contains workspace-specific settings and extension data
     $vscodeInsidersCachePaths = @(
         "$env:APPDATA\Code - Insiders\Cache"
         "$env:APPDATA\Code - Insiders\CachedData"
-        "$env:APPDATA\Code - Insiders\User\workspaceStorage"
+        "$env:APPDATA\Code - Insiders\CachedExtensions"
+        "$env:APPDATA\Code - Insiders\CachedExtensionVSIXs"
+        "$env:APPDATA\Code - Insiders\Code Cache"
+        "$env:APPDATA\Code - Insiders\GPUCache"
     )
     foreach ($path in $vscodeInsidersCachePaths) {
         if (Test-Path $path) {
