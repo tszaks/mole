@@ -370,7 +370,7 @@ function Show-RepairMenu {
     )
     
     Write-Host ""
-    Write-Host "$esc[1;35m$($script:Icons.Mole) Mole Repair$esc[0m"
+    Write-Host "$esc[1;35m$($script:Icons.Admin) Mole Repair$esc[0m"
     Write-Host ""
     
     if ($script:IsDryRun) {
@@ -387,6 +387,10 @@ function Show-RepairMenu {
     
     Write-Host ""
     $choice = Read-Host "Choice"
+    
+    if ([string]::IsNullOrWhiteSpace($choice)) {
+        return
+    }
     
     $selected = $menuItems | Where-Object { $_.Key -eq $choice.ToUpper() }
     
@@ -440,7 +444,7 @@ function Main {
     
     # Run specific repairs
     Write-Host ""
-    Write-Host "$esc[1;35m$($script:Icons.Mole) Mole Repair$esc[0m"
+    Write-Host "$esc[1;35m$($script:Icons.Admin) Mole Repair$esc[0m"
     
     if ($script:IsDryRun) {
         Write-Host ""
