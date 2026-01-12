@@ -539,9 +539,14 @@ register_temp_dir() {
 mktemp_file() {
     local prefix="${1:-mole}"
     local temp
+    local error_msg
     # Use TMPDIR if set, otherwise /tmp
     # Add .XXXXXX suffix to work with both BSD and GNU mktemp
-    temp=$(mktemp "${TMPDIR:-/tmp}/${prefix}.XXXXXX") || return 1
+    if ! error_msg=$(mktemp "${TMPDIR:-/tmp}/${prefix}.XXXXXX" 2>&1); then
+        echo "Error: Failed to create temporary file: $error_msg" >&2
+        return 1
+    fi
+    temp="$error_msg"
     register_temp_file "$temp"
     echo "$temp"
 }

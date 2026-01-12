@@ -471,11 +471,13 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, duS
 						defer func() { <-duSem }()
 						return getDirectorySizeFromDu(path)
 					}()
-					if err == nil && size > 0 {
-						atomic.AddInt64(&total, size)
+					if err != nil || size <= 0 {
+						size = calculateDirSizeFast(path, filesScanned, dirsScanned, bytesScanned, currentPath)
+					} else {
 						atomic.AddInt64(bytesScanned, size)
-						atomic.AddInt64(dirsScanned, 1)
 					}
+					atomic.AddInt64(&total, size)
+					atomic.AddInt64(dirsScanned, 1)
 				}(fullPath)
 				continue
 			}
