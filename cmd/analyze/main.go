@@ -394,7 +394,7 @@ func (m model) scanCmd(path string) tea.Cmd {
 }
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*80, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
@@ -683,6 +683,11 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.largeMultiSelected = make(map[string]bool)
 
 		if m.inOverviewMode() {
+			// Explicitly invalidate cache for all overview entries to force re-scan
+			for _, entry := range m.entries {
+				invalidateCache(entry.Path)
+			}
+
 			m.overviewSizeCache = make(map[string]int64)
 			m.overviewScanningSet = make(map[string]bool)
 			m.hydrateOverviewEntries() // Reset sizes to pending
