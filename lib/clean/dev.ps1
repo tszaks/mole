@@ -413,6 +413,198 @@ function Clear-CloudCliCaches {
 }
 
 # ============================================================================
+# Elixir/Erlang Ecosystem
+# ============================================================================
+
+function Clear-ElixirCaches {
+    <#
+    .SYNOPSIS
+        Clean Elixir Mix and Hex caches
+    #>
+    
+    # Mix archives - skip auto-cleanup to preserve globally installed Mix tools
+    # NOTE: This directory contains globally installed Mix tools and tasks (e.g., phx_new, hex).
+    # Clearing it would remove user-installed tools requiring reinstallation.
+    $mixArchivesPath = "$env:USERPROFILE\.mix\archives"
+    if (Test-Path $mixArchivesPath) {
+        Write-Debug "Skipping Mix archives at '$mixArchivesPath' - contains globally installed tools"
+    }
+    
+    # Hex cache
+    $hexCachePath = "$env:USERPROFILE\.hex\cache"
+    if (Test-Path $hexCachePath) {
+        Clear-DirectoryContents -Path $hexCachePath -Description "Hex cache"
+    }
+    
+    # Hex packages - use age-based cleanup to preserve actively used packages
+    $hexPackagesPath = "$env:USERPROFILE\.hex\packages"
+    if (Test-Path $hexPackagesPath) {
+        $cutoffDate = (Get-Date).AddDays(-90)
+        $oldHexPackages = Get-ChildItem -Path $hexPackagesPath -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+        if ($oldHexPackages) {
+            foreach ($pkg in $oldHexPackages) {
+                Remove-SafeItem -Path $pkg.FullName -Description "Old Hex package ($($pkg.Name))" -Recurse
+            }
+        }
+    }
+}
+
+# ============================================================================
+# Haskell Ecosystem
+# ============================================================================
+
+function Clear-HaskellCaches {
+    <#
+    .SYNOPSIS
+        Clean Haskell Cabal and Stack caches
+    #>
+    
+    # Cabal packages cache - use age-based cleanup to preserve recently used packages
+    $cabalPackagesPath = "$env:USERPROFILE\.cabal\packages"
+    if (Test-Path $cabalPackagesPath) {
+        $cutoffDate = (Get-Date).AddDays(-90)
+        $oldCacheItems = Get-ChildItem -Path $cabalPackagesPath -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+        if ($oldCacheItems) {
+            $paths = $oldCacheItems | ForEach-Object { $_.FullName }
+            Remove-SafeItems -Paths $paths -Description "Cabal old packages cache"
+        }
+    }
+    
+    # Cabal store
+    $cabalStorePath = "$env:USERPROFILE\.cabal\store"
+    if (Test-Path $cabalStorePath) {
+        # Only clean old/unused packages - be careful here
+        $oldDirs = Get-ChildItem -Path $cabalStorePath -Directory -ErrorAction SilentlyContinue |
+                   Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-90) }
+        if ($oldDirs) {
+            foreach ($dir in $oldDirs) {
+                Remove-SafeItem -Path $dir.FullName -Description "Cabal old store ($($dir.Name))" -Recurse
+            }
+        }
+    }
+    
+    # Stack programs cache - use age-based cleanup (contains GHC installations)
+    # These can be large and time-consuming to re-download
+    $stackProgramsPath = "$env:USERPROFILE\.stack\programs"
+    if (Test-Path $stackProgramsPath) {
+        $cutoffDate = (Get-Date).AddDays(-90)
+        $oldProgramDirs = Get-ChildItem -Path $stackProgramsPath -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+        if ($oldProgramDirs) {
+            foreach ($dir in $oldProgramDirs) {
+                Remove-SafeItem -Path $dir.FullName -Description "Stack old program ($($dir.Name))" -Recurse
+            }
+        }
+    }
+    
+    # Stack snapshots (be careful - these are needed for builds)
+    $stackSnapshotsPath = "$env:USERPROFILE\.stack\snapshots"
+    if (Test-Path $stackSnapshotsPath) {
+        # Only clean temp files
+        $tempFiles = Get-ChildItem -Path $stackSnapshotsPath -Recurse -Filter "*.tmp" -ErrorAction SilentlyContinue
+        if ($tempFiles) {
+            $paths = $tempFiles | ForEach-Object { $_.FullName }
+            Remove-SafeItems -Paths $paths -Description "Stack temp files"
+        }
+    }
+}
+
+# ============================================================================
+# OCaml Ecosystem
+# ============================================================================
+
+function Clear-OCamlCaches {
+    <#
+    .SYNOPSIS
+        Clean OCaml Opam caches
+    #>
+    
+    # Opam download cache
+    $opamDownloadCache = "$env:USERPROFILE\.opam\download-cache"
+    if (Test-Path $opamDownloadCache) {
+        Clear-DirectoryContents -Path $opamDownloadCache -Description "Opam download cache"
+    }
+    
+    # Opam repo cache
+    $opamRepoCache = "$env:USERPROFILE\.opam\repo"
+    if (Test-Path $opamRepoCache) {
+        $cacheDirs = Get-ChildItem -Path $opamRepoCache -Directory -Filter "*cache*" -ErrorAction SilentlyContinue
+        foreach ($dir in $cacheDirs) {
+            Clear-DirectoryContents -Path $dir.FullName -Description "Opam repo cache"
+        }
+    }
+}
+
+# ============================================================================
+# Editor Caches (VS Code, Zed, etc.)
+# ============================================================================
+
+function Clear-EditorCaches {
+    <#
+    .SYNOPSIS
+        Clean VS Code, Zed, and other editor caches
+    #>
+    
+    # VS Code cached data
+    # NOTE: workspaceStorage excluded - contains workspace-specific settings and extension data
+    $vscodeCachePaths = @(
+        "$env:APPDATA\Code\Cache"
+        "$env:APPDATA\Code\CachedData"
+        "$env:APPDATA\Code\CachedExtensions"
+        "$env:APPDATA\Code\CachedExtensionVSIXs"
+        "$env:APPDATA\Code\Code Cache"
+        "$env:APPDATA\Code\GPUCache"
+        "$env:LOCALAPPDATA\Microsoft\vscode-cpptools"
+    )
+    foreach ($path in $vscodeCachePaths) {
+        if (Test-Path $path) {
+            Clear-DirectoryContents -Path $path -Description "VS Code cache"
+        }
+    }
+    
+    # VS Code Insiders
+    # NOTE: workspaceStorage excluded - contains workspace-specific settings and extension data
+    $vscodeInsidersCachePaths = @(
+        "$env:APPDATA\Code - Insiders\Cache"
+        "$env:APPDATA\Code - Insiders\CachedData"
+        "$env:APPDATA\Code - Insiders\CachedExtensions"
+        "$env:APPDATA\Code - Insiders\CachedExtensionVSIXs"
+        "$env:APPDATA\Code - Insiders\Code Cache"
+        "$env:APPDATA\Code - Insiders\GPUCache"
+    )
+    foreach ($path in $vscodeInsidersCachePaths) {
+        if (Test-Path $path) {
+            Clear-DirectoryContents -Path $path -Description "VS Code Insiders cache"
+        }
+    }
+    
+    # Zed editor cache
+    $zedCachePaths = @(
+        "$env:LOCALAPPDATA\Zed\cache"
+        "$env:APPDATA\Zed\cache"
+    )
+    foreach ($path in $zedCachePaths) {
+        if (Test-Path $path) {
+            Clear-DirectoryContents -Path $path -Description "Zed cache"
+        }
+    }
+    
+    # Sublime Text cache
+    $sublimeCachePath = "$env:APPDATA\Sublime Text\Cache"
+    if (Test-Path $sublimeCachePath) {
+        Clear-DirectoryContents -Path $sublimeCachePath -Description "Sublime Text cache"
+    }
+    
+    # Atom cache (legacy)
+    $atomCachePath = "$env:APPDATA\.atom\compile-cache"
+    if (Test-Path $atomCachePath) {
+        Clear-DirectoryContents -Path $atomCachePath -Description "Atom compile cache"
+    }
+}
+
+# ============================================================================
 # IDE Caches
 # ============================================================================
 
@@ -516,13 +708,25 @@ function Invoke-DevToolsCleanup {
     # JVM ecosystem
     Clear-JvmCaches
     
+    # Elixir/Erlang ecosystem
+    Clear-ElixirCaches
+    
+    # Haskell ecosystem
+    Clear-HaskellCaches
+    
+    # OCaml ecosystem
+    Clear-OCamlCaches
+    
     # Containers
     Clear-DockerCaches
     
     # Cloud CLI tools
     Clear-CloudCliCaches
     
-    # IDEs
+    # Editor caches (VS Code, Zed, etc.)
+    Clear-EditorCaches
+    
+    # IDEs (JetBrains, Visual Studio)
     Clear-IdeCaches
     
     # Git

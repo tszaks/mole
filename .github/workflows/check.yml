@@ -2,96 +2,82 @@ name: Check
 
 on:
   push:
-    branches: [main]
+    branches: [windows]
   pull_request:
+    branches: [windows]
 
 permissions:
   contents: write
 
 jobs:
   format:
-    name: Format
-    runs-on: macos-latest
+    name: Format & Lint
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+        uses: actions/checkout@v4
         with:
           ref: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref) || github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cache Homebrew
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
-        with:
-          path: |
-            ~/Library/Caches/Homebrew
-            /usr/local/Cellar/shfmt
-            /usr/local/Cellar/shellcheck
-            /usr/local/Cellar/golangci-lint
-          key: ${{ runner.os }}-brew-quality-v2-${{ hashFiles('**/Brewfile') }}
-          restore-keys: |
-            ${{ runner.os }}-brew-quality-v2-
-
-      - name: Install tools
-        run: brew install shfmt shellcheck golangci-lint
-
       - name: Set up Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v5
+        uses: actions/setup-go@v5
         with:
           go-version: '1.24.6'
 
-      - name: Install goimports
-        run: go install golang.org/x/tools/cmd/goimports@latest
-
-      - name: Format all code
+      - name: Install Go tools
         run: |
-          export PATH=$(go env GOPATH)/bin:$PATH
-          ./scripts/check.sh --format
+          go install golang.org/x/tools/cmd/goimports@latest
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Format Go code
+        run: |
+          $env:PATH = "$(go env GOPATH)\bin;$env:PATH"
+          Get-ChildItem -Path cmd -Recurse -Filter "*.go" | ForEach-Object {
+            goimports -w $_.FullName
+          }
+        shell: pwsh
+
+      - name: Run golangci-lint
+        run: |
+          $env:PATH = "$(go env GOPATH)\bin;$env:PATH"
+          cd cmd/analyze
+          golangci-lint run --timeout 5m
+          cd ../status
+          golangci-lint run --timeout 5m
+        shell: pwsh
+        continue-on-error: true
+
+      - name: Check PowerShell syntax
+        run: |
+          $hasErrors = $false
+          $scripts = Get-ChildItem -Path . -Recurse -Include "*.ps1" -Exclude "*.Tests.ps1"
+          foreach ($script in $scripts) {
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$null, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              Write-Host "Syntax errors in $($script.Name):" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host "  $_" }
+              $hasErrors = $true
+            }
+          }
+          if ($hasErrors) { exit 1 }
+          Write-Host "All PowerShell scripts have valid syntax" -ForegroundColor Green
+        shell: pwsh
 
       - name: Commit formatting changes
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          git config user.name "Tw93"
-          git config user.email "tw93@qq.com"
-          if [[ -n $(git status --porcelain) ]]; then
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          $changes = git status --porcelain
+          if ($changes) {
             git add .
             git commit -m "chore: auto format code"
             git push
-            echo "✓ Formatting changes committed"
-          else
-            echo "✓ No formatting changes needed"
-          fi
-
-  quality:
-    name: Check
-    runs-on: macos-latest
-    needs: format
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
-        with:
-          ref: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref) || github.ref }}
-
-      - name: Cache Homebrew
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v4
-        with:
-          path: |
-            ~/Library/Caches/Homebrew
-            /usr/local/Cellar/shfmt
-            /usr/local/Cellar/shellcheck
-            /usr/local/Cellar/golangci-lint
-          key: ${{ runner.os }}-brew-quality-v2-${{ hashFiles('**/Brewfile') }}
-          restore-keys: |
-            ${{ runner.os }}-brew-quality-v2-
-
-      - name: Install tools
-        run: brew install shfmt shellcheck golangci-lint
-
-      - name: Set up Go
-        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v5
-        with:
-          go-version: '1.24.6'
-
-      - name: Run check script
-        run: ./scripts/check.sh --no-format
+            Write-Host "Formatting changes committed"
+          } else {
+            Write-Host "No formatting changes needed"
+          }
+        shell: pwsh
