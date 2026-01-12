@@ -53,7 +53,15 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 	var wg sync.WaitGroup
 
 	// Collect results via channels.
-	entryChan := make(chan dirEntry, len(children))
+	// Cap buffer size to prevent memory spikes with huge directories.
+	entryBufSize := len(children)
+	if entryBufSize > 4096 {
+		entryBufSize = 4096
+	}
+	if entryBufSize < 1 {
+		entryBufSize = 1
+	}
+	entryChan := make(chan dirEntry, entryBufSize)
 	largeFileChan := make(chan fileEntry, maxLargeFiles*2)
 
 	var collectorWg sync.WaitGroup
