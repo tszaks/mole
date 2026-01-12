@@ -20,7 +20,7 @@ teardown_file() {
     fi
 }
 
-@test "clean_dev_elixir cleans mix and hex caches" {
+@test "clean_dev_elixir cleans hex cache" {
     mkdir -p "$HOME/.mix" "$HOME/.hex"
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -31,11 +31,23 @@ clean_dev_elixir
 EOF
 
     [ "$status" -eq 0 ]
-
     [[ "$output" == *"Hex cache"* ]]
 }
 
-@test "clean_dev_haskell cleans cabal install and stack caches" {
+@test "clean_dev_elixir does not clean mix archives" {
+    mkdir -p "$HOME/.mix/archives"
+    touch "$HOME/.mix/archives/test_tool.ez"
+
+    # Source and run the function
+    source "$PROJECT_ROOT/lib/core/common.sh"
+    source "$PROJECT_ROOT/bin/clean.sh"
+    clean_dev_elixir > /dev/null 2>&1 || true
+
+    # Verify the file still exists
+    [ -f "$HOME/.mix/archives/test_tool.ez" ]
+}
+
+@test "clean_dev_haskell cleans cabal install cache" {
     mkdir -p "$HOME/.cabal" "$HOME/.stack"
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -47,7 +59,19 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Cabal install cache"* ]]
+}
 
+@test "clean_dev_haskell does not clean stack programs" {
+    mkdir -p "$HOME/.stack/programs/x86_64-osx"
+    touch "$HOME/.stack/programs/x86_64-osx/ghc-9.2.8.tar.xz"
+
+    # Source and run the function
+    source "$PROJECT_ROOT/lib/core/common.sh"
+    source "$PROJECT_ROOT/bin/clean.sh"
+    clean_dev_haskell > /dev/null 2>&1 || true
+
+    # Verify the file still exists
+    [ -f "$HOME/.stack/programs/x86_64-osx/ghc-9.2.8.tar.xz" ]
 }
 
 @test "clean_dev_ocaml cleans opam cache" {
@@ -76,6 +100,18 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"VS Code cached data"* ]]
-
     [[ "$output" == *"Zed cache"* ]]
+}
+
+@test "clean_dev_editors does not clean VS Code workspace storage" {
+    mkdir -p "$HOME/Library/Application Support/Code/User/workspaceStorage/abc123"
+    touch "$HOME/Library/Application Support/Code/User/workspaceStorage/abc123/workspace.json"
+
+    # Source and run the function
+    source "$PROJECT_ROOT/lib/core/common.sh"
+    source "$PROJECT_ROOT/bin/clean.sh"
+    clean_dev_editors > /dev/null 2>&1 || true
+
+    # Verify the file still exists
+    [ -f "$HOME/Library/Application Support/Code/User/workspaceStorage/abc123/workspace.json" ]
 }

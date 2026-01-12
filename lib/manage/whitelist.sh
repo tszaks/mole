@@ -248,15 +248,13 @@ is_whitelisted() {
         return 1
     fi
 
-    if [[ ${#CURRENT_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
-        for existing in "${CURRENT_WHITELIST_PATTERNS[@]}"; do
-            local existing_expanded="${existing/#\~/$HOME}"
-            # Only use exact string match to prevent glob expansion security issues
-            if [[ "$check_pattern" == "$existing_expanded" ]]; then
-                return 0
-            fi
-        done
-    fi
+    for existing in "${CURRENT_WHITELIST_PATTERNS[@]}"; do
+        local existing_expanded="${existing/#\~/$HOME}"
+        # Only use exact string match to prevent glob expansion security issues
+        if [[ "$check_pattern" == "$existing_expanded" ]]; then
+            return 0
+        fi
+    done
     return 1
 }
 

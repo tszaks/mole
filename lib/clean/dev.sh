@@ -256,24 +256,24 @@ clean_sqlite_temp_files() {
     return 0
 }
 # Elixir/Erlang ecosystem.
+# Note: ~/.mix/archives contains installed Mix tools - excluded from cleanup
 clean_dev_elixir() {
-    # safe_clean ~/.mix/archives/* "Mix cache"
     safe_clean ~/.hex/cache/* "Hex cache"
 }
 # Haskell ecosystem.
+# Note: ~/.stack/programs contains Stack-installed GHC compilers - excluded from cleanup
 clean_dev_haskell() {
     safe_clean ~/.cabal/packages/* "Cabal install cache"
-    # safe_clean ~/.stack/programs/* "Stack cache"
 }
 # OCaml ecosystem.
 clean_dev_ocaml() {
     safe_clean ~/.opam/download-cache/* "Opam cache"
 }
 # Editor caches.
+# Note: ~/Library/Application Support/Code/User/workspaceStorage contains workspace settings - excluded from cleanup
 clean_dev_editors() {
     safe_clean ~/Library/Caches/com.microsoft.VSCode/Cache/* "VS Code cached data"
     safe_clean ~/Library/Application\ Support/Code/CachedData/* "VS Code cached data"
-    # safe_clean ~/Library/Application\ Support/Code/User/workspaceStorage/* "VS Code workspace storage"
     safe_clean ~/Library/Caches/Zed/* "Zed cache"
 }
 # Main developer tools cleanup sequence.
