@@ -99,7 +99,7 @@ func (m model) View() string {
 			colorGreen, humanizeBytes(bytesScanned), colorReset)
 
 		if m.currentPath != nil {
-			currentPath := *m.currentPath
+			currentPath := m.currentPath.Load().(string)
 			if currentPath != "" {
 				shortPath := displayPath(currentPath)
 				shortPath = truncateMiddle(shortPath, 50)

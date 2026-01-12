@@ -23,7 +23,7 @@ import (
 
 var scanGroup singleflight.Group
 
-func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *string) (scanResult, error) {
+func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value) (scanResult, error) {
 	children, err := os.ReadDir(root)
 	if err != nil {
 		return scanResult{}, err
@@ -293,7 +293,7 @@ func shouldSkipFileForLargeTracking(path string) bool {
 }
 
 // calculateDirSizeFast performs concurrent dir sizing using os.ReadDir.
-func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *string) int64 {
+func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value) int64 {
 	var total int64
 	var wg sync.WaitGroup
 
@@ -312,7 +312,7 @@ func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *
 		}
 
 		if currentPath != nil && atomic.LoadInt64(filesScanned)%int64(batchUpdateSize) == 0 {
-			*currentPath = dirPath
+			currentPath.Store(dirPath)
 		}
 
 		entries, err := os.ReadDir(dirPath)
@@ -429,7 +429,7 @@ func isInFoldedDir(path string) bool {
 	return false
 }
 
-func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, duSem chan struct{}, filesScanned, dirsScanned, bytesScanned *int64, currentPath *string) int64 {
+func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, duSem chan struct{}, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value) int64 {
 	children, err := os.ReadDir(root)
 	if err != nil {
 		return 0
@@ -507,7 +507,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, duS
 
 		// Update current path occasionally to prevent UI jitter.
 		if currentPath != nil && atomic.LoadInt64(filesScanned)%int64(batchUpdateSize) == 0 {
-			*currentPath = fullPath
+			currentPath.Store(fullPath)
 		}
 	}
 

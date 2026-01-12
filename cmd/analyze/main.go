@@ -97,7 +97,7 @@ type model struct {
 	filesScanned         *int64
 	dirsScanned          *int64
 	bytesScanned         *int64
-	currentPath          *string
+	currentPath          *atomic.Value
 	showLargeFiles       bool
 	isOverview           bool
 	deleteConfirm        bool
@@ -162,7 +162,8 @@ func main() {
 
 func newModel(path string, isOverview bool) model {
 	var filesScanned, dirsScanned, bytesScanned int64
-	currentPath := ""
+	currentPath := &atomic.Value{}
+	currentPath.Store("")
 	var overviewFilesScanned, overviewDirsScanned, overviewBytesScanned int64
 	overviewCurrentPath := ""
 
@@ -174,7 +175,7 @@ func newModel(path string, isOverview bool) model {
 		filesScanned:         &filesScanned,
 		dirsScanned:          &dirsScanned,
 		bytesScanned:         &bytesScanned,
-		currentPath:          &currentPath,
+		currentPath:          currentPath,
 		showLargeFiles:       false,
 		isOverview:           isOverview,
 		cache:                make(map[string]historyEntry),
@@ -434,7 +435,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				atomic.StoreInt64(m.dirsScanned, 0)
 				atomic.StoreInt64(m.bytesScanned, 0)
 				if m.currentPath != nil {
-					*m.currentPath = ""
+					m.currentPath.Store("")
 				}
 				return m, tea.Batch(m.scanCmd(m.path), tickCmd())
 			}
@@ -712,7 +713,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		atomic.StoreInt64(m.dirsScanned, 0)
 		atomic.StoreInt64(m.bytesScanned, 0)
 		if m.currentPath != nil {
-			*m.currentPath = ""
+			m.currentPath.Store("")
 		}
 		return m, tea.Batch(m.scanCmd(m.path), tickCmd())
 	case "t", "T":
@@ -984,7 +985,7 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 		atomic.StoreInt64(m.dirsScanned, 0)
 		atomic.StoreInt64(m.bytesScanned, 0)
 		if m.currentPath != nil {
-			*m.currentPath = ""
+			m.currentPath.Store("")
 		}
 
 		if cached, ok := m.cache[m.path]; ok && !cached.Dirty {

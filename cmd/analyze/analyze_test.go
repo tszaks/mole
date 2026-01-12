@@ -45,9 +45,10 @@ func TestScanPathConcurrentBasic(t *testing.T) {
 	}
 
 	var filesScanned, dirsScanned, bytesScanned int64
-	current := ""
+	current := &atomic.Value{}
+	current.Store("")
 
-	result, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, &current)
+	result, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current)
 	if err != nil {
 		t.Fatalf("scanPathConcurrent returned error: %v", err)
 	}
@@ -361,10 +362,11 @@ func TestScanPathPermissionError(t *testing.T) {
 	}()
 
 	var files, dirs, bytes int64
-	current := ""
+	current := &atomic.Value{}
+	current.Store("")
 
 	// Scanning the locked dir itself should fail.
-	_, err := scanPathConcurrent(lockedDir, &files, &dirs, &bytes, &current)
+	_, err := scanPathConcurrent(lockedDir, &files, &dirs, &bytes, current)
 	if err == nil {
 		t.Fatalf("expected error scanning locked directory, got nil")
 	}
