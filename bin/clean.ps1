@@ -230,6 +230,9 @@ function Start-Cleanup {
         # Browser caches
         Clear-BrowserCaches
 
+        # GPU shader caches (NVIDIA, AMD, Intel, DirectX)
+        Clear-GPUShaderCaches
+
         # Application caches
         Clear-AppCaches
 
