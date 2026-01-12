@@ -50,7 +50,8 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 		numWorkers = 1
 	}
 	sem := make(chan struct{}, numWorkers)
-	duSem := make(chan struct{}, min(4, runtime.NumCPU()))
+	duSem := make(chan struct{}, min(4, runtime.NumCPU()))        // limits concurrent du processes
+	duQueueSem := make(chan struct{}, min(4, runtime.NumCPU())*2) // limits how many goroutines may be waiting to run du
 	var wg sync.WaitGroup
 
 	// Collect results via channels.
@@ -147,7 +148,7 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 					} else if cached, err := loadCacheFromDisk(path); err == nil {
 						size = cached.TotalSize
 					} else {
-						size = calculateDirSizeConcurrent(path, largeFileChan, duSem, filesScanned, dirsScanned, bytesScanned, currentPath)
+						size = calculateDirSizeConcurrent(path, largeFileChan, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath)
 					}
 					atomic.AddInt64(&total, size)
 					atomic.AddInt64(dirsScanned, 1)
@@ -165,11 +166,11 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 
 			// Folded dirs: fast size without expanding.
 			if shouldFoldDirWithPath(child.Name(), fullPath) {
-				sem <- struct{}{}
+				duQueueSem <- struct{}{}
 				wg.Add(1)
 				go func(name, path string) {
 					defer wg.Done()
-					defer func() { <-sem }()
+					defer func() { <-duQueueSem }()
 
 					size, err := func() (int64, error) {
 						duSem <- struct{}{}
@@ -199,7 +200,7 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				size := calculateDirSizeConcurrent(path, largeFileChan, duSem, filesScanned, dirsScanned, bytesScanned, currentPath)
+				size := calculateDirSizeConcurrent(path, largeFileChan, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath)
 				atomic.AddInt64(&total, size)
 				atomic.AddInt64(dirsScanned, 1)
 
@@ -429,7 +430,7 @@ func isInFoldedDir(path string) bool {
 	return false
 }
 
-func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, duSem chan struct{}, filesScanned, dirsScanned, bytesScanned *int64, currentPath *string) int64 {
+func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, duSem, duQueueSem chan struct{}, filesScanned, dirsScanned, bytesScanned *int64, currentPath *string) int64 {
 	children, err := os.ReadDir(root)
 	if err != nil {
 		return 0
@@ -459,11 +460,12 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, duS
 
 		if child.IsDir() {
 			if shouldFoldDirWithPath(child.Name(), fullPath) {
-				sem <- struct{}{}
+				duQueueSem <- struct{}{}
 				wg.Add(1)
 				go func(path string) {
 					defer wg.Done()
-					defer func() { <-sem }()
+					defer func() { <-duQueueSem }()
+
 					size, err := func() (int64, error) {
 						duSem <- struct{}{}
 						defer func() { <-duSem }()
@@ -484,7 +486,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, duS
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				size := calculateDirSizeConcurrent(path, largeFileChan, duSem, filesScanned, dirsScanned, bytesScanned, currentPath)
+				size := calculateDirSizeConcurrent(path, largeFileChan, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath)
 				atomic.AddInt64(&total, size)
 				atomic.AddInt64(dirsScanned, 1)
 			}(fullPath)
