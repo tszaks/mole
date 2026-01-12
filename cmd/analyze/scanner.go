@@ -519,10 +519,6 @@ func measureOverviewSize(path string) (int64, error) {
 		excludePath = filepath.Join(home, "Library")
 	}
 
-	if cached, err := loadStoredOverviewSize(path); err == nil && cached > 0 {
-		return cached, nil
-	}
-
 	if duSize, err := getDirectorySizeFromDuWithExclude(path, excludePath); err == nil && duSize > 0 {
 		_ = storeOverviewSize(path, duSize)
 		return duSize, nil
