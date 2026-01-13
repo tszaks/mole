@@ -98,7 +98,12 @@ perform_purge() {
             # Function to truncate path in the middle
             truncate_path() {
                 local path="$1"
-                local max_len=80
+                local term_width=$(tput cols 2>/dev/null || echo 80)
+                # Reserve space: "| Scanning " = 12 chars, spinner = 2 chars, margins = 4 chars
+                local max_len=$((term_width - 18))
+                
+                # Minimum length to avoid too short
+                [[ $max_len -lt 40 ]] && max_len=40
 
                 if [[ ${#path} -le $max_len ]]; then
                     echo "$path"
@@ -128,17 +133,23 @@ perform_purge() {
                 local spin_char="${spinner_chars:$spinner_idx:1}"
                 spinner_idx=$(((spinner_idx + 1) % ${#spinner_chars}))
 
-                # Show title on first line, spinner and scanning info on second line
+                # Clear previous output and redraw
+                # Important: Must move up THEN to start of line to avoid column offset
                 if [[ -n "$display_path" ]]; then
-                    printf '\r%s\n%s %sScanning %s\033[K\033[A' \
-                        "${PURPLE_BOLD}Purge Project Artifacts${NC}" \
+                    # Line 1: Move to start, clear, print title
+                    printf '\r\033[K%s\n' "${PURPLE_BOLD}Purge Project Artifacts${NC}"
+                    # Line 2: Move to start, clear, print scanning info
+                    printf '\r\033[K%s %sScanning %s' \
                         "${BLUE}${spin_char}${NC}" \
                         "${GRAY}" "$display_path"
+                    # Move up THEN to start (important order!)
+                    printf '\033[A\r'
                 else
-                    printf '\r%s\n%s %sScanning...\033[K\033[A' \
-                        "${PURPLE_BOLD}Purge Project Artifacts${NC}" \
+                    printf '\r\033[K%s\n' "${PURPLE_BOLD}Purge Project Artifacts${NC}"
+                    printf '\r\033[K%s %sScanning...' \
                         "${BLUE}${spin_char}${NC}" \
                         "${GRAY}"
+                    printf '\033[A\r'
                 fi
 
                 sleep 0.05
