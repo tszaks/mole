@@ -119,7 +119,7 @@ get_brew_cask_name() {
         # Path is room/token/version/App.app (can be directory or symlink)
         cask_match=$(find "$room" -maxdepth 3 -name "$app_bundle_name" 2> /dev/null | head -1 || echo "")
         if [[ -n "$cask_match" ]]; then
-            local relative="${cask_match#$room/}"
+            local relative="${cask_match#"$room"/}"
             echo "${relative%%/*}"
             return 0
         fi
@@ -131,7 +131,7 @@ get_brew_cask_name() {
         target=$(readlink "$app_path")
         for room in "/opt/homebrew/Caskroom" "/usr/local/Caskroom"; do
             if [[ "$target" == "$room/"* ]]; then
-                local relative="${target#$room/}"
+                local relative="${target#"$room"/}"
                 echo "${relative%%/*}"
                 return 0
             fi

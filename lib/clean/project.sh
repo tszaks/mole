@@ -383,7 +383,6 @@ scan_purge_targets() {
             while IFS= read -r item; do
                 # Check if we should abort (scanning file removed by Ctrl+C)
                 if [[ ! -f "$stats_dir/purge_scanning" ]]; then
-                    rm -f "$output_file.raw"
                     return
                 fi
 
@@ -421,7 +420,6 @@ scan_purge_targets() {
             while IFS= read -r item; do
                 # Check if we should abort (scanning file removed by Ctrl+C)
                 if [[ ! -f "$stats_dir/purge_scanning" ]]; then
-                    rm -f "$output_file.raw"
                     return
                 fi
 
@@ -860,7 +858,7 @@ clean_project_artifacts() {
 
             # If we found project but still checking for monorepo above
             # (only stop if we're beyond reasonable depth)
-            local depth=$(echo "${current_dir#$HOME}" | LC_ALL=C tr -cd '/' | wc -c | tr -d ' ')
+            local depth=$(echo "${current_dir#"$HOME"}" | LC_ALL=C tr -cd '/' | wc -c | tr -d ' ')
             if [[ -n "$project_root" && $depth -lt 2 ]]; then
                 break
             fi
