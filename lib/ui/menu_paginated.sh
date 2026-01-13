@@ -642,7 +642,7 @@ paginated_multi_select() {
                     [[ $end_idx -ge $visible_total ]] && end_idx=$((visible_total - 1))
 
                     for ((i = start_idx; i <= end_idx; i++)); do
-                        local row=$((i - start_idx + 3))  # +3 for header
+                        local row=$((i - start_idx + 3)) # +3 for header
                         printf "\033[%d;1H" "$row" >&2
                         local is_current=false
                         [[ $((i - start_idx)) -eq $cursor_pos ]] && is_current=true
@@ -704,7 +704,7 @@ paginated_multi_select() {
                             [[ $end_idx -ge $visible_total ]] && end_idx=$((visible_total - 1))
 
                             for ((i = start_idx; i <= end_idx; i++)); do
-                                local row=$((i - start_idx + 3))  # +3 for header
+                                local row=$((i - start_idx + 3)) # +3 for header
                                 printf "\033[%d;1H" "$row" >&2
                                 local is_current=false
                                 [[ $((i - start_idx)) -eq $cursor_pos ]] && is_current=true
