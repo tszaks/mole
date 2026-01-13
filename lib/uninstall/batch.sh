@@ -146,49 +146,72 @@ batch_uninstall_applications() {
             running_apps+=("$app_name")
         fi
 
-        # Sudo needed if bundle owner/dir is not writable or system files exist.
-        local needs_sudo=false
-        local app_owner=$(get_file_owner "$app_path")
-        local current_user=$(whoami)
-        if [[ ! -w "$(dirname "$app_path")" ]] ||
-            [[ "$app_owner" == "root" ]] ||
-            [[ -n "$app_owner" && "$app_owner" != "$current_user" ]]; then
-            needs_sudo=true
+        # Check if it's a Homebrew cask
+        local cask_name=""
+        cask_name=$(get_brew_cask_name "$app_path" || echo "")
+        local is_brew_cask="false"
+        [[ -n "$cask_name" ]] && is_brew_cask="true"
+
+        # For Homebrew casks, skip detailed file scanning since brew handles it
+        if [[ "$is_brew_cask" == "true" ]]; then
+            local app_size_kb=$(get_path_size_kb "$app_path")
+            local total_kb=$app_size_kb
+            ((total_estimated_size += total_kb))
+
+            # Homebrew may need sudo for system-wide installations
+            local needs_sudo=false
+            if [[ "$app_path" == "/Applications/"* ]]; then
+                needs_sudo=true
+                sudo_apps+=("$app_name")
+            fi
+
+            # Store minimal details for Homebrew apps
+            app_details+=("$app_name|$app_path|$bundle_id|$total_kb|||false|$needs_sudo|$is_brew_cask|$cask_name")
+        else
+            # For non-Homebrew apps, do full file scanning
+            local needs_sudo=false
+            local app_owner=$(get_file_owner "$app_path")
+            local current_user=$(whoami)
+            if [[ ! -w "$(dirname "$app_path")" ]] ||
+                [[ "$app_owner" == "root" ]] ||
+                [[ -n "$app_owner" && "$app_owner" != "$current_user" ]]; then
+                needs_sudo=true
+            fi
+
+            # Size estimate includes related and system files.
+            local app_size_kb=$(get_path_size_kb "$app_path")
+            local related_files=$(find_app_files "$bundle_id" "$app_name")
+            local related_size_kb=$(calculate_total_size "$related_files")
+            # system_files is a newline-separated string, not an array.
+            # shellcheck disable=SC2178,SC2128
+            local system_files=$(find_app_system_files "$bundle_id" "$app_name")
+            # shellcheck disable=SC2128
+            local system_size_kb=$(calculate_total_size "$system_files")
+            local total_kb=$((app_size_kb + related_size_kb + system_size_kb))
+            ((total_estimated_size += total_kb))
+
+            # shellcheck disable=SC2128
+            if [[ -n "$system_files" ]]; then
+                needs_sudo=true
+            fi
+
+            if [[ "$needs_sudo" == "true" ]]; then
+                sudo_apps+=("$app_name")
+            fi
+
+            # Check for sensitive user data once.
+            local has_sensitive_data="false"
+            if [[ -n "$related_files" ]] && echo "$related_files" | grep -qE "$SENSITIVE_DATA_REGEX"; then
+                has_sensitive_data="true"
+            fi
+
+            # Store details for later use (base64 keeps lists on one line).
+            local encoded_files
+            encoded_files=$(printf '%s' "$related_files" | base64 | tr -d '\n')
+            local encoded_system_files
+            encoded_system_files=$(printf '%s' "$system_files" | base64 | tr -d '\n')
+            app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name")
         fi
-
-        # Size estimate includes related and system files.
-        local app_size_kb=$(get_path_size_kb "$app_path")
-        local related_files=$(find_app_files "$bundle_id" "$app_name")
-        local related_size_kb=$(calculate_total_size "$related_files")
-        # system_files is a newline-separated string, not an array.
-        # shellcheck disable=SC2178,SC2128
-        local system_files=$(find_app_system_files "$bundle_id" "$app_name")
-        # shellcheck disable=SC2128
-        local system_size_kb=$(calculate_total_size "$system_files")
-        local total_kb=$((app_size_kb + related_size_kb + system_size_kb))
-        ((total_estimated_size += total_kb))
-
-        # shellcheck disable=SC2128
-        if [[ -n "$system_files" ]]; then
-            needs_sudo=true
-        fi
-
-        if [[ "$needs_sudo" == "true" ]]; then
-            sudo_apps+=("$app_name")
-        fi
-
-        # Check for sensitive user data once.
-        local has_sensitive_data="false"
-        if [[ -n "$related_files" ]] && echo "$related_files" | grep -qE "$SENSITIVE_DATA_REGEX"; then
-            has_sensitive_data="true"
-        fi
-
-        # Store details for later use (base64 keeps lists on one line).
-        local encoded_files
-        encoded_files=$(printf '%s' "$related_files" | base64 | tr -d '\n')
-        local encoded_system_files
-        encoded_system_files=$(printf '%s' "$system_files" | base64 | tr -d '\n')
-        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo")
     done
     if [[ -t 1 ]]; then stop_inline_spinner; fi
 
@@ -214,41 +237,49 @@ batch_uninstall_applications() {
     fi
 
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag <<< "$detail"
-        local related_files=$(decode_file_list "$encoded_files" "$app_name")
-        local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name <<< "$detail"
         local app_size_display=$(bytes_to_human "$((total_kb * 1024))")
 
-        echo -e "${BLUE}${ICON_CONFIRM}${NC} ${app_name} ${GRAY}(${app_size_display})${NC}"
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${app_path/$HOME/~}"
+        local brew_tag=""
+        [[ "$is_brew_cask" == "true" ]] && brew_tag=" ${CYAN}[Brew]${NC}"
+        echo -e "${BLUE}${ICON_CONFIRM}${NC} ${app_name}${brew_tag} ${GRAY}(${app_size_display})${NC}"
 
-        # Show related files (limit to 5).
-        local file_count=0
-        local max_files=5
-        while IFS= read -r file; do
-            if [[ -n "$file" && -e "$file" ]]; then
-                if [[ $file_count -lt $max_files ]]; then
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${file/$HOME/~}"
+        # For Homebrew apps, [Brew] tag is enough indication
+        # For non-Homebrew apps, show detailed file list
+        if [[ "$is_brew_cask" != "true" ]]; then
+            local related_files=$(decode_file_list "$encoded_files" "$app_name")
+            local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
+
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${app_path/$HOME/~}"
+
+            # Show related files (limit to 5).
+            local file_count=0
+            local max_files=5
+            while IFS= read -r file; do
+                if [[ -n "$file" && -e "$file" ]]; then
+                    if [[ $file_count -lt $max_files ]]; then
+                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${file/$HOME/~}"
+                    fi
+                    ((file_count++))
                 fi
-                ((file_count++))
-            fi
-        done <<< "$related_files"
+            done <<< "$related_files"
 
-        # Show system files (limit to 5).
-        local sys_file_count=0
-        while IFS= read -r file; do
-            if [[ -n "$file" && -e "$file" ]]; then
-                if [[ $sys_file_count -lt $max_files ]]; then
-                    echo -e "  ${BLUE}${ICON_SOLID}${NC} System: $file"
+            # Show system files (limit to 5).
+            local sys_file_count=0
+            while IFS= read -r file; do
+                if [[ -n "$file" && -e "$file" ]]; then
+                    if [[ $sys_file_count -lt $max_files ]]; then
+                        echo -e "  ${BLUE}${ICON_SOLID}${NC} System: $file"
+                    fi
+                    ((sys_file_count++))
                 fi
-                ((sys_file_count++))
-            fi
-        done <<< "$system_files"
+            done <<< "$system_files"
 
-        local total_hidden=$((file_count > max_files ? file_count - max_files : 0))
-        ((total_hidden += sys_file_count > max_files ? sys_file_count - max_files : 0))
-        if [[ $total_hidden -gt 0 ]]; then
-            echo -e "  ${GRAY}  ... and ${total_hidden} more files${NC}"
+            local total_hidden=$((file_count > max_files ? file_count - max_files : 0))
+            ((total_hidden += sys_file_count > max_files ? sys_file_count - max_files : 0))
+            if [[ $total_hidden -gt 0 ]]; then
+                echo -e "  ${GRAY}  ... and ${total_hidden} more files${NC}"
+            fi
         fi
     done
 
@@ -275,7 +306,7 @@ batch_uninstall_applications() {
             return 0
             ;;
         "" | $'\n' | $'\r' | y | Y)
-            printf "\r\033[K" # Clear the prompt line
+            echo "" # Move to next line
             ;;
         *)
             echo ""
@@ -305,18 +336,28 @@ batch_uninstall_applications() {
         sudo_keepalive_pid=$!
     fi
 
-    if [[ -t 1 ]]; then start_inline_spinner "Uninstalling apps..."; fi
-
-    # Perform uninstallations (silent mode, show results at end).
-    if [[ -t 1 ]]; then stop_inline_spinner; fi
+    # Perform uninstallations with per-app progress feedback
     local success_count=0 failed_count=0
     local -a failed_items=()
     local -a success_items=()
+    local current_index=0
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo <<< "$detail"
+        ((current_index++))
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name <<< "$detail"
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local reason=""
+
+        # Show progress for current app
+        local brew_tag=""
+        [[ "$is_brew_cask" == "true" ]] && brew_tag=" ${CYAN}[Brew]${NC}"
+        if [[ -t 1 ]]; then
+            if [[ ${#app_details[@]} -gt 1 ]]; then
+                start_inline_spinner "[$current_index/${#app_details[@]}] Uninstalling ${app_name}${brew_tag}..."
+            else
+                start_inline_spinner "Uninstalling ${app_name}${brew_tag}..."
+            fi
+        fi
 
         # Stop Launch Agents/Daemons before removal.
         local has_system_files="false"
@@ -329,7 +370,19 @@ batch_uninstall_applications() {
 
         # Remove the application only if not running.
         if [[ -z "$reason" ]]; then
-            if [[ "$needs_sudo" == true ]]; then
+            if [[ "$is_brew_cask" == "true" && -n "$cask_name" ]]; then
+                # Use brew uninstall --cask with progress indicator
+                local brew_output_file=$(mktemp)
+                if ! run_with_timeout 120 brew uninstall --cask "$cask_name" > "$brew_output_file" 2>&1; then
+                    # Fallback to manual removal if brew fails
+                    if [[ "$needs_sudo" == true ]]; then
+                        safe_sudo_remove "$app_path" || reason="remove failed"
+                    else
+                        safe_remove "$app_path" true || reason="remove failed"
+                    fi
+                fi
+                rm -f "$brew_output_file"
+            elif [[ "$needs_sudo" == true ]]; then
                 if ! safe_sudo_remove "$app_path"; then
                     local app_owner=$(get_file_owner "$app_path")
                     local current_user=$(whoami)
@@ -361,12 +414,32 @@ batch_uninstall_applications() {
                 fi
             fi
 
+            # Stop spinner and show success
+            if [[ -t 1 ]]; then
+                stop_inline_spinner
+                if [[ ${#app_details[@]} -gt 1 ]]; then
+                    echo -e "\r\033[K${GREEN}✓${NC} [$current_index/${#app_details[@]}] ${app_name}"
+                else
+                    echo -e "\r\033[K${GREEN}✓${NC} ${app_name}"
+                fi
+            fi
+
             ((total_size_freed += total_kb))
             ((success_count++))
             ((files_cleaned++))
             ((total_items++))
             success_items+=("$app_name")
         else
+            # Stop spinner and show failure
+            if [[ -t 1 ]]; then
+                stop_inline_spinner
+                if [[ ${#app_details[@]} -gt 1 ]]; then
+                    echo -e "\r\033[K${RED}✗${NC} [$current_index/${#app_details[@]}] ${app_name} ${GRAY}($reason)${NC}"
+                else
+                    echo -e "\r\033[K${RED}✗${NC} ${app_name} failed: $reason"
+                fi
+            fi
+
             ((failed_count++))
             failed_items+=("$app_name:$reason")
         fi
@@ -454,6 +527,7 @@ batch_uninstall_applications() {
         title="Uninstall incomplete"
     fi
 
+    echo ""
     print_summary_block "$title" "${summary_details[@]}"
     printf '\n'
 

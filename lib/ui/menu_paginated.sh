@@ -632,10 +632,29 @@ paginated_multi_select() {
                     prev_cursor_pos=$cursor_pos
                     continue # Skip full redraw
                 elif [[ $top_index -gt 0 ]]; then
+                    # Scroll up - redraw visible items only
                     ((top_index--))
+
+                    # Redraw all visible items (faster than full screen redraw)
+                    local start_idx=$top_index
+                    local end_idx=$((top_index + items_per_page - 1))
+                    local visible_total=${#view_indices[@]}
+                    [[ $end_idx -ge $visible_total ]] && end_idx=$((visible_total - 1))
+
+                    for ((i = start_idx; i <= end_idx; i++)); do
+                        local row=$((i - start_idx + 3))  # +3 for header
+                        printf "\033[%d;1H" "$row" >&2
+                        local is_current=false
+                        [[ $((i - start_idx)) -eq $cursor_pos ]] && is_current=true
+                        render_item $((i - start_idx)) $is_current
+                    done
+
+                    # Move cursor to footer
+                    printf "\033[%d;1H" "$((items_per_page + 4))" >&2
+
                     prev_cursor_pos=$cursor_pos
                     prev_top_index=$top_index
-                    need_full_redraw=true # Scrolling requires full redraw
+                    continue
                 fi
                 ;;
             "DOWN")
@@ -670,15 +689,34 @@ paginated_multi_select() {
                             prev_cursor_pos=$cursor_pos
                             continue # Skip full redraw
                         elif [[ $((top_index + visible_count)) -lt ${#view_indices[@]} ]]; then
+                            # Scroll down - redraw visible items only
                             ((top_index++))
                             visible_count=$((${#view_indices[@]} - top_index))
                             [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
                             if [[ $cursor_pos -ge $visible_count ]]; then
                                 cursor_pos=$((visible_count - 1))
                             fi
+
+                            # Redraw all visible items (faster than full screen redraw)
+                            local start_idx=$top_index
+                            local end_idx=$((top_index + items_per_page - 1))
+                            local visible_total=${#view_indices[@]}
+                            [[ $end_idx -ge $visible_total ]] && end_idx=$((visible_total - 1))
+
+                            for ((i = start_idx; i <= end_idx; i++)); do
+                                local row=$((i - start_idx + 3))  # +3 for header
+                                printf "\033[%d;1H" "$row" >&2
+                                local is_current=false
+                                [[ $((i - start_idx)) -eq $cursor_pos ]] && is_current=true
+                                render_item $((i - start_idx)) $is_current
+                            done
+
+                            # Move cursor to footer
+                            printf "\033[%d;1H" "$((items_per_page + 4))" >&2
+
                             prev_cursor_pos=$cursor_pos
                             prev_top_index=$top_index
-                            need_full_redraw=true # Scrolling requires full redraw
+                            continue
                         fi
                     fi
                 fi

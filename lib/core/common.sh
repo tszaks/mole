@@ -99,91 +99,119 @@ update_via_homebrew() {
     rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message" 2> /dev/null || true
 }
 
+# Get Homebrew cask name for an application bundle
+get_brew_cask_name() {
+    local app_path="$1"
+    [[ -z "$app_path" || ! -d "$app_path" ]] && return 1
+
+    # Check if brew command exists
+    command -v brew > /dev/null 2>&1 || return 1
+
+    local app_bundle_name
+    app_bundle_name=$(basename "$app_path")
+
+    # 1. Search in Homebrew Caskroom for the app bundle (most reliable for name mismatches)
+    # Checks /opt/homebrew (Apple Silicon) and /usr/local (Intel)
+    # Note: Modern Homebrew uses symlinks in Caskroom, not directories
+    local cask_match
+    for room in "/opt/homebrew/Caskroom" "/usr/local/Caskroom"; do
+        [[ -d "$room" ]] || continue
+        # Path is room/token/version/App.app (can be directory or symlink)
+        cask_match=$(find "$room" -maxdepth 3 -name "$app_bundle_name" 2> /dev/null | head -1 || echo "")
+        if [[ -n "$cask_match" ]]; then
+            local relative="${cask_match#$room/}"
+            echo "${relative%%/*}"
+            return 0
+        fi
+    done
+
+    # 2. Check for symlink from Caskroom
+    if [[ -L "$app_path" ]]; then
+        local target
+        target=$(readlink "$app_path")
+        for room in "/opt/homebrew/Caskroom" "/usr/local/Caskroom"; do
+            if [[ "$target" == "$room/"* ]]; then
+                local relative="${target#$room/}"
+                echo "${relative%%/*}"
+                return 0
+            fi
+        done
+    fi
+
+    # 3. Fallback: Direct list check (handles some cases where app is moved)
+    local app_name_only="${app_bundle_name%.app}"
+    local cask_name
+    cask_name=$(brew list --cask 2> /dev/null | grep -Fx "$(echo "$app_name_only" | LC_ALL=C tr '[:upper:]' '[:lower:]')" || echo "")
+    if [[ -n "$cask_name" ]]; then
+        if brew info --cask "$cask_name" 2> /dev/null | grep -q "$app_path"; then
+            echo "$cask_name"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 # Remove applications from Dock
 remove_apps_from_dock() {
     if [[ $# -eq 0 ]]; then
         return 0
     fi
 
-    local plist="$HOME/Library/Preferences/com.apple.dock.plist"
-    [[ -f "$plist" ]] || return 0
+    local -a targets=()
+    for arg in "$@"; do
+        [[ -n "$arg" ]] && targets+=("$arg")
+    done
 
-    if ! command -v python3 > /dev/null 2>&1; then
+    if [[ ${#targets[@]} -eq 0 ]]; then
         return 0
     fi
 
-    # Prune dock entries using Python helper
-    python3 - "$@" << 'PY' 2> /dev/null || return 0
-import os
-import plistlib
-import subprocess
-import sys
-import urllib.parse
+    # Use pure shell (PlistBuddy) to remove items from Dock
+    # This avoids dependencies on Python 3 or osascript (AppleScript)
+    local plist="$HOME/Library/Preferences/com.apple.dock.plist"
+    [[ -f "$plist" ]] || return 0
 
-plist_path = os.path.expanduser('~/Library/Preferences/com.apple.dock.plist')
-if not os.path.exists(plist_path):
-    sys.exit(0)
+    command -v PlistBuddy > /dev/null 2>&1 || return 0
 
-def normalise(path):
-    if not path:
-        return ''
-    return os.path.normpath(os.path.realpath(path.rstrip('/')))
+    local changed=false
+    for target in "${targets[@]}"; do
+        local app_path="$target"
+        local app_name
+        app_name=$(basename "$app_path" .app)
 
-targets = {normalise(arg) for arg in sys.argv[1:] if arg}
-targets = {t for t in targets if t}
-if not targets:
-    sys.exit(0)
+        # Normalize path for comparison - realpath might fail if app is already deleted
+        local full_path
+        full_path=$(cd "$(dirname "$app_path")" 2> /dev/null && pwd || echo "")
+        [[ -n "$full_path" ]] && full_path="$full_path/$(basename "$app_path")"
 
-with open(plist_path, 'rb') as fh:
-    try:
-        data = plistlib.load(fh)
-    except Exception:
-        sys.exit(0)
+        # Find the index of the app in persistent-apps
+        local i=0
+        while true; do
+            local label
+            label=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-label" "$plist" 2> /dev/null || echo "")
+            [[ -z "$label" ]] && break
 
-apps = data.get('persistent-apps')
-if not isinstance(apps, list):
-    sys.exit(0)
+            local url
+            url=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-data:_CFURLString" "$plist" 2> /dev/null || echo "")
 
-changed = False
-filtered = []
-for item in apps:
-    try:
-        url = item['tile-data']['file-data']['_CFURLString']
-    except (KeyError, TypeError):
-        filtered.append(item)
-        continue
+            # Match by label or by path (parsing the CFURLString which is usually a file:// URL)
+            if [[ "$label" == "$app_name" ]] || [[ "$url" == *"$app_name.app"* ]]; then
+                # Double check path if possible to avoid false positives for similarly named apps
+                if [[ -n "$full_path" && "$url" == *"$full_path"* ]] || [[ "$label" == "$app_name" ]]; then
+                    if /usr/libexec/PlistBuddy -c "Delete :persistent-apps:$i" "$plist" 2> /dev/null; then
+                        changed=true
+                        # After deletion, current index i now points to the next item
+                        continue
+                    fi
+                fi
+            fi
+            ((i++))
+        done
+    done
 
-    if not isinstance(url, str):
-        filtered.append(item)
-        continue
-
-    parsed = urllib.parse.urlparse(url)
-    path = urllib.parse.unquote(parsed.path or '')
-    if not path:
-        filtered.append(item)
-        continue
-
-    candidate = normalise(path)
-    if any(candidate == t or candidate.startswith(t + os.sep) for t in targets):
-        changed = True
-        continue
-
-    filtered.append(item)
-
-if not changed:
-    sys.exit(0)
-
-data['persistent-apps'] = filtered
-with open(plist_path, 'wb') as fh:
-    try:
-        plistlib.dump(data, fh, fmt=plistlib.FMT_BINARY)
-    except Exception:
-        plistlib.dump(data, fh)
-
-# Restart Dock to apply changes
-try:
-    subprocess.run(['killall', 'Dock'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-except Exception:
-    pass
-PY
+    if [[ "$changed" == "true" ]]; then
+        # Restart Dock to apply changes from the plist
+        killall Dock 2> /dev/null || true
+    fi
 }
