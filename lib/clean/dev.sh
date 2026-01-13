@@ -75,6 +75,41 @@ clean_dev_rust() {
     safe_clean ~/.cargo/git/* "Cargo git cache"
     safe_clean ~/.rustup/downloads/* "Rust downloads cache"
 }
+
+# Helper: Check for multiple versions in a directory.
+# Args: $1=directory, $2=tool_name, $3+=additional_lines
+check_multiple_versions() {
+    local dir="$1"
+    local tool_name="$2"
+    shift 2
+    local -a additional_lines=("$@")
+
+    if [[ ! -d "$dir" ]]; then
+        return 0
+    fi
+
+    local count
+    count=$(find "$dir" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l | tr -d ' ')
+
+    if [[ "$count" -gt 1 ]]; then
+        note_activity
+        echo -e "  Found ${GREEN}${count}${NC} ${tool_name}"
+        for line in "${additional_lines[@]}"; do
+            echo -e "  $line"
+        done
+    fi
+}
+
+# Check for multiple Rust toolchains.
+check_rust_toolchains() {
+    command -v rustup > /dev/null 2>&1 || return 0
+
+    check_multiple_versions \
+        "$HOME/.rustup/toolchains" \
+        "Rust toolchains" \
+        "You can list them with: ${GRAY}rustup toolchain list${NC}" \
+        "Remove unused with: ${GRAY}rustup toolchain uninstall <name>${NC}"
+}
 # Docker caches (guarded by daemon check).
 clean_dev_docker() {
     if command -v docker > /dev/null 2>&1; then
@@ -130,19 +165,13 @@ clean_dev_frontend() {
     safe_clean ~/.cache/eslint/* "ESLint cache"
     safe_clean ~/.cache/prettier/* "Prettier cache"
 }
-# Mobile dev caches (can be large).
 # Check for multiple Android NDK versions.
 check_android_ndk() {
-    local ndk_dir="$HOME/Library/Android/sdk/ndk"
-    if [[ -d "$ndk_dir" ]]; then
-        local count
-        count=$(find "$ndk_dir" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l | tr -d ' ')
-        if [[ "$count" -gt 1 ]]; then
-            note_activity
-            echo -e "  Found ${GREEN}${count}${NC} Android NDK versions"
-            echo -e "  You can delete unused versions manually: ${ndk_dir}"
-        fi
-    fi
+    check_multiple_versions \
+        "$HOME/Library/Android/sdk/ndk" \
+        "Android NDK versions" \
+        "Manage in: ${GRAY}Android Studio → SDK Manager${NC}" \
+        "Or manually at: ${GRAY}\$HOME/Library/Android/sdk/ndk${NC}"
 }
 
 clean_dev_mobile() {
@@ -284,6 +313,7 @@ clean_developer_tools() {
     clean_dev_python
     clean_dev_go
     clean_dev_rust
+    check_rust_toolchains
     clean_dev_docker
     clean_dev_cloud
     clean_dev_nix
