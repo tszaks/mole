@@ -262,6 +262,23 @@ clean_dev_misc() {
     safe_clean ~/Library/Caches/SentryCrash/* "Sentry crash reports"
     safe_clean ~/Library/Caches/KSCrash/* "KSCrash reports"
     safe_clean ~/Library/Caches/com.crashlytics.data/* "Crashlytics data"
+    safe_clean ~/Library/Application\ Support/Antigravity/Cache/* "Antigravity cache"
+    safe_clean ~/Library/Application\ Support/Antigravity/Code\ Cache/* "Antigravity code cache"
+    safe_clean ~/Library/Application\ Support/Antigravity/GPUCache/* "Antigravity GPU cache"
+    safe_clean ~/Library/Application\ Support/Antigravity/DawnGraphiteCache/* "Antigravity Dawn cache"
+    safe_clean ~/Library/Application\ Support/Antigravity/DawnWebGPUCache/* "Antigravity WebGPU cache"
+    # Filo (Electron)
+    safe_clean ~/Library/Application\ Support/Filo/production/Cache/* "Filo cache"
+    safe_clean ~/Library/Application\ Support/Filo/production/Code\ Cache/* "Filo code cache"
+    safe_clean ~/Library/Application\ Support/Filo/production/GPUCache/* "Filo GPU cache"
+    safe_clean ~/Library/Application\ Support/Filo/production/DawnGraphiteCache/* "Filo Dawn cache"
+    safe_clean ~/Library/Application\ Support/Filo/production/DawnWebGPUCache/* "Filo WebGPU cache"
+    # Claude (Electron)
+    safe_clean ~/Library/Application\ Support/Claude/Cache/* "Claude cache"
+    safe_clean ~/Library/Application\ Support/Claude/Code\ Cache/* "Claude code cache"
+    safe_clean ~/Library/Application\ Support/Claude/GPUCache/* "Claude GPU cache"
+    safe_clean ~/Library/Application\ Support/Claude/DawnGraphiteCache/* "Claude Dawn cache"
+    safe_clean ~/Library/Application\ Support/Claude/DawnWebGPUCache/* "Claude WebGPU cache"
 }
 # Shell and VCS leftovers.
 clean_dev_shell() {
@@ -303,6 +320,10 @@ clean_dev_ocaml() {
 clean_dev_editors() {
     safe_clean ~/Library/Caches/com.microsoft.VSCode/Cache/* "VS Code cached data"
     safe_clean ~/Library/Application\ Support/Code/CachedData/* "VS Code cached data"
+    safe_clean ~/Library/Application\ Support/Code/DawnGraphiteCache/* "VS Code Dawn cache"
+    safe_clean ~/Library/Application\ Support/Code/DawnWebGPUCache/* "VS Code WebGPU cache"
+    safe_clean ~/Library/Application\ Support/Code/GPUCache/* "VS Code GPU cache"
+    safe_clean ~/Library/Application\ Support/Code/CachedExtensionVSIXs/* "VS Code extension cache"
     safe_clean ~/Library/Caches/Zed/* "Zed cache"
 }
 # Main developer tools cleanup sequence.
