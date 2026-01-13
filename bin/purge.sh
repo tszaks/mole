@@ -98,10 +98,10 @@ perform_purge() {
             # Function to truncate path in the middle
             truncate_path() {
                 local path="$1"
-                local term_width=$(tput cols 2>/dev/null || echo 80)
+                local term_width=$(tput cols 2> /dev/null || echo 80)
                 # Reserve space: "| Scanning " = 12 chars, spinner = 2 chars, margins = 4 chars
                 local max_len=$((term_width - 18))
-                
+
                 # Minimum length to avoid too short
                 [[ $max_len -lt 40 ]] && max_len=40
 
