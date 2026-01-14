@@ -10,25 +10,36 @@ Windows support for [Mole](https://github.com/tw93/Mole) - A system maintenance 
 
 ## Installation
 
-### Quick Install
+### Quick Install (One-Liner)
+
+**Recommended:** Run this single command in PowerShell:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/tw93/Mole/windows/quick-install.ps1 | iex
+```
+
+This will automatically download and install Mole with PATH configuration.
+
+### Manual Installation
+
+If you prefer to review the code first or customize the installation:
 
 ```powershell
 # Clone the repository
 git clone https://github.com/tw93/Mole.git
-cd Mole/windows
+cd Mole
+
+# Switch to windows branch
+git checkout windows
 
 # Run the installer
 .\install.ps1 -AddToPath
-```
 
-### Manual Installation
-
-```powershell
-# Install to custom location
-.\install.ps1 -InstallDir C:\Tools\Mole -AddToPath
-
-# Create Start Menu shortcut
+# Optional: Create Start Menu shortcut
 .\install.ps1 -AddToPath -CreateShortcut
+
+# Optional: Custom install location
+.\install.ps1 -InstallDir C:\Tools\Mole -AddToPath
 ```
 
 ### Uninstall
@@ -134,6 +145,7 @@ go build -o bin/status.exe ./cmd/status/
 ## Configuration
 
 Mole stores its configuration in:
+
 - Config: `~\.config\mole\`
 - Cache: `~\.cache\mole\`
 - Whitelist: `~\.config\mole\whitelist.txt`
@@ -142,11 +154,13 @@ Mole stores its configuration in:
 ## Development Phases
 
 ### Phase 1: Core Infrastructure ✅
+
 - [x] `install.ps1` - Windows installer
 - [x] `mole.ps1` - Main CLI entry point
 - [x] `lib/core/*` - Core utility libraries
 
 ### Phase 2: Cleanup Features ✅
+
 - [x] `bin/clean.ps1` - Deep cleanup orchestrator
 - [x] `bin/uninstall.ps1` - App removal with leftover detection
 - [x] `bin/optimize.ps1` - System optimization
@@ -154,12 +168,14 @@ Mole stores its configuration in:
 - [x] `lib/clean/*` - Cleanup modules
 
 ### Phase 3: TUI Tools ✅
+
 - [x] `cmd/analyze/` - Disk usage analyzer (Go)
 - [x] `cmd/status/` - Real-time system monitor (Go)
 - [x] `bin/analyze.ps1` - Analyzer wrapper
 - [x] `bin/status.ps1` - Status wrapper
 
 ### Phase 4: Testing & CI (Planned)
+
 - [ ] `tests/` - Pester tests
 - [ ] GitHub Actions workflows
 - [ ] `scripts/build.ps1` - Build automation
