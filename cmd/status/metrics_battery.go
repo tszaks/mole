@@ -227,20 +227,30 @@ func collectThermal() ThermalStatus {
 				valStr, _, _ = strings.Cut(valStr, ",")
 				valStr, _, _ = strings.Cut(valStr, "}")
 				valStr = strings.TrimSpace(valStr)
-				if powerMW, err := strconv.ParseFloat(valStr, 64); err == nil && powerMW > 0 {
-					thermal.SystemPower = powerMW / 1000.0
+				if powerMW, err := strconv.ParseFloat(valStr, 64); err == nil {
+					// SystemPower should always be positive, reject invalid values
+					if powerMW >= 0 && powerMW < 1000000 { // 0 to 1000W
+						thermal.SystemPower = powerMW / 1000.0
+					}
 				}
 			}
 
-			// Battery power (mW -> W, positive = discharging).
+			// Battery power (mW -> W, positive = discharging, negative = charging).
 			if _, after, found := strings.Cut(line, "\"BatteryPower\"="); found {
 				valStr := strings.TrimSpace(after)
 				valStr, _, _ = strings.Cut(valStr, ",")
 				valStr, _, _ = strings.Cut(valStr, "}")
 				valStr = strings.TrimSpace(valStr)
-				// Parse as int64 first to handle negative values (charging)
-				if powerMW, err := strconv.ParseInt(valStr, 10, 64); err == nil {
-					thermal.BatteryPower = float64(powerMW) / 1000.0
+				if powerMW, err := strconv.ParseFloat(valStr, 64); err == nil {
+					// macOS ioreg may return negative values as uint64 (two's complement overflow)
+					// If value > 2^63, convert from uint64 representation to proper signed value
+					if powerMW > float64(1<<63) {
+						powerMW = powerMW - 18446744073709551616.0 // 2^64
+					}
+					// Validate reasonable battery power range: -200W to 200W
+					if powerMW > -200000 && powerMW < 200000 {
+						thermal.BatteryPower = powerMW / 1000.0
+					}
 				}
 			}
 		}
