@@ -135,9 +135,11 @@ scan_installed_apps() {
     ) &
     pids+=($!)
     debug_log "Waiting for ${#pids[@]} background processes: ${pids[*]}"
-    for pid in "${pids[@]}"; do
-        wait "$pid" 2> /dev/null || true
-    done
+    if [[ ${#pids[@]} -gt 0 ]]; then
+        for pid in "${pids[@]}"; do
+            wait "$pid" 2> /dev/null || true
+        done
+    fi
     debug_log "All background processes completed"
     cat "$scan_tmp_dir"/*.txt >> "$installed_bundles" 2> /dev/null || true
     safe_remove "$scan_tmp_dir" true
@@ -279,29 +281,31 @@ clean_orphaned_app_data() {
         for pat in "${pattern_arr[@]}"; do
             file_patterns+=("$base_path/$pat")
         done
-        for item_path in "${file_patterns[@]}"; do
-            local iteration_count=0
-            for match in $item_path; do
-                [[ -e "$match" ]] || continue
-                ((iteration_count++))
-                if [[ $iteration_count -gt $MOLE_MAX_ORPHAN_ITERATIONS ]]; then
-                    break
-                fi
-                local bundle_id=$(basename "$match")
-                bundle_id="${bundle_id%.savedState}"
-                bundle_id="${bundle_id%.binarycookies}"
-                if is_bundle_orphaned "$bundle_id" "$match" "$installed_bundles"; then
-                    local size_kb
-                    size_kb=$(get_path_size_kb "$match")
-                    if [[ -z "$size_kb" || "$size_kb" == "0" ]]; then
-                        continue
+        if [[ ${#file_patterns[@]} -gt 0 ]]; then
+            for item_path in "${file_patterns[@]}"; do
+                local iteration_count=0
+                for match in $item_path; do
+                    [[ -e "$match" ]] || continue
+                    ((iteration_count++))
+                    if [[ $iteration_count -gt $MOLE_MAX_ORPHAN_ITERATIONS ]]; then
+                        break
                     fi
-                    safe_clean "$match" "Orphaned $label: $bundle_id"
-                    ((orphaned_count++))
-                    ((total_orphaned_kb += size_kb))
-                fi
+                    local bundle_id=$(basename "$match")
+                    bundle_id="${bundle_id%.savedState}"
+                    bundle_id="${bundle_id%.binarycookies}"
+                    if is_bundle_orphaned "$bundle_id" "$match" "$installed_bundles"; then
+                        local size_kb
+                        size_kb=$(get_path_size_kb "$match")
+                        if [[ -z "$size_kb" || "$size_kb" == "0" ]]; then
+                            continue
+                        fi
+                        safe_clean "$match" "Orphaned $label: $bundle_id"
+                        ((orphaned_count++))
+                        ((total_orphaned_kb += size_kb))
+                    fi
+                done
             done
-        done
+        fi
     done
     stop_section_spinner
     if [[ $orphaned_count -gt 0 ]]; then

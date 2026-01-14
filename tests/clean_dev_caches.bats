@@ -83,6 +83,8 @@ clean_project_caches() { :; }
 clean_dev_python() { :; }
 clean_dev_go() { :; }
 clean_dev_rust() { :; }
+check_rust_toolchains() { :; }
+check_android_ndk() { :; }
 clean_dev_docker() { :; }
 clean_dev_cloud() { :; }
 clean_dev_nix() { :; }
@@ -96,6 +98,10 @@ clean_dev_database() { :; }
 clean_dev_api_tools() { :; }
 clean_dev_network() { :; }
 clean_dev_misc() { :; }
+clean_dev_elixir() { :; }
+clean_dev_haskell() { :; }
+clean_dev_ocaml() { :; }
+clean_dev_editors() { :; }
 safe_clean() { :; }
 debug_log() { :; }
 clean_developer_tools

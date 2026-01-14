@@ -130,15 +130,20 @@ perform_purge() {
 
                 # Show title on first line, spinner and scanning info on second line
                 if [[ -n "$display_path" ]]; then
-                    printf '\r%s\n%s %sScanning %s\033[K\033[A' \
-                        "${PURPLE_BOLD}Purge Project Artifacts${NC}" \
+                    # Line 1: Move to start, clear, print title
+                    printf '\r\033[K%s\n' "${PURPLE_BOLD}Purge Project Artifacts${NC}"
+                    # Line 2: Move to start, clear, print scanning info
+                    printf '\r\033[K%s %sScanning %s' \
                         "${BLUE}${spin_char}${NC}" \
                         "${GRAY}" "$display_path"
+                    # Move up THEN to start (important order!)
+                    printf '\033[A\r'
                 else
-                    printf '\r%s\n%s %sScanning...\033[K\033[A' \
-                        "${PURPLE_BOLD}Purge Project Artifacts${NC}" \
+                    printf '\r\033[K%s\n' "${PURPLE_BOLD}Purge Project Artifacts${NC}"
+                    printf '\r\033[K%s %sScanning...' \
                         "${BLUE}${spin_char}${NC}" \
                         "${GRAY}"
+                    printf '\033[A\r'
                 fi
 
                 sleep 0.05
