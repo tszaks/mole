@@ -22,7 +22,8 @@ Before any operation:
 - Delete files without checking protection lists
 - Modify system-critical paths (e.g., `/System`, `/Library/Apple`)
 - Remove installer flags `--prefix`/`--config` from `install.sh`
-- Commit code changes unless explicitly requested
+- **Commit code changes or run `git commit` unless the user explicitly asks you to commit**
+- **Reply to GitHub issues or PRs on behalf of the user** - only prepare responses for user review
 - Run destructive operations without dry-run validation
 - Use raw `git` commands when `gh` CLI is available
 
@@ -34,7 +35,7 @@ Before any operation:
 - Test with dry-run modes first
 - Validate syntax before suggesting changes: `bash -n <file>`
 - **Prioritize `gh` CLI for ALL GitHub operations** - Always use `gh` to fetch and manipulate GitHub data (issues, PRs, releases, comments, etc.) instead of raw git commands or web scraping
-- Never commit code unless explicitly requested by user
+- **Document fixes in AGENTS.md instead of committing or replying** - Prepare commit messages and GitHub responses for user review, don't execute them
 - Review and update `SECURITY_AUDIT.md` when modifying `clean` or `optimize` logic
 
 ---
