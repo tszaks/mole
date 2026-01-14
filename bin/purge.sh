@@ -98,7 +98,14 @@ perform_purge() {
             # Function to truncate path in the middle
             truncate_path() {
                 local path="$1"
-                local max_len=80
+                local term_cols
+                term_cols=$(tput cols 2>/dev/null || echo 80)
+                # Reserve some space for the spinner and text (approx 20 chars)
+                local max_len=$((term_cols - 20))
+                # Ensure a reasonable minimum width
+                if (( max_len < 40 )); then
+                    max_len=40
+                fi
 
                 if [[ ${#path} -le $max_len ]]; then
                     echo "$path"
