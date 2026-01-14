@@ -415,8 +415,8 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.netease.163music"     # NetEase Music
 
     # Web Browsers (protect complex storage like IndexedDB, localStorage)
-    "Firefox"               # Firefox Application Support
-    "org.mozilla.*"         # Firefox bundle IDs
+    "Firefox"       # Firefox Application Support
+    "org.mozilla.*" # Firefox bundle IDs
 
     # License Management & App Stores
     "com.paddle.Paddle*"          # Paddle (license management)
