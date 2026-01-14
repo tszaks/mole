@@ -61,8 +61,7 @@ function Show-MainHelp {
     Write-Host "    ${cyan}uninstall${nc}   Smart application uninstaller"
     Write-Host "    ${cyan}analyze${nc}     Visual disk space analyzer"
     Write-Host "    ${cyan}status${nc}      Real-time system monitor"
-    Write-Host "    ${cyan}optimize${nc}    System optimization tasks"
-    Write-Host "    ${cyan}repair${nc}      Cache rebuilds and system fixes"
+    Write-Host "    ${cyan}optimize${nc}    System optimization and repairs"
     Write-Host "    ${cyan}purge${nc}       Clean project build artifacts"
     Write-Host ""
     Write-Host "  ${green}OPTIONS:${nc}"
@@ -72,16 +71,16 @@ function Show-MainHelp {
     Write-Host ""
     Write-Host "  ${green}EXAMPLES:${nc}"
     Write-Host ""
-    Write-Host "    ${gray}mole${nc}                  ${gray}# Interactive menu${nc}"
-    Write-Host "    ${gray}mole clean${nc}            ${gray}# Deep cleanup${nc}"
-    Write-Host "    ${gray}mole clean -DryRun${nc}    ${gray}# Preview cleanup${nc}"
-    Write-Host "    ${gray}mole uninstall${nc}        ${gray}# Uninstall apps${nc}"
-    Write-Host "    ${gray}mole analyze${nc}          ${gray}# Disk analyzer${nc}"
-    Write-Host "    ${gray}mole status${nc}           ${gray}# System monitor${nc}"
-    Write-Host "    ${gray}mole optimize${nc}         ${gray}# Optimize system${nc}"
-    Write-Host "    ${gray}mole repair -DNS${nc}      ${gray}# Flush DNS cache${nc}"
-    Write-Host "    ${gray}mole repair -All${nc}      ${gray}# Run all repairs${nc}"
-    Write-Host "    ${gray}mole purge${nc}            ${gray}# Clean dev artifacts${nc}"
+    Write-Host "    ${gray}mole${nc}                    ${gray}# Interactive menu${nc}"
+    Write-Host "    ${gray}mole clean${nc}              ${gray}# Deep cleanup${nc}"
+    Write-Host "    ${gray}mole clean -DryRun${nc}      ${gray}# Preview cleanup${nc}"
+    Write-Host "    ${gray}mole uninstall${nc}          ${gray}# Uninstall apps${nc}"
+    Write-Host "    ${gray}mole analyze${nc}            ${gray}# Disk analyzer${nc}"
+    Write-Host "    ${gray}mole status${nc}             ${gray}# System monitor${nc}"
+    Write-Host "    ${gray}mole optimize${nc}           ${gray}# Optimize system${nc}"
+    Write-Host "    ${gray}mole optimize -Repair${nc}   ${gray}# Optimize + all repairs${nc}"
+    Write-Host "    ${gray}mole optimize -Icon${nc}     ${gray}# Optimize + rebuild icons${nc}"
+    Write-Host "    ${gray}mole purge${nc}              ${gray}# Clean dev artifacts${nc}"
     Write-Host ""
     Write-Host "  ${green}ENVIRONMENT:${nc}"
     Write-Host ""
@@ -124,15 +123,9 @@ function Show-MainMenu {
         }
         @{
             Name = "Optimize"
-            Description = "System optimization"
+            Description = "Optimization & repairs"
             Command = "optimize"
             Icon = $script:Icons.Arrow
-        }
-        @{
-            Name = "Repair"
-            Description = "Cache rebuilds & fixes"
-            Command = "repair"
-            Icon = $script:Icons.Admin
         }
         @{
             Name = "Purge"
