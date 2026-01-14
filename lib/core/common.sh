@@ -99,59 +99,6 @@ update_via_homebrew() {
     rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message" 2> /dev/null || true
 }
 
-# Get Homebrew cask name for an application bundle
-get_brew_cask_name() {
-    local app_path="$1"
-    [[ -z "$app_path" || ! -d "$app_path" ]] && return 1
-
-    # Check if brew command exists
-    command -v brew > /dev/null 2>&1 || return 1
-
-    local app_bundle_name
-    app_bundle_name=$(basename "$app_path")
-
-    # 1. Search in Homebrew Caskroom for the app bundle (most reliable for name mismatches)
-    # Checks /opt/homebrew (Apple Silicon) and /usr/local (Intel)
-    # Note: Modern Homebrew uses symlinks in Caskroom, not directories
-    local cask_match
-    for room in "/opt/homebrew/Caskroom" "/usr/local/Caskroom"; do
-        [[ -d "$room" ]] || continue
-        # Path is room/token/version/App.app (can be directory or symlink)
-        cask_match=$(find "$room" -maxdepth 3 -name "$app_bundle_name" 2> /dev/null | head -1 || echo "")
-        if [[ -n "$cask_match" ]]; then
-            local relative="${cask_match#"$room"/}"
-            echo "${relative%%/*}"
-            return 0
-        fi
-    done
-
-    # 2. Check for symlink from Caskroom
-    if [[ -L "$app_path" ]]; then
-        local target
-        target=$(readlink "$app_path")
-        for room in "/opt/homebrew/Caskroom" "/usr/local/Caskroom"; do
-            if [[ "$target" == "$room/"* ]]; then
-                local relative="${target#"$room"/}"
-                echo "${relative%%/*}"
-                return 0
-            fi
-        done
-    fi
-
-    # 3. Fallback: Direct list check (handles some cases where app is moved)
-    local app_name_only="${app_bundle_name%.app}"
-    local cask_name
-    cask_name=$(brew list --cask 2> /dev/null | grep -Fx "$(echo "$app_name_only" | LC_ALL=C tr '[:upper:]' '[:lower:]')" || echo "")
-    if [[ -n "$cask_name" ]]; then
-        if brew info --cask "$cask_name" 2> /dev/null | grep -q "$app_path"; then
-            echo "$cask_name"
-            return 0
-        fi
-    fi
-
-    return 1
-}
-
 # Remove applications from Dock
 remove_apps_from_dock() {
     if [[ $# -eq 0 ]]; then
