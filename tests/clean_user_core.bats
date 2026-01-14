@@ -103,7 +103,7 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-@test "clean_empty_library_items only cleans empty dirs" {
+@test "clean_empty_library_items cleans empty dirs and files" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -116,7 +116,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Empty Library folders"* ]]
-    [[ "$output" != *"Empty Library files"* ]]
+    [[ "$output" == *"Empty Library files"* ]]
 }
 
 @test "clean_browsers calls expected cache paths" {
