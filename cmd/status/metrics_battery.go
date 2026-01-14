@@ -241,12 +241,14 @@ func collectThermal() ThermalStatus {
 				valStr, _, _ = strings.Cut(valStr, ",")
 				valStr, _, _ = strings.Cut(valStr, "}")
 				valStr = strings.TrimSpace(valStr)
-				if powerMW, err := strconv.ParseFloat(valStr, 64); err == nil {
-					// macOS ioreg may return negative values as uint64 (two's complement overflow)
-					// If value > 2^63, convert from uint64 representation to proper signed value
-					if powerMW > float64(1<<63) {
-						powerMW = powerMW - 18446744073709551616.0 // 2^64
-					}
+
+				// Use ParseUint to handle potential 64-bit two's complement negative values correctly.
+				// ioreg might return a large generic integer for negative values.
+				if valUint, err := strconv.ParseUint(valStr, 10, 64); err == nil {
+					// Cast to int64 to interpret 2's complement correctly (e.g. MaxUint64 -> -1)
+					valInt := int64(valUint)
+					powerMW := float64(valInt)
+
 					// Validate reasonable battery power range: -200W to 200W
 					if powerMW > -200000 && powerMW < 200000 {
 						thermal.BatteryPower = powerMW / 1000.0
