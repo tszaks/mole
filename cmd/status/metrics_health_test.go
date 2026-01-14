@@ -62,14 +62,14 @@ func TestColorizeTempThresholds(t *testing.T) {
 		temp     float64
 		expected string
 	}{
-		{temp: 30.0, expected: "30.0"},  // Normal - should use okStyle (green)
-		{temp: 55.9, expected: "55.9"},  // Just below warning threshold
-		{temp: 56.0, expected: "56.0"},  // Warning threshold - should use warnStyle (yellow)
-		{temp: 65.0, expected: "65.0"},  // Mid warning range
-		{temp: 75.9, expected: "75.9"},  // Just below danger threshold
-		{temp: 76.0, expected: "76.0"},  // Danger threshold - should use dangerStyle (red)
-		{temp: 90.0, expected: "90.0"},  // High temperature
-		{temp: 0.0, expected: "0.0"},    // Edge case: zero
+		{temp: 30.0, expected: "30.0"}, // Normal - should use okStyle (green)
+		{temp: 55.9, expected: "55.9"}, // Just below warning threshold
+		{temp: 56.0, expected: "56.0"}, // Warning threshold - should use warnStyle (yellow)
+		{temp: 65.0, expected: "65.0"}, // Mid warning range
+		{temp: 75.9, expected: "75.9"}, // Just below danger threshold
+		{temp: 76.0, expected: "76.0"}, // Danger threshold - should use dangerStyle (red)
+		{temp: 90.0, expected: "90.0"}, // High temperature
+		{temp: 0.0, expected: "0.0"},   // Edge case: zero
 	}
 
 	for _, tt := range tests {
