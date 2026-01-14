@@ -191,7 +191,10 @@ remove_apps_from_dock() {
 
             local url
             url=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-data:_CFURLString" "$plist" 2> /dev/null || echo "")
-            [[ -z "$url" ]] && { ((i++)); continue; }
+            [[ -z "$url" ]] && {
+                ((i++))
+                continue
+            }
 
             # Match by full path only to avoid removing apps with the same label.
             if [[ -n "$full_path" && "$url" == *"$full_path"* ]]; then
