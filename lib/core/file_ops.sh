@@ -66,13 +66,49 @@ validate_path_for_deletion() {
             ;;
     esac
 
+    # Allow known safe paths under /private
+    case "$path" in
+        /private/tmp | /private/tmp/* | \
+            /private/var/tmp | /private/var/tmp/* | \
+            /private/var/log | /private/var/log/* | \
+            /private/var/folders | /private/var/folders/* | \
+            /private/var/db/diagnostics | /private/var/db/diagnostics/* | \
+            /private/var/db/DiagnosticPipeline | /private/var/db/DiagnosticPipeline/* | \
+            /private/var/db/powerlog | /private/var/db/powerlog/* | \
+            /private/var/db/reportmemoryexception | /private/var/db/reportmemoryexception/*)
+            return 0
+            ;;
+    esac
+
     # Check path isn't critical system directory
     case "$path" in
-        / | /bin | /sbin | /usr | /usr/bin | /usr/sbin | /etc | /var | /System | /System/* | /Library/Extensions)
+        / | /bin | /bin/* | /sbin | /sbin/* | /usr | /usr/bin | /usr/bin/* | /usr/sbin | /usr/sbin/* | /usr/lib | /usr/lib/* | /System | /System/* | /Library/Extensions)
             log_error "Path validation failed: critical system directory: $path"
             return 1
             ;;
+        /private)
+            log_error "Path validation failed: critical system directory: $path"
+            return 1
+            ;;
+        /etc | /etc/* | /private/etc | /private/etc/*)
+            log_error "Path validation failed: /etc contains critical system files: $path"
+            return 1
+            ;;
+        /var | /var/db | /var/db/* | /private/var | /private/var/db | /private/var/db/*)
+            log_error "Path validation failed: /var/db contains system databases: $path"
+            return 1
+            ;;
     esac
+
+    # Check if path is protected (keychains, system settings, etc)
+    if declare -f should_protect_path > /dev/null 2>&1; then
+        if should_protect_path "$path"; then
+            if [[ "${MO_DEBUG:-0}" == "1" ]]; then
+                log_warning "Path validation: protected path skipped: $path"
+            fi
+            return 1
+        fi
+    fi
 
     return 0
 }

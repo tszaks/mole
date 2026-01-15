@@ -136,6 +136,10 @@ remove_file_list() {
     while IFS= read -r file; do
         [[ -n "$file" && -e "$file" ]] || continue
 
+        if ! validate_path_for_deletion "$file"; then
+            continue
+        fi
+
         if [[ -L "$file" ]]; then
             if [[ "$use_sudo" == "true" ]]; then
                 sudo rm "$file" 2> /dev/null && ((++count)) || true
