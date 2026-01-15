@@ -175,9 +175,12 @@ brew_uninstall_cask() {
 
     # Run uninstall with timeout (suppress hints/auto-update)
     local uninstall_ok=false
-    if HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
-        run_with_timeout 120 brew uninstall --cask "$cask_name" 2>&1; then
+    local output
+    if output=$(HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
+        run_with_timeout 120 brew uninstall --cask "$cask_name" 2>&1); then
         uninstall_ok=true
+    else
+        debug_log "brew uninstall output: $output"
     fi
 
     # Verify removal

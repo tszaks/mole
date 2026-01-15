@@ -104,7 +104,11 @@ remove_login_item() {
 
     # Remove from Login Items using index-based deletion (handles broken items)
     if [[ -n "$clean_name" ]]; then
-        osascript <<- EOF 2> /dev/null || true
+        # Escape double quotes and backslashes for AppleScript
+        local escaped_name="${clean_name//\\/\\\\}"
+        escaped_name="${escaped_name//\"/\\\"}"
+
+        osascript <<- EOF > /dev/null 2>&1 || true
 			tell application "System Events"
 			    try
 			        set itemCount to count of login items
@@ -112,7 +116,7 @@ remove_login_item() {
 			        repeat with i from itemCount to 1 by -1
 			            try
 			                set itemName to name of login item i
-			                if itemName is "$clean_name" then
+			                if itemName is "$escaped_name" then
 			                    delete login item i
 			                end if
 			            end try
