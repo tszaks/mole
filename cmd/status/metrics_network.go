@@ -70,6 +70,20 @@ func (c *Collector) collectNetwork(now time.Time) ([]NetworkStatus, error) {
 		result = result[:3]
 	}
 
+	var totalRx, totalTx float64
+	for _, r := range result {
+		totalRx += r.RxRateMBs
+		totalTx += r.TxRateMBs
+	}
+	c.netHistory.RxHistory = append(c.netHistory.RxHistory, totalRx)
+	c.netHistory.TxHistory = append(c.netHistory.TxHistory, totalTx)
+	if len(c.netHistory.RxHistory) > NetworkHistorySize {
+		c.netHistory.RxHistory = c.netHistory.RxHistory[len(c.netHistory.RxHistory)-NetworkHistorySize:]
+	}
+	if len(c.netHistory.TxHistory) > NetworkHistorySize {
+		c.netHistory.TxHistory = c.netHistory.TxHistory[len(c.netHistory.TxHistory)-NetworkHistorySize:]
+	}
+
 	return result, nil
 }
 

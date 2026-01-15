@@ -22,18 +22,19 @@ type MetricsSnapshot struct {
 	HealthScore    int    // 0-100 system health score
 	HealthScoreMsg string // Brief explanation
 
-	CPU          CPUStatus
-	GPU          []GPUStatus
-	Memory       MemoryStatus
-	Disks        []DiskStatus
-	DiskIO       DiskIOStatus
-	Network      []NetworkStatus
-	Proxy        ProxyStatus
-	Batteries    []BatteryStatus
-	Thermal      ThermalStatus
-	Sensors      []SensorReading
-	Bluetooth    []BluetoothDevice
-	TopProcesses []ProcessInfo
+	CPU            CPUStatus
+	GPU            []GPUStatus
+	Memory         MemoryStatus
+	Disks          []DiskStatus
+	DiskIO         DiskIOStatus
+	Network        []NetworkStatus
+	NetworkHistory NetworkHistory
+	Proxy          ProxyStatus
+	Batteries      []BatteryStatus
+	Thermal        ThermalStatus
+	Sensors        []SensorReading
+	Bluetooth      []BluetoothDevice
+	TopProcesses   []ProcessInfo
 }
 
 type HardwareInfo struct {
@@ -104,6 +105,12 @@ type NetworkStatus struct {
 	TxRateMBs float64
 	IP        string
 }
+type NetworkHistory struct {
+	RxHistory []float64
+	TxHistory []float64
+}
+
+const NetworkHistorySize = 20 // number of checks to keep
 
 type ProxyStatus struct {
 	Enabled bool
@@ -156,6 +163,7 @@ type Collector struct {
 	// Fast metrics (1s).
 	prevNet    map[string]net.IOCountersStat
 	lastNetAt  time.Time
+	netHistory NetworkHistory
 	lastGPUAt  time.Time
 	cachedGPU  []GPUStatus
 	prevDiskIO disk.IOCountersStat
@@ -263,6 +271,7 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 		Disks:          diskStats,
 		DiskIO:         diskIO,
 		Network:        netStats,
+		NetworkHistory: c.netHistory,
 		Proxy:          proxyStats,
 		Batteries:      batteryStats,
 		Thermal:        thermalStats,
