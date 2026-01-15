@@ -84,8 +84,8 @@ clean_chrome_old_versions() {
         "$HOME/Applications/Google Chrome.app"
     )
 
-    # Use -f to match Chrome Helper processes as well
-    if pgrep -f "Google Chrome" > /dev/null 2>&1; then
+    # Match the exact Chrome process name to avoid false positives
+    if pgrep -x "Google Chrome" > /dev/null 2>&1; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Google Chrome running · old versions cleanup skipped"
         return 0
     fi
@@ -164,8 +164,8 @@ clean_edge_old_versions() {
         "$HOME/Applications/Microsoft Edge.app"
     )
 
-    # Use -f to match Edge Helper processes as well
-    if pgrep -f "Microsoft Edge" > /dev/null 2>&1; then
+    # Match the exact Edge process name to avoid false positives (e.g., Microsoft Teams)
+    if pgrep -x "Microsoft Edge" > /dev/null 2>&1; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Microsoft Edge running · old versions cleanup skipped"
         return 0
     fi
@@ -242,7 +242,7 @@ clean_edge_updater_old_versions() {
     local updater_dir="$HOME/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
     [[ -d "$updater_dir" ]] || return 0
 
-    if pgrep -f "Microsoft Edge" > /dev/null 2>&1; then
+    if pgrep -x "Microsoft Edge" > /dev/null 2>&1; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Microsoft Edge running · updater cleanup skipped"
         return 0
     fi
