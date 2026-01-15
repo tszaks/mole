@@ -103,21 +103,7 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-@test "clean_empty_library_items cleans empty dirs and files" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-safe_clean() { echo "$2"; }
-WHITELIST_PATTERNS=()
-mkdir -p "$HOME/Library/EmptyDir"
-touch "$HOME/Library/empty.txt"
-clean_empty_library_items
-EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Empty Library folders"* ]]
-}
 
 @test "clean_browsers calls expected cache paths" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'

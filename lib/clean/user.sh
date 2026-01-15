@@ -5,9 +5,7 @@ clean_user_essentials() {
     start_section_spinner "Scanning caches..."
     safe_clean ~/Library/Caches/* "User app cache"
     stop_section_spinner
-    start_section_spinner "Scanning empty items..."
-    clean_empty_library_items
-    stop_section_spinner
+
     safe_clean ~/Library/Logs/* "User app logs"
     if is_path_whitelisted "$HOME/.Trash"; then
         note_activity
@@ -17,65 +15,7 @@ clean_user_essentials() {
     fi
 }
 
-clean_empty_library_items() {
-    if [[ ! -d "$HOME/Library" ]]; then
-        return 0
-    fi
 
-    # 1. Clean top-level empty directories and files in Library
-    local -a empty_dirs=()
-    while IFS= read -r -d '' dir; do
-        [[ -d "$dir" ]] && empty_dirs+=("$dir")
-    done < <(find "$HOME/Library" -mindepth 1 -maxdepth 1 -type d -empty -print0 2> /dev/null)
-
-    if [[ ${#empty_dirs[@]} -gt 0 ]]; then
-        safe_clean "${empty_dirs[@]}" "Empty Library folders"
-    fi
-
-    # 2. Clean empty subdirectories in Application Support and other key locations
-    # Iteratively remove empty directories until no more are found
-    local -a key_locations=(
-        "$HOME/Library/Application Support"
-        "$HOME/Library/Caches"
-    )
-
-    for location in "${key_locations[@]}"; do
-        [[ -d "$location" ]] || continue
-
-        # Limit passes to keep cleanup fast; 3 iterations handle most nested scenarios.
-        local max_iterations=3
-        local iteration=0
-
-        while [[ $iteration -lt $max_iterations ]]; do
-            local -a nested_empty_dirs=()
-            # Find empty directories
-            while IFS= read -r -d '' dir; do
-                # Skip if whitelisted
-                if is_path_whitelisted "$dir"; then
-                    continue
-                fi
-                # Skip protected system components
-                local dir_name=$(basename "$dir")
-                if is_critical_system_component "$dir_name"; then
-                    continue
-                fi
-                [[ -d "$dir" ]] && nested_empty_dirs+=("$dir")
-            done < <(find "$location" -mindepth 1 -type d -empty -print0 2> /dev/null)
-
-            # If no empty dirs found, we're done with this location
-            if [[ ${#nested_empty_dirs[@]} -eq 0 ]]; then
-                break
-            fi
-
-            local location_name=$(basename "$location")
-            safe_clean "${nested_empty_dirs[@]}" "Empty $location_name subdirs"
-
-            ((iteration++))
-        done
-    done
-
-    # Empty file cleanup is skipped to avoid removing app sentinel files.
-}
 
 # Remove old Google Chrome versions while keeping Current.
 clean_chrome_old_versions() {
