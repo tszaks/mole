@@ -104,7 +104,7 @@ remove_login_item() {
 
     # Remove from Login Items using index-based deletion (handles broken items)
     if [[ -n "$clean_name" ]]; then
-        osascript <<-EOF 2>/dev/null || true
+        osascript <<- EOF 2> /dev/null || true
 			tell application "System Events"
 			    try
 			        set itemCount to count of login items
@@ -122,8 +122,6 @@ remove_login_item() {
 		EOF
     fi
 }
-
-
 
 # Remove files (handles symlinks, optional sudo).
 remove_file_list() {
