@@ -92,6 +92,9 @@ _detect_cask_via_caskroom_search() {
         done < <(find "$room" -maxdepth 3 -name "$app_bundle_name" 2>/dev/null)
     done
 
+    # Need at least one token
+    ((${#tokens[@]} > 0)) || return 1
+
     # Deduplicate and check count
     local -a uniq
     IFS=$'\n' read -r -d '' -a uniq < <(printf '%s\n' "${tokens[@]}" | sort -u && printf '\0') || true

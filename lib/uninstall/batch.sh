@@ -395,6 +395,8 @@ batch_uninstall_applications() {
         local used_brew_successfully=false
         if [[ -z "$reason" ]]; then
             if [[ "$is_brew_cask" == "true" && -n "$cask_name" ]]; then
+                # Stop spinner before brew output
+                [[ -t 1 ]] && stop_inline_spinner
                 # Use brew_uninstall_cask helper (handles env vars, timeout, verification)
                 if brew_uninstall_cask "$cask_name" "$app_path"; then
                     used_brew_successfully=true
@@ -562,10 +564,16 @@ batch_uninstall_applications() {
     print_summary_block "$title" "${summary_details[@]}"
     printf '\n'
 
-    # Suggest brew autoremove if Homebrew casks were successfully uninstalled
+    # Auto-run brew autoremove if Homebrew casks were uninstalled
     if [[ $brew_apps_removed -gt 0 ]]; then
-        echo -e "  ${GRAY}Tip: Run ${NC}brew autoremove${GRAY} to clean up orphaned dependencies${NC}"
-        echo ""
+        local autoremove_output removed_count
+        autoremove_output=$(HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2>/dev/null) || true
+        removed_count=$(printf '%s\n' "$autoremove_output" | grep -c "^Uninstalling" || true)
+        removed_count=${removed_count:-0}
+        if [[ $removed_count -gt 0 ]]; then
+            echo -e "${GREEN}${ICON_SUCCESS}${NC} Cleaned $removed_count orphaned brew dependencies"
+            echo ""
+        fi
     fi
 
     # Clean up Dock entries for uninstalled apps.
