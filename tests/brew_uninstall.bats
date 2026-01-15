@@ -31,6 +31,7 @@ setup() {
 
     run bash <<EOF
 source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/brew.sh"
 
 # Override the function to use our test Caskroom
 get_brew_cask_name() {
@@ -62,6 +63,7 @@ EOF
 
     result=$(bash <<EOF
 source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/brew.sh"
 # Mock brew to return nothing for this
 brew() { return 1; }
 export -f brew
