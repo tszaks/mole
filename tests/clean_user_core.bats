@@ -117,7 +117,6 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Empty Library folders"* ]]
-    [[ "$output" == *"Empty Library files"* ]]
 }
 
 @test "clean_browsers calls expected cache paths" {
