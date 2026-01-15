@@ -420,8 +420,8 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.netease.163music"     # NetEase Music
 
     # Web Browsers (protect complex storage like IndexedDB, localStorage)
-    "Firefox"               # Firefox Application Support
-    "org.mozilla.*"         # Firefox bundle IDs
+    "Firefox"       # Firefox Application Support
+    "org.mozilla.*" # Firefox bundle IDs
 
     # License Management & App Stores
     "com.paddle.Paddle*"          # Paddle (license management)
@@ -665,6 +665,7 @@ find_app_files() {
         "$HOME/Library/HTTPStorages/$bundle_id"
         "$HOME/Library/Cookies/$bundle_id.binarycookies"
         "$HOME/Library/LaunchAgents/$bundle_id.plist"
+        "$HOME/Library/LaunchDaemons/$bundle_id.plist"
         "$HOME/Library/Application Scripts/$bundle_id"
         "$HOME/Library/Services/$app_name.workflow"
         "$HOME/Library/QuickLook/$app_name.qlgenerator"
@@ -739,11 +740,18 @@ find_app_files() {
         fi
     fi
 
-    # Launch Agents by name (special handling)
-    if [[ ${#app_name} -gt 3 ]] && [[ -d ~/Library/LaunchAgents ]]; then
-        while IFS= read -r -d '' plist; do
-            files_to_clean+=("$plist")
-        done < <(command find ~/Library/LaunchAgents -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
+    # Launch Agents and Daemons by name (special handling)
+    if [[ ${#app_name} -gt 3 ]]; then
+        if [[ -d ~/Library/LaunchAgents ]]; then
+            while IFS= read -r -d '' plist; do
+                files_to_clean+=("$plist")
+            done < <(command find ~/Library/LaunchAgents -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
+        fi
+        if [[ -d ~/Library/LaunchDaemons ]]; then
+            while IFS= read -r -d '' plist; do
+                files_to_clean+=("$plist")
+            done < <(command find ~/Library/LaunchDaemons -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
+        fi
     fi
 
     # Handle specialized toolchains and development environments

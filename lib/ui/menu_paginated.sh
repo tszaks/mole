@@ -864,7 +864,14 @@ paginated_multi_select() {
                 # Backspace filter
                 if [[ "$filter_mode" == "true" && -n "$filter_query" ]]; then
                     filter_query="${filter_query%?}"
-                    need_full_redraw=true
+                    # Fast footer-only update in filter mode (avoid full redraw)
+                    local filter_status="${filter_query:-_}"
+                    local footer_row=$((items_per_page + 4))
+                    printf "\033[%d;1H\033[2K" "$footer_row" >&2
+                    local sep=" ${GRAY}|${NC} "
+                    printf "%s" "${GRAY}Search: ${filter_status}${NC}${sep}${GRAY}Delete${NC}${sep}${GRAY}Enter Confirm${NC}${sep}${GRAY}ESC Cancel${NC}" >&2
+                    printf "\033[%d;1H\033[2K" "$((footer_row + 1))" >&2
+                    continue
                 fi
                 ;;
             CHAR:*)
@@ -873,7 +880,14 @@ paginated_multi_select() {
                     # avoid accidental leading spaces
                     if [[ -n "$filter_query" || "$ch" != " " ]]; then
                         filter_query+="$ch"
-                        need_full_redraw=true
+                        # Fast footer-only update in filter mode (avoid full redraw)
+                        local filter_status="${filter_query:-_}"
+                        local footer_row=$((items_per_page + 4))
+                        printf "\033[%d;1H\033[2K" "$footer_row" >&2
+                        local sep=" ${GRAY}|${NC} "
+                        printf "%s" "${GRAY}Search: ${filter_status}${NC}${sep}${GRAY}Delete${NC}${sep}${GRAY}Enter Confirm${NC}${sep}${GRAY}ESC Cancel${NC}" >&2
+                        printf "\033[%d;1H\033[2K" "$((footer_row + 1))" >&2
+                        continue
                     fi
                 fi
                 ;;

@@ -91,6 +91,40 @@ stop_launch_services() {
     fi
 }
 
+# Remove macOS Login Items for an app
+remove_login_item() {
+    local app_name="$1"
+    local bundle_id="$2"
+
+    # Skip if no identifiers provided
+    [[ -z "$app_name" && -z "$bundle_id" ]] && return 0
+
+    # Strip .app suffix if present (login items don't include it)
+    local clean_name="${app_name%.app}"
+
+    # Remove from Login Items using index-based deletion (handles broken items)
+    if [[ -n "$clean_name" ]]; then
+        osascript <<-EOF 2>/dev/null || true
+			tell application "System Events"
+			    try
+			        set itemCount to count of login items
+			        -- Delete in reverse order to avoid index shifting
+			        repeat with i from itemCount to 1 by -1
+			            try
+			                set itemName to name of login item i
+			                if itemName is "$clean_name" then
+			                    delete login item i
+			                end if
+			            end try
+			        end repeat
+			    end try
+			end tell
+		EOF
+    fi
+}
+
+
+
 # Remove files (handles symlinks, optional sudo).
 remove_file_list() {
     local file_list="$1"
@@ -349,6 +383,9 @@ batch_uninstall_applications() {
         local has_system_files="false"
         [[ -n "$system_files" ]] && has_system_files="true"
         stop_launch_services "$bundle_id" "$has_system_files"
+
+        # Remove from Login Items
+        remove_login_item "$app_name" "$bundle_id"
 
         if ! force_kill_app "$app_name" "$app_path"; then
             reason="still running"

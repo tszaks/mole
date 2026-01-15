@@ -99,11 +99,11 @@ perform_purge() {
             truncate_path() {
                 local path="$1"
                 local term_cols
-                term_cols=$(tput cols 2>/dev/null || echo 80)
+                term_cols=$(tput cols 2> /dev/null || echo 80)
                 # Reserve some space for the spinner and text (approx 20 chars)
                 local max_len=$((term_cols - 20))
                 # Ensure a reasonable minimum width
-                if (( max_len < 40 )); then
+                if ((max_len < 40)); then
                     max_len=40
                 fi
 

@@ -109,6 +109,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
 safe_clean() { echo "$2"; }
+WHITELIST_PATTERNS=()
 mkdir -p "$HOME/Library/EmptyDir"
 touch "$HOME/Library/empty.txt"
 clean_empty_library_items
