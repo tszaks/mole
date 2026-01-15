@@ -18,13 +18,13 @@ resolve_path() {
     [[ -e "$p" ]] || return 1
 
     # macOS 12.3+ and Linux have realpath
-    if realpath "$p" 2>/dev/null; then
+    if realpath "$p" 2> /dev/null; then
         return 0
     fi
 
     # Fallback: use cd -P to resolve directory, then append basename
     local dir base
-    dir=$(cd -P "$(dirname "$p")" 2>/dev/null && pwd) || return 1
+    dir=$(cd -P "$(dirname "$p")" 2> /dev/null && pwd) || return 1
     base=$(basename "$p")
     echo "$dir/$base"
 }
@@ -87,9 +87,9 @@ _detect_cask_via_caskroom_search() {
         [[ -d "$room" ]] || continue
         while IFS= read -r match; do
             [[ -n "$match" ]] || continue
-            token=$(_extract_cask_token_from_path "$match" 2>/dev/null) || continue
+            token=$(_extract_cask_token_from_path "$match" 2> /dev/null) || continue
             [[ -n "$token" ]] && tokens+=("$token")
-        done < <(find "$room" -maxdepth 3 -name "$app_bundle_name" 2>/dev/null)
+        done < <(find "$room" -maxdepth 3 -name "$app_bundle_name" 2> /dev/null)
     done
 
     # Need at least one token
@@ -101,7 +101,7 @@ _detect_cask_via_caskroom_search() {
 
     # Only succeed if exactly one unique token found and it's installed
     if ((${#uniq[@]} == 1)) && [[ -n "${uniq[0]}" ]]; then
-        HOMEBREW_NO_ENV_HINTS=1 brew list --cask 2>/dev/null | grep -qxF "${uniq[0]}" || return 1
+        HOMEBREW_NO_ENV_HINTS=1 brew list --cask 2> /dev/null | grep -qxF "${uniq[0]}" || return 1
         echo "${uniq[0]}"
         return 0
     fi
@@ -115,7 +115,7 @@ _detect_cask_via_symlink_check() {
     [[ -L "$app_path" ]] || return 1
 
     local target
-    target=$(readlink "$app_path" 2>/dev/null) || return 1
+    target=$(readlink "$app_path" 2> /dev/null) || return 1
     _extract_cask_token_from_path "$target"
 }
 
@@ -127,10 +127,10 @@ _detect_cask_via_brew_list() {
     app_name_lower=$(echo "${app_bundle_name%.app}" | LC_ALL=C tr '[:upper:]' '[:lower:]')
 
     local cask_name
-    cask_name=$(HOMEBREW_NO_ENV_HINTS=1 brew list --cask 2>/dev/null | grep -Fix "$app_name_lower") || return 1
+    cask_name=$(HOMEBREW_NO_ENV_HINTS=1 brew list --cask 2> /dev/null | grep -Fix "$app_name_lower") || return 1
 
     # Verify this cask actually owns this app path
-    HOMEBREW_NO_ENV_HINTS=1 brew info --cask "$cask_name" 2>/dev/null | grep -qF "$app_path" || return 1
+    HOMEBREW_NO_ENV_HINTS=1 brew info --cask "$cask_name" 2> /dev/null | grep -qF "$app_path" || return 1
     echo "$cask_name"
 }
 
@@ -185,7 +185,7 @@ brew_uninstall_cask() {
 
     # Verify removal
     local cask_gone=true app_gone=true
-    HOMEBREW_NO_ENV_HINTS=1 brew list --cask 2>/dev/null | grep -qxF "$cask_name" && cask_gone=false
+    HOMEBREW_NO_ENV_HINTS=1 brew list --cask 2> /dev/null | grep -qxF "$cask_name" && cask_gone=false
     [[ -n "$app_path" && -e "$app_path" ]] && app_gone=false
 
     # Success: uninstall worked and both are gone, or already uninstalled

@@ -363,7 +363,7 @@ batch_uninstall_applications() {
 
     # Perform uninstallations with per-app progress feedback
     local success_count=0 failed_count=0
-    local brew_apps_removed=0  # Track successful brew uninstalls for autoremove tip
+    local brew_apps_removed=0 # Track successful brew uninstalls for autoremove tip
     local -a failed_items=()
     local -a success_items=()
     local current_index=0
@@ -573,7 +573,7 @@ batch_uninstall_applications() {
     # Auto-run brew autoremove if Homebrew casks were uninstalled
     if [[ $brew_apps_removed -gt 0 ]]; then
         local autoremove_output removed_count
-        autoremove_output=$(HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2>/dev/null) || true
+        autoremove_output=$(HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2> /dev/null) || true
         removed_count=$(printf '%s\n' "$autoremove_output" | grep -c "^Uninstalling" || true)
         removed_count=${removed_count:-0}
         if [[ $removed_count -gt 0 ]]; then
