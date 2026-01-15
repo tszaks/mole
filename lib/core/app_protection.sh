@@ -12,6 +12,11 @@ readonly MOLE_APP_PROTECTION_LOADED=1
 _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "${MOLE_BASE_LOADED:-}" ]] && source "$_MOLE_CORE_DIR/base.sh"
 
+# Declare WHITELIST_PATTERNS if not already set (used by is_path_whitelisted)
+if ! declare -p WHITELIST_PATTERNS &>/dev/null; then
+    declare -a WHITELIST_PATTERNS=()
+fi
+
 # Application Management
 
 # Critical system components protected from uninstallation
