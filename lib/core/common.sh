@@ -182,6 +182,9 @@ remove_apps_from_dock() {
         full_path=$(cd "$(dirname "$app_path")" 2> /dev/null && pwd || echo "")
         [[ -n "$full_path" ]] && full_path="$full_path/$(basename "$app_path")"
 
+        # URL-encode the path for matching against Dock URLs (spaces -> %20)
+        local encoded_path="${full_path// /%20}"
+
         # Find the index of the app in persistent-apps
         local i=0
         while true; do
@@ -196,8 +199,8 @@ remove_apps_from_dock() {
                 continue
             }
 
-            # Match by full path only to avoid removing apps with the same label.
-            if [[ -n "$full_path" && "$url" == *"$full_path"* ]]; then
+            # Match by URL-encoded path to handle spaces in app names
+            if [[ -n "$encoded_path" && "$url" == *"$encoded_path"* ]]; then
                 if /usr/libexec/PlistBuddy -c "Delete :persistent-apps:$i" "$plist" 2> /dev/null; then
                     changed=true
                     # After deletion, current index i now points to the next item
