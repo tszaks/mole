@@ -66,11 +66,11 @@ _request_password() {
 
         printf "${PURPLE}${ICON_ARROW}${NC} Password: " > "$tty_path"
 
-        # Disable terminal echo to hide password input
-        stty -echo -icanon min 1 time 0 < "$tty_path" 2> /dev/null || true
+        # Disable terminal echo to hide password input (keep canonical mode for reliable input)
+        stty -echo < "$tty_path" 2> /dev/null || true
         IFS= read -r password < "$tty_path" || password=""
         # Restore terminal echo immediately
-        stty echo icanon < "$tty_path" 2> /dev/null || true
+        stty echo < "$tty_path" 2> /dev/null || true
 
         printf "\n" > "$tty_path"
 
