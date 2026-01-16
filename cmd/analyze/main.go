@@ -971,7 +971,9 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 	}
 	selected := m.entries[m.selected]
 	if selected.IsDir {
-		m.history = append(m.history, snapshotFromModel(m))
+		if len(m.history) == 0 || m.history[len(m.history)-1].Path != m.path {
+			m.history = append(m.history, snapshotFromModel(m))
+		}
 		m.path = selected.Path
 		m.selected = 0
 		m.offset = 0
