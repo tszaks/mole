@@ -12,6 +12,50 @@ import (
 	"github.com/shirou/gopsutil/v3/net"
 )
 
+// RingBuffer is a fixed-size circular buffer for float64 values.
+type RingBuffer struct {
+	data  []float64
+	index int // Current insert position (oldest value)
+	size  int // Number of valid elements
+	cap   int // Total capacity
+}
+
+func NewRingBuffer(capacity int) *RingBuffer {
+	return &RingBuffer{
+		data: make([]float64, capacity),
+		cap:  capacity,
+	}
+}
+
+func (rb *RingBuffer) Add(val float64) {
+	rb.data[rb.index] = val
+	rb.index = (rb.index + 1) % rb.cap
+	if rb.size < rb.cap {
+		rb.size++
+	}
+}
+
+// Slice returns the data in chronological order (oldest to newest).
+func (rb *RingBuffer) Slice() []float64 {
+	if rb.size == 0 {
+		return nil
+	}
+	res := make([]float64, rb.size)
+	if rb.size < rb.cap {
+		// Not full yet: data is at [0 : size]
+		copy(res, rb.data[:rb.size])
+	} else {
+		// Full: oldest is at index, then wrapped
+		// data: [4, 5, 1, 2, 3] (cap=5, index=2, oldest=1)
+		// want: [1, 2, 3, 4, 5]
+		// part1: [index:] -> [1, 2, 3]
+		// part2: [:index] -> [4, 5]
+		copy(res, rb.data[rb.index:])
+		copy(res[rb.cap-rb.index:], rb.data[:rb.index])
+	}
+	return res
+}
+
 type MetricsSnapshot struct {
 	CollectedAt    time.Time
 	Host           string
@@ -105,12 +149,13 @@ type NetworkStatus struct {
 	TxRateMBs float64
 	IP        string
 }
+// NetworkHistory holds the global network usage history.
 type NetworkHistory struct {
 	RxHistory []float64
 	TxHistory []float64
 }
 
-const NetworkHistorySize = 20 // number of checks to keep
+const NetworkHistorySize = 120 // Increased history size for wider graph
 
 type ProxyStatus struct {
 	Enabled bool
@@ -161,18 +206,21 @@ type Collector struct {
 	lastBT   []BluetoothDevice
 
 	// Fast metrics (1s).
-	prevNet    map[string]net.IOCountersStat
-	lastNetAt  time.Time
-	netHistory NetworkHistory
-	lastGPUAt  time.Time
-	cachedGPU  []GPUStatus
-	prevDiskIO disk.IOCountersStat
-	lastDiskAt time.Time
+	prevNet      map[string]net.IOCountersStat
+	lastNetAt    time.Time
+	rxHistoryBuf *RingBuffer
+	txHistoryBuf *RingBuffer
+	lastGPUAt    time.Time
+	cachedGPU    []GPUStatus
+	prevDiskIO   disk.IOCountersStat
+	lastDiskAt   time.Time
 }
 
 func NewCollector() *Collector {
 	return &Collector{
-		prevNet: make(map[string]net.IOCountersStat),
+		prevNet:      make(map[string]net.IOCountersStat),
+		rxHistoryBuf: NewRingBuffer(NetworkHistorySize),
+		txHistoryBuf: NewRingBuffer(NetworkHistorySize),
 	}
 }
 
@@ -271,8 +319,11 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 		Disks:          diskStats,
 		DiskIO:         diskIO,
 		Network:        netStats,
-		NetworkHistory: c.netHistory,
-		Proxy:          proxyStats,
+		NetworkHistory: NetworkHistory{
+			RxHistory: c.rxHistoryBuf.Slice(),
+			TxHistory: c.txHistoryBuf.Slice(),
+		},
+		Proxy:        proxyStats,
 		Batteries:      batteryStats,
 		Thermal:        thermalStats,
 		Sensors:        sensorStats,

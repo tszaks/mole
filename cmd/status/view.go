@@ -201,20 +201,7 @@ func getScoreStyle(score int) lipgloss.Style {
 	}
 }
 
-func buildCards(m MetricsSnapshot, _ int) []cardData {
-	cards := []cardData{
-		renderCPUCard(m.CPU, m.Thermal),
-		renderMemoryCard(m.Memory),
-		renderDiskCard(m.Disks, m.DiskIO),
-		renderBatteryCard(m.Batteries, m.Thermal),
-		renderProcessCard(m.TopProcesses),
-		renderNetworkCard(m.Network, m.NetworkHistory, m.Proxy),
-	}
-	if hasSensorData(m.Sensors) {
-		cards = append(cards, renderSensorsCard(m.Sensors))
-	}
-	return cards
-}
+
 
 func hasSensorData(sensors []SensorReading) bool {
 	for _, s := range sensors {
@@ -417,6 +404,21 @@ func renderProcessCard(procs []ProcessInfo) cardData {
 	return cardData{icon: iconProcs, title: "Processes", lines: lines}
 }
 
+func buildCards(m MetricsSnapshot, width int) []cardData {
+	cards := []cardData{
+		renderCPUCard(m.CPU, m.Thermal),
+		renderMemoryCard(m.Memory),
+		renderDiskCard(m.Disks, m.DiskIO),
+		renderBatteryCard(m.Batteries, m.Thermal),
+		renderProcessCard(m.TopProcesses),
+		renderNetworkCard(m.Network, m.NetworkHistory, m.Proxy, width),
+	}
+	if hasSensorData(m.Sensors) {
+		cards = append(cards, renderSensorsCard(m.Sensors))
+	}
+	return cards
+}
+
 func miniBar(percent float64) string {
 	filled := min(int(percent/20), 5)
 	if filled < 0 {
@@ -425,7 +427,7 @@ func miniBar(percent float64) string {
 	return colorizePercent(percent, strings.Repeat("▮", filled)+strings.Repeat("▯", 5-filled))
 }
 
-func renderNetworkCard(netStats []NetworkStatus, history NetworkHistory, proxy ProxyStatus) cardData {
+func renderNetworkCard(netStats []NetworkStatus, history NetworkHistory, proxy ProxyStatus, cardWidth int) cardData {
 	var lines []string
 	var totalRx, totalTx float64
 	var primaryIP string
@@ -441,9 +443,21 @@ func renderNetworkCard(netStats []NetworkStatus, history NetworkHistory, proxy P
 	if len(netStats) == 0 {
 		lines = []string{subtleStyle.Render("Collecting...")}
 	} else {
+		// Calculate dynamic width
+		// Layout: "Down   " (7) + graph + "  " (2) + rate (approx 10-12)
+		// Safe margin: 22 chars.
+		// We target 16 chars to match progressBar implementation for visual consistency.
+		graphWidth := cardWidth - 22
+		if graphWidth < 5 {
+			graphWidth = 5
+		}
+		if graphWidth > 16 {
+			graphWidth = 16 // Match progressBar fixed width
+		}
+
 		// sparkline graphs
-		rxSparkline := sparkline(history.RxHistory, totalRx)
-		txSparkline := sparkline(history.TxHistory, totalTx)
+		rxSparkline := sparkline(history.RxHistory, totalRx, graphWidth)
+		txSparkline := sparkline(history.TxHistory, totalTx, graphWidth)
 		lines = append(lines, fmt.Sprintf("Down   %s  %s", rxSparkline, formatRate(totalRx)))
 		lines = append(lines, fmt.Sprintf("Up     %s  %s", txSparkline, formatRate(totalTx)))
 		// Show proxy and IP on one line.
@@ -477,8 +491,7 @@ func netBar(rate float64) string {
 }
 
 // 8 levels: ▁▂▃▄▅▆▇█
-func sparkline(history []float64, current float64) string {
-	const width = 16
+func sparkline(history []float64, current float64, width int) string {
 	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
 	data := make([]float64, 0, width)
