@@ -572,10 +572,20 @@ batch_uninstall_applications() {
 
     # Auto-run brew autoremove if Homebrew casks were uninstalled
     if [[ $brew_apps_removed -gt 0 ]]; then
+        # Show spinner while checking for orphaned dependencies
+        if [[ -t 1 ]]; then
+            start_inline_spinner "Checking brew dependencies..."
+        fi
+
         local autoremove_output removed_count
         autoremove_output=$(HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2> /dev/null) || true
         removed_count=$(printf '%s\n' "$autoremove_output" | grep -c "^Uninstalling" || true)
         removed_count=${removed_count:-0}
+
+        if [[ -t 1 ]]; then
+            stop_inline_spinner
+        fi
+
         if [[ $removed_count -gt 0 ]]; then
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Cleaned $removed_count orphaned brew dependencies"
             echo ""
