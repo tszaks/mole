@@ -26,7 +26,7 @@
 
 ## Quick Start
 
-**Install via Homebrew — recommended:**
+**Install via Homebrew:**
 
 ```bash
 brew install mole

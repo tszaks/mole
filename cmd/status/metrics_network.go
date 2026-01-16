@@ -83,42 +83,6 @@ func (c *Collector) collectNetwork(now time.Time) ([]NetworkStatus, error) {
 	return result, nil
 }
 
-// Rewriting slightly more of the file to inject history update logic correctly inside the loop.
-// The previous "tail" logic for totalRx history was actually not what I wrote in the *previous* step
-// (Wait, did the `pull` bring in my changes? No, I implemented them, then did `git reset` then `git pull`.
-// The `git pull` brought in the changes from `dev`.
-// In `dev` (which I pulled), the code at the bottom of `collectNetwork` (lines 73-86 in View)
-// seems to be appending to `c.netHistory.RxHistory`.
-// So the merged code uses a GLOBAL history in `MetricsSnapshot` (or `Collector`?)
-// Let's check `metrics.go` again.
-// In the pulled `metrics.go` (before my generic change):
-// type NetworkHistory struct { RxHistory []float64 ... }
-// type Collector struct { ... netHistory NetworkHistory ... }
-// So the user's merged code uses a SINGLE global history struct, not a map per interface.
-// This simplifies things! It aggregates ALL traffic history?
-// Or does it just append the totals?
-// Line 73-77 calculates `totalRx`.
-// Line 78 appends `totalRx` to `c.netHistory.RxHistory`.
-// Yes, it tracks GLOBAL network usage.
-// So I should adapt my RingBuffer to replace `NetworkHistory` struct usage.
-
-// I will replace `collectNetwork` to use the new `map[string][2]*RingBuffer`?
-// User asked to "optimize". Global history is easier for the UI ("Total Down/Up").
-// Per-interface history is more detailed but if UI only shows one sparkline, Global is better.
-// The user said "responsive width... reference Proxy System".
-// And "generic history structure".
-// If I use RingBuffer, I should probably stick to the GLOBAL history design if that's what `dev` has,
-// OR change `Collector` to use `RingBuffer` for that global history.
-//
-// Let's look at `metrics.go` again (my previous edit).
-// I changed `netHistory` to `map[string][2]*RingBuffer`.
-// This contradicts the `dev` branch's `NetworkHistory` (global).
-// I should probably revert to a SINGLE `RingBuffer` pair for global history if the UI expects global.
-// Usage in `view.go` (which I haven't read fully yet after pull) will tell me.
-// If `view.go` uses `m.NetworkHistory.RxHistory`, then it expects global.
-// Let's check `view.go` first before editing `metrics_network.go`.
-
-
 func getInterfaceIPs() map[string]string {
 	result := make(map[string]string)
 	ifaces, err := net.Interfaces()
