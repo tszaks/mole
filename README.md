@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="https://cdn.tw93.fun/pic/cole.png" alt="Mole Logo" width="120" height="120" style="border-radius:50%" />
   <h1>Mole</h1>
   <p><em>Deep clean and optimize your Windows.</em></p>
 </div>
@@ -12,9 +13,8 @@
   <a href="https://t.me/+GclQS9ZnxyI2ODQ1"><img src="https://img.shields.io/badge/chat-Telegram-blueviolet?style=flat-square&logo=Telegram" alt="Telegram"></a>
 </p>
 
-<p align="center">
-  <img src="https://cdn.tw93.fun/img/mole.jpeg" alt="Mole - 95.50GB freed" width="1000" />
-</p>
+> [!WARNING]
+> **Experimental Status**: The Windows version is currently **not mature**. If your computer is critical or contains important data, **please do not use this tool**.
 
 ## Features
 
@@ -36,26 +36,33 @@ Mole is designed for Windows 10/11. This is the native Windows version ported fr
 
 ## Quick Start
 
-Install via PowerShell:
+### Quick Install (One-Liner)
+
+**Recommended:** Run this single command in PowerShell:
 
 ```powershell
-# Download and run installer (recommended)
-iwr -Uri "https://raw.githubusercontent.com/tw93/mole/windows/install.ps1" -OutFile "$env:TEMP\mole-install.ps1"; & "$env:TEMP\mole-install.ps1" -AddToPath
-
-# Or install with specific options
-# -Branch windows for latest code, -Tag v1.17.0 for specific version
-iwr -Uri "https://raw.githubusercontent.com/tw93/mole/windows/install.ps1" -OutFile "$env:TEMP\mole-install.ps1"; & "$env:TEMP\mole-install.ps1" -AddToPath -CreateShortcut
+iwr -useb https://raw.githubusercontent.com/tw93/Mole/windows/quick-install.ps1 | iex
 ```
 
-Or install manually:
+This will automatically download and install Mole with PATH configuration.
+
+### Manual Installation
+
+If you prefer to review the code first or customize the installation:
 
 ```powershell
-# Clone the repository and checkout windows branch
-git clone -b windows https://github.com/tw93/Mole.git
+# Clone the repository
+git clone https://github.com/tw93/Mole.git
 cd Mole
+
+# Switch to windows branch
+git checkout windows
 
 # Run the installer
 .\install.ps1 -AddToPath
+
+# Optional: Create Start Menu shortcut
+.\install.ps1 -AddToPath -CreateShortcut
 ```
 
 Run:
@@ -153,6 +160,7 @@ System: 12/32 GB RAM | 280/460 GB Disk (61%) | Uptime 6d
   ✓ Refresh Windows Search index
   ✓ Clear thumbnail cache
   ✓ Optimize startup programs
+  ✓ System repairs (Font/Icon/Store/Search)
 
 ====================================================================
 System optimization completed
@@ -242,6 +250,9 @@ Custom scan paths can be configured with `mo purge --paths`.
 
 # Create Start Menu shortcut
 .\install.ps1 -AddToPath -CreateShortcut
+
+# Optional: Custom install location
+.\install.ps1 -InstallDir C:\Tools\Mole -AddToPath
 ```
 
 ### Uninstall
@@ -269,12 +280,12 @@ mole/ (windows branch)
 ├── go.mod            # Go module definition
 ├── go.sum            # Go dependencies
 ├── bin/
-│   ├── clean.ps1     # Deep cleanup orchestrator
-│   ├── uninstall.ps1 # Interactive app uninstaller
-│   ├── optimize.ps1  # System optimization
-│   ├── purge.ps1     # Project artifact cleanup
-│   ├── analyze.ps1   # Disk analyzer wrapper
-│   └── status.ps1    # Status monitor wrapper
+301: │   ├── clean.ps1     # Deep cleanup orchestrator
+302: │   ├── uninstall.ps1 # Interactive app uninstaller
+303: │   ├── optimize.ps1  # System optimization
+304: │   ├── purge.ps1     # Project artifact cleanup
+305: │   ├── analyze.ps1   # Disk analyzer wrapper
+306: │   └── status.ps1    # Status monitor wrapper
 ├── cmd/
 │   ├── analyze/      # Disk analyzer (Go TUI)
 │   │   └── main.go
@@ -319,6 +330,33 @@ go build -o bin/status.exe ./cmd/status/
 - Love Mole? [Buy Tw93 an ice-cold Coke](https://miaoyan.app/cats.html?name=Mole) to keep the project alive and kicking! 🥤
 
 ## Community Love
+
+### Phase 1: Core Infrastructure ✅
+
+- [x] `install.ps1` - Windows installer
+- [x] `mole.ps1` - Main CLI entry point
+- [x] `lib/core/*` - Core utility libraries
+
+### Phase 2: Cleanup Features ✅
+
+- [x] `bin/clean.ps1` - Deep cleanup orchestrator
+- [x] `bin/uninstall.ps1` - App removal with leftover detection
+- [x] `bin/optimize.ps1` - System optimization
+- [x] `bin/purge.ps1` - Project artifact cleanup
+- [x] `lib/clean/*` - Cleanup modules
+
+### Phase 3: TUI Tools ✅
+
+- [x] `cmd/analyze/` - Disk usage analyzer (Go)
+- [x] `cmd/status/` - Real-time system monitor (Go)
+- [x] `bin/analyze.ps1` - Analyzer wrapper
+- [x] `bin/status.ps1` - Status wrapper
+
+### Phase 4: Testing & CI (Planned)
+
+- [ ] `tests/` - Pester tests
+- [ ] GitHub Actions workflows
+- [ ] `scripts/build.ps1` - Build automation
 
 Mole wouldn't be possible without these amazing contributors. They've built countless features that make Mole what it is today. Go follow them! ❤️
 

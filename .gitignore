@@ -14,3 +14,8 @@ bin/*.exe
 # Test artifacts
 *.test
 coverage.out
+
+# Main branch specific files
+ANTIGRAVITY.md
+CLAUDE.md
+windows-readme-update.md

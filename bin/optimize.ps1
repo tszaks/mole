@@ -11,6 +11,11 @@ param(
     [switch]$DebugMode,
     
     [Alias('h')]
+
+    [Alias('debug')]
+    [switch]$DebugMode,
+
+    [Alias('help')]
     [switch]$ShowHelp
 )
 
@@ -52,16 +57,15 @@ function Show-OptimizeHelp {
     Write-Host "  --help       Show this help message"
     Write-Host ""
     Write-Host "$esc[33mWhat it does:$esc[0m"
-    Write-Host "  - Disk optimization (TRIM for SSD, defrag for HDD)"
-    Write-Host "  - DNS cache flush"
-    Write-Host "  - Network stack optimization"
-    Write-Host "  - Font cache rebuild"
-    Write-Host "  - Icon cache rebuild"
-    Write-Host "  - Windows Search optimization"
-    Write-Host "  - Windows Store cache reset"
-    Write-Host "  - Startup program analysis"
-    Write-Host "  - Disk health check"
-    Write-Host "  - Windows Update status"
+    Write-Host "  - Disk optimization (TRIM/Defrag)"
+    Write-Host "  - Windows Search & Update check"
+    Write-Host "  - Network & DNS optimization"
+    Write-Host "  - System cache cleanup & repairs"
+    Write-Host "    (Font cache, Icon cache, Store cache)"
+    Write-Host ""
+    Write-Host "$esc[33mExamples:$esc[0m"
+    Write-Host "  mo optimize              # Run all optimizations"
+    Write-Host "  mo optimize --dry-run    # Preview what would happen"
     Write-Host ""
     Write-Host "$esc[33mExamples:$esc[0m"
     Write-Host "  mo optimize            # Run all optimizations"
@@ -78,38 +82,38 @@ function Get-SystemHealth {
     .SYNOPSIS
         Collect system health metrics
     #>
-    
+
     $health = @{}
-    
+
     # Memory info
     $os = Get-WmiObject Win32_OperatingSystem
     $health.MemoryTotalGB = [Math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
     $health.MemoryUsedGB = [Math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1MB, 1)
     $health.MemoryUsedPercent = [Math]::Round((($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize) * 100, 0)
-    
+
     # Disk info
     $disk = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='$env:SystemDrive'"
     $health.DiskTotalGB = [Math]::Round($disk.Size / 1GB, 0)
     $health.DiskUsedGB = [Math]::Round(($disk.Size - $disk.FreeSpace) / 1GB, 0)
     $health.DiskUsedPercent = [Math]::Round((($disk.Size - $disk.FreeSpace) / $disk.Size) * 100, 0)
-    
+
     # Uptime
     $uptime = (Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
     $health.UptimeDays = [Math]::Round($uptime.TotalDays, 1)
-    
+
     # CPU info
     $cpu = Get-WmiObject Win32_Processor
     $health.CPUName = $cpu.Name
     $health.CPUCores = $cpu.NumberOfLogicalProcessors
-    
+
     return $health
 }
 
 function Show-SystemHealth {
     param([hashtable]$Health)
-    
+
     $esc = [char]27
-    
+
     Write-Host "$esc[34m$($script:Icons.Admin)$esc[0m System  " -NoNewline
     Write-Host "$($Health.MemoryUsedGB)/$($Health.MemoryTotalGB)GB RAM | " -NoNewline
     Write-Host "$($Health.DiskUsedGB)/$($Health.DiskTotalGB)GB Disk | " -NoNewline
@@ -125,28 +129,28 @@ function Optimize-DiskDrive {
     .SYNOPSIS
         Optimize disk (defrag for HDD, TRIM for SSD)
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Disk Optimization$esc[0m"
-    
+
     if (-not (Test-IsAdmin)) {
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Requires administrator privileges"
         return
     }
-    
+
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would optimize $env:SystemDrive"
         $script:OptimizationsApplied++
         return
     }
-    
+
     try {
         # Check if SSD or HDD
         $diskNumber = (Get-Partition -DriveLetter $env:SystemDrive[0]).DiskNumber
         $mediaType = (Get-PhysicalDisk | Where-Object { $_.DeviceId -eq $diskNumber }).MediaType
-        
+
         if ($mediaType -eq "SSD") {
             Write-Host "  Running TRIM on SSD..."
             $null = Optimize-Volume -DriveLetter $env:SystemDrive[0] -ReTrim -ErrorAction Stop
@@ -169,27 +173,27 @@ function Optimize-SearchIndex {
     .SYNOPSIS
         Rebuild Windows Search index if needed
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Windows Search$esc[0m"
-    
+
     $searchService = Get-Service -Name WSearch -ErrorAction SilentlyContinue
-    
+
     if (-not $searchService) {
         Write-Host "  $esc[90mWindows Search service not found$esc[0m"
         return
     }
-    
+
     if ($searchService.Status -ne 'Running') {
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Windows Search service is not running"
-        
+
         if ($script:DryRun) {
             Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would start search service"
             return
         }
-        
+
         try {
             Start-Service -Name WSearch -ErrorAction Stop
             Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Started Windows Search service"
@@ -209,18 +213,18 @@ function Clear-DnsCache {
     .SYNOPSIS
         Clear DNS resolver cache
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) DNS Cache$esc[0m"
-    
+
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would flush DNS cache"
         $script:OptimizationsApplied++
         return
     }
-    
+
     try {
         Clear-DnsClientCache -ErrorAction Stop
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m DNS cache flushed"
@@ -236,24 +240,24 @@ function Optimize-Network {
     .SYNOPSIS
         Network stack optimization
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Network Optimization$esc[0m"
-    
+
     if (-not (Test-IsAdmin)) {
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Requires administrator privileges"
         return
     }
-    
+
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would reset Winsock catalog"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would reset TCP/IP stack"
         $script:OptimizationsApplied += 2
         return
     }
-    
+
     try {
         # Reset Winsock
         $null = netsh winsock reset 2>&1
@@ -263,7 +267,7 @@ function Optimize-Network {
     catch {
         Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Winsock reset failed"
     }
-    
+
     try {
         # Flush ARP cache
         $null = netsh interface ip delete arpcache 2>&1
@@ -280,37 +284,37 @@ function Get-StartupPrograms {
     .SYNOPSIS
         Analyze startup programs
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Startup Programs$esc[0m"
-    
+
     $startupPaths = @(
         "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
         "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"
     )
-    
+
     $startupCount = 0
-    
+
     foreach ($path in $startupPaths) {
         if (Test-Path $path) {
             $items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
-            $props = @($items.PSObject.Properties | Where-Object { 
+            $props = @($items.PSObject.Properties | Where-Object {
                 $_.Name -notin @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider')
             })
             $startupCount += $props.Count
         }
     }
-    
+
     # Also check startup folder
     $startupFolder = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
     if (Test-Path $startupFolder) {
         $startupFiles = @(Get-ChildItem -Path $startupFolder -File -ErrorAction SilentlyContinue)
         $startupCount += $startupFiles.Count
     }
-    
+
     if ($startupCount -gt 10) {
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m $startupCount startup programs (high)"
         Write-Host "  $esc[90mConsider disabling unnecessary startup items in Task Manager$esc[0m"
@@ -330,31 +334,31 @@ function Test-SystemFiles {
     .SYNOPSIS
         Run System File Checker (SFC)
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) System File Verification$esc[0m"
-    
+
     if (-not (Test-IsAdmin)) {
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Requires administrator privileges"
         return
     }
-    
+
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would run System File Checker"
         return
     }
-    
+
     Write-Host "  Running System File Checker (this may take several minutes)..."
-    
+
     try {
         $sfcResult = Start-Process -FilePath "sfc.exe" -ArgumentList "/scannow" `
             -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$env:TEMP\sfc_output.txt" -ErrorAction Stop
-        
+
         $output = Get-Content "$env:TEMP\sfc_output.txt" -ErrorAction SilentlyContinue
         Remove-Item "$env:TEMP\sfc_output.txt" -Force -ErrorAction SilentlyContinue
-        
+
         if ($output -match "did not find any integrity violations") {
             Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m No integrity violations found"
         }
@@ -381,19 +385,19 @@ function Test-DiskHealth {
     .SYNOPSIS
         Check disk health status
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Disk Health$esc[0m"
-    
+
     try {
         $disks = Get-PhysicalDisk -ErrorAction Stop
-        
+
         foreach ($disk in $disks) {
             $status = $disk.HealthStatus
             $name = $disk.FriendlyName
-            
+
             if ($status -eq "Healthy") {
                 Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m $name - Healthy"
             }
@@ -419,23 +423,23 @@ function Test-WindowsUpdate {
     .SYNOPSIS
         Check Windows Update status
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Windows Update$esc[0m"
-    
+
     try {
         $updateSession = New-Object -ComObject Microsoft.Update.Session
         $updateSearcher = $updateSession.CreateUpdateSearcher()
-        
+
         Write-Host "  Checking for updates..."
         $searchResult = $updateSearcher.Search("IsInstalled=0")
-        
-        $importantUpdates = $searchResult.Updates | Where-Object { 
-            $_.MsrcSeverity -in @('Critical', 'Important') 
+
+        $importantUpdates = $searchResult.Updates | Where-Object {
+            $_.MsrcSeverity -in @('Critical', 'Important')
         }
-        
+
         if ($importantUpdates.Count -gt 0) {
             Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m $($importantUpdates.Count) important updates available"
             Write-Host "  $esc[90mRun Windows Update to install$esc[0m"
@@ -465,24 +469,24 @@ function Repair-FontCache {
         Stops the font cache service, clears the cache files, and restarts.
         Fixes issues with fonts not displaying correctly or missing fonts.
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Font Cache Rebuild$esc[0m"
-    
+
     if (-not (Test-IsAdmin)) {
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Requires administrator privileges"
         return
     }
-    
+
     # Font cache locations
     $fontCachePaths = @(
         "$env:LOCALAPPDATA\Microsoft\Windows\Fonts"
         "$env:WINDIR\ServiceProfiles\LocalService\AppData\Local\FontCache"
         "$env:WINDIR\System32\FNTCACHE.DAT"
     )
-    
+
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would stop Windows Font Cache Service"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would delete font cache files"
@@ -490,21 +494,21 @@ function Repair-FontCache {
         $script:OptimizationsApplied++
         return
     }
-    
+
     try {
         # Stop font cache service
         Write-Host "  $esc[90mStopping Font Cache Service...$esc[0m"
         Stop-Service -Name "FontCache" -Force -ErrorAction SilentlyContinue
         Stop-Service -Name "FontCache3.0.0.0" -Force -ErrorAction SilentlyContinue
-        
+
         # Wait a moment for service to stop
         Start-Sleep -Seconds 2
-        
+
         # Delete font cache files
         foreach ($path in $fontCachePaths) {
             if (Test-Path $path) {
                 if (Test-Path $path -PathType Container) {
-                    Get-ChildItem -Path $path -Recurse -Force -ErrorAction SilentlyContinue | 
+                    Get-ChildItem -Path $path -Recurse -Force -ErrorAction SilentlyContinue |
                         Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
                 }
                 else {
@@ -512,12 +516,12 @@ function Repair-FontCache {
                 }
             }
         }
-        
+
         # Restart font cache service
         Write-Host "  $esc[90mRestarting Font Cache Service...$esc[0m"
         Start-Service -Name "FontCache" -ErrorAction SilentlyContinue
         Start-Service -Name "FontCache3.0.0.0" -ErrorAction SilentlyContinue
-        
+
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Font cache rebuilt successfully"
         Write-Host "  $esc[90mNote: Some apps may need restart to see changes$esc[0m"
         $script:OptimizationsApplied++
@@ -536,14 +540,14 @@ function Repair-IconCache {
         Clears the icon cache database files, forcing Windows to rebuild them.
         Fixes issues with missing, corrupted, or outdated icons.
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Icon Cache Rebuild$esc[0m"
-    
+
     $iconCachePath = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
-    
+
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would stop Explorer"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would delete icon cache files (iconcache_*.db)"
@@ -551,36 +555,36 @@ function Repair-IconCache {
         $script:OptimizationsApplied++
         return
     }
-    
+
     try {
         Write-Host "  $esc[90mStopping Explorer...$esc[0m"
         Stop-Process -Name "explorer" -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
-        
+
         # Delete icon cache files
         $iconCacheFiles = Get-ChildItem -Path $iconCachePath -Filter "iconcache_*.db" -Force -ErrorAction SilentlyContinue
         $thumbCacheFiles = Get-ChildItem -Path $iconCachePath -Filter "thumbcache_*.db" -Force -ErrorAction SilentlyContinue
-        
+
         $deletedCount = 0
         foreach ($file in $iconCacheFiles) {
             Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
             $deletedCount++
         }
-        
+
         foreach ($file in $thumbCacheFiles) {
             Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
             $deletedCount++
         }
-        
+
         $systemIconCache = "$env:LOCALAPPDATA\IconCache.db"
         if (Test-Path $systemIconCache) {
             Remove-Item -Path $systemIconCache -Force -ErrorAction SilentlyContinue
             $deletedCount++
         }
-        
+
         Write-Host "  $esc[90mRestarting Explorer...$esc[0m"
         Start-Process "explorer.exe"
-        
+
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Icon cache rebuilt ($deletedCount files cleared)"
         Write-Host "  $esc[90mNote: Icons will rebuild gradually as you browse$esc[0m"
         $script:OptimizationsApplied++
@@ -599,19 +603,19 @@ function Repair-SearchIndex {
         Stops the Windows Search service, deletes the search index, and restarts.
         Fixes issues with search not finding files or returning incorrect results.
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Windows Search Index Reset$esc[0m"
-    
+
     if (-not (Test-IsAdmin)) {
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Requires administrator privileges"
         return
     }
-    
+
     $searchIndexPath = "$env:ProgramData\Microsoft\Search\Data\Applications\Windows"
-    
+
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would stop Windows Search service"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would delete search index database"
@@ -619,20 +623,20 @@ function Repair-SearchIndex {
         $script:OptimizationsApplied++
         return
     }
-    
+
     try {
         Write-Host "  $esc[90mStopping Windows Search service...$esc[0m"
         Stop-Service -Name "WSearch" -Force -ErrorAction Stop
         Start-Sleep -Seconds 3
-        
+
         if (Test-Path $searchIndexPath) {
             Write-Host "  $esc[90mDeleting search index...$esc[0m"
             Remove-Item -Path "$searchIndexPath\*" -Recurse -Force -ErrorAction SilentlyContinue
         }
-        
+
         Write-Host "  $esc[90mRestarting Windows Search service...$esc[0m"
         Start-Service -Name "WSearch" -ErrorAction Stop
-        
+
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Search index reset successfully"
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Indexing will rebuild in the background (may take hours)"
         $script:OptimizationsApplied++
@@ -651,23 +655,23 @@ function Repair-StoreCache {
         Runs wsreset.exe to clear the Windows Store cache.
         Fixes issues with Store apps not installing, updating, or launching.
     #>
-    
+
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[34m$($script:Icons.Arrow) Windows Store Cache Reset$esc[0m"
-    
+
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would run wsreset.exe"
         $script:OptimizationsApplied++
         return
     }
-    
+
     try {
         Write-Host "  $esc[90mResetting Windows Store cache...$esc[0m"
         $wsreset = Start-Process -FilePath "wsreset.exe" -PassThru -WindowStyle Hidden
         $wsreset.WaitForExit(30000)
-        
+
         if ($wsreset.ExitCode -eq 0) {
             Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Windows Store cache reset successfully"
         }
@@ -687,7 +691,7 @@ function Repair-StoreCache {
 
 function Show-OptimizeSummary {
     $esc = [char]27
-    
+
     Write-Host ""
     Write-Host "$esc[1;35m" -NoNewline
     if ($script:DryRun) {
@@ -698,18 +702,22 @@ function Show-OptimizeSummary {
     }
     Write-Host "$esc[0m"
     Write-Host ""
-    
+
     if ($script:DryRun) {
         Write-Host "  Would apply $esc[33m$($script:OptimizationsApplied)$esc[0m optimizations"
         Write-Host "  Run without --dry-run to apply changes"
     }
     else {
         Write-Host "  Optimizations applied: $esc[32m$($script:OptimizationsApplied)$esc[0m"
-        
+
+        if ($script:RepairsApplied -gt 0) {
+            Write-Host "  Repairs applied: $esc[32m$($script:RepairsApplied)$esc[0m"
+        }
+
         if ($script:IssuesFixed -gt 0) {
             Write-Host "  Issues fixed: $esc[32m$($script:IssuesFixed)$esc[0m"
         }
-        
+
         if ($script:IssuesFound -gt 0) {
             Write-Host "  Issues found: $esc[33m$($script:IssuesFound)$esc[0m"
         }
@@ -717,7 +725,7 @@ function Show-OptimizeSummary {
             Write-Host "  System health: $esc[32mGood$esc[0m"
         }
     }
-    
+
     Write-Host ""
 }
 
@@ -731,49 +739,61 @@ function Main {
         $env:MOLE_DEBUG = "1"
         $DebugPreference = "Continue"
     }
-    
+
     # Show help
     if ($ShowHelp) {
         Show-OptimizeHelp
         return
     }
-    
+
     # Set dry-run mode
     $script:DryRun = $DryRun
-    
+
     # Clear screen
     Clear-Host
-    
+
     $esc = [char]27
     Write-Host ""
     Write-Host "$esc[1;35mOptimize and Maintain$esc[0m"
     Write-Host ""
-    
+
     if ($script:DryRun) {
         Write-Host "$esc[33m$($script:Icons.DryRun) DRY RUN MODE$esc[0m - No changes will be made"
         Write-Host ""
     }
-    
+
     # Show system health
     $health = Get-SystemHealth
     Show-SystemHealth -Health $health
-    
+
     # Run optimizations
     Optimize-DiskDrive
     Clear-DnsCache
     Optimize-Network
-    
-    # Run cache rebuilds (repairs integrated into optimize)
-    Repair-FontCache
-    Repair-IconCache
-    Optimize-SearchIndex
-    Repair-StoreCache
-    
+
     # Run health checks
     Get-StartupPrograms
     Test-DiskHealth
     Test-WindowsUpdate
-    
+
+    # Run repairs (consolidated)
+    Write-Host ""
+    Write-Host "$esc[34m$($script:Icons.Arrow) System Repairs$esc[0m"
+
+    Repair-FontCache
+    Repair-StoreCache
+    Repair-SearchIndex
+    Repair-IconCache
+
+    # System file check is slow, ask first
+    if (-not $script:DryRun -and (Test-IsAdmin)) {
+        Write-Host ""
+        $runSfc = Read-Host "Run System File Checker? This may take several minutes (y/N)"
+        if ($runSfc -eq 'y' -or $runSfc -eq 'Y') {
+            Test-SystemFiles
+        }
+    }
+
     # Summary
     Show-OptimizeSummary
 }

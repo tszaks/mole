@@ -11,6 +11,13 @@ param(
     [switch]$Paths,
     
     [Alias('h')]
+    [Alias('debug')]
+    [switch]$DebugMode,
+
+    [Alias('paths')]
+    [switch]$Paths,
+
+    [Alias('help')]
     [switch]$ShowHelp
 )
 
