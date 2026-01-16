@@ -201,7 +201,6 @@ paginated_multi_select() {
         export MOLE_MENU_SORT_MODE="$sort_mode"
         export MOLE_MENU_SORT_REVERSE="$sort_reverse"
         restore_terminal
-        unset MOLE_READ_KEY_FORCE_CHAR
     }
 
     # Interrupt handler
@@ -595,7 +594,6 @@ paginated_multi_select() {
             "QUIT")
                 if [[ "$filter_mode" == "true" ]]; then
                     filter_mode="false"
-                    unset MOLE_READ_KEY_FORCE_CHAR
                     filter_query=""
                     applied_query=""
                     top_index=0
@@ -764,7 +762,9 @@ paginated_multi_select() {
                 if [[ "$filter_mode" == "true" ]]; then
                     local ch="${key#CHAR:}"
                     filter_query+="$ch"
+                    rebuild_view
                     need_full_redraw=true
+                    continue
                 elif [[ "$has_metadata" == "true" ]]; then
                     # Cycle sort mode (only if metadata available)
                     case "$sort_mode" in
@@ -789,7 +789,6 @@ paginated_multi_select() {
                 else
                     # Enter filter mode
                     filter_mode="true"
-                    export MOLE_READ_KEY_FORCE_CHAR=1
                     filter_query=""
                     top_index=0
                     cursor_pos=0
@@ -815,6 +814,9 @@ paginated_multi_select() {
                     fi
                 else
                     filter_query+="j"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 fi
                 ;;
             "CHAR:k")
@@ -829,17 +831,66 @@ paginated_multi_select() {
                     fi
                 else
                     filter_query+="k"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
+                fi
+                ;;
+            "TOUCHID")
+                if [[ "$filter_mode" == "true" ]]; then
+                    filter_query+="t"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
+                fi
+                ;;
+            "RIGHT")
+                if [[ "$filter_mode" == "true" ]]; then
+                    filter_query+="l"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
+                fi
+                ;;
+            "LEFT")
+                if [[ "$filter_mode" == "true" ]]; then
+                    filter_query+="h"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
+                fi
+                ;;
+            "MORE")
+                if [[ "$filter_mode" == "true" ]]; then
+                    filter_query+="m"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
+                fi
+                ;;
+            "UPDATE")
+                if [[ "$filter_mode" == "true" ]]; then
+                    filter_query+="u"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 fi
                 ;;
             "CHAR:f" | "CHAR:F")
                 if [[ "$filter_mode" == "true" ]]; then
                     filter_query+="${key#CHAR:}"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 fi
                 # F is currently unbound in normal mode to avoid conflict with Refresh (R)
                 ;;
             "CHAR:r" | "CHAR:R")
                 if [[ "$filter_mode" == "true" ]]; then
                     filter_query+="${key#CHAR:}"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 else
                     # Trigger Refresh signal (Unified with Analyze)
                     cleanup
@@ -849,6 +900,9 @@ paginated_multi_select() {
             "CHAR:o" | "CHAR:O")
                 if [[ "$filter_mode" == "true" ]]; then
                     filter_query+="${key#CHAR:}"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 elif [[ "$has_metadata" == "true" ]]; then
                     # O toggles reverse order (Unified Sort Order)
                     if [[ "$sort_reverse" == "true" ]]; then
@@ -864,13 +918,10 @@ paginated_multi_select() {
                 # Backspace filter
                 if [[ "$filter_mode" == "true" && -n "$filter_query" ]]; then
                     filter_query="${filter_query%?}"
-                    # Fast footer-only update in filter mode (avoid full redraw)
-                    local filter_status="${filter_query:-_}"
-                    local footer_row=$((items_per_page + 4))
-                    printf "\033[%d;1H\033[2K" "$footer_row" >&2
-                    local sep=" ${GRAY}|${NC} "
-                    printf "%s" "${GRAY}Search: ${filter_status}${NC}${sep}${GRAY}Delete${NC}${sep}${GRAY}Enter Confirm${NC}${sep}${GRAY}ESC Cancel${NC}" >&2
-                    printf "\033[%d;1H\033[2K" "$((footer_row + 1))" >&2
+                    # Rebuild view to apply filter in real-time
+                    rebuild_view
+                    # Trigger redraw and continue to avoid drain_pending_input
+                    need_full_redraw=true
                     continue
                 fi
                 ;;
@@ -880,13 +931,10 @@ paginated_multi_select() {
                     # avoid accidental leading spaces
                     if [[ -n "$filter_query" || "$ch" != " " ]]; then
                         filter_query+="$ch"
-                        # Fast footer-only update in filter mode (avoid full redraw)
-                        local filter_status="${filter_query:-_}"
-                        local footer_row=$((items_per_page + 4))
-                        printf "\033[%d;1H\033[2K" "$footer_row" >&2
-                        local sep=" ${GRAY}|${NC} "
-                        printf "%s" "${GRAY}Search: ${filter_status}${NC}${sep}${GRAY}Delete${NC}${sep}${GRAY}Enter Confirm${NC}${sep}${GRAY}ESC Cancel${NC}" >&2
-                        printf "\033[%d;1H\033[2K" "$((footer_row + 1))" >&2
+                        # Rebuild view to apply filter in real-time
+                        rebuild_view
+                        # Trigger redraw and continue to avoid drain_pending_input
+                        need_full_redraw=true
                         continue
                     fi
                 fi
@@ -895,17 +943,9 @@ paginated_multi_select() {
                 if [[ "$filter_mode" == "true" ]]; then
                     applied_query="$filter_query"
                     filter_mode="false"
-                    unset MOLE_READ_KEY_FORCE_CHAR
-                    top_index=0
-                    cursor_pos=0
-
-                    searching="true"
-                    draw_menu           # paint "searching..."
-                    drain_pending_input # drop any extra keypresses (e.g., double-Enter)
+                    # Preserve cursor/top_index so navigation during search is respected
                     rebuild_view
-                    searching="false"
-                    draw_menu
-                    continue
+                    # Fall through to confirmation logic
                 fi
                 # In normal mode: smart Enter behavior
                 # 1. Check if any items are already selected

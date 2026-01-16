@@ -93,9 +93,14 @@ Even with `sudo`, these paths are **unconditionally blocked**:
 /bin, /sbin, /usr    # Core binaries
 /etc, /var           # System configuration
 /Library/Extensions  # Kernel extensions
+/private             # System-private directories
 ```
 
-**Exception:** `/System/Library/Caches/com.apple.coresymbolicationd/data` (safe, rebuildable cache).
+**Exceptions:**
+
+- `/System/Library/Caches/com.apple.coresymbolicationd/data` (safe, rebuildable cache)
+- `/private/tmp`, `/private/var/tmp`, `/private/var/log`, `/private/var/folders`
+- `/private/var/db/diagnostics`, `/private/var/db/DiagnosticPipeline`, `/private/var/db/powerlog`, `/private/var/db/reportmemoryexception`
 
 **Code:** `lib/core/file_ops.sh:60-78`
 
@@ -161,6 +166,7 @@ For user-selected app removal:
 - **Safety Limit:** 3-char minimum (prevents "Go" matching "Google")
 - **Disabled:** Fuzzy matching and wildcard expansion for short names.
 - **User Confirmation:** Required before deletion.
+- **Receipt Scans:** BOM-derived files are restricted to app-specific prefixes (e.g., `/Applications`, `/Library/Application Support`). Shared directories like `/Library/Frameworks` are **excluded** to prevent collateral damage.
 
 **Code:** `lib/clean/apps.sh:uninstall_app()`
 

@@ -12,6 +12,11 @@ readonly MOLE_APP_PROTECTION_LOADED=1
 _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "${MOLE_BASE_LOADED:-}" ]] && source "$_MOLE_CORE_DIR/base.sh"
 
+# Declare WHITELIST_PATTERNS if not already set (used by is_path_whitelisted)
+if ! declare -p WHITELIST_PATTERNS &> /dev/null; then
+    declare -a WHITELIST_PATTERNS=()
+fi
+
 # Application Management
 
 # Critical system components protected from uninstallation
@@ -872,12 +877,24 @@ find_app_system_files() {
         done < <(command find /private/var/db/receipts -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
     fi
 
+    local receipt_files=""
+    receipt_files=$(find_app_receipt_files "$bundle_id")
+
+    local combined_files=""
     if [[ ${#system_files[@]} -gt 0 ]]; then
-        printf '%s\n' "${system_files[@]}"
+        combined_files=$(printf '%s\n' "${system_files[@]}")
     fi
 
-    # Find files from receipts (Deep Scan)
-    find_app_receipt_files "$bundle_id"
+    if [[ -n "$receipt_files" ]]; then
+        if [[ -n "$combined_files" ]]; then
+            combined_files+=$'\n'
+        fi
+        combined_files+="$receipt_files"
+    fi
+
+    if [[ -n "$combined_files" ]]; then
+        printf '%s\n' "$combined_files" | sort -u
+    fi
 }
 
 # Locate files using installation receipts (BOM)
@@ -923,42 +940,35 @@ find_app_receipt_files() {
                 # ------------------------------------------------------------------------
                 local is_safe=false
 
-                # Whitelisted prefixes
+                # Whitelisted prefixes (exclude /Users, /usr, /opt)
                 case "$clean_path" in
                     /Applications/*) is_safe=true ;;
-                    /Users/*) is_safe=true ;;
-                    /usr/local/*) is_safe=true ;;
-                    /opt/*) is_safe=true ;;
-                    /Library/*)
-                        # Filter sub-paths in /Library to avoid system damage
-                        # Allow safely: Application Support, Caches, Logs, Preferences
-                        case "$clean_path" in
-                            /Library/Application\ Support/*) is_safe=true ;;
-                            /Library/Caches/*) is_safe=true ;;
-                            /Library/Logs/*) is_safe=true ;;
-                            /Library/Preferences/*) is_safe=true ;;
-                            /Library/PrivilegedHelperTools/*) is_safe=true ;;
-                            /Library/LaunchAgents/*) is_safe=true ;;
-                            /Library/LaunchDaemons/*) is_safe=true ;;
-                            /Library/Internet\ Plug-Ins/*) is_safe=true ;;
-                            /Library/Audio/Plug-Ins/*) is_safe=true ;;
-                            /Library/Extensions/*) is_safe=false ;; # Default unsafe
-                            *) is_safe=false ;;
-                        esac
-                        ;;
+                    /Library/Application\ Support/*) is_safe=true ;;
+                    /Library/Caches/*) is_safe=true ;;
+                    /Library/Logs/*) is_safe=true ;;
+                    /Library/Preferences/*) is_safe=true ;;
+                    /Library/LaunchAgents/*) is_safe=true ;;
+                    /Library/LaunchDaemons/*) is_safe=true ;;
+                    /Library/PrivilegedHelperTools/*) is_safe=true ;;
+                    /Library/Extensions/*) is_safe=false ;;
+                    *) is_safe=false ;;
                 esac
 
                 # Hard blocks
                 case "$clean_path" in
-                    /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/*) is_safe=false ;;
+                    /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/* | /private/*) is_safe=false ;;
                 esac
 
                 if [[ "$is_safe" == "true" && -e "$clean_path" ]]; then
-                    # If lsbom lists /Applications, skip to avoid system damage.
-                    # Extra check: path must be deep enough?
-                    # If path is just "/Applications", skip.
-                    if [[ "$clean_path" == "/Applications" || "$clean_path" == "/Library" || "$clean_path" == "/usr/local" ]]; then
+                    # Skip top-level directories
+                    if [[ "$clean_path" == "/Applications" || "$clean_path" == "/Library" ]]; then
                         continue
+                    fi
+
+                    if declare -f should_protect_path > /dev/null 2>&1; then
+                        if should_protect_path "$clean_path"; then
+                            continue
+                        fi
                     fi
 
                     receipt_files+=("$clean_path")
