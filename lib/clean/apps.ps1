@@ -403,6 +403,269 @@ function Clear-GamingPlatformCaches {
 }
 
 # ============================================================================
+# Game Media Cleanup (Replays, Screenshots, Recordings)
+# ============================================================================
+
+function Clear-GameMediaFiles {
+    <#
+    .SYNOPSIS
+        Clean old game replays, screenshots, and recordings
+    .DESCRIPTION
+        Removes old media files from various gaming sources:
+        - NVIDIA ShadowPlay/Highlights
+        - AMD ReLive
+        - Xbox Game Bar captures
+        - Steam screenshots
+        - OBS recordings
+        - Windows Game DVR
+        - GeForce Experience
+        
+        By default, only removes files older than 90 days.
+        User media in standard Pictures/Videos folders is NOT touched
+        unless it's in a game-specific subfolder.
+    .PARAMETER DaysOld
+        Minimum age of files to remove (default: 90 days)
+    #>
+    param(
+        [int]$DaysOld = 90
+    )
+    
+    Start-Section "Game media (>${DaysOld}d old)"
+    
+    $cutoffDate = (Get-Date).AddDays(-$DaysOld)
+    $mediaExtensions = @('*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.webm', '*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif')
+    
+    # -------------------------------------------------------------------------
+    # NVIDIA ShadowPlay / GeForce Experience
+    # -------------------------------------------------------------------------
+    $nvidiaPaths = @(
+        "$env:USERPROFILE\Videos\NVIDIA"                    # Default ShadowPlay location
+        "$env:USERPROFILE\Videos\ShadowPlay"                # Alternative name
+        "$env:USERPROFILE\Videos\GeForce Experience"        # GeForce Experience recordings
+    )
+    
+    foreach ($basePath in $nvidiaPaths) {
+        if (Test-Path $basePath) {
+            foreach ($ext in $mediaExtensions) {
+                $oldFiles = Get-ChildItem -Path $basePath -Filter $ext -File -Recurse -ErrorAction SilentlyContinue |
+                            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+                if ($oldFiles) {
+                    $paths = $oldFiles | ForEach-Object { $_.FullName }
+                    Remove-SafeItems -Paths $paths -Description "NVIDIA recordings (>${DaysOld}d)"
+                }
+            }
+        }
+    }
+    
+    # NVIDIA Highlights (game-specific clips)
+    $highlightsPath = "$env:USERPROFILE\Videos\NVIDIA\Highlights"
+    if (Test-Path $highlightsPath) {
+        $oldHighlights = Get-ChildItem -Path $highlightsPath -File -Recurse -ErrorAction SilentlyContinue |
+                         Where-Object { $_.LastWriteTime -lt $cutoffDate -and $_.Extension -match '\.(mp4|mkv|avi|mov)$' }
+        if ($oldHighlights) {
+            $paths = $oldHighlights | ForEach-Object { $_.FullName }
+            Remove-SafeItems -Paths $paths -Description "NVIDIA Highlights (>${DaysOld}d)"
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # AMD ReLive / Radeon Software
+    # -------------------------------------------------------------------------
+    $amdPaths = @(
+        "$env:USERPROFILE\Videos\Radeon ReLive"
+        "$env:USERPROFILE\Videos\AMD"
+        "$env:USERPROFILE\Videos\Radeon"
+    )
+    
+    foreach ($basePath in $amdPaths) {
+        if (Test-Path $basePath) {
+            foreach ($ext in $mediaExtensions) {
+                $oldFiles = Get-ChildItem -Path $basePath -Filter $ext -File -Recurse -ErrorAction SilentlyContinue |
+                            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+                if ($oldFiles) {
+                    $paths = $oldFiles | ForEach-Object { $_.FullName }
+                    Remove-SafeItems -Paths $paths -Description "AMD ReLive recordings (>${DaysOld}d)"
+                }
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Xbox Game Bar / Windows Game DVR
+    # -------------------------------------------------------------------------
+    $xboxCapturesPath = "$env:USERPROFILE\Videos\Captures"
+    if (Test-Path $xboxCapturesPath) {
+        foreach ($ext in $mediaExtensions) {
+            $oldFiles = Get-ChildItem -Path $xboxCapturesPath -Filter $ext -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldFiles) {
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "Xbox Game Bar captures (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Windows Snipping Tool / Snip & Sketch Screenshots
+    # -------------------------------------------------------------------------
+    $windowsScreenshotsPath = "$env:USERPROFILE\Pictures\Screenshots"
+    if (Test-Path $windowsScreenshotsPath) {
+        foreach ($ext in @('*.png', '*.jpg', '*.jpeg', '*.gif', '*.bmp')) {
+            $oldFiles = Get-ChildItem -Path $windowsScreenshotsPath -Filter $ext -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldFiles) {
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "Windows screenshots (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Windows Screen Recordings (Snipping Tool / Win+Alt+R)
+    # -------------------------------------------------------------------------
+    $windowsRecordingsPath = "$env:USERPROFILE\Videos\Screen Recordings"
+    if (Test-Path $windowsRecordingsPath) {
+        foreach ($ext in @('*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv')) {
+            $oldFiles = Get-ChildItem -Path $windowsRecordingsPath -Filter $ext -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldFiles) {
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "Windows screen recordings (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Steam Screenshots
+    # -------------------------------------------------------------------------
+    # Steam stores screenshots in userdata\<userid>\760\remote\<appid>\screenshots
+    $steamUserDataPath = "${env:ProgramFiles(x86)}\Steam\userdata"
+    if (Test-Path $steamUserDataPath) {
+        $screenshotFolders = Get-ChildItem -Path $steamUserDataPath -Directory -ErrorAction SilentlyContinue |
+                             ForEach-Object { Join-Path $_.FullName "760\remote" } |
+                             Where-Object { Test-Path $_ }
+        
+        foreach ($folder in $screenshotFolders) {
+            $oldScreenshots = Get-ChildItem -Path $folder -Filter "*.jpg" -File -Recurse -ErrorAction SilentlyContinue |
+                              Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldScreenshots) {
+                $paths = $oldScreenshots | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "Steam screenshots (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # Also check common Steam screenshot export location
+    $steamScreenshotsPath = "$env:USERPROFILE\Pictures\Steam Screenshots"
+    if (Test-Path $steamScreenshotsPath) {
+        $oldFiles = Get-ChildItem -Path $steamScreenshotsPath -Filter "*.jpg" -File -Recurse -ErrorAction SilentlyContinue |
+                    Where-Object { $_.LastWriteTime -lt $cutoffDate }
+        if ($oldFiles) {
+            $paths = $oldFiles | ForEach-Object { $_.FullName }
+            Remove-SafeItems -Paths $paths -Description "Steam exported screenshots (>${DaysOld}d)"
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # OBS Studio Recordings
+    # -------------------------------------------------------------------------
+    $obsRecordingsPath = "$env:USERPROFILE\Videos\OBS"
+    if (Test-Path $obsRecordingsPath) {
+        foreach ($ext in @('*.mp4', '*.mkv', '*.flv', '*.mov', '*.ts')) {
+            $oldFiles = Get-ChildItem -Path $obsRecordingsPath -Filter $ext -File -Recurse -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldFiles) {
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "OBS recordings (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Windows Game DVR (legacy location)
+    # -------------------------------------------------------------------------
+    $gameDvrPath = "$env:LOCALAPPDATA\Packages\Microsoft.XboxGamingOverlay_*\LocalState\GameDVR"
+    $gameDvrPaths = Resolve-Path $gameDvrPath -ErrorAction SilentlyContinue
+    foreach ($path in $gameDvrPaths) {
+        if (Test-Path $path.Path) {
+            $oldFiles = Get-ChildItem -Path $path.Path -File -Recurse -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate -and $_.Extension -match '\.(mp4|png)$' }
+            if ($oldFiles) {
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "Game DVR recordings (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Medal.tv Clips
+    # -------------------------------------------------------------------------
+    $medalPath = "$env:USERPROFILE\Videos\Medal"
+    if (Test-Path $medalPath) {
+        foreach ($ext in $mediaExtensions) {
+            $oldFiles = Get-ChildItem -Path $medalPath -Filter $ext -File -Recurse -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldFiles) {
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "Medal.tv clips (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Overwolf / Outplayed Recordings
+    # -------------------------------------------------------------------------
+    $overwolfPaths = @(
+        "$env:USERPROFILE\Videos\Overwolf"
+        "$env:USERPROFILE\Videos\Outplayed"
+    )
+    foreach ($basePath in $overwolfPaths) {
+        if (Test-Path $basePath) {
+            foreach ($ext in $mediaExtensions) {
+                $oldFiles = Get-ChildItem -Path $basePath -Filter $ext -File -Recurse -ErrorAction SilentlyContinue |
+                            Where-Object { $_.LastWriteTime -lt $cutoffDate }
+                if ($oldFiles) {
+                    $paths = $oldFiles | ForEach-Object { $_.FullName }
+                    Remove-SafeItems -Paths $paths -Description "Overwolf/Outplayed recordings (>${DaysOld}d)"
+                }
+            }
+        }
+    }
+    
+    # -------------------------------------------------------------------------
+    # Game-specific replay folders (common locations)
+    # -------------------------------------------------------------------------
+    $gameReplayPaths = @(
+        # Fortnite replays
+        "$env:LOCALAPPDATA\FortniteGame\Saved\Demos"
+        # League of Legends replays
+        "$env:USERPROFILE\Documents\League of Legends\Replays"
+        # Valorant
+        "$env:LOCALAPPDATA\VALORANT\Saved\Logs"
+        # Rocket League replays
+        "$env:USERPROFILE\Documents\My Games\Rocket League\TAGame\Demos"
+        # Call of Duty
+        "$env:USERPROFILE\Documents\Call of Duty\players\theatre"
+        # Apex Legends
+        "$env:USERPROFILE\Saved Games\Respawn\Apex\assets\temp"
+    )
+    
+    foreach ($path in $gameReplayPaths) {
+        if (Test-Path $path) {
+            $oldFiles = Get-ChildItem -Path $path -File -Recurse -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -lt $cutoffDate }
+            if ($oldFiles) {
+                $gameName = (Split-Path (Split-Path $path -Parent) -Leaf)
+                $paths = $oldFiles | ForEach-Object { $_.FullName }
+                Remove-SafeItems -Paths $paths -Description "$gameName replays (>${DaysOld}d)"
+            }
+        }
+    }
+    
+    Stop-Section
+}
+
+# ============================================================================
 # Main Application Cleanup Function
 # ============================================================================
 
@@ -411,7 +674,11 @@ function Invoke-AppCleanup {
     .SYNOPSIS
         Run all application-specific cleanup tasks
     #>
-    param([switch]$IncludeOrphaned)
+    param(
+        [switch]$IncludeOrphaned,
+        [switch]$IncludeGameMedia,
+        [int]$GameMediaDaysOld = 90
+    )
     
     Start-Section "Applications"
     
@@ -429,6 +696,11 @@ function Invoke-AppCleanup {
     Clear-GamingPlatformCaches
     
     Stop-Section
+    
+    # Game media (replays, screenshots, recordings)
+    if ($IncludeGameMedia) {
+        Clear-GameMediaFiles -DaysOld $GameMediaDaysOld
+    }
     
     # Orphaned app data (separate section)
     if ($IncludeOrphaned) {

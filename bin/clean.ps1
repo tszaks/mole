@@ -6,6 +6,7 @@
 param(
     [switch]$DryRun,
     [switch]$System,
+    [switch]$GameMedia,
     [switch]$DebugMode,
     [switch]$Whitelist,
     [switch]$ShowHelp
@@ -51,14 +52,16 @@ function Show-CleanHelp {
     Write-Host "$esc[33mOptions:$esc[0m"
     Write-Host "  -DryRun      Preview changes without deleting (recommended first run)"
     Write-Host "  -System      Include system-level cleanup (requires admin)"
+    Write-Host "  -GameMedia   Clean old game replays, screenshots, recordings (>90d)"
     Write-Host "  -Whitelist   Manage protected paths"
     Write-Host "  -DebugMode   Enable debug logging"
     Write-Host "  -ShowHelp    Show this help message"
     Write-Host ""
     Write-Host "$esc[33mExamples:$esc[0m"
-    Write-Host "  mole clean -DryRun     # Preview what would be cleaned"
-    Write-Host "  mole clean             # Run standard cleanup"
-    Write-Host "  mole clean -System     # Include system cleanup (as admin)"
+    Write-Host "  mole clean -DryRun       # Preview what would be cleaned"
+    Write-Host "  mole clean               # Run standard cleanup"
+    Write-Host "  mole clean -GameMedia    # Include old game media cleanup"
+    Write-Host "  mole clean -System       # Include system cleanup (as admin)"
     Write-Host ""
 }
 
@@ -161,7 +164,8 @@ function Show-CleanupSummary {
 function Start-Cleanup {
     param(
         [bool]$IsDryRun,
-        [bool]$IncludeSystem
+        [bool]$IncludeSystem,
+        [bool]$IncludeGameMedia
     )
 
     $esc = [char]27
@@ -230,14 +234,22 @@ function Start-Cleanup {
         # Browser caches
         Clear-BrowserCaches
 
+        # GPU shader caches (NVIDIA, AMD, Intel, DirectX)
+        Clear-GPUShaderCaches
+
         # Application caches
         Clear-AppCaches
 
         # Developer tools
         Invoke-DevToolsCleanup
 
-        # Applications cleanup
-        Invoke-AppCleanup
+        # Applications cleanup (with optional game media)
+        if ($IncludeGameMedia) {
+            Invoke-AppCleanup -IncludeGameMedia -GameMediaDaysOld 90
+        }
+        else {
+            Invoke-AppCleanup
+        }
 
         # System cleanup (if requested and admin)
         if ($IncludeSystem -and (Test-IsAdmin)) {
@@ -288,7 +300,7 @@ function Main {
 
     # Run cleanup
     try {
-        Start-Cleanup -IsDryRun $DryRun -IncludeSystem $System
+        Start-Cleanup -IsDryRun $DryRun -IncludeSystem $System -IncludeGameMedia $GameMedia
     }
     finally {
         # Cleanup temp files

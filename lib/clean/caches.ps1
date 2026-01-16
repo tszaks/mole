@@ -338,6 +338,79 @@ function Clear-DotNetCaches {
 }
 
 # ============================================================================
+# GPU Shader Caches
+# ============================================================================
+
+function Clear-GPUShaderCaches {
+    <#
+    .SYNOPSIS
+        Clean GPU shader caches (NVIDIA, AMD, Intel, DirectX)
+    .DESCRIPTION
+        GPU drivers cache compiled shaders to improve game/app load times.
+        These caches can grow very large (10GB+) and are safe to delete.
+        They will be rebuilt automatically when needed.
+    #>
+    
+    Start-Section "GPU shader caches"
+    
+    # NVIDIA shader caches
+    $nvidiaCachePaths = @(
+        "$env:LOCALAPPDATA\NVIDIA\DXCache"
+        "$env:LOCALAPPDATA\NVIDIA\GLCache"
+        "$env:LOCALAPPDATA\NVIDIA Corporation\NV_Cache"
+        "$env:TEMP\NVIDIA Corporation\NV_Cache"
+    )
+    foreach ($path in $nvidiaCachePaths) {
+        if (Test-Path $path) {
+            Clear-DirectoryContents -Path $path -Description "NVIDIA shader cache"
+        }
+    }
+    
+    # AMD shader caches
+    $amdCachePaths = @(
+        "$env:LOCALAPPDATA\AMD\DXCache"
+        "$env:LOCALAPPDATA\AMD\GLCache"
+        "$env:LOCALAPPDATA\AMD\VkCache"
+    )
+    foreach ($path in $amdCachePaths) {
+        if (Test-Path $path) {
+            Clear-DirectoryContents -Path $path -Description "AMD shader cache"
+        }
+    }
+    
+    # Intel shader caches
+    $intelCachePaths = @(
+        "$env:LOCALAPPDATA\Intel\ShaderCache"
+        "$env:APPDATA\Intel\ShaderCache"
+    )
+    foreach ($path in $intelCachePaths) {
+        if (Test-Path $path) {
+            Clear-DirectoryContents -Path $path -Description "Intel shader cache"
+        }
+    }
+    
+    # DirectX shader cache (system-wide)
+    $dxCachePath = "$env:LOCALAPPDATA\D3DSCache"
+    if (Test-Path $dxCachePath) {
+        Clear-DirectoryContents -Path $dxCachePath -Description "DirectX shader cache"
+    }
+    
+    # DirectX pipeline cache
+    $dxPipelinePath = "$env:LOCALAPPDATA\Microsoft\DirectX Shader Cache"
+    if (Test-Path $dxPipelinePath) {
+        Clear-DirectoryContents -Path $dxPipelinePath -Description "DirectX pipeline cache"
+    }
+    
+    # Vulkan pipeline cache (common location)
+    $vulkanCachePath = "$env:LOCALAPPDATA\VulkanCache"
+    if (Test-Path $vulkanCachePath) {
+        Clear-DirectoryContents -Path $vulkanCachePath -Description "Vulkan pipeline cache"
+    }
+    
+    Stop-Section
+}
+
+# ============================================================================
 # Main Cache Cleanup Function
 # ============================================================================
 
@@ -349,7 +422,8 @@ function Invoke-CacheCleanup {
     param(
         [switch]$IncludeWindowsUpdate,
         [switch]$IncludeBrowsers,
-        [switch]$IncludeApps
+        [switch]$IncludeApps,
+        [switch]$IncludeGPU
     )
     
     Start-Section "System caches"
@@ -367,6 +441,11 @@ function Invoke-CacheCleanup {
     Clear-DotNetCaches
     
     Stop-Section
+    
+    # GPU shader caches
+    if ($IncludeGPU) {
+        Clear-GPUShaderCaches
+    }
     
     # Browser caches
     if ($IncludeBrowsers) {
