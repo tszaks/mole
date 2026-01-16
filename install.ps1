@@ -258,6 +258,7 @@ function Install-Mole {
     $filesToCopy = @(
         "mole.ps1"
         "go.mod"
+        "go.sum"
         "bin"
         "lib"
         "cmd"
