@@ -764,7 +764,9 @@ paginated_multi_select() {
                 if [[ "$filter_mode" == "true" ]]; then
                     local ch="${key#CHAR:}"
                     filter_query+="$ch"
+                    rebuild_view
                     need_full_redraw=true
+                    continue
                 elif [[ "$has_metadata" == "true" ]]; then
                     # Cycle sort mode (only if metadata available)
                     case "$sort_mode" in
@@ -815,6 +817,9 @@ paginated_multi_select() {
                     fi
                 else
                     filter_query+="j"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 fi
                 ;;
             "CHAR:k")
@@ -829,17 +834,26 @@ paginated_multi_select() {
                     fi
                 else
                     filter_query+="k"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 fi
                 ;;
             "CHAR:f" | "CHAR:F")
                 if [[ "$filter_mode" == "true" ]]; then
                     filter_query+="${key#CHAR:}"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 fi
                 # F is currently unbound in normal mode to avoid conflict with Refresh (R)
                 ;;
             "CHAR:r" | "CHAR:R")
                 if [[ "$filter_mode" == "true" ]]; then
                     filter_query+="${key#CHAR:}"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 else
                     # Trigger Refresh signal (Unified with Analyze)
                     cleanup
@@ -849,6 +863,9 @@ paginated_multi_select() {
             "CHAR:o" | "CHAR:O")
                 if [[ "$filter_mode" == "true" ]]; then
                     filter_query+="${key#CHAR:}"
+                    rebuild_view
+                    need_full_redraw=true
+                    continue
                 elif [[ "$has_metadata" == "true" ]]; then
                     # O toggles reverse order (Unified Sort Order)
                     if [[ "$sort_reverse" == "true" ]]; then
@@ -864,13 +881,10 @@ paginated_multi_select() {
                 # Backspace filter
                 if [[ "$filter_mode" == "true" && -n "$filter_query" ]]; then
                     filter_query="${filter_query%?}"
-                    # Fast footer-only update in filter mode (avoid full redraw)
-                    local filter_status="${filter_query:-_}"
-                    local footer_row=$((items_per_page + 4))
-                    printf "\033[%d;1H\033[2K" "$footer_row" >&2
-                    local sep=" ${GRAY}|${NC} "
-                    printf "%s" "${GRAY}Search: ${filter_status}${NC}${sep}${GRAY}Delete${NC}${sep}${GRAY}Enter Confirm${NC}${sep}${GRAY}ESC Cancel${NC}" >&2
-                    printf "\033[%d;1H\033[2K" "$((footer_row + 1))" >&2
+                    # Rebuild view to apply filter in real-time
+                    rebuild_view
+                    # Trigger redraw and continue to avoid drain_pending_input
+                    need_full_redraw=true
                     continue
                 fi
                 ;;
@@ -880,13 +894,10 @@ paginated_multi_select() {
                     # avoid accidental leading spaces
                     if [[ -n "$filter_query" || "$ch" != " " ]]; then
                         filter_query+="$ch"
-                        # Fast footer-only update in filter mode (avoid full redraw)
-                        local filter_status="${filter_query:-_}"
-                        local footer_row=$((items_per_page + 4))
-                        printf "\033[%d;1H\033[2K" "$footer_row" >&2
-                        local sep=" ${GRAY}|${NC} "
-                        printf "%s" "${GRAY}Search: ${filter_status}${NC}${sep}${GRAY}Delete${NC}${sep}${GRAY}Enter Confirm${NC}${sep}${GRAY}ESC Cancel${NC}" >&2
-                        printf "\033[%d;1H\033[2K" "$((footer_row + 1))" >&2
+                        # Rebuild view to apply filter in real-time
+                        rebuild_view
+                        # Trigger redraw and continue to avoid drain_pending_input
+                        need_full_redraw=true
                         continue
                     fi
                 fi
