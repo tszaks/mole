@@ -166,7 +166,7 @@ For user-selected app removal:
 - **Safety Limit:** 3-char minimum (prevents "Go" matching "Google")
 - **Disabled:** Fuzzy matching and wildcard expansion for short names.
 - **User Confirmation:** Required before deletion.
-- **Receipt Scans:** BOM-derived files are limited to safe system prefixes and filtered by `should_protect_path()`.
+- **Receipt Scans:** BOM-derived files are restricted to app-specific prefixes (e.g., `/Applications`, `/Library/Application Support`). Shared directories like `/Library/Frameworks` are **excluded** to prevent collateral damage.
 
 **Code:** `lib/clean/apps.sh:uninstall_app()`
 

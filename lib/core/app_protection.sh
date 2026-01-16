@@ -950,13 +950,6 @@ find_app_receipt_files() {
                     /Library/LaunchAgents/*) is_safe=true ;;
                     /Library/LaunchDaemons/*) is_safe=true ;;
                     /Library/PrivilegedHelperTools/*) is_safe=true ;;
-                    /Library/Internet\ Plug-Ins/*) is_safe=true ;;
-                    /Library/Audio/Plug-Ins/*) is_safe=true ;;
-                    /Library/Frameworks/*) is_safe=true ;;
-                    /Library/Input\ Methods/*) is_safe=true ;;
-                    /Library/QuickLook/*) is_safe=true ;;
-                    /Library/PreferencePanes/*) is_safe=true ;;
-                    /Library/Screen\ Savers/*) is_safe=true ;;
                     /Library/Extensions/*) is_safe=false ;;
                     *) is_safe=false ;;
                 esac
