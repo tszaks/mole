@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shirou/gopsutil/v3/net"
+	"github.com/shirou/gopsutil/v4/net"
 )
 
 func (c *Collector) collectNetwork(now time.Time) ([]NetworkStatus, error) {
