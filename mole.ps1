@@ -57,37 +57,33 @@ function Show-MainHelp {
     Write-Host ""
     Write-Host "  ${green}COMMANDS:${nc}"
     Write-Host ""
-    Write-Host "    ${cyan}clean${nc}       Deep system cleanup (caches, temp, logs)"
+    Write-Host "    ${cyan}clean${nc}       Deep system cleanup"
     Write-Host "    ${cyan}uninstall${nc}   Smart application uninstaller"
-    Write-Host "    ${cyan}analyze${nc}     Visual disk space analyzer"
-    Write-Host "    ${cyan}status${nc}      Real-time system monitor"
     Write-Host "    ${cyan}optimize${nc}    System optimization and repairs"
-    Write-Host "    ${cyan}purge${nc}       Clean project build artifacts"
+    Write-Host "    ${cyan}analyze${nc}     Disk space analyzer"
+    Write-Host "    ${cyan}status${nc}      System monitor"
+    Write-Host "    ${cyan}purge${nc}       Clean project artifacts"
     Write-Host ""
     Write-Host "  ${green}OPTIONS:${nc}"
     Write-Host ""
-    Write-Host "    ${cyan}-Version${nc}    Show version information"
-    Write-Host "    ${cyan}-ShowHelp${nc}   Show this help message"
+    Write-Host "    ${cyan}--version${nc}   Show version information"
+    Write-Host "    ${cyan}--help${nc}      Show this help message"
     Write-Host ""
     Write-Host "  ${green}EXAMPLES:${nc}"
     Write-Host ""
-    Write-Host "    ${gray}mole${nc}                    ${gray}# Interactive menu${nc}"
-    Write-Host "    ${gray}mole clean${nc}              ${gray}# Deep cleanup${nc}"
-    Write-Host "    ${gray}mole clean -DryRun${nc}      ${gray}# Preview cleanup${nc}"
-    Write-Host "    ${gray}mole uninstall${nc}          ${gray}# Uninstall apps${nc}"
-    Write-Host "    ${gray}mole analyze${nc}            ${gray}# Disk analyzer${nc}"
-    Write-Host "    ${gray}mole status${nc}             ${gray}# System monitor${nc}"
-    Write-Host "    ${gray}mole optimize${nc}           ${gray}# Optimize system${nc}"
-    Write-Host "    ${gray}mole optimize -Repair${nc}   ${gray}# Optimize + all repairs${nc}"
-    Write-Host "    ${gray}mole optimize -Icon${nc}     ${gray}# Optimize + rebuild icons${nc}"
-    Write-Host "    ${gray}mole purge${nc}              ${gray}# Clean dev artifacts${nc}"
+    Write-Host "    ${gray}mo${nc}                     ${gray}# Interactive menu${nc}"
+    Write-Host "    ${gray}mo clean${nc}               ${gray}# Deep cleanup${nc}"
+    Write-Host "    ${gray}mo clean --dry-run${nc}     ${gray}# Preview cleanup${nc}"
+    Write-Host "    ${gray}mo optimize${nc}            ${gray}# Optimize system${nc}"
+    Write-Host "    ${gray}mo optimize --dry-run${nc}  ${gray}# Preview optimization${nc}"
+    Write-Host "    ${gray}mo uninstall${nc}           ${gray}# Uninstall apps${nc}"
     Write-Host ""
     Write-Host "  ${green}ENVIRONMENT:${nc}"
     Write-Host ""
     Write-Host "    ${cyan}MOLE_DRY_RUN=1${nc}    Preview without changes"
     Write-Host "    ${cyan}MOLE_DEBUG=1${nc}      Enable debug output"
     Write-Host ""
-    Write-Host "  ${gray}Run '${nc}mole <command> -ShowHelp${gray}' for command-specific help${nc}"
+    Write-Host "  ${gray}Run '${nc}mo <command> --help${gray}' for command-specific help${nc}"
     Write-Host ""
 }
 
@@ -102,6 +98,12 @@ function Show-MainMenu {
             Description = "Deep system cleanup"
             Command = "clean"
             Icon = $script:Icons.Trash
+        }
+        @{
+            Name = "Optimize"
+            Description = "Optimization & repairs"
+            Command = "optimize"
+            Icon = $script:Icons.Arrow
         }
         @{
             Name = "Uninstall"
@@ -120,12 +122,6 @@ function Show-MainMenu {
             Description = "System monitor"
             Command = "status"
             Icon = $script:Icons.Solid
-        }
-        @{
-            Name = "Optimize"
-            Description = "Optimization & repairs"
-            Command = "optimize"
-            Icon = $script:Icons.Arrow
         }
         @{
             Name = "Purge"
@@ -159,7 +155,7 @@ function Invoke-MoleCommand {
     if (-not (Test-Path $scriptPath)) {
         Write-MoleError "Unknown command: $CommandName"
         Write-Host ""
-        Write-Host "Run 'mole -ShowHelp' for available commands"
+        Write-Host "Run 'mo --help' for available commands"
         return
     }
 
@@ -175,13 +171,13 @@ function Invoke-MoleCommand {
             # Remove surrounding quotes if present
             $cleanArg = $arg.Trim("'`"")
 
-            if ($cleanArg -match '^-(\w+)$') {
-                # It's a switch parameter (e.g., -DryRun)
+            if ($cleanArg -match '^-{1,2}([\w-]+)$') {
+                # It's a switch parameter (e.g., -DryRun or --dry-run)
                 $paramName = $Matches[1]
                 $splatParams[$paramName] = $true
             }
-            elseif ($cleanArg -match '^-(\w+)[=:](.+)$') {
-                # It's a named parameter with value (e.g., -Name=Value or -Name:Value)
+            elseif ($cleanArg -match '^-{1,2}([\w-]+)[=:](.+)$') {
+                # It's a named parameter with value (e.g., --name=value)
                 $paramName = $Matches[1]
                 $paramValue = $Matches[2].Trim("'`"")
                 $splatParams[$paramName] = $paramValue

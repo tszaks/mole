@@ -4,11 +4,22 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [Alias('dry-run')]
     [switch]$DryRun,
+
+    [Alias('system')]
     [switch]$System,
+
+    [Alias('game-media')]
     [switch]$GameMedia,
+
+    [Alias('debug')]
     [switch]$DebugMode,
+
+    [Alias('whitelist')]
     [switch]$Whitelist,
+
+    [Alias('help')]
     [switch]$ShowHelp
 )
 

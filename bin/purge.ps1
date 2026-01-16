@@ -4,8 +4,13 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [Alias('debug')]
     [switch]$DebugMode,
+
+    [Alias('paths')]
     [switch]$Paths,
+
+    [Alias('help')]
     [switch]$ShowHelp
 )
 

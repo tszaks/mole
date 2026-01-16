@@ -68,40 +68,40 @@ git checkout windows
 Run:
 
 ```powershell
-mole                     # Interactive menu
-mole clean               # Deep cleanup
-mole uninstall           # Remove apps + leftovers
-mole optimize            # Refresh caches & services
-mole analyze             # Visual disk explorer
-mole status              # Live system health dashboard
-mole purge               # Clean project build artifacts
+mo                       # Interactive menu
+mo clean                 # Deep cleanup
+mo uninstall             # Remove apps + leftovers
+mo optimize              # Refresh caches & services
+mo analyze               # Visual disk explorer
+mo status                # Live system health dashboard
+mo purge                 # Clean project build artifacts
 
-mole -ShowHelp           # Show help
-mole -Version            # Show installed version
+mo --help                # Show help
+mo --version             # Show installed version
 
-mole clean -DryRun       # Preview the cleanup plan
-mole clean -Whitelist    # Manage protected caches
-mole clean -DryRun -Debug # Detailed preview with risk levels
+mo clean --dry-run       # Preview the cleanup plan
+mo clean --whitelist     # Manage protected caches
+mo clean --dry-run --debug # Detailed preview with risk levels
 
-mole optimize -DryRun    # Preview optimization actions
-mole optimize -Debug     # Run with detailed operation logs
-mole purge -Paths        # Configure project scan directories
+mo optimize --dry-run    # Preview optimization actions
+mo optimize --debug      # Run with detailed operation logs
+mo purge --paths         # Configure project scan directories
 ```
 
 ## Tips
 
-- **Safety**: Built with strict protections. Preview changes with `mole clean -DryRun`.
+- **Safety**: Built with strict protections. Preview changes with `mo clean --dry-run`.
 - **Be Careful**: Although safe by design, file deletion is permanent. Please review operations carefully.
-- **Debug Mode**: Use `-Debug` for detailed logs (e.g., `mole clean -Debug`). Combine with `-DryRun` for comprehensive preview including risk levels and file details.
+- **Debug Mode**: Use `--debug` for detailed logs (e.g., `mo clean --debug`). Combine with `--dry-run` for comprehensive preview including risk levels and file details.
 - **Navigation**: Supports arrow keys for TUI navigation.
-- **Configuration**: Use `mole clean -Whitelist` to manage protected paths, `mole purge -Paths` to configure scan directories.
+- **Configuration**: Use `mo clean --whitelist` to manage protected paths, `mo purge --paths` to configure scan directories.
 
 ## Features in Detail
 
 ### Deep System Cleanup
 
 ```powershell
-mole clean
+mo clean
 ```
 
 ```
@@ -122,7 +122,7 @@ Space freed: 56.1GB | Free space now: 180.3GB
 ### Smart App Uninstaller
 
 ```powershell
-mole uninstall
+mo uninstall
 ```
 
 ```
@@ -148,7 +148,7 @@ Space freed: 4.8GB
 ### System Optimization
 
 ```powershell
-mole optimize
+mo optimize
 ```
 
 ```
@@ -160,6 +160,7 @@ System: 12/32 GB RAM | 280/460 GB Disk (61%) | Uptime 6d
   ✓ Refresh Windows Search index
   ✓ Clear thumbnail cache
   ✓ Optimize startup programs
+  ✓ System repairs (Font/Icon/Store/Search)
 
 ====================================================================
 System optimization completed
@@ -169,7 +170,7 @@ System optimization completed
 ### Disk Space Analyzer
 
 ```powershell
-mole analyze
+mo analyze
 ```
 
 ```
@@ -189,7 +190,7 @@ Analyze Disk  C:\Users\YourName\Documents  |  Total: 156.8GB
 Real-time dashboard with system health score, hardware info, and performance metrics.
 
 ```powershell
-mole status
+mo status
 ```
 
 ```
@@ -219,7 +220,7 @@ Health score based on CPU, memory, disk, temperature, and I/O load. Color-coded 
 Clean old build artifacts (`node_modules`, `target`, `build`, `dist`, etc.) from your projects to free up disk space.
 
 ```powershell
-mole purge
+mo purge
 ```
 
 ```
@@ -237,7 +238,7 @@ Select Categories to Clean - 18.5GB (8 selected)
 
 Use with caution: This will permanently delete selected artifacts. Review carefully before confirming. Recent projects — less than 7 days old — are marked and unselected by default.
 
-Custom scan paths can be configured with `mole purge -Paths`.
+Custom scan paths can be configured with `mo purge --paths`.
 
 ## Installation Options
 
