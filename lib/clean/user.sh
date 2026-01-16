@@ -15,8 +15,6 @@ clean_user_essentials() {
     fi
 }
 
-
-
 # Remove old Google Chrome versions while keeping Current.
 clean_chrome_old_versions() {
     local -a app_paths=(
