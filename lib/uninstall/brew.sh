@@ -179,8 +179,8 @@ brew_uninstall_cask() {
     # Ensure we have sudo access if needed, to prevent brew from hanging on password prompt
     # Many brew casks need sudo to uninstall
     if ! sudo -n true 2> /dev/null; then
-         # If we don't have sudo, try to get it (visibly)
-         sudo -v
+        # If we don't have sudo, try to get it (visibly)
+        sudo -v
     fi
 
     local uninstall_ok=false

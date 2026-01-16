@@ -201,8 +201,6 @@ func getScoreStyle(score int) lipgloss.Style {
 	}
 }
 
-
-
 func hasSensorData(sensors []SensorReading) bool {
 	for _, s := range sensors {
 		if s.Note == "" && s.Value > 0 {
