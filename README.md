@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="https://cdn.tw93.fun/pic/cole.png" alt="Mole Logo" width="120" height="120" style="border-radius:50%" />
   <h1>Mole</h1>
   <p><em>Deep clean and optimize your Windows.</em></p>
 </div>
@@ -12,9 +13,8 @@
   <a href="https://t.me/+GclQS9ZnxyI2ODQ1"><img src="https://img.shields.io/badge/chat-Telegram-blueviolet?style=flat-square&logo=Telegram" alt="Telegram"></a>
 </p>
 
-<p align="center">
-  <img src="https://cdn.tw93.fun/img/mole.jpeg" alt="Mole - 95.50GB freed" width="1000" />
-</p>
+> [!WARNING]
+> **Experimental Status**: The Windows version is currently **not mature**. If your computer is critical or contains important data, **please do not use this tool**.
 
 ## Features
 
