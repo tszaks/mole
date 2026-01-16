@@ -5,6 +5,8 @@
 param(
     [Parameter(Position = 0)]
     [string]$Path,
+    
+    [Alias('h')]
     [switch]$ShowHelp
 )
 
@@ -19,13 +21,13 @@ $binPath = Join-Path $windowsDir "bin\analyze.exe"
 function Show-AnalyzeHelp {
     $esc = [char]27
     Write-Host ""
-    Write-Host "$esc[1;35mMole Analyze$esc[0m - Interactive disk space analyzer"
+    Write-Host "$esc[1;35mmo analyze$esc[0m - Interactive disk space analyzer"
     Write-Host ""
-    Write-Host "$esc[33mUsage:$esc[0m mole analyze [path]"
+    Write-Host "$esc[33mUsage:$esc[0m mo analyze [path]"
     Write-Host ""
     Write-Host "$esc[33mOptions:$esc[0m"
-    Write-Host "  [path]       Path to analyze (default: user profile)"
-    Write-Host "  -ShowHelp    Show this help message"
+    Write-Host "  [path]     Path to analyze (default: user profile)"
+    Write-Host "  --help     Show this help message"
     Write-Host ""
     Write-Host "$esc[33mKeybindings:$esc[0m"
     Write-Host "  Up/Down      Navigate entries"

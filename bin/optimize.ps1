@@ -4,15 +4,14 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [Alias('dry-run')]
     [switch]$DryRun,
+    
+    [Alias('d')]
     [switch]$DebugMode,
-    [switch]$ShowHelp,
-    # Repair options
-    [switch]$Repair,
-    [switch]$Font,
-    [switch]$Icon,
-    [switch]$Search,
-    [switch]$Store
+    
+    [Alias('h')]
+    [switch]$ShowHelp
 )
 
 Set-StrictMode -Version Latest
@@ -33,7 +32,6 @@ $libDir = Join-Path (Split-Path -Parent $scriptDir) "lib"
 # ============================================================================
 
 $script:OptimizationsApplied = 0
-$script:RepairsApplied = 0
 $script:IssuesFound = 0
 $script:IssuesFixed = 0
 
@@ -44,36 +42,30 @@ $script:IssuesFixed = 0
 function Show-OptimizeHelp {
     $esc = [char]27
     Write-Host ""
-    Write-Host "$esc[1;35mMole Optimize$esc[0m - System optimization, health checks, and repairs"
+    Write-Host "$esc[1;35mmo optimize$esc[0m - System optimization and maintenance"
     Write-Host ""
-    Write-Host "$esc[33mUsage:$esc[0m mole optimize [options]"
+    Write-Host "$esc[33mUsage:$esc[0m mo optimize [options]"
     Write-Host ""
     Write-Host "$esc[33mOptions:$esc[0m"
-    Write-Host "  -DryRun      Preview changes without applying"
-    Write-Host "  -DebugMode   Enable debug logging"
-    Write-Host "  -ShowHelp    Show this help message"
+    Write-Host "  --dry-run    Preview changes without applying"
+    Write-Host "  --debug      Enable debug logging"
+    Write-Host "  --help       Show this help message"
     Write-Host ""
-    Write-Host "$esc[33mRepair Options:$esc[0m"
-    Write-Host "  -Repair      Run all repairs (Font, Icon, Search, Store)"
-    Write-Host "  -Font        Rebuild font cache (fixes font display issues)"
-    Write-Host "  -Icon        Rebuild icon cache (fixes missing/corrupt icons)"
-    Write-Host "  -Search      Reset Windows Search index (fixes search issues)"
-    Write-Host "  -Store       Reset Windows Store cache (fixes Store issues)"
-    Write-Host ""
-    Write-Host "$esc[33mExamples:$esc[0m"
-    Write-Host "  mole optimize              # Run standard optimizations"
-    Write-Host "  mole optimize -Repair      # Run optimizations + all repairs"
-    Write-Host "  mole optimize -Icon -Font  # Run optimizations + specific repairs"
-    Write-Host "  mole optimize -DryRun      # Preview what would happen"
-    Write-Host ""
-    Write-Host "$esc[33mOptimizations (always run):$esc[0m"
-    Write-Host "  - Disk defragmentation/TRIM (SSD optimization)"
-    Write-Host "  - Windows Search index check"
+    Write-Host "$esc[33mWhat it does:$esc[0m"
+    Write-Host "  - Disk optimization (TRIM for SSD, defrag for HDD)"
     Write-Host "  - DNS cache flush"
-    Write-Host "  - Network optimization"
+    Write-Host "  - Network stack optimization"
+    Write-Host "  - Font cache rebuild"
+    Write-Host "  - Icon cache rebuild"
+    Write-Host "  - Windows Search optimization"
+    Write-Host "  - Windows Store cache reset"
     Write-Host "  - Startup program analysis"
     Write-Host "  - Disk health check"
     Write-Host "  - Windows Update status"
+    Write-Host ""
+    Write-Host "$esc[33mExamples:$esc[0m"
+    Write-Host "  mo optimize            # Run all optimizations"
+    Write-Host "  mo optimize --dry-run  # Preview what would happen"
     Write-Host ""
 }
 
@@ -495,7 +487,7 @@ function Repair-FontCache {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would stop Windows Font Cache Service"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would delete font cache files"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would restart Windows Font Cache Service"
-        $script:RepairsApplied++
+        $script:OptimizationsApplied++
         return
     }
     
@@ -528,7 +520,7 @@ function Repair-FontCache {
         
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Font cache rebuilt successfully"
         Write-Host "  $esc[90mNote: Some apps may need restart to see changes$esc[0m"
-        $script:RepairsApplied++
+        $script:OptimizationsApplied++
     }
     catch {
         Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Could not rebuild font cache: $_"
@@ -556,7 +548,7 @@ function Repair-IconCache {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would stop Explorer"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would delete icon cache files (iconcache_*.db)"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would restart Explorer"
-        $script:RepairsApplied++
+        $script:OptimizationsApplied++
         return
     }
     
@@ -591,7 +583,7 @@ function Repair-IconCache {
         
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Icon cache rebuilt ($deletedCount files cleared)"
         Write-Host "  $esc[90mNote: Icons will rebuild gradually as you browse$esc[0m"
-        $script:RepairsApplied++
+        $script:OptimizationsApplied++
     }
     catch {
         Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Could not rebuild icon cache: $_"
@@ -624,7 +616,7 @@ function Repair-SearchIndex {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would stop Windows Search service"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would delete search index database"
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would restart Windows Search service"
-        $script:RepairsApplied++
+        $script:OptimizationsApplied++
         return
     }
     
@@ -643,7 +635,7 @@ function Repair-SearchIndex {
         
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Search index reset successfully"
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Indexing will rebuild in the background (may take hours)"
-        $script:RepairsApplied++
+        $script:OptimizationsApplied++
     }
     catch {
         Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Could not reset search index: $_"
@@ -667,7 +659,7 @@ function Repair-StoreCache {
     
     if ($script:DryRun) {
         Write-Host "  $esc[33m$($script:Icons.DryRun)$esc[0m Would run wsreset.exe"
-        $script:RepairsApplied++
+        $script:OptimizationsApplied++
         return
     }
     
@@ -682,7 +674,7 @@ function Repair-StoreCache {
         else {
             Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m wsreset completed with code $($wsreset.ExitCode)"
         }
-        $script:RepairsApplied++
+        $script:OptimizationsApplied++
     }
     catch {
         Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Could not reset Store cache: $_"
@@ -708,19 +700,11 @@ function Show-OptimizeSummary {
     Write-Host ""
     
     if ($script:DryRun) {
-        $total = $script:OptimizationsApplied + $script:RepairsApplied
-        Write-Host "  Would apply $esc[33m$total$esc[0m changes"
-        if ($script:RepairsApplied -gt 0) {
-            Write-Host "  ($($script:OptimizationsApplied) optimizations, $($script:RepairsApplied) repairs)"
-        }
-        Write-Host "  Run without -DryRun to apply changes"
+        Write-Host "  Would apply $esc[33m$($script:OptimizationsApplied)$esc[0m optimizations"
+        Write-Host "  Run without --dry-run to apply changes"
     }
     else {
         Write-Host "  Optimizations applied: $esc[32m$($script:OptimizationsApplied)$esc[0m"
-        
-        if ($script:RepairsApplied -gt 0) {
-            Write-Host "  Repairs applied: $esc[32m$($script:RepairsApplied)$esc[0m"
-        }
         
         if ($script:IssuesFixed -gt 0) {
             Write-Host "  Issues fixed: $esc[32m$($script:IssuesFixed)$esc[0m"
@@ -757,15 +741,12 @@ function Main {
     # Set dry-run mode
     $script:DryRun = $DryRun
     
-    # Check if any repairs were requested
-    $runRepairs = $Repair -or $Font -or $Icon -or $Search -or $Store
-    
     # Clear screen
     Clear-Host
     
     $esc = [char]27
     Write-Host ""
-    Write-Host "$esc[1;35mOptimize and Check$esc[0m"
+    Write-Host "$esc[1;35mOptimize and Maintain$esc[0m"
     Write-Host ""
     
     if ($script:DryRun) {
@@ -779,45 +760,19 @@ function Main {
     
     # Run optimizations
     Optimize-DiskDrive
-    Optimize-SearchIndex
     Clear-DnsCache
     Optimize-Network
+    
+    # Run cache rebuilds (repairs integrated into optimize)
+    Repair-FontCache
+    Repair-IconCache
+    Optimize-SearchIndex
+    Repair-StoreCache
     
     # Run health checks
     Get-StartupPrograms
     Test-DiskHealth
     Test-WindowsUpdate
-    
-    # Run repairs if requested
-    if ($runRepairs) {
-        Write-Host ""
-        Write-Host "$esc[1;35m$($script:Icons.Arrow) Repairs$esc[0m"
-        
-        if ($Repair -or $Font) {
-            Repair-FontCache
-        }
-        
-        if ($Repair -or $Icon) {
-            Repair-IconCache
-        }
-        
-        if ($Repair -or $Search) {
-            Repair-SearchIndex
-        }
-        
-        if ($Repair -or $Store) {
-            Repair-StoreCache
-        }
-    }
-    
-    # System file check is slow, ask first (only if not doing repairs)
-    if (-not $runRepairs -and -not $script:DryRun -and (Test-IsAdmin)) {
-        Write-Host ""
-        $runSfc = Read-Host "Run System File Checker? This may take several minutes (y/N)"
-        if ($runSfc -eq 'y' -or $runSfc -eq 'Y') {
-            Test-SystemFiles
-        }
-    }
     
     # Summary
     Show-OptimizeSummary

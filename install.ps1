@@ -318,6 +318,11 @@ powershell.exe -ExecutionPolicy Bypass -NoLogo -NoProfile -Command "& '%MOLE_DIR
     $batchPath = Join-Path $InstallDir "mole.cmd"
     Set-Content -Path $batchPath -Value $batchContent -Encoding ASCII
     Write-Success "Created launcher: mole.cmd"
+    
+    # Also create 'mo' alias
+    $moPath = Join-Path $InstallDir "mo.cmd"
+    Set-Content -Path $moPath -Value $batchContent -Encoding ASCII
+    Write-Success "Created launcher: mo.cmd (short alias)"
 
     # Add to PATH if requested
     if ($AddToPath) {
@@ -339,7 +344,7 @@ powershell.exe -ExecutionPolicy Bypass -NoLogo -NoProfile -Command "& '%MOLE_DIR
     Write-Host ""
 
     if ($AddToPath) {
-        Write-Host "  Run 'mole' from any terminal to start"
+        Write-Host "  Run 'mo' or 'mole' from any terminal to start"
     }
     else {
         Write-Host "  Run the following to start:"

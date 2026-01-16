@@ -4,11 +4,22 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [Alias('dry-run')]
     [switch]$DryRun,
+    
+    [Alias('s')]
     [switch]$System,
+    
+    [Alias('game-media')]
     [switch]$GameMedia,
+    
+    [Alias('d')]
     [switch]$DebugMode,
+    
+    [Alias('w')]
     [switch]$Whitelist,
+    
+    [Alias('h')]
     [switch]$ShowHelp
 )
 
@@ -45,23 +56,23 @@ $script:ExportListFile = "$env:USERPROFILE\.config\mole\clean-list.txt"
 function Show-CleanHelp {
     $esc = [char]27
     Write-Host ""
-    Write-Host "$esc[1;35mMole Clean$esc[0m - Deep cleanup for Windows"
+    Write-Host "$esc[1;35mmo clean$esc[0m - Deep cleanup for Windows"
     Write-Host ""
-    Write-Host "$esc[33mUsage:$esc[0m mole clean [options]"
+    Write-Host "$esc[33mUsage:$esc[0m mo clean [options]"
     Write-Host ""
     Write-Host "$esc[33mOptions:$esc[0m"
-    Write-Host "  -DryRun      Preview changes without deleting (recommended first run)"
-    Write-Host "  -System      Include system-level cleanup (requires admin)"
-    Write-Host "  -GameMedia   Clean old game replays, screenshots, recordings (>90d)"
-    Write-Host "  -Whitelist   Manage protected paths"
-    Write-Host "  -DebugMode   Enable debug logging"
-    Write-Host "  -ShowHelp    Show this help message"
+    Write-Host "  --dry-run      Preview changes without deleting (recommended first run)"
+    Write-Host "  --system       Include system-level cleanup (requires admin)"
+    Write-Host "  --game-media   Clean old game replays, screenshots, recordings (>90d)"
+    Write-Host "  --whitelist    Manage protected paths"
+    Write-Host "  --debug        Enable debug logging"
+    Write-Host "  --help         Show this help message"
     Write-Host ""
     Write-Host "$esc[33mExamples:$esc[0m"
-    Write-Host "  mole clean -DryRun       # Preview what would be cleaned"
-    Write-Host "  mole clean               # Run standard cleanup"
-    Write-Host "  mole clean -GameMedia    # Include old game media cleanup"
-    Write-Host "  mole clean -System       # Include system cleanup (as admin)"
+    Write-Host "  mo clean --dry-run     # Preview what would be cleaned"
+    Write-Host "  mo clean               # Run standard cleanup"
+    Write-Host "  mo clean --game-media  # Include old game media cleanup"
+    Write-Host "  mo clean --system      # Include system cleanup (as admin)"
     Write-Host ""
 }
 
@@ -134,7 +145,7 @@ function Show-CleanupSummary {
             Write-Host "  Categories: $($Stats.TotalItems)"
             Write-Host ""
             Write-Host "  Detailed list: $esc[90m$($script:ExportListFile)$esc[0m"
-            Write-Host "  Run without -DryRun to apply cleanup"
+            Write-Host "  Run without --dry-run to apply cleanup"
         }
         else {
             Write-Host "  Space freed: $esc[32m${sizeGB}GB$esc[0m"
@@ -192,14 +203,14 @@ function Start-Cleanup {
 #
 # How to protect files:
 # 1. Copy any path below to $($script:Config.WhitelistFile)
-# 2. Run: mole clean -Whitelist
+# 2. Run: mo clean --whitelist
 #
 
 "@
         Set-Content -Path $script:ExportListFile -Value $header
     }
     else {
-        Write-Host "$esc[90m$($script:Icons.Solid) Use -DryRun to preview, -Whitelist to manage protected paths$esc[0m"
+        Write-Host "$esc[90m$($script:Icons.Solid) Use --dry-run to preview, --whitelist to manage protected paths$esc[0m"
         Write-Host ""
     }
 

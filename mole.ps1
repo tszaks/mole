@@ -10,7 +10,10 @@ param(
     [Parameter(Position = 1, ValueFromRemainingArguments)]
     [string[]]$CommandArgs,
 
+    [Alias('v')]
     [switch]$Version,
+    
+    [Alias('h')]
     [switch]$ShowHelp
 )
 
@@ -66,28 +69,27 @@ function Show-MainHelp {
     Write-Host ""
     Write-Host "  ${green}OPTIONS:${nc}"
     Write-Host ""
-    Write-Host "    ${cyan}-Version${nc}    Show version information"
-    Write-Host "    ${cyan}-ShowHelp${nc}   Show this help message"
+    Write-Host "    ${cyan}--version${nc}   Show version information"
+    Write-Host "    ${cyan}--help${nc}      Show this help message"
     Write-Host ""
     Write-Host "  ${green}EXAMPLES:${nc}"
     Write-Host ""
-    Write-Host "    ${gray}mole${nc}                    ${gray}# Interactive menu${nc}"
-    Write-Host "    ${gray}mole clean${nc}              ${gray}# Deep cleanup${nc}"
-    Write-Host "    ${gray}mole clean -DryRun${nc}      ${gray}# Preview cleanup${nc}"
-    Write-Host "    ${gray}mole uninstall${nc}          ${gray}# Uninstall apps${nc}"
-    Write-Host "    ${gray}mole analyze${nc}            ${gray}# Disk analyzer${nc}"
-    Write-Host "    ${gray}mole status${nc}             ${gray}# System monitor${nc}"
-    Write-Host "    ${gray}mole optimize${nc}           ${gray}# Optimize system${nc}"
-    Write-Host "    ${gray}mole optimize -Repair${nc}   ${gray}# Optimize + all repairs${nc}"
-    Write-Host "    ${gray}mole optimize -Icon${nc}     ${gray}# Optimize + rebuild icons${nc}"
-    Write-Host "    ${gray}mole purge${nc}              ${gray}# Clean dev artifacts${nc}"
+    Write-Host "    ${gray}mo${nc}                      ${gray}# Interactive menu${nc}"
+    Write-Host "    ${gray}mo clean${nc}                ${gray}# Deep cleanup${nc}"
+    Write-Host "    ${gray}mo clean --dry-run${nc}      ${gray}# Preview cleanup${nc}"
+    Write-Host "    ${gray}mo uninstall${nc}            ${gray}# Uninstall apps${nc}"
+    Write-Host "    ${gray}mo analyze${nc}              ${gray}# Disk analyzer${nc}"
+    Write-Host "    ${gray}mo status${nc}               ${gray}# System monitor${nc}"
+    Write-Host "    ${gray}mo optimize${nc}             ${gray}# Optimize system (includes repairs)${nc}"
+    Write-Host "    ${gray}mo optimize --dry-run${nc}   ${gray}# Preview optimizations${nc}"
+    Write-Host "    ${gray}mo purge${nc}                ${gray}# Clean dev artifacts${nc}"
     Write-Host ""
     Write-Host "  ${green}ENVIRONMENT:${nc}"
     Write-Host ""
     Write-Host "    ${cyan}MOLE_DRY_RUN=1${nc}    Preview without changes"
     Write-Host "    ${cyan}MOLE_DEBUG=1${nc}      Enable debug output"
     Write-Host ""
-    Write-Host "  ${gray}Run '${nc}mole <command> -ShowHelp${gray}' for command-specific help${nc}"
+    Write-Host "  ${gray}Run '${nc}mo <command> --help${gray}' for command-specific help${nc}"
     Write-Host ""
 }
 
@@ -240,13 +242,13 @@ function Main {
     $effectiveVersion = $Version
     $effectiveCommand = $Command
 
-    if ($Command -match '^-(.+)$') {
-        $switchName = $Matches[1]
+    if ($Command -match '^-{1,2}(.+)$') {
+        $switchName = $Matches[1].ToLower()
         switch ($switchName) {
-            'ShowHelp' { $effectiveShowHelp = $true; $effectiveCommand = $null }
-            'Help' { $effectiveShowHelp = $true; $effectiveCommand = $null }
+            'showhelp' { $effectiveShowHelp = $true; $effectiveCommand = $null }
+            'help' { $effectiveShowHelp = $true; $effectiveCommand = $null }
             'h' { $effectiveShowHelp = $true; $effectiveCommand = $null }
-            'Version' { $effectiveVersion = $true; $effectiveCommand = $null }
+            'version' { $effectiveVersion = $true; $effectiveCommand = $null }
             'v' { $effectiveVersion = $true; $effectiveCommand = $null }
         }
     }
@@ -274,7 +276,7 @@ function Main {
             Write-MoleError "Unknown command: $effectiveCommand"
             Write-Host ""
             Write-Host "Available commands: $($validCommands -join ', ')"
-            Write-Host "Run 'mole -ShowHelp' for more information"
+            Write-Host "Run 'mo --help' for more information"
         }
         return
     }

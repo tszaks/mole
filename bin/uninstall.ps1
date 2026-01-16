@@ -4,8 +4,13 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [Alias('d')]
     [switch]$DebugMode,
+    
+    [Alias('r')]
     [switch]$Rescan,
+    
+    [Alias('h')]
     [switch]$ShowHelp
 )
 
@@ -37,14 +42,14 @@ $script:CacheTTLHours = 24
 function Show-UninstallHelp {
     $esc = [char]27
     Write-Host ""
-    Write-Host "$esc[1;35mMole Uninstall$esc[0m - Interactive application uninstaller"
+    Write-Host "$esc[1;35mmo uninstall$esc[0m - Interactive application uninstaller"
     Write-Host ""
-    Write-Host "$esc[33mUsage:$esc[0m mole uninstall [options]"
+    Write-Host "$esc[33mUsage:$esc[0m mo uninstall [options]"
     Write-Host ""
     Write-Host "$esc[33mOptions:$esc[0m"
-    Write-Host "  -Rescan      Force rescan of installed applications"
-    Write-Host "  -DebugMode   Enable debug logging"
-    Write-Host "  -ShowHelp    Show this help message"
+    Write-Host "  --rescan     Force rescan of installed applications"
+    Write-Host "  --debug      Enable debug logging"
+    Write-Host "  --help       Show this help message"
     Write-Host ""
     Write-Host "$esc[33mFeatures:$esc[0m"
     Write-Host "  - Scans installed programs from registry and Windows Apps"

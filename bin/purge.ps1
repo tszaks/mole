@@ -4,8 +4,13 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
+    [Alias('d')]
     [switch]$DebugMode,
+    
+    [Alias('p')]
     [switch]$Paths,
+    
+    [Alias('h')]
     [switch]$ShowHelp
 )
 
@@ -74,14 +79,14 @@ $script:ItemsCleaned = 0
 function Show-PurgeHelp {
     $esc = [char]27
     Write-Host ""
-    Write-Host "$esc[1;35mMole Purge$esc[0m - Clean project build artifacts"
+    Write-Host "$esc[1;35mmo purge$esc[0m - Clean project build artifacts"
     Write-Host ""
-    Write-Host "$esc[33mUsage:$esc[0m mole purge [options]"
+    Write-Host "$esc[33mUsage:$esc[0m mo purge [options]"
     Write-Host ""
     Write-Host "$esc[33mOptions:$esc[0m"
-    Write-Host "  -Paths       Edit custom scan directories"
-    Write-Host "  -DebugMode   Enable debug logging"
-    Write-Host "  -ShowHelp    Show this help message"
+    Write-Host "  --paths      Edit custom scan directories"
+    Write-Host "  --debug      Enable debug logging"
+    Write-Host "  --help       Show this help message"
     Write-Host ""
     Write-Host "$esc[33mDefault Search Paths:$esc[0m"
     foreach ($path in $script:DefaultSearchPaths) {
@@ -550,7 +555,7 @@ function Main {
 
     if ($null -eq $searchPaths -or $searchPaths.Count -eq 0) {
         Write-MoleWarning "No valid search paths found"
-        Write-Host "Run 'mole purge -Paths' to configure search directories"
+        Write-Host "Run 'mo purge --paths' to configure search directories"
         return
     }
 
