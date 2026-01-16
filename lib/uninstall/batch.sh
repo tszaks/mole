@@ -388,6 +388,8 @@ batch_uninstall_applications() {
         # Stop Launch Agents/Daemons before removal.
         local has_system_files="false"
         [[ -n "$system_files" ]] && has_system_files="true"
+
+
         stop_launch_services "$bundle_id" "$has_system_files"
 
         # Remove from Login Items

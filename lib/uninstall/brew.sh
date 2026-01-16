@@ -174,13 +174,24 @@ brew_uninstall_cask() {
     debug_log "Attempting brew uninstall --cask $cask_name"
 
     # Run uninstall with timeout (suppress hints/auto-update)
+    debug_log "Attempting brew uninstall --cask $cask_name"
+
+    # Ensure we have sudo access if needed, to prevent brew from hanging on password prompt
+    # Many brew casks need sudo to uninstall
+    if ! sudo -n true 2> /dev/null; then
+         # If we don't have sudo, try to get it (visibly)
+         sudo -v
+    fi
+
     local uninstall_ok=false
-    local output
-    if output=$(HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
-        run_with_timeout 120 brew uninstall --cask "$cask_name" 2>&1); then
+
+    # Run directly without output capture to allow user interaction/visibility
+    # This avoids silence/hangs when brew asks for passwords or confirmation
+    if HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
+        brew uninstall --cask "$cask_name"; then
         uninstall_ok=true
     else
-        debug_log "brew uninstall output: $output"
+        debug_log "brew uninstall failed with exit code $?"
     fi
 
     # Verify removal
