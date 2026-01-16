@@ -208,7 +208,7 @@ func buildCards(m MetricsSnapshot, _ int) []cardData {
 		renderDiskCard(m.Disks, m.DiskIO),
 		renderBatteryCard(m.Batteries, m.Thermal),
 		renderProcessCard(m.TopProcesses),
-		renderNetworkCard(m.Network, m.Proxy),
+		renderNetworkCard(m.Network, m.NetworkHistory, m.Proxy),
 	}
 	if hasSensorData(m.Sensors) {
 		cards = append(cards, renderSensorsCard(m.Sensors))
@@ -425,7 +425,7 @@ func miniBar(percent float64) string {
 	return colorizePercent(percent, strings.Repeat("▮", filled)+strings.Repeat("▯", 5-filled))
 }
 
-func renderNetworkCard(netStats []NetworkStatus, proxy ProxyStatus) cardData {
+func renderNetworkCard(netStats []NetworkStatus, history NetworkHistory, proxy ProxyStatus) cardData {
 	var lines []string
 	var totalRx, totalTx float64
 	var primaryIP string
@@ -441,10 +441,11 @@ func renderNetworkCard(netStats []NetworkStatus, proxy ProxyStatus) cardData {
 	if len(netStats) == 0 {
 		lines = []string{subtleStyle.Render("Collecting...")}
 	} else {
-		rxBar := netBar(totalRx)
-		txBar := netBar(totalTx)
-		lines = append(lines, fmt.Sprintf("Down   %s  %s", rxBar, formatRate(totalRx)))
-		lines = append(lines, fmt.Sprintf("Up     %s  %s", txBar, formatRate(totalTx)))
+		// sparkline graphs
+		rxSparkline := sparkline(history.RxHistory, totalRx)
+		txSparkline := sparkline(history.TxHistory, totalTx)
+		lines = append(lines, fmt.Sprintf("Down   %s  %s", rxSparkline, formatRate(totalRx)))
+		lines = append(lines, fmt.Sprintf("Up     %s  %s", txSparkline, formatRate(totalTx)))
 		// Show proxy and IP on one line.
 		var infoParts []string
 		if proxy.Enabled {
@@ -473,6 +474,57 @@ func netBar(rate float64) string {
 		return warnStyle.Render(bar)
 	}
 	return okStyle.Render(bar)
+}
+
+// 8 levels: ▁▂▃▄▅▆▇█
+func sparkline(history []float64, current float64) string {
+	const width = 16
+	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+
+	data := make([]float64, 0, width)
+	if len(history) > 0 {
+		// Take the most recent points.
+		start := 0
+		if len(history) > width {
+			start = len(history) - width
+		}
+		data = append(data, history[start:]...)
+	}
+	// padding with zeros at the start
+	for len(data) < width {
+		data = append([]float64{0}, data...)
+	}
+	if len(data) > width {
+		data = data[len(data)-width:]
+	}
+
+	maxVal := 0.1
+	for _, v := range data {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+
+	var builder strings.Builder
+	for _, v := range data {
+		level := int((v / maxVal) * float64(len(blocks)-1))
+		if level < 0 {
+			level = 0
+		}
+		if level >= len(blocks) {
+			level = len(blocks) - 1
+		}
+		builder.WriteRune(blocks[level])
+	}
+
+	result := builder.String()
+	if current > 8 {
+		return dangerStyle.Render(result)
+	}
+	if current > 3 {
+		return warnStyle.Render(result)
+	}
+	return okStyle.Render(result)
 }
 
 func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
