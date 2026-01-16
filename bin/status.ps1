@@ -3,6 +3,7 @@
 
 #Requires -Version 5.1
 param(
+    [Alias('h')]
     [switch]$ShowHelp
 )
 
@@ -17,12 +18,12 @@ $binPath = Join-Path $windowsDir "bin\status.exe"
 function Show-StatusHelp {
     $esc = [char]27
     Write-Host ""
-    Write-Host "$esc[1;35mMole Status$esc[0m - Real-time system health monitor"
+    Write-Host "$esc[1;35mmo status$esc[0m - Real-time system health monitor"
     Write-Host ""
-    Write-Host "$esc[33mUsage:$esc[0m mole status"
+    Write-Host "$esc[33mUsage:$esc[0m mo status"
     Write-Host ""
     Write-Host "$esc[33mOptions:$esc[0m"
-    Write-Host "  -ShowHelp    Show this help message"
+    Write-Host "  --help     Show this help message"
     Write-Host ""
     Write-Host "$esc[33mDisplays:$esc[0m"
     Write-Host "  - System health score (0-100)"

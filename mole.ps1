@@ -10,7 +10,10 @@ param(
     [Parameter(Position = 1, ValueFromRemainingArguments)]
     [string[]]$CommandArgs,
 
+    [Alias('v')]
     [switch]$Version,
+    
+    [Alias('h')]
     [switch]$ShowHelp
 )
 
@@ -71,6 +74,15 @@ function Show-MainHelp {
     Write-Host ""
     Write-Host "  ${green}EXAMPLES:${nc}"
     Write-Host ""
+    Write-Host "    ${gray}mo${nc}                      ${gray}# Interactive menu${nc}"
+    Write-Host "    ${gray}mo clean${nc}                ${gray}# Deep cleanup${nc}"
+    Write-Host "    ${gray}mo clean --dry-run${nc}      ${gray}# Preview cleanup${nc}"
+    Write-Host "    ${gray}mo uninstall${nc}            ${gray}# Uninstall apps${nc}"
+    Write-Host "    ${gray}mo analyze${nc}              ${gray}# Disk analyzer${nc}"
+    Write-Host "    ${gray}mo status${nc}               ${gray}# System monitor${nc}"
+    Write-Host "    ${gray}mo optimize${nc}             ${gray}# Optimize system (includes repairs)${nc}"
+    Write-Host "    ${gray}mo optimize --dry-run${nc}   ${gray}# Preview optimizations${nc}"
+    Write-Host "    ${gray}mo purge${nc}                ${gray}# Clean dev artifacts${nc}"
     Write-Host "    ${gray}mo${nc}                     ${gray}# Interactive menu${nc}"
     Write-Host "    ${gray}mo clean${nc}               ${gray}# Deep cleanup${nc}"
     Write-Host "    ${gray}mo clean --dry-run${nc}     ${gray}# Preview cleanup${nc}"
@@ -236,13 +248,13 @@ function Main {
     $effectiveVersion = $Version
     $effectiveCommand = $Command
 
-    if ($Command -match '^-(.+)$') {
-        $switchName = $Matches[1]
+    if ($Command -match '^-{1,2}(.+)$') {
+        $switchName = $Matches[1].ToLower()
         switch ($switchName) {
-            'ShowHelp' { $effectiveShowHelp = $true; $effectiveCommand = $null }
-            'Help' { $effectiveShowHelp = $true; $effectiveCommand = $null }
+            'showhelp' { $effectiveShowHelp = $true; $effectiveCommand = $null }
+            'help' { $effectiveShowHelp = $true; $effectiveCommand = $null }
             'h' { $effectiveShowHelp = $true; $effectiveCommand = $null }
-            'Version' { $effectiveVersion = $true; $effectiveCommand = $null }
+            'version' { $effectiveVersion = $true; $effectiveCommand = $null }
             'v' { $effectiveVersion = $true; $effectiveCommand = $null }
         }
     }
@@ -270,7 +282,7 @@ function Main {
             Write-MoleError "Unknown command: $effectiveCommand"
             Write-Host ""
             Write-Host "Available commands: $($validCommands -join ', ')"
-            Write-Host "Run 'mole -ShowHelp' for more information"
+            Write-Host "Run 'mo --help' for more information"
         }
         return
     }
