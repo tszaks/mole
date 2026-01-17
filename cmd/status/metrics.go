@@ -149,6 +149,7 @@ type NetworkStatus struct {
 	TxRateMBs float64
 	IP        string
 }
+
 // NetworkHistory holds the global network usage history.
 type NetworkHistory struct {
 	RxHistory []float64
@@ -324,11 +325,11 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 			TxHistory: c.txHistoryBuf.Slice(),
 		},
 		Proxy:        proxyStats,
-		Batteries:      batteryStats,
-		Thermal:        thermalStats,
-		Sensors:        sensorStats,
-		Bluetooth:      btStats,
-		TopProcesses:   topProcs,
+		Batteries:    batteryStats,
+		Thermal:      thermalStats,
+		Sensors:      sensorStats,
+		Bluetooth:    btStats,
+		TopProcesses: topProcs,
 	}, mergeErr
 }
 

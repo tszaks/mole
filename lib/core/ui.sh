@@ -206,7 +206,7 @@ read_key() {
                     echo "QUIT"
                 fi
                 ;;
-            ' ') echo "SPACE" ;;  # Allow space in filter mode for selection
+            ' ') echo "SPACE" ;; # Allow space in filter mode for selection
             [[:print:]]) echo "CHAR:$key" ;;
             *) echo "OTHER" ;;
         esac
