@@ -7,10 +7,7 @@ clean_user_essentials() {
     stop_section_spinner
 
     safe_clean ~/Library/Logs/* "User app logs"
-    if is_path_whitelisted "$HOME/.Trash"; then
-        note_activity
-        echo -e "  ${GREEN}${ICON_EMPTY}${NC} Trash · whitelist protected"
-    else
+    if ! is_path_whitelisted "$HOME/.Trash"; then
         safe_clean ~/.Trash/* "Trash"
     fi
 }
@@ -23,7 +20,7 @@ clean_chrome_old_versions() {
     )
 
     # Match the exact Chrome process name to avoid false positives
-    if pgrep -x "Google Chrome" > /dev/null 2>&1; then
+    if pgrep -x "Google Chrome" >/dev/null 2>&1; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Google Chrome running · old versions cleanup skipped"
         return 0
     fi
@@ -42,7 +39,7 @@ clean_chrome_old_versions() {
         [[ -L "$current_link" ]] || continue
 
         local current_version
-        current_version=$(readlink "$current_link" 2> /dev/null || true)
+        current_version=$(readlink "$current_link" 2>/dev/null || true)
         current_version="${current_version##*/}"
         [[ -n "$current_version" ]] || continue
 
@@ -72,9 +69,9 @@ clean_chrome_old_versions() {
             cleaned_any=true
             if [[ "$DRY_RUN" != "true" ]]; then
                 if has_sudo_session; then
-                    safe_sudo_remove "$dir" > /dev/null 2>&1 || true
+                    safe_sudo_remove "$dir" >/dev/null 2>&1 || true
                 else
-                    safe_remove "$dir" true > /dev/null 2>&1 || true
+                    safe_remove "$dir" true >/dev/null 2>&1 || true
                 fi
             fi
         done
@@ -103,7 +100,7 @@ clean_edge_old_versions() {
     )
 
     # Match the exact Edge process name to avoid false positives (e.g., Microsoft Teams)
-    if pgrep -x "Microsoft Edge" > /dev/null 2>&1; then
+    if pgrep -x "Microsoft Edge" >/dev/null 2>&1; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Microsoft Edge running · old versions cleanup skipped"
         return 0
     fi
@@ -122,7 +119,7 @@ clean_edge_old_versions() {
         [[ -L "$current_link" ]] || continue
 
         local current_version
-        current_version=$(readlink "$current_link" 2> /dev/null || true)
+        current_version=$(readlink "$current_link" 2>/dev/null || true)
         current_version="${current_version##*/}"
         [[ -n "$current_version" ]] || continue
 
@@ -152,9 +149,9 @@ clean_edge_old_versions() {
             cleaned_any=true
             if [[ "$DRY_RUN" != "true" ]]; then
                 if has_sudo_session; then
-                    safe_sudo_remove "$dir" > /dev/null 2>&1 || true
+                    safe_sudo_remove "$dir" >/dev/null 2>&1 || true
                 else
-                    safe_remove "$dir" true > /dev/null 2>&1 || true
+                    safe_remove "$dir" true >/dev/null 2>&1 || true
                 fi
             fi
         done
@@ -180,7 +177,7 @@ clean_edge_updater_old_versions() {
     local updater_dir="$HOME/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
     [[ -d "$updater_dir" ]] || return 0
 
-    if pgrep -x "Microsoft Edge" > /dev/null 2>&1; then
+    if pgrep -x "Microsoft Edge" >/dev/null 2>&1; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Microsoft Edge running · updater cleanup skipped"
         return 0
     fi
@@ -218,7 +215,7 @@ clean_edge_updater_old_versions() {
         ((cleaned_count++))
         cleaned_any=true
         if [[ "$DRY_RUN" != "true" ]]; then
-            safe_remove "$dir" true > /dev/null 2>&1 || true
+            safe_remove "$dir" true >/dev/null 2>&1 || true
         fi
     done
 
@@ -245,20 +242,20 @@ scan_external_volumes() {
         [[ -d "$volume" && -w "$volume" && ! -L "$volume" ]] || continue
         [[ "$volume" == "/" || "$volume" == "/Volumes/Macintosh HD" ]] && continue
         local protocol=""
-        protocol=$(run_with_timeout 1 command diskutil info "$volume" 2> /dev/null | grep -i "Protocol:" | awk '{print $2}' || echo "")
+        protocol=$(run_with_timeout 1 command diskutil info "$volume" 2>/dev/null | grep -i "Protocol:" | awk '{print $2}' || echo "")
         case "$protocol" in
-            SMB | NFS | AFP | CIFS | WebDAV)
-                network_volumes+=("$volume")
-                continue
-                ;;
+        SMB | NFS | AFP | CIFS | WebDAV)
+            network_volumes+=("$volume")
+            continue
+            ;;
         esac
         local fs_type=""
-        fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "")
+        fs_type=$(run_with_timeout 1 command df -T "$volume" 2>/dev/null | tail -1 | awk '{print $2}' || echo "")
         case "$fs_type" in
-            nfs | smbfs | afpfs | cifs | webdav)
-                network_volumes+=("$volume")
-                continue
-                ;;
+        nfs | smbfs | afpfs | cifs | webdav)
+            network_volumes+=("$volume")
+            continue
+            ;;
         esac
         candidate_volumes+=("$volume")
     done
@@ -278,7 +275,7 @@ scan_external_volumes() {
         if [[ -d "$volume_trash" && "$DRY_RUN" != "true" ]] && ! is_path_whitelisted "$volume_trash"; then
             while IFS= read -r -d '' item; do
                 safe_remove "$item" true || true
-            done < <(command find "$volume_trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+            done < <(command find "$volume_trash" -mindepth 1 -maxdepth 1 -print0 2>/dev/null || true)
         fi
         if [[ "$PROTECT_FINDER_METADATA" != "true" ]]; then
             clean_ds_store_tree "$volume" "$(basename "$volume") volume (.DS_Store)"
@@ -288,17 +285,13 @@ scan_external_volumes() {
 }
 # Finder metadata (.DS_Store).
 clean_finder_metadata() {
-    stop_section_spinner
     if [[ "$PROTECT_FINDER_METADATA" == "true" ]]; then
-        note_activity
-        echo -e "  ${GREEN}${ICON_EMPTY}${NC} Finder metadata · whitelist protected"
         return
     fi
     clean_ds_store_tree "$HOME" "Home directory (.DS_Store)"
 }
 # macOS system caches and user-level leftovers.
 clean_macos_system_caches() {
-    stop_section_spinner
     # safe_clean already checks protected paths.
     safe_clean ~/Library/Saved\ Application\ State/* "Saved application states" || true
     safe_clean ~/Library/Caches/com.apple.photoanalysisd "Photo analysis cache" || true
@@ -318,7 +311,6 @@ clean_macos_system_caches() {
     safe_clean ~/Library/Application\ Support/AddressBook/Sources/*/Photos.cache "Address Book photo cache" || true
 }
 clean_recent_items() {
-    stop_section_spinner
     local shared_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"
     local -a recent_lists=(
         "$shared_dir/com.apple.LSSharedFileList.RecentApplications.sfl2"
@@ -338,7 +330,6 @@ clean_recent_items() {
     safe_clean ~/Library/Preferences/com.apple.recentitems.plist "Recent items preferences" || true
 }
 clean_mail_downloads() {
-    stop_section_spinner
     local mail_age_days=${MOLE_MAIL_AGE_DAYS:-}
     if ! [[ "$mail_age_days" =~ ^[0-9]+$ ]]; then
         mail_age_days=30
@@ -371,7 +362,7 @@ clean_mail_downloads() {
                         ((cleaned_kb += file_size_kb))
                     fi
                 fi
-            done < <(command find "$target_path" -type f -mtime +"$mail_age_days" -print0 2> /dev/null || true)
+            done < <(command find "$target_path" -type f -mtime +"$mail_age_days" -print0 2>/dev/null || true)
         fi
     done
     if [[ $count -gt 0 ]]; then
@@ -429,7 +420,7 @@ process_container_cache() {
     local cache_dir="$container_dir/Data/Library/Caches"
     [[ -d "$cache_dir" ]] || return 0
     # Fast non-empty check.
-    if find "$cache_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
+    if find "$cache_dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
         local size=$(get_path_size_kb "$cache_dir")
         ((total_size += size))
         found_any=true
@@ -449,7 +440,6 @@ process_container_cache() {
 }
 # Browser caches (Safari/Chrome/Edge/Firefox).
 clean_browsers() {
-    stop_section_spinner
     safe_clean ~/Library/Caches/com.apple.Safari/* "Safari cache"
     # Chrome/Chromium.
     safe_clean ~/Library/Caches/Google/Chrome/* "Chrome cache"
@@ -461,7 +451,7 @@ clean_browsers() {
     safe_clean ~/Library/Caches/company.thebrowser.dia/* "Dia cache"
     safe_clean ~/Library/Caches/BraveSoftware/Brave-Browser/* "Brave cache"
     local firefox_running=false
-    if pgrep -x "Firefox" > /dev/null 2>&1; then
+    if pgrep -x "Firefox" >/dev/null 2>&1; then
         firefox_running=true
     fi
     if [[ "$firefox_running" == "true" ]]; then
@@ -485,7 +475,6 @@ clean_browsers() {
 }
 # Cloud storage caches.
 clean_cloud_storage() {
-    stop_section_spinner
     safe_clean ~/Library/Caches/com.dropbox.* "Dropbox cache"
     safe_clean ~/Library/Caches/com.getdropbox.dropbox "Dropbox cache"
     safe_clean ~/Library/Caches/com.google.GoogleDrive "Google Drive cache"
@@ -496,7 +485,6 @@ clean_cloud_storage() {
 }
 # Office app caches.
 clean_office_applications() {
-    stop_section_spinner
     safe_clean ~/Library/Caches/com.microsoft.Word "Microsoft Word cache"
     safe_clean ~/Library/Caches/com.microsoft.Excel "Microsoft Excel cache"
     safe_clean ~/Library/Caches/com.microsoft.Powerpoint "Microsoft PowerPoint cache"
@@ -516,8 +504,7 @@ clean_virtualization_tools() {
 }
 # Application Support logs/caches.
 clean_application_support_logs() {
-    stop_section_spinner
-    if [[ ! -d "$HOME/Library/Application Support" ]] || ! ls "$HOME/Library/Application Support" > /dev/null 2>&1; then
+    if [[ ! -d "$HOME/Library/Application Support" ]] || ! ls "$HOME/Library/Application Support" >/dev/null 2>&1; then
         note_activity
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Skipped: No permission to access Application Support"
         return 0
@@ -549,7 +536,7 @@ clean_application_support_logs() {
         local -a start_candidates=("$app_dir/log" "$app_dir/logs" "$app_dir/activitylog" "$app_dir/Cache/Cache_Data" "$app_dir/Crashpad/completed")
         for candidate in "${start_candidates[@]}"; do
             if [[ -d "$candidate" ]]; then
-                if find "$candidate" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
+                if find "$candidate" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
                     local size=$(get_path_size_kb "$candidate")
                     ((total_size += size))
                     ((cleaned_count++))
@@ -557,7 +544,7 @@ clean_application_support_logs() {
                     if [[ "$DRY_RUN" != "true" ]]; then
                         for item in "$candidate"/*; do
                             [[ -e "$item" ]] || continue
-                            safe_remove "$item" true > /dev/null 2>&1 || true
+                            safe_remove "$item" true >/dev/null 2>&1 || true
                         done
                     fi
                 fi
@@ -573,7 +560,7 @@ clean_application_support_logs() {
         local -a gc_candidates=("$container_path/Logs" "$container_path/Library/Logs")
         for candidate in "${gc_candidates[@]}"; do
             if [[ -d "$candidate" ]]; then
-                if find "$candidate" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
+                if find "$candidate" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
                     local size=$(get_path_size_kb "$candidate")
                     ((total_size += size))
                     ((cleaned_count++))
@@ -581,7 +568,7 @@ clean_application_support_logs() {
                     if [[ "$DRY_RUN" != "true" ]]; then
                         for item in "$candidate"/*; do
                             [[ -e "$item" ]] || continue
-                            safe_remove "$item" true > /dev/null 2>&1 || true
+                            safe_remove "$item" true >/dev/null 2>&1 || true
                         done
                     fi
                 fi
@@ -610,7 +597,7 @@ check_ios_device_backups() {
     if [[ -d "$backup_dir" ]]; then
         local backup_kb=$(get_path_size_kb "$backup_dir")
         if [[ -n "${backup_kb:-}" && "$backup_kb" -gt 102400 ]]; then
-            local backup_human=$(command du -sh "$backup_dir" 2> /dev/null | awk '{print $1}')
+            local backup_human=$(command du -sh "$backup_dir" 2>/dev/null | awk '{print $1}')
             if [[ -n "$backup_human" ]]; then
                 note_activity
                 echo -e "  Found ${GREEN}${backup_human}${NC} iOS backups"

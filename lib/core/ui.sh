@@ -168,47 +168,47 @@ read_key() {
             return 0
         }
         case "$key" in
-            $'\n' | $'\r') echo "ENTER" ;;
-            $'\x7f' | $'\x08') echo "DELETE" ;;
-            $'\x1b')
-                # Check if this is an escape sequence (arrow keys) or ESC key
-                if IFS= read -r -s -n 1 -t 0.1 rest 2> /dev/null; then
-                    if [[ "$rest" == "[" ]]; then
-                        if IFS= read -r -s -n 1 -t 0.1 rest2 2> /dev/null; then
-                            case "$rest2" in
-                                "A") echo "UP" ;;
-                                "B") echo "DOWN" ;;
-                                "C") echo "RIGHT" ;;
-                                "D") echo "LEFT" ;;
-                                "3")
-                                    IFS= read -r -s -n 1 -t 0.1 rest3 2> /dev/null
-                                    [[ "$rest3" == "~" ]] && echo "DELETE" || echo "OTHER"
-                                    ;;
-                                *) echo "OTHER" ;;
-                            esac
-                        else echo "QUIT"; fi
-                    elif [[ "$rest" == "O" ]]; then
-                        if IFS= read -r -s -n 1 -t 0.1 rest2 2> /dev/null; then
-                            case "$rest2" in
-                                "A") echo "UP" ;;
-                                "B") echo "DOWN" ;;
-                                "C") echo "RIGHT" ;;
-                                "D") echo "LEFT" ;;
-                                *) echo "OTHER" ;;
-                            esac
-                        else echo "OTHER"; fi
-                    else
-                        # Not an escape sequence, it's ESC key
-                        echo "QUIT"
-                    fi
+        $'\n' | $'\r') echo "ENTER" ;;
+        $'\x7f' | $'\x08') echo "DELETE" ;;
+        $'\x1b')
+            # Check if this is an escape sequence (arrow keys) or ESC key
+            if IFS= read -r -s -n 1 -t 0.1 rest 2>/dev/null; then
+                if [[ "$rest" == "[" ]]; then
+                    if IFS= read -r -s -n 1 -t 0.1 rest2 2>/dev/null; then
+                        case "$rest2" in
+                        "A") echo "UP" ;;
+                        "B") echo "DOWN" ;;
+                        "C") echo "RIGHT" ;;
+                        "D") echo "LEFT" ;;
+                        "3")
+                            IFS= read -r -s -n 1 -t 0.1 rest3 2>/dev/null
+                            [[ "$rest3" == "~" ]] && echo "DELETE" || echo "OTHER"
+                            ;;
+                        *) echo "OTHER" ;;
+                        esac
+                    else echo "QUIT"; fi
+                elif [[ "$rest" == "O" ]]; then
+                    if IFS= read -r -s -n 1 -t 0.1 rest2 2>/dev/null; then
+                        case "$rest2" in
+                        "A") echo "UP" ;;
+                        "B") echo "DOWN" ;;
+                        "C") echo "RIGHT" ;;
+                        "D") echo "LEFT" ;;
+                        *) echo "OTHER" ;;
+                        esac
+                    else echo "OTHER"; fi
                 else
-                    # No following characters, it's ESC key
+                    # Not an escape sequence, it's ESC key
                     echo "QUIT"
                 fi
-                ;;
-            ' ') echo "SPACE" ;; # Allow space in filter mode for selection
-            [[:print:]]) echo "CHAR:$key" ;;
-            *) echo "OTHER" ;;
+            else
+                # No following characters, it's ESC key
+                echo "QUIT"
+            fi
+            ;;
+        ' ') echo "SPACE" ;; # Allow space in filter mode for selection
+        [[:print:]]) echo "CHAR:$key" ;;
+        *) echo "OTHER" ;;
         esac
         return 0
     fi
@@ -218,53 +218,53 @@ read_key() {
         return 0
     }
     case "$key" in
-        $'\n' | $'\r') echo "ENTER" ;;
-        ' ') echo "SPACE" ;;
-        '/') echo "FILTER" ;;
-        'q' | 'Q') echo "QUIT" ;;
-        'R') echo "RETRY" ;;
-        'm' | 'M') echo "MORE" ;;
-        'u' | 'U') echo "UPDATE" ;;
-        't' | 'T') echo "TOUCHID" ;;
-        'j' | 'J') echo "DOWN" ;;
-        'k' | 'K') echo "UP" ;;
-        'h' | 'H') echo "LEFT" ;;
-        'l' | 'L') echo "RIGHT" ;;
-        $'\x03') echo "QUIT" ;;
-        $'\x7f' | $'\x08') echo "DELETE" ;;
-        $'\x1b')
-            if IFS= read -r -s -n 1 -t 1 rest 2> /dev/null; then
-                if [[ "$rest" == "[" ]]; then
-                    if IFS= read -r -s -n 1 -t 1 rest2 2> /dev/null; then
-                        case "$rest2" in
-                            "A") echo "UP" ;; "B") echo "DOWN" ;;
-                            "C") echo "RIGHT" ;; "D") echo "LEFT" ;;
-                            "3")
-                                IFS= read -r -s -n 1 -t 1 rest3 2> /dev/null
-                                [[ "$rest3" == "~" ]] && echo "DELETE" || echo "OTHER"
-                                ;;
-                            *) echo "OTHER" ;;
-                        esac
-                    else echo "QUIT"; fi
-                elif [[ "$rest" == "O" ]]; then
-                    if IFS= read -r -s -n 1 -t 1 rest2 2> /dev/null; then
-                        case "$rest2" in
-                            "A") echo "UP" ;; "B") echo "DOWN" ;;
-                            "C") echo "RIGHT" ;; "D") echo "LEFT" ;;
-                            *) echo "OTHER" ;;
-                        esac
-                    else echo "OTHER"; fi
+    $'\n' | $'\r') echo "ENTER" ;;
+    ' ') echo "SPACE" ;;
+    '/') echo "FILTER" ;;
+    'q' | 'Q') echo "QUIT" ;;
+    'R') echo "RETRY" ;;
+    'm' | 'M') echo "MORE" ;;
+    'u' | 'U') echo "UPDATE" ;;
+    't' | 'T') echo "TOUCHID" ;;
+    'j' | 'J') echo "DOWN" ;;
+    'k' | 'K') echo "UP" ;;
+    'h' | 'H') echo "LEFT" ;;
+    'l' | 'L') echo "RIGHT" ;;
+    $'\x03') echo "QUIT" ;;
+    $'\x7f' | $'\x08') echo "DELETE" ;;
+    $'\x1b')
+        if IFS= read -r -s -n 1 -t 1 rest 2>/dev/null; then
+            if [[ "$rest" == "[" ]]; then
+                if IFS= read -r -s -n 1 -t 1 rest2 2>/dev/null; then
+                    case "$rest2" in
+                    "A") echo "UP" ;; "B") echo "DOWN" ;;
+                    "C") echo "RIGHT" ;; "D") echo "LEFT" ;;
+                    "3")
+                        IFS= read -r -s -n 1 -t 1 rest3 2>/dev/null
+                        [[ "$rest3" == "~" ]] && echo "DELETE" || echo "OTHER"
+                        ;;
+                    *) echo "OTHER" ;;
+                    esac
+                else echo "QUIT"; fi
+            elif [[ "$rest" == "O" ]]; then
+                if IFS= read -r -s -n 1 -t 1 rest2 2>/dev/null; then
+                    case "$rest2" in
+                    "A") echo "UP" ;; "B") echo "DOWN" ;;
+                    "C") echo "RIGHT" ;; "D") echo "LEFT" ;;
+                    *) echo "OTHER" ;;
+                    esac
                 else echo "OTHER"; fi
-            else echo "QUIT"; fi
-            ;;
-        [[:print:]]) echo "CHAR:$key" ;;
-        *) echo "OTHER" ;;
+            else echo "OTHER"; fi
+        else echo "QUIT"; fi
+        ;;
+    [[:print:]]) echo "CHAR:$key" ;;
+    *) echo "OTHER" ;;
     esac
 }
 
 drain_pending_input() {
     local drained=0
-    while IFS= read -r -s -n 1 -t 0.01 _ 2> /dev/null; do
+    while IFS= read -r -s -n 1 -t 0.01 _ 2>/dev/null; do
         ((drained++))
         [[ $drained -gt 100 ]] && break
     done
@@ -288,7 +288,7 @@ INLINE_SPINNER_PID=""
 INLINE_SPINNER_STOP_FILE=""
 
 start_inline_spinner() {
-    stop_inline_spinner 2> /dev/null || true
+    stop_inline_spinner 2>/dev/null || true
     local message="$1"
 
     if [[ -t 1 ]]; then
@@ -308,15 +308,15 @@ start_inline_spinner() {
                 # Output to stderr to avoid interfering with stdout
                 printf "\r${MOLE_SPINNER_PREFIX:-}${BLUE}%s${NC} %s" "$c" "$message" >&2 || break
                 ((i++))
-                sleep 0.1
+                sleep 0.05
             done
 
             # Clean up stop file before exiting
-            rm -f "$stop_file" 2> /dev/null || true
+            rm -f "$stop_file" 2>/dev/null || true
             exit 0
         ) &
         INLINE_SPINNER_PID=$!
-        disown 2> /dev/null || true
+        disown 2>/dev/null || true
     else
         echo -n "  ${BLUE}|${NC} $message" >&2 || true
     fi
@@ -326,25 +326,25 @@ stop_inline_spinner() {
     if [[ -n "$INLINE_SPINNER_PID" ]]; then
         # Cooperative stop: create stop file to signal spinner to exit
         if [[ -n "$INLINE_SPINNER_STOP_FILE" ]]; then
-            touch "$INLINE_SPINNER_STOP_FILE" 2> /dev/null || true
+            touch "$INLINE_SPINNER_STOP_FILE" 2>/dev/null || true
         fi
 
         # Wait briefly for cooperative exit
         local wait_count=0
-        while kill -0 "$INLINE_SPINNER_PID" 2> /dev/null && [[ $wait_count -lt 5 ]]; do
-            sleep 0.05 2> /dev/null || true
+        while kill -0 "$INLINE_SPINNER_PID" 2>/dev/null && [[ $wait_count -lt 5 ]]; do
+            sleep 0.05 2>/dev/null || true
             ((wait_count++))
         done
 
         # Only use SIGKILL as last resort if process is stuck
-        if kill -0 "$INLINE_SPINNER_PID" 2> /dev/null; then
-            kill -KILL "$INLINE_SPINNER_PID" 2> /dev/null || true
+        if kill -0 "$INLINE_SPINNER_PID" 2>/dev/null; then
+            kill -KILL "$INLINE_SPINNER_PID" 2>/dev/null || true
         fi
 
-        wait "$INLINE_SPINNER_PID" 2> /dev/null || true
+        wait "$INLINE_SPINNER_PID" 2>/dev/null || true
 
         # Cleanup
-        rm -f "$INLINE_SPINNER_STOP_FILE" 2> /dev/null || true
+        rm -f "$INLINE_SPINNER_STOP_FILE" 2>/dev/null || true
         INLINE_SPINNER_PID=""
         INLINE_SPINNER_STOP_FILE=""
 
@@ -361,8 +361,8 @@ with_spinner() {
     start_inline_spinner "$msg"
     local exit_code=0
     if [[ -n "${MOLE_TIMEOUT_BIN:-}" ]]; then
-        "$MOLE_TIMEOUT_BIN" "$timeout" "$@" > /dev/null 2>&1 || exit_code=$?
-    else "$@" > /dev/null 2>&1 || exit_code=$?; fi
+        "$MOLE_TIMEOUT_BIN" "$timeout" "$@" >/dev/null 2>&1 || exit_code=$?
+    else "$@" >/dev/null 2>&1 || exit_code=$?; fi
     stop_inline_spinner "$msg"
     return $exit_code
 }
@@ -379,14 +379,14 @@ format_last_used_summary() {
     local value="$1"
 
     case "$value" in
-        "" | "Unknown")
-            echo "Unknown"
-            return 0
-            ;;
-        "Never" | "Recent" | "Today" | "Yesterday" | "This year" | "Old")
-            echo "$value"
-            return 0
-            ;;
+    "" | "Unknown")
+        echo "Unknown"
+        return 0
+        ;;
+    "Never" | "Recent" | "Today" | "Yesterday" | "This year" | "Old")
+        echo "$value"
+        return 0
+        ;;
     esac
 
     if [[ $value =~ ^([0-9]+)[[:space:]]+days?\ ago$ ]]; then
@@ -444,7 +444,7 @@ has_full_disk_access() {
         if [[ -e "$test_path" ]]; then
             tested_count=$((tested_count + 1))
             # Try to stat the ACTUAL protected path - this requires FDA
-            if stat "$test_path" > /dev/null 2>&1; then
+            if stat "$test_path" >/dev/null 2>&1; then
                 accessible_count=$((accessible_count + 1))
             fi
         fi

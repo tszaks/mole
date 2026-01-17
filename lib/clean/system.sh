@@ -27,14 +27,14 @@ clean_deep_system() {
                     continue
                 fi
                 local item_flags
-                item_flags=$($STAT_BSD -f%Sf "$item" 2> /dev/null || echo "")
+                item_flags=$($STAT_BSD -f%Sf "$item" 2>/dev/null || echo "")
                 if [[ "$item_flags" == *"restricted"* ]]; then
                     continue
                 fi
                 if safe_sudo_remove "$item"; then
                     ((updates_cleaned++))
                 fi
-            done < <(find /Library/Updates -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+            done < <(find /Library/Updates -mindepth 1 -maxdepth 1 -print0 2>/dev/null || true)
             [[ $updates_cleaned -gt 0 ]] && log_success "System library updates"
         fi
     fi
@@ -76,28 +76,32 @@ clean_deep_system() {
                 last_update_time=$current_time
             fi
         fi
-    done < <(run_with_timeout 5 command find /private/var/folders -type d -name "*.code_sign_clone" -path "*/X/*" -print0 2> /dev/null || true)
+    done < <(run_with_timeout 5 command find /private/var/folders -type d -name "*.code_sign_clone" -path "*/X/*" -print0 2>/dev/null || true)
     stop_section_spinner
     [[ $code_sign_cleaned -gt 0 ]] && log_success "Browser code signature caches ($code_sign_cleaned items)"
-    safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
-    safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
-    safe_sudo_find_delete "/private/var/db/DiagnosticPipeline" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
-    log_success "System diagnostic logs"
-    safe_sudo_find_delete "/private/var/db/powerlog" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
-    log_success "Power logs"
-    safe_sudo_find_delete "/private/var/db/reportmemoryexception/MemoryLimitViolations" "*" "30" "f" || true
-    log_success "Memory exception reports"
-    start_section_spinner "Cleaning diagnostic trace logs..."
-    local diag_logs_cleaned=0
-    safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*.tracev3" "30" "f" && diag_logs_cleaned=1 || true
-    safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*.tracev3" "30" "f" && diag_logs_cleaned=1 || true
+
+    start_section_spinner "Cleaning system diagnostic logs..."
+    local diag_cleaned=0
+    safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*" "$MOLE_LOG_AGE_DAYS" "f" && diag_cleaned=1 || true
+    safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*" "$MOLE_LOG_AGE_DAYS" "f" && diag_cleaned=1 || true
+    safe_sudo_find_delete "/private/var/db/DiagnosticPipeline" "*" "$MOLE_LOG_AGE_DAYS" "f" && diag_cleaned=1 || true
+    safe_sudo_find_delete "/private/var/db/powerlog" "*" "$MOLE_LOG_AGE_DAYS" "f" && diag_cleaned=1 || true
+    safe_sudo_find_delete "/private/var/db/reportmemoryexception/MemoryLimitViolations" "*" "30" "f" && diag_cleaned=1 || true
     stop_section_spinner
-    [[ $diag_logs_cleaned -eq 1 ]] && log_success "System diagnostic trace logs"
+
+    [[ $diag_cleaned -eq 1 ]] && log_success "System diagnostic logs"
+
+    start_section_spinner "Cleaning diagnostic trace logs..."
+    local trace_cleaned=0
+    safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*.tracev3" "30" "f" && trace_cleaned=1 || true
+    safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*.tracev3" "30" "f" && trace_cleaned=1 || true
+    stop_section_spinner
+    [[ $trace_cleaned -eq 1 ]] && log_success "System diagnostic trace logs"
 }
 # Incomplete Time Machine backups.
 clean_time_machine_failed_backups() {
     local tm_cleaned=0
-    if ! command -v tmutil > /dev/null 2>&1; then
+    if ! command -v tmutil >/dev/null 2>&1; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
@@ -151,9 +155,9 @@ clean_time_machine_failed_backups() {
     fi
     for volume in "${backup_volumes[@]}"; do
         local fs_type
-        fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "unknown")
+        fs_type=$(run_with_timeout 1 command df -T "$volume" 2>/dev/null | tail -1 | awk '{print $2}' || echo "unknown")
         case "$fs_type" in
-            nfs | smbfs | afpfs | cifs | webdav | unknown) continue ;;
+        nfs | smbfs | afpfs | cifs | webdav | unknown) continue ;;
         esac
         local backupdb_dir="$volume/Backups.backupdb"
         if [[ -d "$backupdb_dir" ]]; then
@@ -181,11 +185,11 @@ clean_time_machine_failed_backups() {
                     note_activity
                     continue
                 fi
-                if ! command -v tmutil > /dev/null 2>&1; then
+                if ! command -v tmutil >/dev/null 2>&1; then
                     echo -e "  ${YELLOW}!${NC} tmutil not available, skipping: $backup_name"
                     continue
                 fi
-                if tmutil delete "$inprogress_file" 2> /dev/null; then
+                if tmutil delete "$inprogress_file" 2>/dev/null; then
                     echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Incomplete backup: $backup_name ${GREEN}($size_human)${NC}"
                     ((tm_cleaned++))
                     ((files_cleaned++))
@@ -195,14 +199,14 @@ clean_time_machine_failed_backups() {
                 else
                     echo -e "  ${YELLOW}!${NC} Could not delete: $backup_name · try manually with sudo"
                 fi
-            done < <(run_with_timeout 15 find "$backupdb_dir" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2> /dev/null || true)
+            done < <(run_with_timeout 15 find "$backupdb_dir" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2>/dev/null || true)
         fi
         # APFS bundles.
         for bundle in "$volume"/*.backupbundle "$volume"/*.sparsebundle; do
             [[ -e "$bundle" ]] || continue
             [[ -d "$bundle" ]] || continue
             local bundle_name=$(basename "$bundle")
-            local mounted_path=$(hdiutil info 2> /dev/null | grep -A 5 "image-path.*$bundle_name" | grep "/Volumes/" | awk '{print $1}' | head -1 || echo "")
+            local mounted_path=$(hdiutil info 2>/dev/null | grep -A 5 "image-path.*$bundle_name" | grep "/Volumes/" | awk '{print $1}' | head -1 || echo "")
             if [[ -n "$mounted_path" && -d "$mounted_path" ]]; then
                 while IFS= read -r inprogress_file; do
                     [[ -d "$inprogress_file" ]] || continue
@@ -227,10 +231,10 @@ clean_time_machine_failed_backups() {
                         note_activity
                         continue
                     fi
-                    if ! command -v tmutil > /dev/null 2>&1; then
+                    if ! command -v tmutil >/dev/null 2>&1; then
                         continue
                     fi
-                    if tmutil delete "$inprogress_file" 2> /dev/null; then
+                    if tmutil delete "$inprogress_file" 2>/dev/null; then
                         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Incomplete APFS backup in $bundle_name: $backup_name ${GREEN}($size_human)${NC}"
                         ((tm_cleaned++))
                         ((files_cleaned++))
@@ -240,7 +244,7 @@ clean_time_machine_failed_backups() {
                     else
                         echo -e "  ${YELLOW}!${NC} Could not delete from bundle: $backup_name"
                     fi
-                done < <(run_with_timeout 15 find "$mounted_path" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2> /dev/null || true)
+                done < <(run_with_timeout 15 find "$mounted_path" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2>/dev/null || true)
             fi
         done
     done
@@ -256,20 +260,20 @@ clean_time_machine_failed_backups() {
 # Returns 2 if status cannot be determined
 tm_is_running() {
     local st
-    st="$(tmutil status 2> /dev/null)" || return 2
+    st="$(tmutil status 2>/dev/null)" || return 2
 
     # If we can't find a Running field at all, treat as unknown.
-    if ! grep -qE '(^|[[:space:]])("Running"|Running)[[:space:]]*=' <<< "$st"; then
+    if ! grep -qE '(^|[[:space:]])("Running"|Running)[[:space:]]*=' <<<"$st"; then
         return 2
     fi
 
     # Match: Running = 1;   OR   "Running" = 1   (with or without trailing ;)
-    grep -qE '(^|[[:space:]])("Running"|Running)[[:space:]]*=[[:space:]]*1([[:space:]]*;|$)' <<< "$st"
+    grep -qE '(^|[[:space:]])("Running"|Running)[[:space:]]*=[[:space:]]*1([[:space:]]*;|$)' <<<"$st"
 }
 
 # Local APFS snapshots (keep the most recent).
 clean_local_snapshots() {
-    if ! command -v tmutil > /dev/null 2>&1; then
+    if ! command -v tmutil >/dev/null 2>&1; then
         return 0
     fi
 
@@ -288,7 +292,7 @@ clean_local_snapshots() {
 
     start_section_spinner "Checking local snapshots..."
     local snapshot_list
-    snapshot_list=$(tmutil listlocalsnapshots / 2> /dev/null)
+    snapshot_list=$(tmutil listlocalsnapshots / 2>/dev/null)
     stop_section_spinner
     [[ -z "$snapshot_list" ]] && return 0
     local cleaned_count=0
@@ -301,14 +305,14 @@ clean_local_snapshots() {
             local snap_name="${BASH_REMATCH[0]}"
             snapshots+=("$snap_name")
             local date_str="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]:0:2}:${BASH_REMATCH[4]:2:2}:${BASH_REMATCH[4]:4:2}"
-            local snap_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$date_str" "+%s" 2> /dev/null || echo "0")
+            local snap_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$date_str" "+%s" 2>/dev/null || echo "0")
             [[ "$snap_ts" == "0" ]] && continue
             if [[ "$snap_ts" -gt "$newest_ts" ]]; then
                 newest_ts="$snap_ts"
                 newest_name="$snap_name"
             fi
         fi
-    done <<< "$snapshot_list"
+    done <<<"$snapshot_list"
 
     [[ ${#snapshots[@]} -eq 0 ]] && return 0
     [[ -z "$newest_name" ]] && return 0
@@ -327,7 +331,7 @@ clean_local_snapshots() {
         echo -e "  ${GRAY}The most recent snapshot will be kept.${NC}"
         echo -ne "  ${PURPLE}${ICON_ARROW}${NC} Remove all local snapshots except the most recent one? ${GREEN}Enter${NC} continue, ${GRAY}Space${NC} skip: "
         local choice
-        if type read_key > /dev/null 2>&1; then
+        if type read_key >/dev/null 2>&1; then
             choice=$(read_key)
         else
             IFS= read -r -s -n 1 choice || choice=""
@@ -352,7 +356,7 @@ clean_local_snapshots() {
                     ((cleaned_count++))
                     note_activity
                 else
-                    if sudo tmutil deletelocalsnapshots "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}-${BASH_REMATCH[4]}" > /dev/null 2>&1; then
+                    if sudo tmutil deletelocalsnapshots "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}-${BASH_REMATCH[4]}" >/dev/null 2>&1; then
                         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Removed snapshot: $snap_name"
                         ((cleaned_count++))
                         note_activity
