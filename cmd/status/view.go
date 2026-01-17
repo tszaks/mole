@@ -473,21 +473,6 @@ func renderNetworkCard(netStats []NetworkStatus, history NetworkHistory, proxy P
 	return cardData{icon: iconNetwork, title: "Network", lines: lines}
 }
 
-func netBar(rate float64) string {
-	filled := min(int(rate/2.0), 5)
-	if filled < 0 {
-		filled = 0
-	}
-	bar := strings.Repeat("▮", filled) + strings.Repeat("▯", 5-filled)
-	if rate > 8 {
-		return dangerStyle.Render(bar)
-	}
-	if rate > 3 {
-		return warnStyle.Render(bar)
-	}
-	return okStyle.Render(bar)
-}
-
 // 8 levels: ▁▂▃▄▅▆▇█
 func sparkline(history []float64, current float64, width int) string {
 	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
