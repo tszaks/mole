@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/net"
+	"github.com/shirou/gopsutil/v4/disk"
+	"github.com/shirou/gopsutil/v4/host"
+	"github.com/shirou/gopsutil/v4/net"
 )
 
 // RingBuffer is a fixed-size circular buffer for float64 values.

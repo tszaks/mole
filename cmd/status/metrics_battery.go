@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shirou/gopsutil/v3/host"
+	"github.com/shirou/gopsutil/v4/sensors"
 )
 
 var (
@@ -285,7 +285,7 @@ func collectThermal() ThermalStatus {
 }
 
 func collectSensors() ([]SensorReading, error) {
-	temps, err := host.SensorsTemperatures()
+	temps, err := sensors.SensorsTemperatures()
 	if err != nil {
 		return nil, err
 	}
