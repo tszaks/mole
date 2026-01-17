@@ -43,9 +43,9 @@ update_via_homebrew() {
         echo "Updating Homebrew..."
     fi
 
-    brew update >"$temp_update" 2>&1 &
+    brew update > "$temp_update" 2>&1 &
     local update_pid=$!
-    wait $update_pid 2>/dev/null || true # Continue even if brew update fails
+    wait $update_pid 2> /dev/null || true # Continue even if brew update fails
 
     if [[ -t 1 ]]; then
         stop_inline_spinner
@@ -58,9 +58,9 @@ update_via_homebrew() {
         echo "Upgrading Mole..."
     fi
 
-    brew upgrade mole >"$temp_upgrade" 2>&1 &
+    brew upgrade mole > "$temp_upgrade" 2>&1 &
     local upgrade_pid=$!
-    wait $upgrade_pid 2>/dev/null || true # Continue even if brew upgrade fails
+    wait $upgrade_pid 2> /dev/null || true # Continue even if brew upgrade fails
 
     local upgrade_output
     upgrade_output=$(cat "$temp_upgrade")
@@ -78,7 +78,7 @@ update_via_homebrew() {
 
     if echo "$upgrade_output" | grep -q "already installed"; then
         local installed_version
-        installed_version=$(brew list --versions mole 2>/dev/null | awk '{print $2}')
+        installed_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
         echo ""
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version (${installed_version:-$current_version})"
         echo ""
@@ -89,14 +89,14 @@ update_via_homebrew() {
     else
         echo "$upgrade_output" | grep -Ev "^(==>|Updating Homebrew|Warning:)" || true
         local new_version
-        new_version=$(brew list --versions mole 2>/dev/null | awk '{print $2}')
+        new_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
         echo ""
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version (${new_version:-$current_version})"
         echo ""
     fi
 
     # Clear update cache (suppress errors if cache doesn't exist or is locked)
-    rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message" 2>/dev/null || true
+    rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message" 2> /dev/null || true
 }
 
 # Remove applications from Dock
@@ -133,16 +133,16 @@ remove_apps_from_dock() {
         fi
 
         if [[ -e "$app_path" ]]; then
-            if full_path=$(cd "$(dirname "$app_path")" 2>/dev/null && pwd); then
+            if full_path=$(cd "$(dirname "$app_path")" 2> /dev/null && pwd); then
                 full_path="$full_path/$(basename "$app_path")"
             else
                 continue
             fi
         else
             case "$app_path" in
-            ~/*) full_path="$HOME/${app_path#~/}" ;;
-            /*) full_path="$app_path" ;;
-            *) continue ;;
+                ~/*) full_path="$HOME/${app_path#~/}" ;;
+                /*) full_path="$app_path" ;;
+                *) continue ;;
             esac
         fi
 
@@ -154,11 +154,11 @@ remove_apps_from_dock() {
         local i=0
         while true; do
             local label
-            label=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-label" "$plist" 2>/dev/null || echo "")
+            label=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-label" "$plist" 2> /dev/null || echo "")
             [[ -z "$label" ]] && break
 
             local url
-            url=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-data:_CFURLString" "$plist" 2>/dev/null || echo "")
+            url=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-data:_CFURLString" "$plist" 2> /dev/null || echo "")
             [[ -z "$url" ]] && {
                 ((i++))
                 continue
@@ -166,7 +166,7 @@ remove_apps_from_dock() {
 
             # Match by URL-encoded path to handle spaces in app names
             if [[ -n "$encoded_path" && "$url" == *"$encoded_path"* ]]; then
-                if /usr/libexec/PlistBuddy -c "Delete :persistent-apps:$i" "$plist" 2>/dev/null; then
+                if /usr/libexec/PlistBuddy -c "Delete :persistent-apps:$i" "$plist" 2> /dev/null; then
                     changed=true
                     # After deletion, current index i now points to the next item
                     continue
@@ -178,6 +178,6 @@ remove_apps_from_dock() {
 
     if [[ "$changed" == "true" ]]; then
         # Restart Dock to apply changes from the plist
-        killall Dock 2>/dev/null || true
+        killall Dock 2> /dev/null || true
     fi
 }

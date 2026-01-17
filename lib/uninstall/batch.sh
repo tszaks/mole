@@ -22,17 +22,17 @@ has_sensitive_data() {
 
         # Use Bash native pattern matching (faster than spawning grep)
         case "$file" in
-        */.warp* | */.config/* | */themes/* | */settings/* | */User\ Data/* | \
-            */.ssh/* | */.gnupg/* | */Documents/* | */Preferences/*.plist | \
-            */Desktop/* | */Downloads/* | */Movies/* | */Music/* | */Pictures/* | \
-            */.password* | */.token* | */.auth* | */keychain* | \
-            */Passwords/* | */Accounts/* | */Cookies/* | \
-            */.aws/* | */.docker/config.json | */.kube/* | \
-            */credentials/* | */secrets/*)
-            return 0 # Found sensitive data
-            ;;
+            */.warp* | */.config/* | */themes/* | */settings/* | */User\ Data/* | \
+                */.ssh/* | */.gnupg/* | */Documents/* | */Preferences/*.plist | \
+                */Desktop/* | */Downloads/* | */Movies/* | */Music/* | */Pictures/* | \
+                */.password* | */.token* | */.auth* | */keychain* | \
+                */Passwords/* | */Accounts/* | */Cookies/* | \
+                */.aws/* | */.docker/config.json | */.kube/* | \
+                */credentials/* | */secrets/*)
+                return 0 # Found sensitive data
+                ;;
         esac
-    done <<<"$files"
+    done <<< "$files"
 
     return 1 # Not found
 }
@@ -44,8 +44,8 @@ decode_file_list() {
     local decoded
 
     # macOS uses -D, GNU uses -d. Always return 0 for set -e safety.
-    if ! decoded=$(printf '%s' "$encoded" | base64 -D 2>/dev/null); then
-        if ! decoded=$(printf '%s' "$encoded" | base64 -d 2>/dev/null); then
+    if ! decoded=$(printf '%s' "$encoded" | base64 -D 2> /dev/null); then
+        if ! decoded=$(printf '%s' "$encoded" | base64 -d 2> /dev/null); then
             log_error "Failed to decode file list for $app_name" >&2
             echo ""
             return 0 # Return success with empty string
@@ -64,7 +64,7 @@ decode_file_list() {
             echo ""
             return 0 # Return success with empty string
         fi
-    done <<<"$decoded"
+    done <<< "$decoded"
 
     echo "$decoded"
     return 0
@@ -80,20 +80,20 @@ stop_launch_services() {
 
     if [[ -d ~/Library/LaunchAgents ]]; then
         while IFS= read -r -d '' plist; do
-            launchctl unload "$plist" 2>/dev/null || true
-        done < <(find ~/Library/LaunchAgents -maxdepth 1 -name "${bundle_id}*.plist" -print0 2>/dev/null)
+            launchctl unload "$plist" 2> /dev/null || true
+        done < <(find ~/Library/LaunchAgents -maxdepth 1 -name "${bundle_id}*.plist" -print0 2> /dev/null)
     fi
 
     if [[ "$has_system_files" == "true" ]]; then
         if [[ -d /Library/LaunchAgents ]]; then
             while IFS= read -r -d '' plist; do
-                sudo launchctl unload "$plist" 2>/dev/null || true
-            done < <(find /Library/LaunchAgents -maxdepth 1 -name "${bundle_id}*.plist" -print0 2>/dev/null)
+                sudo launchctl unload "$plist" 2> /dev/null || true
+            done < <(find /Library/LaunchAgents -maxdepth 1 -name "${bundle_id}*.plist" -print0 2> /dev/null)
         fi
         if [[ -d /Library/LaunchDaemons ]]; then
             while IFS= read -r -d '' plist; do
-                sudo launchctl unload "$plist" 2>/dev/null || true
-            done < <(find /Library/LaunchDaemons -maxdepth 1 -name "${bundle_id}*.plist" -print0 2>/dev/null)
+                sudo launchctl unload "$plist" 2> /dev/null || true
+            done < <(find /Library/LaunchDaemons -maxdepth 1 -name "${bundle_id}*.plist" -print0 2> /dev/null)
         fi
     fi
 }
@@ -115,7 +115,7 @@ remove_login_item() {
         local escaped_name="${clean_name//\\/\\\\}"
         escaped_name="${escaped_name//\"/\\\"}"
 
-        osascript <<-EOF >/dev/null 2>&1 || true
+        osascript <<- EOF > /dev/null 2>&1 || true
 			tell application "System Events"
 			    try
 			        set itemCount to count of login items
@@ -149,9 +149,9 @@ remove_file_list() {
 
         if [[ -L "$file" ]]; then
             if [[ "$use_sudo" == "true" ]]; then
-                sudo rm "$file" 2>/dev/null && ((++count)) || true
+                sudo rm "$file" 2> /dev/null && ((++count)) || true
             else
-                rm "$file" 2>/dev/null && ((++count)) || true
+                rm "$file" 2> /dev/null && ((++count)) || true
             fi
         else
             if [[ "$use_sudo" == "true" ]]; then
@@ -160,7 +160,7 @@ remove_file_list() {
                 safe_remove "$file" true && ((++count)) || true
             fi
         fi
-    done <<<"$file_list"
+    done <<< "$file_list"
 
     echo "$count"
 }
@@ -184,15 +184,15 @@ batch_uninstall_applications() {
     if [[ -t 1 ]]; then start_inline_spinner "Scanning files..."; fi
     for selected_app in "${selected_apps[@]}"; do
         [[ -z "$selected_app" ]] && continue
-        IFS='|' read -r _ app_path app_name bundle_id _ _ <<<"$selected_app"
+        IFS='|' read -r _ app_path app_name bundle_id _ _ <<< "$selected_app"
 
         # Check running app by bundle executable if available.
         local exec_name=""
         if [[ -e "$app_path/Contents/Info.plist" ]]; then
-            exec_name=$(defaults read "$app_path/Contents/Info.plist" CFBundleExecutable 2>/dev/null || echo "")
+            exec_name=$(defaults read "$app_path/Contents/Info.plist" CFBundleExecutable 2> /dev/null || echo "")
         fi
         local check_pattern="${exec_name:-$app_name}"
-        if pgrep -x "$check_pattern" >/dev/null 2>&1; then
+        if pgrep -x "$check_pattern" > /dev/null 2>&1; then
             running_apps+=("$app_name")
         fi
 
@@ -259,7 +259,7 @@ batch_uninstall_applications() {
     # Warn if user data is detected.
     local has_user_data=false
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r _ _ _ _ _ _ has_sensitive_data <<<"$detail"
+        IFS='|' read -r _ _ _ _ _ _ has_sensitive_data <<< "$detail"
         if [[ "$has_sensitive_data" == "true" ]]; then
             has_user_data=true
             break
@@ -272,7 +272,7 @@ batch_uninstall_applications() {
     fi
 
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name <<<"$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name <<< "$detail"
         local app_size_display=$(bytes_to_human "$((total_kb * 1024))")
 
         local brew_tag=""
@@ -295,7 +295,7 @@ batch_uninstall_applications() {
                 fi
                 ((file_count++))
             fi
-        done <<<"$related_files"
+        done <<< "$related_files"
 
         # Show system files (limit to 5).
         local sys_file_count=0
@@ -306,7 +306,7 @@ batch_uninstall_applications() {
                 fi
                 ((sys_file_count++))
             fi
-        done <<<"$system_files"
+        done <<< "$system_files"
 
         local total_hidden=$((file_count > max_files ? file_count - max_files : 0))
         ((total_hidden += sys_file_count > max_files ? sys_file_count - max_files : 0))
@@ -332,24 +332,24 @@ batch_uninstall_applications() {
     IFS= read -r -s -n1 key || key=""
     drain_pending_input # Clean up any escape sequence remnants
     case "$key" in
-    $'\e' | q | Q)
-        echo ""
-        echo ""
-        return 0
-        ;;
-    "" | $'\n' | $'\r' | y | Y)
-        echo "" # Move to next line
-        ;;
-    *)
-        echo ""
-        echo ""
-        return 0
-        ;;
+        $'\e' | q | Q)
+            echo ""
+            echo ""
+            return 0
+            ;;
+        "" | $'\n' | $'\r' | y | Y)
+            echo "" # Move to next line
+            ;;
+        *)
+            echo ""
+            echo ""
+            return 0
+            ;;
     esac
 
     # Request sudo if needed.
     if [[ ${#sudo_apps[@]} -gt 0 ]]; then
-        if ! sudo -n true 2>/dev/null; then
+        if ! sudo -n true 2> /dev/null; then
             if ! request_sudo_access "Admin required for system apps: ${sudo_apps[*]}"; then
                 echo ""
                 log_error "Admin access denied"
@@ -359,12 +359,12 @@ batch_uninstall_applications() {
         # Keep sudo alive during uninstall.
         parent_pid=$$
         (while true; do
-            if ! kill -0 "$parent_pid" 2>/dev/null; then
+            if ! kill -0 "$parent_pid" 2> /dev/null; then
                 exit 0
             fi
             sudo -n true
             sleep 60
-        done 2>/dev/null) &
+        done 2> /dev/null) &
         sudo_keepalive_pid=$!
     fi
 
@@ -376,7 +376,7 @@ batch_uninstall_applications() {
     local current_index=0
     for detail in "${app_details[@]}"; do
         ((current_index++))
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name <<<"$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name <<< "$detail"
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local reason=""
@@ -439,24 +439,24 @@ batch_uninstall_applications() {
 
         # Remove related files if app removal succeeded.
         if [[ -z "$reason" ]]; then
-            remove_file_list "$related_files" "false" >/dev/null
+            remove_file_list "$related_files" "false" > /dev/null
 
             # If brew successfully uninstalled the cask, avoid deleting
             # system-level files Mole discovered. Brew manages its own
             # receipts/symlinks and we don't want to fight it.
             if [[ "$used_brew_successfully" != "true" ]]; then
-                remove_file_list "$system_files" "true" >/dev/null
+                remove_file_list "$system_files" "true" > /dev/null
             fi
 
             # Clean up macOS defaults (preference domains).
             if [[ -n "$bundle_id" && "$bundle_id" != "unknown" ]]; then
-                if defaults read "$bundle_id" &>/dev/null; then
-                    defaults delete "$bundle_id" 2>/dev/null || true
+                if defaults read "$bundle_id" &> /dev/null; then
+                    defaults delete "$bundle_id" 2> /dev/null || true
                 fi
 
                 # ByHost preferences (machine-specific).
                 if [[ -d ~/Library/Preferences/ByHost ]]; then
-                    find ~/Library/Preferences/ByHost -maxdepth 1 -name "${bundle_id}.*.plist" -delete 2>/dev/null || true
+                    find ~/Library/Preferences/ByHost -maxdepth 1 -name "${bundle_id}.*.plist" -delete 2> /dev/null || true
                 fi
             fi
 
@@ -554,11 +554,11 @@ batch_uninstall_applications() {
         if [[ $failed_count -eq 1 ]]; then
             local first_reason=${failed_items[0]#*:}
             case "$first_reason" in
-            still*running*) reason_summary="is still running" ;;
-            remove*failed*) reason_summary="could not be removed" ;;
-            permission*denied*) reason_summary="permission denied" ;;
-            owned*by*) reason_summary="$first_reason (try with sudo)" ;;
-            *) reason_summary="$first_reason" ;;
+                still*running*) reason_summary="is still running" ;;
+                remove*failed*) reason_summary="could not be removed" ;;
+                permission*denied*) reason_summary="permission denied" ;;
+                owned*by*) reason_summary="$first_reason (try with sudo)" ;;
+                *) reason_summary="$first_reason" ;;
             esac
         fi
         summary_details+=("Failed: ${RED}${failed_list}${NC} ${reason_summary}")
@@ -586,7 +586,7 @@ batch_uninstall_applications() {
         fi
 
         local autoremove_output removed_count
-        autoremove_output=$(HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2>/dev/null) || true
+        autoremove_output=$(HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2> /dev/null) || true
         removed_count=$(printf '%s\n' "$autoremove_output" | grep -c "^Uninstalling" || true)
         removed_count=${removed_count:-0}
 
@@ -604,7 +604,7 @@ batch_uninstall_applications() {
     if [[ $success_count -gt 0 ]]; then
         local -a removed_paths=()
         for detail in "${app_details[@]}"; do
-            IFS='|' read -r app_name app_path _ _ _ _ <<<"$detail"
+            IFS='|' read -r app_name app_path _ _ _ _ <<< "$detail"
             for success_name in "${success_items[@]}"; do
                 if [[ "$success_name" == "$app_name" ]]; then
                     removed_paths+=("$app_path")
@@ -613,21 +613,21 @@ batch_uninstall_applications() {
             done
         done
         if [[ ${#removed_paths[@]} -gt 0 ]]; then
-            remove_apps_from_dock "${removed_paths[@]}" 2>/dev/null || true
+            remove_apps_from_dock "${removed_paths[@]}" 2> /dev/null || true
         fi
     fi
 
     # Clean up sudo keepalive if it was started.
     if [[ -n "${sudo_keepalive_pid:-}" ]]; then
-        kill "$sudo_keepalive_pid" 2>/dev/null || true
-        wait "$sudo_keepalive_pid" 2>/dev/null || true
+        kill "$sudo_keepalive_pid" 2> /dev/null || true
+        wait "$sudo_keepalive_pid" 2> /dev/null || true
         sudo_keepalive_pid=""
     fi
 
     # Invalidate cache if any apps were successfully uninstalled.
     if [[ $success_count -gt 0 ]]; then
         local cache_file="$HOME/.cache/mole/app_scan_cache"
-        rm -f "$cache_file" 2>/dev/null || true
+        rm -f "$cache_file" 2> /dev/null || true
     fi
 
     ((total_size_cleaned += total_size_freed))
