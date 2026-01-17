@@ -956,7 +956,7 @@ find_app_receipt_files() {
                 fi
 
                 # Normalize path (remove duplicate slashes)
-                clean_path=$(tr -s "/" <<<"$clean_path")
+                clean_path=$(tr -s "/" <<< "$clean_path")
 
                 # ------------------------------------------------------------------------
                 # Safety check: restrict removal to trusted paths
