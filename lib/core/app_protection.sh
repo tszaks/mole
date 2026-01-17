@@ -13,7 +13,7 @@ _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "${MOLE_BASE_LOADED:-}" ]] && source "$_MOLE_CORE_DIR/base.sh"
 
 # Declare WHITELIST_PATTERNS if not already set (used by is_path_whitelisted)
-if ! declare -p WHITELIST_PATTERNS &> /dev/null; then
+if ! declare -p WHITELIST_PATTERNS &>/dev/null; then
     declare -a WHITELIST_PATTERNS=()
 fi
 
@@ -439,12 +439,12 @@ is_critical_system_component() {
     lower=$(echo "$token" | LC_ALL=C tr '[:upper:]' '[:lower:]')
 
     case "$lower" in
-        *backgroundtaskmanagement* | *loginitems* | *systempreferences* | *systemsettings* | *settings* | *preferences* | *controlcenter* | *biometrickit* | *sfl* | *tcc*)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
+    *backgroundtaskmanagement* | *loginitems* | *systempreferences* | *systemsettings* | *settings* | *preferences* | *controlcenter* | *biometrickit* | *sfl* | *tcc*)
+        return 0
+        ;;
+    *)
+        return 1
+        ;;
     esac
 }
 
@@ -522,25 +522,25 @@ should_protect_path() {
     # 2. Protect caches critical for system UI rendering
     # These caches are essential for modern macOS (Sonoma/Sequoia) system UI rendering
     case "$path" in
-        # System Settings and Control Center caches (CRITICAL - prevents blank panel bug)
-        *com.apple.systempreferences.cache* | *com.apple.Settings.cache* | *com.apple.controlcenter.cache*)
-            return 0
-            ;;
-        # Finder and Dock (system essential)
-        *com.apple.finder.cache* | *com.apple.dock.cache*)
-            return 0
-            ;;
-        # System XPC services and sandboxed containers
-        */Library/Containers/com.apple.Settings* | */Library/Containers/com.apple.SystemSettings* | */Library/Containers/com.apple.controlcenter*)
-            return 0
-            ;;
-        */Library/Group\ Containers/com.apple.systempreferences* | */Library/Group\ Containers/com.apple.Settings*)
-            return 0
-            ;;
-        # Shared file lists for System Settings (macOS Sequoia) - Issue #136
-        */com.apple.sharedfilelist/*com.apple.Settings* | */com.apple.sharedfilelist/*com.apple.SystemSettings* | */com.apple.sharedfilelist/*systempreferences*)
-            return 0
-            ;;
+    # System Settings and Control Center caches (CRITICAL - prevents blank panel bug)
+    *com.apple.systempreferences.cache* | *com.apple.Settings.cache* | *com.apple.controlcenter.cache*)
+        return 0
+        ;;
+    # Finder and Dock (system essential)
+    *com.apple.finder.cache* | *com.apple.dock.cache*)
+        return 0
+        ;;
+    # System XPC services and sandboxed containers
+    */Library/Containers/com.apple.Settings* | */Library/Containers/com.apple.SystemSettings* | */Library/Containers/com.apple.controlcenter*)
+        return 0
+        ;;
+    */Library/Group\ Containers/com.apple.systempreferences* | */Library/Group\ Containers/com.apple.Settings*)
+        return 0
+        ;;
+    # Shared file lists for System Settings (macOS Sequoia) - Issue #136
+    */com.apple.sharedfilelist/*com.apple.Settings* | */com.apple.sharedfilelist/*com.apple.SystemSettings* | */com.apple.sharedfilelist/*systempreferences*)
+        return 0
+        ;;
     esac
 
     # 3. Extract bundle ID from sandbox paths
@@ -555,24 +555,24 @@ should_protect_path() {
 
     # 4. Check for specific hardcoded critical patterns
     case "$path" in
-        *com.apple.Settings* | *com.apple.SystemSettings* | *com.apple.controlcenter* | *com.apple.finder* | *com.apple.dock*)
-            return 0
-            ;;
+    *com.apple.Settings* | *com.apple.SystemSettings* | *com.apple.controlcenter* | *com.apple.finder* | *com.apple.dock*)
+        return 0
+        ;;
     esac
 
     # 5. Protect critical preference files and user data
     case "$path" in
-        */Library/Preferences/com.apple.dock.plist | */Library/Preferences/com.apple.finder.plist)
-            return 0
-            ;;
-        # Bluetooth and WiFi configurations
-        */ByHost/com.apple.bluetooth.* | */ByHost/com.apple.wifi.*)
-            return 0
-            ;;
-        # iCloud Drive - protect user's cloud synced data
-        */Library/Mobile\ Documents* | */Mobile\ Documents*)
-            return 0
-            ;;
+    */Library/Preferences/com.apple.dock.plist | */Library/Preferences/com.apple.finder.plist)
+        return 0
+        ;;
+    # Bluetooth and WiFi configurations
+    */ByHost/com.apple.bluetooth.* | */ByHost/com.apple.wifi.*)
+        return 0
+        ;;
+    # iCloud Drive - protect user's cloud synced data
+    */Library/Mobile\ Documents* | */Mobile\ Documents*)
+        return 0
+        ;;
     esac
 
     # 6. Match full path against protected patterns
@@ -611,9 +611,9 @@ is_path_whitelisted() {
         local check_pattern="${pattern%/}"
         local has_glob="false"
         case "$check_pattern" in
-            *\** | *\?* | *\[*)
-                has_glob="true"
-                ;;
+        *\** | *\?* | *\[*)
+            has_glob="true"
+            ;;
         esac
 
         # Check for exact match or glob pattern match
@@ -643,6 +643,14 @@ is_path_whitelisted() {
 find_app_files() {
     local bundle_id="$1"
     local app_name="$2"
+
+    # Early validation: require at least one valid identifier
+    # Skip scanning if both bundle_id and app_name are invalid
+    if [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] &&
+        [[ -z "$app_name" || ${#app_name} -lt 2 ]]; then
+        return 0 # Silent return to avoid invalid scanning
+    fi
+
     local -a files_to_clean=()
 
     # Normalize app name for matching
@@ -665,7 +673,6 @@ find_app_files() {
         "$HOME/Library/HTTPStorages/$bundle_id"
         "$HOME/Library/Cookies/$bundle_id.binarycookies"
         "$HOME/Library/LaunchAgents/$bundle_id.plist"
-        "$HOME/Library/LaunchDaemons/$bundle_id.plist"
         "$HOME/Library/Application Scripts/$bundle_id"
         "$HOME/Library/Services/$app_name.workflow"
         "$HOME/Library/QuickLook/$app_name.qlgenerator"
@@ -709,17 +716,17 @@ find_app_files() {
         # Safety check: Skip if path ends with a common directory name (indicates empty app_name/bundle_id)
         # This prevents deletion of entire Library subdirectories when bundle_id is empty
         case "$expanded_path" in
-            */Library/Application\ Support | */Library/Application\ Support/ | \
-                */Library/Caches | */Library/Caches/ | \
-                */Library/Logs | */Library/Logs/ | \
-                */Library/Containers | */Library/Containers/ | \
-                */Library/WebKit | */Library/WebKit/ | \
-                */Library/HTTPStorages | */Library/HTTPStorages/ | \
-                */Library/Application\ Scripts | */Library/Application\ Scripts/ | \
-                */Library/Autosave\ Information | */Library/Autosave\ Information/ | \
-                */Library/Group\ Containers | */Library/Group\ Containers/)
-                continue
-                ;;
+        */Library/Application\ Support | */Library/Application\ Support/ | \
+            */Library/Caches | */Library/Caches/ | \
+            */Library/Logs | */Library/Logs/ | \
+            */Library/Containers | */Library/Containers/ | \
+            */Library/WebKit | */Library/WebKit/ | \
+            */Library/HTTPStorages | */Library/HTTPStorages/ | \
+            */Library/Application\ Scripts | */Library/Application\ Scripts/ | \
+            */Library/Autosave\ Information | */Library/Autosave\ Information/ | \
+            */Library/Group\ Containers | */Library/Group\ Containers/)
+            continue
+            ;;
         esac
 
         files_to_clean+=("$expanded_path")
@@ -730,28 +737,26 @@ find_app_files() {
         [[ -f ~/Library/Preferences/"$bundle_id".plist ]] && files_to_clean+=("$HOME/Library/Preferences/$bundle_id.plist")
         [[ -d ~/Library/Preferences/ByHost ]] && while IFS= read -r -d '' pref; do
             files_to_clean+=("$pref")
-        done < <(command find ~/Library/Preferences/ByHost -maxdepth 1 \( -name "$bundle_id*.plist" \) -print0 2> /dev/null)
+        done < <(command find ~/Library/Preferences/ByHost -maxdepth 1 \( -name "$bundle_id*.plist" \) -print0 2>/dev/null)
 
         # Group Containers (special handling)
         if [[ -d ~/Library/Group\ Containers ]]; then
             while IFS= read -r -d '' container; do
                 files_to_clean+=("$container")
-            done < <(command find ~/Library/Group\ Containers -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+            done < <(command find ~/Library/Group\ Containers -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2>/dev/null)
         fi
     fi
 
-    # Launch Agents and Daemons by name (special handling)
-    if [[ ${#app_name} -gt 3 ]]; then
-        if [[ -d ~/Library/LaunchAgents ]]; then
-            while IFS= read -r -d '' plist; do
-                files_to_clean+=("$plist")
-            done < <(command find ~/Library/LaunchAgents -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
-        fi
-        if [[ -d ~/Library/LaunchDaemons ]]; then
-            while IFS= read -r -d '' plist; do
-                files_to_clean+=("$plist")
-            done < <(command find ~/Library/LaunchDaemons -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
-        fi
+    # Launch Agents by name (special handling)
+    # Note: LaunchDaemons are system-level and handled in find_app_system_files()
+    if [[ ${#app_name} -ge 5 ]] && [[ -d ~/Library/LaunchAgents ]]; then
+        while IFS= read -r -d '' plist; do
+            local plist_name=$(basename "$plist")
+            if [[ "$plist_name" =~ ^com\.apple\. ]]; then
+                continue
+            fi
+            files_to_clean+=("$plist")
+        done < <(command find ~/Library/LaunchAgents -maxdepth 1 -name "*$app_name*.plist" -print0 2>/dev/null)
     fi
 
     # Handle specialized toolchains and development environments
@@ -764,10 +769,10 @@ find_app_files() {
 
     # 2. Android Studio (Google)
     if [[ "$app_name" =~ Android.*Studio|android.*studio ]] || [[ "$bundle_id" =~ google.*android.*studio|jetbrains.*android ]]; then
-        for d in ~/AndroidStudioProjects ~/Library/Android ~/.android ~/.gradle; do
+        for d in ~/AndroidStudioProjects ~/Library/Android ~/.android; do
             [[ -d "$d" ]] && files_to_clean+=("$d")
         done
-        [[ -d ~/Library/Application\ Support/Google ]] && while IFS= read -r -d '' d; do files_to_clean+=("$d"); done < <(command find ~/Library/Application\ Support/Google -maxdepth 1 -name "AndroidStudio*" -print0 2> /dev/null)
+        [[ -d ~/Library/Application\ Support/Google ]] && while IFS= read -r -d '' d; do files_to_clean+=("$d"); done < <(command find ~/Library/Application\ Support/Google -maxdepth 1 -name "AndroidStudio*" -print0 2>/dev/null)
     fi
 
     # 3. Xcode (Apple)
@@ -779,7 +784,7 @@ find_app_files() {
     # 4. JetBrains (IDE settings)
     if [[ "$bundle_id" =~ jetbrains ]] || [[ "$app_name" =~ IntelliJ|PyCharm|WebStorm|GoLand|RubyMine|PhpStorm|CLion|DataGrip|Rider ]]; then
         for base in ~/Library/Application\ Support/JetBrains ~/Library/Caches/JetBrains ~/Library/Logs/JetBrains; do
-            [[ -d "$base" ]] && while IFS= read -r -d '' d; do files_to_clean+=("$d"); done < <(command find "$base" -maxdepth 1 -name "${app_name}*" -print0 2> /dev/null)
+            [[ -d "$base" ]] && while IFS= read -r -d '' d; do files_to_clean+=("$d"); done < <(command find "$base" -maxdepth 1 -name "${app_name}*" -print0 2>/dev/null)
         done
     fi
 
@@ -846,11 +851,11 @@ find_app_system_files() {
 
         # Safety check: Skip if path ends with a common directory name (indicates empty app_name/bundle_id)
         case "$p" in
-            /Library/Application\ Support | /Library/Application\ Support/ | \
-                /Library/Caches | /Library/Caches/ | \
-                /Library/Logs | /Library/Logs/)
-                continue
-                ;;
+        /Library/Application\ Support | /Library/Application\ Support/ | \
+            /Library/Caches | /Library/Caches/ | \
+            /Library/Logs | /Library/Logs/)
+            continue
+            ;;
         esac
 
         system_files+=("$p")
@@ -861,7 +866,7 @@ find_app_system_files() {
         for base in /Library/LaunchAgents /Library/LaunchDaemons; do
             [[ -d "$base" ]] && while IFS= read -r -d '' plist; do
                 system_files+=("$plist")
-            done < <(command find "$base" -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
+            done < <(command find "$base" -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2>/dev/null)
         done
     fi
 
@@ -870,11 +875,11 @@ find_app_system_files() {
     if [[ -n "$bundle_id" && "$bundle_id" != "unknown" && ${#bundle_id} -gt 3 ]]; then
         [[ -d /Library/PrivilegedHelperTools ]] && while IFS= read -r -d '' helper; do
             system_files+=("$helper")
-        done < <(command find /Library/PrivilegedHelperTools -maxdepth 1 \( -name "$bundle_id*" \) -print0 2> /dev/null)
+        done < <(command find /Library/PrivilegedHelperTools -maxdepth 1 \( -name "$bundle_id*" \) -print0 2>/dev/null)
 
         [[ -d /private/var/db/receipts ]] && while IFS= read -r -d '' receipt; do
             system_files+=("$receipt")
-        done < <(command find /private/var/db/receipts -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+        done < <(command find /private/var/db/receipts -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2>/dev/null)
     fi
 
     local receipt_files=""
@@ -904,6 +909,13 @@ find_app_receipt_files() {
     # Skip if no bundle ID
     [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && return 0
 
+    # Validate bundle_id format to prevent wildcard injection
+    # Only allow alphanumeric characters, dots, hyphens, and underscores
+    if [[ ! "$bundle_id" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        debug_log "Invalid bundle_id format: $bundle_id"
+        return 0
+    fi
+
     local -a receipt_files=()
     local -a bom_files=()
 
@@ -912,7 +924,7 @@ find_app_receipt_files() {
     if [[ -d /private/var/db/receipts ]]; then
         while IFS= read -r -d '' bom; do
             bom_files+=("$bom")
-        done < <(find /private/var/db/receipts -maxdepth 1 -name "${bundle_id}*.bom" -print0 2> /dev/null)
+        done < <(find /private/var/db/receipts -maxdepth 1 -name "${bundle_id}*.bom" -print0 2>/dev/null)
     fi
 
     # Process bom files if any found
@@ -924,7 +936,7 @@ find_app_receipt_files() {
             # lsbom -f: file paths only
             # -s: suppress output (convert to text)
             local bom_content
-            bom_content=$(lsbom -f -s "$bom_file" 2> /dev/null)
+            bom_content=$(lsbom -f -s "$bom_file" 2>/dev/null)
 
             while IFS= read -r file_path; do
                 # Standardize path (remove leading dot)
@@ -935,6 +947,15 @@ find_app_receipt_files() {
                     clean_path="/$clean_path"
                 fi
 
+                # Path traversal protection: reject paths containing ..
+                if [[ "$clean_path" =~ \.\. ]]; then
+                    debug_log "Rejected path traversal in BOM: $clean_path"
+                    continue
+                fi
+
+                # Normalize path (remove duplicate slashes)
+                clean_path=$(echo "$clean_path" | sed 's#//*#/#g')
+
                 # ------------------------------------------------------------------------
                 # Safety check: restrict removal to trusted paths
                 # ------------------------------------------------------------------------
@@ -942,21 +963,21 @@ find_app_receipt_files() {
 
                 # Whitelisted prefixes (exclude /Users, /usr, /opt)
                 case "$clean_path" in
-                    /Applications/*) is_safe=true ;;
-                    /Library/Application\ Support/*) is_safe=true ;;
-                    /Library/Caches/*) is_safe=true ;;
-                    /Library/Logs/*) is_safe=true ;;
-                    /Library/Preferences/*) is_safe=true ;;
-                    /Library/LaunchAgents/*) is_safe=true ;;
-                    /Library/LaunchDaemons/*) is_safe=true ;;
-                    /Library/PrivilegedHelperTools/*) is_safe=true ;;
-                    /Library/Extensions/*) is_safe=false ;;
-                    *) is_safe=false ;;
+                /Applications/*) is_safe=true ;;
+                /Library/Application\ Support/*) is_safe=true ;;
+                /Library/Caches/*) is_safe=true ;;
+                /Library/Logs/*) is_safe=true ;;
+                /Library/Preferences/*) is_safe=true ;;
+                /Library/LaunchAgents/*) is_safe=true ;;
+                /Library/LaunchDaemons/*) is_safe=true ;;
+                /Library/PrivilegedHelperTools/*) is_safe=true ;;
+                /Library/Extensions/*) is_safe=false ;;
+                *) is_safe=false ;;
                 esac
 
                 # Hard blocks
                 case "$clean_path" in
-                    /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/* | /private/*) is_safe=false ;;
+                /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/* | /private/*) is_safe=false ;;
                 esac
 
                 if [[ "$is_safe" == "true" && -e "$clean_path" ]]; then
@@ -965,7 +986,7 @@ find_app_receipt_files() {
                         continue
                     fi
 
-                    if declare -f should_protect_path > /dev/null 2>&1; then
+                    if declare -f should_protect_path >/dev/null 2>&1; then
                         if should_protect_path "$clean_path"; then
                             continue
                         fi
@@ -974,7 +995,7 @@ find_app_receipt_files() {
                     receipt_files+=("$clean_path")
                 fi
 
-            done <<< "$bom_content"
+            done <<<"$bom_content"
         done
     fi
     if [[ ${#receipt_files[@]} -gt 0 ]]; then
@@ -991,34 +1012,34 @@ force_kill_app() {
     # Get the executable name from bundle if app_path is provided
     local exec_name=""
     if [[ -n "$app_path" && -e "$app_path/Contents/Info.plist" ]]; then
-        exec_name=$(defaults read "$app_path/Contents/Info.plist" CFBundleExecutable 2> /dev/null || echo "")
+        exec_name=$(defaults read "$app_path/Contents/Info.plist" CFBundleExecutable 2>/dev/null || echo "")
     fi
 
     # Use executable name for precise matching, fallback to app name
     local match_pattern="${exec_name:-$app_name}"
 
     # Check if process is running using exact match only
-    if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
+    if ! pgrep -x "$match_pattern" >/dev/null 2>&1; then
         return 0
     fi
 
     # Try graceful termination first
-    pkill -x "$match_pattern" 2> /dev/null || true
+    pkill -x "$match_pattern" 2>/dev/null || true
     sleep 2
 
     # Check again after graceful kill
-    if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
+    if ! pgrep -x "$match_pattern" >/dev/null 2>&1; then
         return 0
     fi
 
     # Force kill if still running
-    pkill -9 -x "$match_pattern" 2> /dev/null || true
+    pkill -9 -x "$match_pattern" 2>/dev/null || true
     sleep 2
 
     # If still running and sudo is available, try with sudo
-    if pgrep -x "$match_pattern" > /dev/null 2>&1; then
-        if sudo -n true 2> /dev/null; then
-            sudo pkill -9 -x "$match_pattern" 2> /dev/null || true
+    if pgrep -x "$match_pattern" >/dev/null 2>&1; then
+        if sudo -n true 2>/dev/null; then
+            sudo pkill -9 -x "$match_pattern" 2>/dev/null || true
             sleep 2
         fi
     fi
@@ -1026,7 +1047,7 @@ force_kill_app() {
     # Final check with longer timeout for stubborn processes
     local retries=3
     while [[ $retries -gt 0 ]]; do
-        if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
+        if ! pgrep -x "$match_pattern" >/dev/null 2>&1; then
             return 0
         fi
         sleep 1
@@ -1034,7 +1055,7 @@ force_kill_app() {
     done
 
     # Still running after all attempts
-    pgrep -x "$match_pattern" > /dev/null 2>&1 && return 1 || return 0
+    pgrep -x "$match_pattern" >/dev/null 2>&1 && return 1 || return 0
 }
 
 # Note: calculate_total_size() is defined in lib/core/file_ops.sh
