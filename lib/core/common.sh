@@ -133,7 +133,7 @@ remove_apps_from_dock() {
         fi
 
         if [[ -e "$app_path" ]]; then
-            if full_path=$(cd "$(dirname "$app_path")" 2>/dev/null && pwd -P); then
+            if full_path=$(cd "$(dirname "$app_path")" 2>/dev/null && pwd); then
                 full_path="$full_path/$(basename "$app_path")"
             else
                 continue

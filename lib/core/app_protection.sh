@@ -749,6 +749,8 @@ find_app_files() {
 
     # Launch Agents by name (special handling)
     # Note: LaunchDaemons are system-level and handled in find_app_system_files()
+    # Minimum 5-char threshold prevents false positives (e.g., "Time" matching system agents)
+    # Short-name apps (e.g., Zoom, Arc) are still cleaned via bundle_id matching above
     if [[ ${#app_name} -ge 5 ]] && [[ -d ~/Library/LaunchAgents ]]; then
         while IFS= read -r -d '' plist; do
             local plist_name=$(basename "$plist")

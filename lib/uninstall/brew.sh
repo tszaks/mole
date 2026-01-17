@@ -174,17 +174,18 @@ brew_uninstall_cask() {
     debug_log "Attempting brew uninstall --cask $cask_name"
 
     # Ensure we have sudo access if needed, to prevent brew from hanging on password prompt
-    if ! sudo -n true 2>/dev/null; then
-        sudo -v
+    if [[ "${NONINTERACTIVE:-}" != "1" && -t 0 && -t 1 ]]; then
+        if ! sudo -n true 2>/dev/null; then
+            sudo -v
+        fi
     fi
 
     local uninstall_ok=false
     local brew_exit=0
 
     # Run with timeout to prevent hangs from problematic cask scripts
-    if run_with_timeout 300 \
-        env HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
-        brew uninstall --cask "$cask_name" 2>&1; then
+    if HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
+        run_with_timeout 300 brew uninstall --cask "$cask_name" 2>&1; then
         uninstall_ok=true
     else
         brew_exit=$?

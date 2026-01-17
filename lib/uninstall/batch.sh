@@ -11,25 +11,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Batch uninstall with a single confirmation.
 
-# User data detection patterns (prompt user to backup if found).
-readonly SENSITIVE_DATA_PATTERNS=(
-    "\.warp"                               # Warp terminal configs/themes
-    "/\.config/"                           # Standard Unix config directory
-    "/themes/"                             # Theme customizations
-    "/settings/"                           # Settings directories
-    "/Application Support/[^/]+/User Data" # Chrome/Electron user data
-    "/Preferences/[^/]+\.plist"            # User preference files
-    "/Documents/"                          # User documents
-    "/\.ssh/"                              # SSH keys and configs (critical)
-    "/\.gnupg/"                            # GPG keys (critical)
-)
-
-# Join patterns into a single regex for grep.
-SENSITIVE_DATA_REGEX=$(
-    IFS='|'
-    echo "${SENSITIVE_DATA_PATTERNS[*]}"
-)
-
 # High-performance sensitive data detection (pure Bash, no subprocess)
 # Faster than grep for batch operations, especially when processing many apps
 has_sensitive_data() {

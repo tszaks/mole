@@ -47,11 +47,19 @@ validate_path_for_deletion() {
             return 1
         }
 
-        # If symlink points to absolute path, validate target
-        if [[ "$link_target" == /* ]]; then
-            case "$link_target" in
+        # Resolve relative symlinks to absolute paths for validation
+        local resolved_target="$link_target"
+        if [[ "$link_target" != /* ]]; then
+            local link_dir
+            link_dir=$(dirname "$path")
+            resolved_target=$(cd "$link_dir" 2>/dev/null && cd "$(dirname "$link_target")" 2>/dev/null && pwd)/$(basename "$link_target") || resolved_target=""
+        fi
+
+        # Validate resolved target against protected paths
+        if [[ -n "$resolved_target" ]]; then
+            case "$resolved_target" in
             /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/* | /private/etc/*)
-                log_error "Symlink points to protected system path: $path -> $link_target"
+                log_error "Symlink points to protected system path: $path -> $resolved_target"
                 return 1
                 ;;
             esac
