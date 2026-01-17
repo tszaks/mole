@@ -34,8 +34,8 @@ clean_user_essentials
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Trash"* ]]
-    [[ "$output" == *"whitelist"* ]]
+    # Whitelist-protected items no longer show output (UX improvement in V1.22.0)
+    [[ "$output" != *"Trash"* ]]
 }
 
 @test "clean_macos_system_caches calls safe_clean for core paths" {
