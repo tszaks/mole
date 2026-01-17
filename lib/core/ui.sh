@@ -316,7 +316,7 @@ start_inline_spinner() {
             exit 0
         ) &
         INLINE_SPINNER_PID=$!
-        disown 2> /dev/null || true
+        disown "$INLINE_SPINNER_PID" 2> /dev/null || true
     else
         echo -n "  ${BLUE}|${NC} $message" >&2 || true
     fi

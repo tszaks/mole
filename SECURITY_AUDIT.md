@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Status:** PASSED | **Risk Level:** LOW | **Version:** 1.21.0 (2026-01-15)
+**Status:** PASSED | **Risk Level:** LOW | **Version:** 1.22.1 (2026-01-17)
 
 </div>
 
@@ -12,9 +12,9 @@
 
 | Attribute | Details |
 |-----------|---------|
-| Audit Date | January 15, 2026 |
+| Audit Date | January 17, 2026 |
 | Audit Conclusion | **PASSED** |
-| Mole Version | V1.21.0 |
+| Mole Version | V1.22.0 |
 | Audited Branch | `main` (HEAD) |
 | Scope | Shell scripts, Go binaries, Configuration |
 | Methodology | Static analysis, Threat modeling, Code review |

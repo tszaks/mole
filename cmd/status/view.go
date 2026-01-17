@@ -201,15 +201,6 @@ func getScoreStyle(score int) lipgloss.Style {
 	}
 }
 
-func hasSensorData(sensors []SensorReading) bool {
-	for _, s := range sensors {
-		if s.Note == "" && s.Value > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func renderCPUCard(cpu CPUStatus, thermal ThermalStatus) cardData {
 	var lines []string
 
@@ -411,9 +402,10 @@ func buildCards(m MetricsSnapshot, width int) []cardData {
 		renderProcessCard(m.TopProcesses),
 		renderNetworkCard(m.Network, m.NetworkHistory, m.Proxy, width),
 	}
-	if hasSensorData(m.Sensors) {
-		cards = append(cards, renderSensorsCard(m.Sensors))
-	}
+	// Sensors card disabled - redundant with CPU temp
+	// if hasSensorData(m.Sensors) {
+	// 	cards = append(cards, renderSensorsCard(m.Sensors))
+	// }
 	return cards
 }
 
@@ -598,20 +590,6 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 	}
 
 	return cardData{icon: iconBattery, title: "Power", lines: lines}
-}
-
-func renderSensorsCard(sensors []SensorReading) cardData {
-	var lines []string
-	for _, s := range sensors {
-		if s.Note != "" {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%-12s %s", shorten(s.Label, 12), colorizeTemp(s.Value)+s.Unit))
-	}
-	if len(lines) == 0 {
-		lines = append(lines, subtleStyle.Render("No sensors"))
-	}
-	return cardData{icon: iconSensors, title: "Sensors", lines: lines}
 }
 
 func renderCard(data cardData, width int, height int) string {
