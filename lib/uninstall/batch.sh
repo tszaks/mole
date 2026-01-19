@@ -169,6 +169,9 @@ remove_file_list() {
 batch_uninstall_applications() {
     local total_size_freed=0
 
+    # Trap to clean up spinner on interrupt
+    trap 'stop_inline_spinner 2>/dev/null; echo ""; return 130' INT TERM
+
     # shellcheck disable=SC2154
     if [[ ${#selected_apps[@]} -eq 0 ]]; then
         log_warning "No applications selected for uninstallation"
@@ -181,33 +184,37 @@ batch_uninstall_applications() {
     local total_estimated_size=0
     local -a app_details=()
 
+    # Cache current user outside loop
+    local current_user=$(whoami)
+
     if [[ -t 1 ]]; then start_inline_spinner "Scanning files..."; fi
     for selected_app in "${selected_apps[@]}"; do
         [[ -z "$selected_app" ]] && continue
         IFS='|' read -r _ app_path app_name bundle_id _ _ <<< "$selected_app"
 
-        # Check running app by bundle executable if available.
+        # Check running app by bundle executable if available
         local exec_name=""
-        if [[ -e "$app_path/Contents/Info.plist" ]]; then
-            exec_name=$(defaults read "$app_path/Contents/Info.plist" CFBundleExecutable 2> /dev/null || echo "")
+        local info_plist="$app_path/Contents/Info.plist"
+        if [[ -e "$info_plist" ]]; then
+            exec_name=$(defaults read "$info_plist" CFBundleExecutable 2>/dev/null || echo "")
         fi
-        local check_pattern="${exec_name:-$app_name}"
-        if pgrep -x "$check_pattern" > /dev/null 2>&1; then
+        if pgrep -qx "${exec_name:-$app_name}" 2>/dev/null; then
             running_apps+=("$app_name")
         fi
 
-        # Check if it's a Homebrew cask (deterministic: resolved path in Caskroom)
-        local cask_name=""
-        cask_name=$(get_brew_cask_name "$app_path" || echo "")
-        local is_brew_cask="false"
-        [[ -n "$cask_name" ]] && is_brew_cask="true"
+        # Check if it's a Homebrew cask (only if app is symlinked from Caskroom)
+        local cask_name="" is_brew_cask="false"
+        local resolved_path=$(readlink "$app_path" 2>/dev/null || echo "")
+        if [[ "$resolved_path" == */Caskroom/* ]]; then
+            # Extract cask name using bash parameter expansion (faster than sed)
+            local tmp="${resolved_path#*/Caskroom/}"
+            cask_name="${tmp%%/*}"
+            [[ -n "$cask_name" ]] && is_brew_cask="true"
+        fi
 
-        # Full file scanning for ALL apps (including Homebrew casks)
-        # brew uninstall --cask does NOT remove user data (caches, prefs, app support)
-        # Mole's value is cleaning those up, so we must scan for them
+        # Check if sudo is needed
         local needs_sudo=false
         local app_owner=$(get_file_owner "$app_path")
-        local current_user=$(whoami)
         if [[ ! -w "$(dirname "$app_path")" ]] ||
             [[ "$app_owner" == "root" ]] ||
             [[ -n "$app_owner" && "$app_owner" != "$current_user" ]]; then
@@ -406,11 +413,12 @@ batch_uninstall_applications() {
         fi
 
         # Remove the application only if not running.
+        # Stop spinner before any removal attempt (avoids mixed output on errors)
+        [[ -t 1 ]] && stop_inline_spinner
+
         local used_brew_successfully=false
         if [[ -z "$reason" ]]; then
             if [[ "$is_brew_cask" == "true" && -n "$cask_name" ]]; then
-                # Stop spinner before brew output
-                [[ -t 1 ]] && stop_inline_spinner
                 # Use brew_uninstall_cask helper (handles env vars, timeout, verification)
                 if brew_uninstall_cask "$cask_name" "$app_path"; then
                     used_brew_successfully=true
@@ -425,7 +433,6 @@ batch_uninstall_applications() {
             elif [[ "$needs_sudo" == true ]]; then
                 if ! safe_sudo_remove "$app_path"; then
                     local app_owner=$(get_file_owner "$app_path")
-                    local current_user=$(whoami)
                     if [[ -n "$app_owner" && "$app_owner" != "$current_user" && "$app_owner" != "root" ]]; then
                         reason="owned by $app_owner"
                     else
@@ -460,13 +467,12 @@ batch_uninstall_applications() {
                 fi
             fi
 
-            # Stop spinner and show success
+            # Show success
             if [[ -t 1 ]]; then
-                stop_inline_spinner
                 if [[ ${#app_details[@]} -gt 1 ]]; then
-                    echo -e "\r\033[K${GREEN}✓${NC} [$current_index/${#app_details[@]}] ${app_name}"
+                    echo -e "${GREEN}✓${NC} [$current_index/${#app_details[@]}] ${app_name}"
                 else
-                    echo -e "\r\033[K${GREEN}✓${NC} ${app_name}"
+                    echo -e "${GREEN}✓${NC} ${app_name}"
                 fi
             fi
 
@@ -477,13 +483,12 @@ batch_uninstall_applications() {
             ((total_items++))
             success_items+=("$app_name")
         else
-            # Stop spinner and show failure
+            # Show failure
             if [[ -t 1 ]]; then
-                stop_inline_spinner
                 if [[ ${#app_details[@]} -gt 1 ]]; then
-                    echo -e "\r\033[K${RED}✗${NC} [$current_index/${#app_details[@]}] ${app_name} ${GRAY}($reason)${NC}"
+                    echo -e "${ICON_ERROR} [$current_index/${#app_details[@]}] ${app_name} ${GRAY}($reason)${NC}"
                 else
-                    echo -e "\r\033[K${RED}✗${NC} ${app_name} failed: $reason"
+                    echo -e "${ICON_ERROR} ${app_name} failed: $reason"
                 fi
             fi
 
