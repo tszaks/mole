@@ -204,7 +204,7 @@ cleanup_path() {
         return
     fi
     if should_protect_path "$expanded_path"; then
-        echo -e "${YELLOW}${ICON_WARNING}${NC} Protected $label"
+        echo -e "${GRAY}${ICON_WARNING}${NC} Protected $label"
         return
     fi
 
@@ -231,7 +231,7 @@ cleanup_path() {
             echo -e "${GREEN}${ICON_SUCCESS}${NC} $label"
         fi
     else
-        echo -e "${YELLOW}${ICON_WARNING}${NC} Skipped $label ${GRAY}(grant Full Disk Access to your terminal and retry)${NC}"
+        echo -e "${GRAY}${ICON_WARNING}${NC} Skipped $label ${GRAY}(grant Full Disk Access to your terminal and retry)${NC}"
     fi
 }
 
@@ -304,7 +304,7 @@ apply_firewall_fix() {
         FIREWALL_DISABLED=false
         return 0
     fi
-    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to enable firewall (check permissions)"
+    echo -e "  ${GRAY}${ICON_WARNING}${NC} Failed to enable firewall (check permissions)"
     return 1
 }
 
@@ -314,7 +314,7 @@ apply_gatekeeper_fix() {
         GATEKEEPER_DISABLED=false
         return 0
     fi
-    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to enable Gatekeeper"
+    echo -e "  ${GRAY}${ICON_WARNING}${NC} Failed to enable Gatekeeper"
     return 1
 }
 
@@ -327,7 +327,7 @@ apply_touchid_fix() {
 
 perform_security_fixes() {
     if ! ensure_sudo_session "Security changes require admin access"; then
-        echo -e "${YELLOW}${ICON_WARNING}${NC} Skipped security fixes (sudo denied)"
+        echo -e "${GRAY}${ICON_WARNING}${NC} Skipped security fixes (sudo denied)"
         return 1
     fi
 

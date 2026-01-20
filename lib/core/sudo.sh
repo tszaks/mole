@@ -78,7 +78,7 @@ _request_password() {
             unset password
             ((attempts++))
             if [[ $attempts -lt 3 ]]; then
-                echo -e "${YELLOW}${ICON_WARNING}${NC} Password cannot be empty" > "$tty_path"
+                echo -e "${GRAY}${ICON_WARNING}${NC} Password cannot be empty" > "$tty_path"
             fi
             continue
         fi
@@ -93,7 +93,7 @@ _request_password() {
         unset password
         ((attempts++))
         if [[ $attempts -lt 3 ]]; then
-            echo -e "${YELLOW}${ICON_WARNING}${NC} Incorrect password, try again" > "$tty_path"
+            echo -e "${GRAY}${ICON_WARNING}${NC} Incorrect password, try again" > "$tty_path"
         fi
     done
 

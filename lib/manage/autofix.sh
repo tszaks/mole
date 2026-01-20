@@ -73,7 +73,7 @@ show_suggestions() {
     # Show auto-fix items
     if [[ ${#auto_fix_items[@]} -gt 0 ]]; then
         for item in "${auto_fix_items[@]}"; do
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} ${item} ${GREEN}[auto]${NC}"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${item} ${GREEN}[auto]${NC}"
         done
     fi
 
@@ -82,7 +82,7 @@ show_suggestions() {
         for item in "${manual_items[@]}"; do
             local title="${item%%|*}"
             local hint="${item#*|}"
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} ${title}"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${title}"
             echo -e "    ${GRAY}${hint}${NC}"
         done
     fi

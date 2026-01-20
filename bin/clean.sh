@@ -864,7 +864,7 @@ perform_cleanup() {
         fda_status=$?
         if [[ $fda_status -eq 1 ]]; then
             echo ""
-            echo -e "${YELLOW}${ICON_WARNING}${NC} ${GRAY}Tip: Grant Full Disk Access to your terminal in System Settings for best results${NC}"
+            echo -e "${GRAY}${ICON_WARNING}${NC} ${GRAY}Tip: Grant Full Disk Access to your terminal in System Settings for best results${NC}"
         fi
     fi
 
@@ -889,7 +889,7 @@ perform_cleanup() {
     if [[ ${#WHITELIST_WARNINGS[@]} -gt 0 ]]; then
         echo ""
         for warning in "${WHITELIST_WARNINGS[@]}"; do
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Whitelist: $warning"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Whitelist: $warning"
         done
     fi
 

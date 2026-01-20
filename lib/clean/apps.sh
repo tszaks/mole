@@ -246,7 +246,7 @@ is_bundle_orphaned() {
 clean_orphaned_app_data() {
     if ! ls "$HOME/Library/Caches" > /dev/null 2>&1; then
         stop_section_spinner
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Skipped: No permission to access Library folders"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: No permission to access Library folders"
         return 0
     fi
     start_section_spinner "Scanning installed apps..."
@@ -438,7 +438,7 @@ clean_orphaned_system_services() {
 
     # Report and clean
     if [[ $orphaned_count -gt 0 ]]; then
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Found $orphaned_count orphaned system services"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Found $orphaned_count orphaned system services"
 
         for orphan_file in "${orphaned_files[@]}"; do
             local filename

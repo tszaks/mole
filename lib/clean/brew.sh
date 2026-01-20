@@ -92,7 +92,7 @@ clean_homebrew() {
             fi
         fi
     elif [[ $brew_exit -eq 124 ]]; then
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Homebrew cleanup timed out · run ${GRAY}brew cleanup${NC} manually"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Homebrew cleanup timed out · run ${GRAY}brew cleanup${NC} manually"
     fi
     # Process autoremove output - only show if packages were removed
     # Only surface autoremove output when packages were removed.
@@ -105,7 +105,7 @@ clean_homebrew() {
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Removed orphaned dependencies (${removed_packages} packages)"
         fi
     elif [[ $autoremove_exit -eq 124 ]]; then
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Autoremove timed out · run ${GRAY}brew autoremove${NC} manually"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Autoremove timed out · run ${GRAY}brew autoremove${NC} manually"
     fi
     # Update cache timestamp on successful completion or when cleanup was intelligently skipped
     # This prevents repeated cache size checks within the 7-day window

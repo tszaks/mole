@@ -280,7 +280,7 @@ batch_uninstall_applications() {
     done
 
     if [[ "$has_user_data" == "true" ]]; then
-        echo -e "${YELLOW}${ICON_WARNING}${NC} ${YELLOW}Note: Some apps contain user configurations/themes${NC}"
+        echo -e "${GRAY}${ICON_WARNING}${NC} ${YELLOW}Note: Some apps contain user configurations/themes${NC}"
         echo ""
     fi
 

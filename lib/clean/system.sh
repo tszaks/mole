@@ -323,7 +323,7 @@ clean_local_snapshots() {
     if [[ "$DRY_RUN" != "true" ]]; then
         if [[ ! -t 0 ]]; then
             echo -e "  ${YELLOW}!${NC} ${#snapshots[@]} local snapshot(s) found, skipping non-interactive mode"
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} ${GRAY}Tip: Snapshots may cause Disk Utility to show different 'Available' values${NC}"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${GRAY}Tip: Snapshots may cause Disk Utility to show different 'Available' values${NC}"
             return 0
         fi
         echo -e "  ${YELLOW}!${NC} Time Machine local snapshots found"
