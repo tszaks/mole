@@ -493,6 +493,9 @@ should_protect_data() {
 # Check if a path is protected from deletion
 # Centralized logic to protect system settings, control center, and critical apps
 #
+# In uninstall mode (MOLE_UNINSTALL_MODE=1), only system-critical components are protected.
+# Data-protected apps (VPNs, dev tools, etc.) can be uninstalled when user explicitly chooses to.
+#
 # Args: $1 - path to check
 # Returns: 0 if protected, 1 if safe to delete
 should_protect_path() {
@@ -577,17 +580,31 @@ should_protect_path() {
 
     # 6. Match full path against protected patterns
     # This catches things like /Users/tw93/Library/Caches/Claude when pattern is *Claude*
-    for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}"; do
-        if bundle_matches_pattern "$path" "$pattern"; then
-            return 0
-        fi
-    done
+    # In uninstall mode, only check system-critical bundles (user explicitly chose to uninstall)
+    if [[ "${MOLE_UNINSTALL_MODE:-0}" == "1" ]]; then
+        # Uninstall mode: only protect system-critical components
+        for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}"; do
+            if bundle_matches_pattern "$path" "$pattern"; then
+                return 0
+            fi
+        done
+    else
+        # Normal mode (cleanup): protect both system-critical and data-protected bundles
+        for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}"; do
+            if bundle_matches_pattern "$path" "$pattern"; then
+                return 0
+            fi
+        done
+    fi
 
     # 7. Check if the filename itself matches any protected patterns
-    local filename
-    filename=$(basename "$path")
-    if should_protect_data "$filename"; then
-        return 0
+    # Skip in uninstall mode - user explicitly chose to remove this app
+    if [[ "${MOLE_UNINSTALL_MODE:-0}" != "1" ]]; then
+        local filename
+        filename=$(basename "$path")
+        if should_protect_data "$filename"; then
+            return 0
+        fi
     fi
 
     return 1

@@ -169,8 +169,8 @@ remove_file_list() {
 batch_uninstall_applications() {
     local total_size_freed=0
 
-    # Trap to clean up spinner on interrupt
-    trap 'stop_inline_spinner 2>/dev/null; echo ""; return 130' INT TERM
+    # Trap to clean up spinner and uninstall mode on interrupt
+    trap 'stop_inline_spinner 2>/dev/null; unset MOLE_UNINSTALL_MODE; echo ""; return 130' INT TERM
 
     # shellcheck disable=SC2154
     if [[ ${#selected_apps[@]} -eq 0 ]]; then
@@ -359,6 +359,10 @@ batch_uninstall_applications() {
             return 0
             ;;
     esac
+
+    # Enable uninstall mode - allows deletion of data-protected apps (VPNs, dev tools, etc.)
+    # that user explicitly chose to uninstall. System-critical components remain protected.
+    export MOLE_UNINSTALL_MODE=1
 
     # Request sudo if needed.
     if [[ ${#sudo_apps[@]} -gt 0 ]]; then
@@ -634,6 +638,9 @@ batch_uninstall_applications() {
         wait "$sudo_keepalive_pid" 2> /dev/null || true
         sudo_keepalive_pid=""
     fi
+
+    # Disable uninstall mode
+    unset MOLE_UNINSTALL_MODE
 
     # Invalidate cache if any apps were successfully uninstalled.
     if [[ $success_count -gt 0 ]]; then

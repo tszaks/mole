@@ -102,7 +102,8 @@ validate_path_for_deletion() {
             /private/var/db/diagnostics | /private/var/db/diagnostics/* | \
             /private/var/db/DiagnosticPipeline | /private/var/db/DiagnosticPipeline/* | \
             /private/var/db/powerlog | /private/var/db/powerlog/* | \
-            /private/var/db/reportmemoryexception | /private/var/db/reportmemoryexception/*)
+            /private/var/db/reportmemoryexception | /private/var/db/reportmemoryexception/* | \
+            /private/var/db/receipts/*.bom | /private/var/db/receipts/*.plist)
             return 0
             ;;
     esac
