@@ -320,7 +320,7 @@ clean_orphaned_app_data() {
 # These are left behind when apps are uninstalled but their system services remain
 clean_orphaned_system_services() {
     # Requires sudo
-    if ! sudo -n true 2>/dev/null; then
+    if ! sudo -n true 2> /dev/null; then
         return 0
     fi
 
@@ -371,13 +371,13 @@ clean_orphaned_system_services() {
                 if [[ "$bundle_id" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
                     orphaned_files+=("$plist")
                     local size_kb
-                    size_kb=$(sudo du -sk "$plist" 2>/dev/null | awk '{print $1}' || echo "0")
+                    size_kb=$(sudo du -sk "$plist" 2> /dev/null | awk '{print $1}' || echo "0")
                     ((total_orphaned_kb += size_kb))
                     ((orphaned_count++))
                     break
                 fi
             done
-        done < <(sudo find /Library/LaunchDaemons -maxdepth 1 -name "*.plist" -print0 2>/dev/null)
+        done < <(sudo find /Library/LaunchDaemons -maxdepth 1 -name "*.plist" -print0 2> /dev/null)
     fi
 
     # Scan system LaunchAgents
@@ -399,13 +399,13 @@ clean_orphaned_system_services() {
                 if [[ "$bundle_id" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
                     orphaned_files+=("$plist")
                     local size_kb
-                    size_kb=$(sudo du -sk "$plist" 2>/dev/null | awk '{print $1}' || echo "0")
+                    size_kb=$(sudo du -sk "$plist" 2> /dev/null | awk '{print $1}' || echo "0")
                     ((total_orphaned_kb += size_kb))
                     ((orphaned_count++))
                     break
                 fi
             done
-        done < <(sudo find /Library/LaunchAgents -maxdepth 1 -name "*.plist" -print0 2>/dev/null)
+        done < <(sudo find /Library/LaunchAgents -maxdepth 1 -name "*.plist" -print0 2> /dev/null)
     fi
 
     # Scan PrivilegedHelperTools
@@ -425,13 +425,13 @@ clean_orphaned_system_services() {
                 if [[ "$filename" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
                     orphaned_files+=("$helper")
                     local size_kb
-                    size_kb=$(sudo du -sk "$helper" 2>/dev/null | awk '{print $1}' || echo "0")
+                    size_kb=$(sudo du -sk "$helper" 2> /dev/null | awk '{print $1}' || echo "0")
                     ((total_orphaned_kb += size_kb))
                     ((orphaned_count++))
                     break
                 fi
             done
-        done < <(sudo find /Library/PrivilegedHelperTools -maxdepth 1 -type f -print0 2>/dev/null)
+        done < <(sudo find /Library/PrivilegedHelperTools -maxdepth 1 -type f -print0 2> /dev/null)
     fi
 
     stop_section_spinner
@@ -449,9 +449,9 @@ clean_orphaned_system_services() {
             else
                 # Unload if it's a LaunchDaemon/LaunchAgent
                 if [[ "$orphan_file" == *.plist ]]; then
-                    sudo launchctl unload "$orphan_file" 2>/dev/null || true
+                    sudo launchctl unload "$orphan_file" 2> /dev/null || true
                 fi
-                if sudo rm -f "$orphan_file" 2>/dev/null; then
+                if sudo rm -f "$orphan_file" 2> /dev/null; then
                     debug_log "Removed orphaned service: $orphan_file"
                 fi
             fi
