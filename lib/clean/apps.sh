@@ -438,7 +438,7 @@ clean_orphaned_system_services() {
 
     # Report and clean
     if [[ $orphaned_count -gt 0 ]]; then
-        echo -e "  ${CYAN}${ICON_INFO}${NC} Found $orphaned_count orphaned system services"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Found $orphaned_count orphaned system services"
 
         for orphan_file in "${orphaned_files[@]}"; do
             local filename
