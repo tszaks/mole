@@ -315,3 +315,157 @@ clean_orphaned_app_data() {
     fi
     rm -f "$installed_bundles"
 }
+
+# Clean orphaned system-level services (LaunchDaemons, LaunchAgents, PrivilegedHelperTools)
+# These are left behind when apps are uninstalled but their system services remain
+clean_orphaned_system_services() {
+    # Requires sudo
+    if ! sudo -n true 2>/dev/null; then
+        return 0
+    fi
+
+    start_section_spinner "Scanning orphaned system services..."
+
+    # Build list of installed app bundle IDs
+    local installed_bundles
+    installed_bundles=$(create_temp_file)
+    scan_installed_apps "$installed_bundles"
+
+    local orphaned_count=0
+    local total_orphaned_kb=0
+    local -a orphaned_files=()
+
+    # Known bundle ID patterns for common apps that leave system services behind
+    # Format: "file_pattern:app_check_command"
+    local -a known_orphan_patterns=(
+        # Sogou Input Method
+        "com.sogou.*:/Library/Input Methods/SogouInput.app"
+        # ClashX
+        "com.west2online.ClashX.*:/Applications/ClashX.app"
+        # ClashMac
+        "com.clashmac.*:/Applications/ClashMac.app"
+        # Nektony App Cleaner
+        "com.nektony.AC*:/Applications/App Cleaner & Uninstaller.app"
+        # i4tools (爱思助手)
+        "cn.i4tools.*:/Applications/i4Tools.app"
+    )
+
+    # Scan system LaunchDaemons
+    if [[ -d /Library/LaunchDaemons ]]; then
+        while IFS= read -r -d '' plist; do
+            local filename
+            filename=$(basename "$plist")
+
+            # Skip Apple system files
+            [[ "$filename" == com.apple.* ]] && continue
+
+            # Extract bundle ID from filename (remove .plist extension)
+            local bundle_id="${filename%.plist}"
+
+            # Check against known orphan patterns
+            for pattern_entry in "${known_orphan_patterns[@]}"; do
+                local file_pattern="${pattern_entry%%:*}"
+                local app_path="${pattern_entry#*:}"
+
+                # shellcheck disable=SC2053
+                if [[ "$bundle_id" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
+                    orphaned_files+=("$plist")
+                    local size_kb
+                    size_kb=$(sudo du -sk "$plist" 2>/dev/null | awk '{print $1}' || echo "0")
+                    ((total_orphaned_kb += size_kb))
+                    ((orphaned_count++))
+                    break
+                fi
+            done
+        done < <(sudo find /Library/LaunchDaemons -maxdepth 1 -name "*.plist" -print0 2>/dev/null)
+    fi
+
+    # Scan system LaunchAgents
+    if [[ -d /Library/LaunchAgents ]]; then
+        while IFS= read -r -d '' plist; do
+            local filename
+            filename=$(basename "$plist")
+
+            # Skip Apple system files
+            [[ "$filename" == com.apple.* ]] && continue
+
+            local bundle_id="${filename%.plist}"
+
+            for pattern_entry in "${known_orphan_patterns[@]}"; do
+                local file_pattern="${pattern_entry%%:*}"
+                local app_path="${pattern_entry#*:}"
+
+                # shellcheck disable=SC2053
+                if [[ "$bundle_id" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
+                    orphaned_files+=("$plist")
+                    local size_kb
+                    size_kb=$(sudo du -sk "$plist" 2>/dev/null | awk '{print $1}' || echo "0")
+                    ((total_orphaned_kb += size_kb))
+                    ((orphaned_count++))
+                    break
+                fi
+            done
+        done < <(sudo find /Library/LaunchAgents -maxdepth 1 -name "*.plist" -print0 2>/dev/null)
+    fi
+
+    # Scan PrivilegedHelperTools
+    if [[ -d /Library/PrivilegedHelperTools ]]; then
+        while IFS= read -r -d '' helper; do
+            local filename
+            filename=$(basename "$helper")
+
+            # Skip Apple system files
+            [[ "$filename" == com.apple.* ]] && continue
+
+            for pattern_entry in "${known_orphan_patterns[@]}"; do
+                local file_pattern="${pattern_entry%%:*}"
+                local app_path="${pattern_entry#*:}"
+
+                # shellcheck disable=SC2053
+                if [[ "$filename" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
+                    orphaned_files+=("$helper")
+                    local size_kb
+                    size_kb=$(sudo du -sk "$helper" 2>/dev/null | awk '{print $1}' || echo "0")
+                    ((total_orphaned_kb += size_kb))
+                    ((orphaned_count++))
+                    break
+                fi
+            done
+        done < <(sudo find /Library/PrivilegedHelperTools -maxdepth 1 -type f -print0 2>/dev/null)
+    fi
+
+    stop_section_spinner
+
+    # Report and clean
+    if [[ $orphaned_count -gt 0 ]]; then
+        echo -e "  ${CYAN}${ICON_INFO}${NC} Found $orphaned_count orphaned system services"
+
+        for orphan_file in "${orphaned_files[@]}"; do
+            local filename
+            filename=$(basename "$orphan_file")
+
+            if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+                debug_log "[DRY RUN] Would remove orphaned service: $orphan_file"
+            else
+                # Unload if it's a LaunchDaemon/LaunchAgent
+                if [[ "$orphan_file" == *.plist ]]; then
+                    sudo launchctl unload "$orphan_file" 2>/dev/null || true
+                fi
+                if sudo rm -f "$orphan_file" 2>/dev/null; then
+                    debug_log "Removed orphaned service: $orphan_file"
+                fi
+            fi
+        done
+
+        local orphaned_kb_display
+        if [[ $total_orphaned_kb -gt 1024 ]]; then
+            orphaned_kb_display=$(echo "$total_orphaned_kb" | awk '{printf "%.1fMB", $1/1024}')
+        else
+            orphaned_kb_display="${total_orphaned_kb}KB"
+        fi
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $orphaned_count orphaned services (~$orphaned_kb_display)"
+        note_activity
+    fi
+
+    rm -f "$installed_bundles"
+}

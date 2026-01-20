@@ -952,6 +952,7 @@ perform_cleanup() {
     # ===== 12. Orphaned app data cleanup (60+ days inactive, skip protected vendors) =====
     start_section "Uninstalled app data"
     clean_orphaned_app_data
+    clean_orphaned_system_services
     end_section
 
     # ===== 13. Apple Silicon optimizations =====
