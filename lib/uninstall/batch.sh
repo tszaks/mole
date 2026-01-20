@@ -202,7 +202,6 @@ batch_uninstall_applications() {
             running_apps+=("$app_name")
         fi
 
-        # Check if it's a Homebrew cask (only if app is symlinked from Caskroom)
         local cask_name="" is_brew_cask="false"
         local resolved_path=$(readlink "$app_path" 2> /dev/null || echo "")
         if [[ "$resolved_path" == */Caskroom/* ]]; then
@@ -210,6 +209,13 @@ batch_uninstall_applications() {
             local tmp="${resolved_path#*/Caskroom/}"
             cask_name="${tmp%%/*}"
             [[ -n "$cask_name" ]] && is_brew_cask="true"
+        elif command -v get_brew_cask_name > /dev/null 2>&1; then
+            local detected_cask
+            detected_cask=$(get_brew_cask_name "$app_path" 2> /dev/null || true)
+            if [[ -n "$detected_cask" ]]; then
+                cask_name="$detected_cask"
+                is_brew_cask="true"
+            fi
         fi
 
         # Check if sudo is needed
