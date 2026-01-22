@@ -169,14 +169,31 @@ remove_file_list() {
 batch_uninstall_applications() {
     local total_size_freed=0
 
-    # Trap to clean up spinner and uninstall mode on interrupt
-    trap 'stop_inline_spinner 2>/dev/null; unset MOLE_UNINSTALL_MODE; echo ""; return 130' INT TERM
-
     # shellcheck disable=SC2154
     if [[ ${#selected_apps[@]} -eq 0 ]]; then
         log_warning "No applications selected for uninstallation"
         return 0
     fi
+
+    local old_trap_int old_trap_term
+    old_trap_int=$(trap -p INT)
+    old_trap_term=$(trap -p TERM)
+
+    _restore_uninstall_traps() {
+        if [[ -n "$old_trap_int" ]]; then
+            eval "$old_trap_int"
+        else
+            trap - INT
+        fi
+        if [[ -n "$old_trap_term" ]]; then
+            eval "$old_trap_term"
+        else
+            trap - TERM
+        fi
+    }
+
+    # Trap to clean up spinner and uninstall mode on interrupt
+    trap 'stop_inline_spinner 2>/dev/null; unset MOLE_UNINSTALL_MODE; echo ""; _restore_uninstall_traps; return 130' INT TERM
 
     # Pre-scan: running apps, sudo needs, size.
     local -a running_apps=()
@@ -348,6 +365,7 @@ batch_uninstall_applications() {
         $'\e' | q | Q)
             echo ""
             echo ""
+            _restore_uninstall_traps
             return 0
             ;;
         "" | $'\n' | $'\r' | y | Y)
@@ -356,6 +374,7 @@ batch_uninstall_applications() {
         *)
             echo ""
             echo ""
+            _restore_uninstall_traps
             return 0
             ;;
     esac
@@ -370,6 +389,7 @@ batch_uninstall_applications() {
             if ! request_sudo_access "Admin required for system apps: ${sudo_apps[*]}"; then
                 echo ""
                 log_error "Admin access denied"
+                _restore_uninstall_traps
                 return 1
             fi
         fi
@@ -647,6 +667,9 @@ batch_uninstall_applications() {
         local cache_file="$HOME/.cache/mole/app_scan_cache"
         rm -f "$cache_file" 2> /dev/null || true
     fi
+
+    _restore_uninstall_traps
+    unset -f _restore_uninstall_traps
 
     ((total_size_cleaned += total_size_freed))
     unset failed_items

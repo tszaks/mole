@@ -326,11 +326,6 @@ clean_orphaned_system_services() {
 
     start_section_spinner "Scanning orphaned system services..."
 
-    # Build list of installed app bundle IDs
-    local installed_bundles
-    installed_bundles=$(create_temp_file)
-    scan_installed_apps "$installed_bundles"
-
     local orphaned_count=0
     local total_orphaned_kb=0
     local -a orphaned_files=()
@@ -467,5 +462,4 @@ clean_orphaned_system_services() {
         note_activity
     fi
 
-    rm -f "$installed_bundles"
 }

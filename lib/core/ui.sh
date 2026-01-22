@@ -220,7 +220,6 @@ read_key() {
     case "$key" in
         $'\n' | $'\r') echo "ENTER" ;;
         ' ') echo "SPACE" ;;
-        '/') echo "FILTER" ;;
         'q' | 'Q') echo "QUIT" ;;
         'R') echo "RETRY" ;;
         'm' | 'M') echo "MORE" ;;
