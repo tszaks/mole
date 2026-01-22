@@ -699,7 +699,7 @@ start_cleanup() {
     echo ""
 
     if [[ "$DRY_RUN" != "true" && -t 0 ]]; then
-        echo -e "${GRAY}${ICON_SOLID} Use --dry-run to preview, --whitelist to manage protected paths${NC}"
+        echo -e "${GRAY}${ICON_WARNING} Use --dry-run to preview, --whitelist to manage protected paths${NC}"
     fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -977,6 +977,11 @@ perform_cleanup() {
     # ===== 15. Time Machine incomplete backups =====
     start_section "Time Machine incomplete backups"
     clean_time_machine_failed_backups
+    end_section
+
+    # ===== 16. Large files to review (report only) =====
+    start_section "Large files to review"
+    check_large_file_candidates
     end_section
 
     # ===== Final summary =====

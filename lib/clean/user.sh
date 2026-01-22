@@ -600,11 +600,105 @@ check_ios_device_backups() {
             local backup_human=$(command du -sh "$backup_dir" 2> /dev/null | awk '{print $1}')
             if [[ -n "$backup_human" ]]; then
                 note_activity
-                echo -e "  Found ${GREEN}${backup_human}${NC} iOS backups"
-                echo -e "  You can delete them manually: ${backup_dir}"
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} iOS backups: ${GREEN}${backup_human}${NC}${GRAY}, Path: $backup_dir${NC}"
             fi
         fi
     fi
+    return 0
+}
+
+# Large file candidates (report only, no deletion).
+check_large_file_candidates() {
+    local threshold_kb=$((1024 * 1024)) # 1GB
+    local found_any=false
+
+    local mail_dir="$HOME/Library/Mail"
+    if [[ -d "$mail_dir" ]]; then
+        local mail_kb
+        mail_kb=$(get_path_size_kb "$mail_dir")
+        if [[ "$mail_kb" -ge "$threshold_kb" ]]; then
+            local mail_human
+            mail_human=$(bytes_to_human "$((mail_kb * 1024))")
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Mail data: ${GREEN}${mail_human}${NC}${GRAY}, Path: $mail_dir${NC}"
+            found_any=true
+        fi
+    fi
+
+    local mail_downloads="$HOME/Library/Mail Downloads"
+    if [[ -d "$mail_downloads" ]]; then
+        local downloads_kb
+        downloads_kb=$(get_path_size_kb "$mail_downloads")
+        if [[ "$downloads_kb" -ge "$threshold_kb" ]]; then
+            local downloads_human
+            downloads_human=$(bytes_to_human "$((downloads_kb * 1024))")
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Mail downloads: ${GREEN}${downloads_human}${NC}${GRAY}, Path: $mail_downloads${NC}"
+            found_any=true
+        fi
+    fi
+
+    local installer_path
+    for installer_path in /Applications/Install\ macOS*.app; do
+        if [[ -e "$installer_path" ]]; then
+            local installer_kb
+            installer_kb=$(get_path_size_kb "$installer_path")
+            if [[ "$installer_kb" -gt 0 ]]; then
+                local installer_human
+                installer_human=$(bytes_to_human "$((installer_kb * 1024))")
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} macOS installer: ${GREEN}${installer_human}${NC}${GRAY}, Path: $installer_path${NC}"
+                found_any=true
+            fi
+        fi
+    done
+
+    local updates_dir="$HOME/Library/Updates"
+    if [[ -d "$updates_dir" ]]; then
+        local updates_kb
+        updates_kb=$(get_path_size_kb "$updates_dir")
+        if [[ "$updates_kb" -ge "$threshold_kb" ]]; then
+            local updates_human
+            updates_human=$(bytes_to_human "$((updates_kb * 1024))")
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} macOS updates cache: ${GREEN}${updates_human}${NC}${GRAY}, Path: $updates_dir${NC}"
+            found_any=true
+        fi
+    fi
+
+    if [[ "${SYSTEM_CLEAN:-false}" != "true" ]] && command -v tmutil > /dev/null 2>&1; then
+        local snapshot_list snapshot_count
+        snapshot_list=$(run_with_timeout 3 tmutil listlocalsnapshots / 2> /dev/null || true)
+        if [[ -n "$snapshot_list" ]]; then
+            snapshot_count=$(echo "$snapshot_list" | grep -Eo 'com\.apple\.TimeMachine\.[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | wc -l | awk '{print $1}')
+            if [[ "$snapshot_count" =~ ^[0-9]+$ && "$snapshot_count" -gt 0 ]]; then
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Time Machine local snapshots: ${GREEN}${snapshot_count}${NC}${GRAY}, Review: tmutil listlocalsnapshots /${NC}"
+                found_any=true
+            fi
+        fi
+    fi
+
+    if command -v docker > /dev/null 2>&1; then
+        local docker_output
+        docker_output=$(run_with_timeout 3 docker system df --format '{{.Type}}\t{{.Size}}\t{{.Reclaimable}}' 2> /dev/null || true)
+        if [[ -n "$docker_output" ]]; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Docker storage:"
+            while IFS=$'\t' read -r dtype dsize dreclaim; do
+                [[ -z "$dtype" ]] && continue
+                echo -e "    ${GRAY}• $dtype: $dsize, Reclaimable: $dreclaim${NC}"
+            done <<< "$docker_output"
+            found_any=true
+        else
+            docker_output=$(run_with_timeout 3 docker system df 2> /dev/null || true)
+            if [[ -n "$docker_output" ]]; then
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Docker storage:"
+                echo -e "    ${GRAY}• Run: docker system df${NC}"
+                found_any=true
+            fi
+        fi
+    fi
+
+    if [[ "$found_any" == "false" ]]; then
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No large items detected in common locations"
+    fi
+
+    note_activity
     return 0
 }
 # Apple Silicon specific caches (IS_M_SERIES).

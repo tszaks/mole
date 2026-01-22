@@ -332,7 +332,7 @@ batch_uninstall_applications() {
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
                 if [[ $sys_file_count -lt $max_files ]]; then
-                    echo -e "  ${BLUE}${ICON_SOLID}${NC} System: $file"
+                    echo -e "  ${BLUE}${ICON_WARNING}${NC} System: $file"
                 fi
                 ((sys_file_count++))
             fi

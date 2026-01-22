@@ -269,7 +269,7 @@ tm_is_running() {
     grep -qE '(^|[[:space:]])("Running"|Running)[[:space:]]*=[[:space:]]*1([[:space:]]*;|$)' <<< "$st"
 }
 
-# Local APFS snapshots (keep the most recent).
+# Local APFS snapshots (report only).
 clean_local_snapshots() {
     if ! command -v tmutil > /dev/null 2>&1; then
         return 0
@@ -279,93 +279,25 @@ clean_local_snapshots() {
     tm_is_running || rc_running=$?
 
     if [[ $rc_running -eq 2 ]]; then
-        echo -e "  ${YELLOW}!${NC} Could not determine Time Machine status; skipping snapshot cleanup"
+        echo -e "  ${YELLOW}!${NC} Could not determine Time Machine status; skipping snapshot check"
         return 0
     fi
 
     if [[ $rc_running -eq 0 ]]; then
-        echo -e "  ${YELLOW}!${NC} Time Machine is active; skipping snapshot cleanup"
+        echo -e "  ${YELLOW}!${NC} Time Machine is active; skipping snapshot check"
         return 0
     fi
 
     start_section_spinner "Checking local snapshots..."
     local snapshot_list
-    snapshot_list=$(tmutil listlocalsnapshots / 2> /dev/null)
+    snapshot_list=$(run_with_timeout 3 tmutil listlocalsnapshots / 2> /dev/null || true)
     stop_section_spinner
     [[ -z "$snapshot_list" ]] && return 0
-    local cleaned_count=0
-    local total_cleaned_size=0 # Estimation not possible without thin
-    local newest_ts=0
-    local newest_name=""
-    local -a snapshots=()
-    while IFS= read -r line; do
-        if [[ "$line" =~ com\.apple\.TimeMachine\.([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{6}) ]]; then
-            local snap_name="${BASH_REMATCH[0]}"
-            snapshots+=("$snap_name")
-            local date_str="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]:0:2}:${BASH_REMATCH[4]:2:2}:${BASH_REMATCH[4]:4:2}"
-            local snap_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$date_str" "+%s" 2> /dev/null || echo "0")
-            [[ "$snap_ts" == "0" ]] && continue
-            if [[ "$snap_ts" -gt "$newest_ts" ]]; then
-                newest_ts="$snap_ts"
-                newest_name="$snap_name"
-            fi
-        fi
-    done <<< "$snapshot_list"
 
-    [[ ${#snapshots[@]} -eq 0 ]] && return 0
-    [[ -z "$newest_name" ]] && return 0
-
-    local deletable_count=$((${#snapshots[@]} - 1))
-    [[ $deletable_count -le 0 ]] && return 0
-
-    if [[ "$DRY_RUN" != "true" ]]; then
-        if [[ ! -t 0 ]]; then
-            echo -e "  ${YELLOW}!${NC} ${#snapshots[@]} local snapshot(s) found, skipping non-interactive mode"
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${GRAY}Tip: Snapshots may cause Disk Utility to show different 'Available' values${NC}"
-            return 0
-        fi
-        echo -e "  ${YELLOW}!${NC} Time Machine local snapshots found"
-        echo -e "  ${GRAY}macOS can recreate them if needed.${NC}"
-        echo -e "  ${GRAY}The most recent snapshot will be kept.${NC}"
-        echo -ne "  ${PURPLE}${ICON_ARROW}${NC} Remove all local snapshots except the most recent one? ${GREEN}Enter${NC} continue, ${GRAY}Space${NC} skip: "
-        local choice
-        if type read_key > /dev/null 2>&1; then
-            choice=$(read_key)
-        else
-            IFS= read -r -s -n 1 choice || choice=""
-            if [[ -z "$choice" || "$choice" == $'\n' || "$choice" == $'\r' ]]; then
-                choice="ENTER"
-            fi
-        fi
-        if [[ "$choice" == "ENTER" ]]; then
-            printf "\r\033[K" # Clear the prompt line
-        else
-            echo -e " ${GRAY}Skipped${NC}"
-            return 0
-        fi
-    fi
-
-    local snap_name
-    for snap_name in "${snapshots[@]}"; do
-        if [[ "$snap_name" =~ com\.apple\.TimeMachine\.([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{6}) ]]; then
-            if [[ "${BASH_REMATCH[0]}" != "$newest_name" ]]; then
-                if [[ "$DRY_RUN" == "true" ]]; then
-                    echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Local snapshot: $snap_name ${YELLOW}dry-run${NC}"
-                    ((cleaned_count++))
-                    note_activity
-                else
-                    if sudo tmutil deletelocalsnapshots "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}-${BASH_REMATCH[4]}" > /dev/null 2>&1; then
-                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Removed snapshot: $snap_name"
-                        ((cleaned_count++))
-                        note_activity
-                    else
-                        echo -e "  ${YELLOW}!${NC} Failed to remove: $snap_name"
-                    fi
-                fi
-            fi
-        fi
-    done
-    if [[ $cleaned_count -gt 0 && "$DRY_RUN" != "true" ]]; then
-        log_success "Cleaned $cleaned_count local snapshots, kept latest"
+    local snapshot_count
+    snapshot_count=$(echo "$snapshot_list" | grep -Eo 'com\.apple\.TimeMachine\.[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | wc -l | awk '{print $1}')
+    if [[ "$snapshot_count" =~ ^[0-9]+$ && "$snapshot_count" -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Time Machine local snapshots: ${GREEN}${snapshot_count}${NC}${GRAY}, Review: tmutil listlocalsnapshots /${NC}"
+        note_activity
     fi
 }
