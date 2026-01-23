@@ -1069,6 +1069,7 @@ main() {
                 ;;
             "--dry-run" | "-n")
                 DRY_RUN=true
+                export MOLE_DRY_RUN=1
                 ;;
             "--whitelist")
                 source "$SCRIPT_DIR/../lib/manage/whitelist.sh"

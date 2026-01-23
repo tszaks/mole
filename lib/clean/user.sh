@@ -667,7 +667,7 @@ check_large_file_candidates() {
         local snapshot_list snapshot_count
         snapshot_list=$(run_with_timeout 3 tmutil listlocalsnapshots / 2> /dev/null || true)
         if [[ -n "$snapshot_list" ]]; then
-            snapshot_count=$(echo "$snapshot_list" | grep -Eo 'com\.apple\.TimeMachine\.[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' | wc -l | awk '{print $1}')
+            snapshot_count=$(echo "$snapshot_list" | { grep -Eo 'com\.apple\.TimeMachine\.[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' || true; } | wc -l | awk '{print $1}')
             if [[ "$snapshot_count" =~ ^[0-9]+$ && "$snapshot_count" -gt 0 ]]; then
                 echo -e "  ${YELLOW}${ICON_WARNING}${NC} Time Machine local snapshots: ${GREEN}${snapshot_count}${NC}${GRAY}, Review: tmutil listlocalsnapshots /${NC}"
                 found_any=true
