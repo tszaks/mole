@@ -137,9 +137,15 @@ scan_applications() {
         done < <(command find "$app_dir" -name "*.app" -maxdepth 3 -print0 2> /dev/null)
     done
 
+    if [[ ${#app_data_tuples[@]:-0} -eq 0 ]]; then
+        rm -f "$temp_file"
+        printf "\r\033[K" >&2
+        echo "No applications found to uninstall." >&2
+        return 1
+    fi
     # Pass 2: metadata + size in parallel (mdls is slow).
     local app_count=0
-    local total_apps=${#app_data_tuples[@]}
+    local total_apps=${#app_data_tuples[@]:-0}
     local max_parallel
     max_parallel=$(get_optimal_parallel_jobs "io")
     if [[ $max_parallel -lt 8 ]]; then
