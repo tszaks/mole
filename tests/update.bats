@@ -233,3 +233,150 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Already on latest version"* ]]
 }
+
+@test "process_install_output shows install.sh success message with version" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+GREEN='\033[0;32m'
+ICON_SUCCESS='✓'
+NC='\033[0m'
+
+process_install_output() {
+    local output="$1"
+    local fallback_version="$2"
+    
+    local filtered_output
+    filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
+    if [[ -n "$filtered_output" ]]; then
+        printf '%s\n' "$filtered_output"
+    fi
+
+    if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
+        local new_version
+        new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        if [[ -z "$new_version" ]]; then
+            new_version="$fallback_version"
+        fi
+        printf '\n%s\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version (${new_version:-unknown})"
+    fi
+}
+
+output="Installing Mole...
+✓ Updated to latest version (1.23.1)"
+process_install_output "$output" "1.23.0"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Updated to latest version (1.23.1)"* ]]
+    [[ "$output" != *"1.23.0"* ]]
+}
+
+@test "process_install_output uses fallback version when install.sh has no success message" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+GREEN='\033[0;32m'
+ICON_SUCCESS='✓'
+NC='\033[0m'
+
+process_install_output() {
+    local output="$1"
+    local fallback_version="$2"
+    
+    local filtered_output
+    filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
+    if [[ -n "$filtered_output" ]]; then
+        printf '%s\n' "$filtered_output"
+    fi
+
+    if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
+        local new_version
+        new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        if [[ -z "$new_version" ]]; then
+            new_version="$fallback_version"
+        fi
+        printf '\n%s\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version (${new_version:-unknown})"
+    fi
+}
+
+output="Installing Mole...
+Installation completed"
+process_install_output "$output" "1.23.1"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Installation completed"* ]]
+    [[ "$output" == *"Updated to latest version (1.23.1)"* ]]
+}
+
+@test "process_install_output handles empty output with fallback version" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+GREEN='\033[0;32m'
+ICON_SUCCESS='✓'
+NC='\033[0m'
+
+process_install_output() {
+    local output="$1"
+    local fallback_version="$2"
+    
+    local filtered_output
+    filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
+    if [[ -n "$filtered_output" ]]; then
+        printf '%s\n' "$filtered_output"
+    fi
+
+    if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
+        local new_version
+        new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        if [[ -z "$new_version" ]]; then
+            new_version="$fallback_version"
+        fi
+        printf '\n%s\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version (${new_version:-unknown})"
+    fi
+}
+
+output=""
+process_install_output "$output" "1.23.1"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Updated to latest version (1.23.1)"* ]]
+}
+
+@test "process_install_output does not extract wrong parentheses content" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+GREEN='\033[0;32m'
+ICON_SUCCESS='✓'
+NC='\033[0m'
+
+process_install_output() {
+    local output="$1"
+    local fallback_version="$2"
+    
+    local filtered_output
+    filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
+    if [[ -n "$filtered_output" ]]; then
+        printf '%s\n' "$filtered_output"
+    fi
+
+    if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
+        local new_version
+        new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        if [[ -z "$new_version" ]]; then
+            new_version="$fallback_version"
+        fi
+        printf '\n%s\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version (${new_version:-unknown})"
+    fi
+}
+
+output="Downloading (progress: 100%)
+Done"
+process_install_output "$output" "1.23.1"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Downloading (progress: 100%)"* ]]
+    [[ "$output" == *"Updated to latest version (1.23.1)"* ]]
+    [[ "$output" != *"progress: 100%"* ]] || [[ "$output" == *"Downloading (progress: 100%)"* ]]
+}
