@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/lib/core/commands.sh"
 trap cleanup_temp_files EXIT INT TERM
 
 # Version and update helpers
-VERSION="1.23.1"
+VERSION="1.23.2"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
 is_touchid_configured() {
@@ -347,7 +347,10 @@ update_mole() {
 
         if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
             local new_version
-            new_version=$("$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+            new_version=$(printf '%s\n' "$output" | sed -n 's/.*(version \([^)]*\)).*/\1/p' | head -1)
+            if [[ -z "$new_version" ]]; then
+                new_version=$("$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+            fi
             if [[ -z "$new_version" ]]; then
                 new_version="$fallback_version"
             fi

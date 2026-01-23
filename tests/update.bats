@@ -244,7 +244,7 @@ NC='\033[0m'
 process_install_output() {
     local output="$1"
     local fallback_version="$2"
-    
+
     local filtered_output
     filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
     if [[ -n "$filtered_output" ]]; then
@@ -253,7 +253,10 @@ process_install_output() {
 
     if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
         local new_version
-        new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        new_version=$(printf '%s\n' "$output" | sed -n 's/.*(version \([^)]*\)).*/\1/p' | head -1)
+        if [[ -z "$new_version" ]]; then
+            new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        fi
         if [[ -z "$new_version" ]]; then
             new_version="$fallback_version"
         fi
@@ -262,7 +265,7 @@ process_install_output() {
 }
 
 output="Installing Mole...
-✓ Updated to latest version (1.23.1)"
+◎ Mole installed successfully (version 1.23.1)"
 process_install_output "$output" "1.23.0"
 EOF
 
@@ -281,7 +284,7 @@ NC='\033[0m'
 process_install_output() {
     local output="$1"
     local fallback_version="$2"
-    
+
     local filtered_output
     filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
     if [[ -n "$filtered_output" ]]; then
@@ -290,7 +293,10 @@ process_install_output() {
 
     if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
         local new_version
-        new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        new_version=$(printf '%s\n' "$output" | sed -n 's/.*(version \([^)]*\)).*/\1/p' | head -1)
+        if [[ -z "$new_version" ]]; then
+            new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        fi
         if [[ -z "$new_version" ]]; then
             new_version="$fallback_version"
         fi
@@ -318,7 +324,7 @@ NC='\033[0m'
 process_install_output() {
     local output="$1"
     local fallback_version="$2"
-    
+
     local filtered_output
     filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
     if [[ -n "$filtered_output" ]]; then
@@ -327,7 +333,10 @@ process_install_output() {
 
     if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
         local new_version
-        new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        new_version=$(printf '%s\n' "$output" | sed -n 's/.*(version \([^)]*\)).*/\1/p' | head -1)
+        if [[ -z "$new_version" ]]; then
+            new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        fi
         if [[ -z "$new_version" ]]; then
             new_version="$fallback_version"
         fi
@@ -353,7 +362,7 @@ NC='\033[0m'
 process_install_output() {
     local output="$1"
     local fallback_version="$2"
-    
+
     local filtered_output
     filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
     if [[ -n "$filtered_output" ]]; then
@@ -362,7 +371,10 @@ process_install_output() {
 
     if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
         local new_version
-        new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        new_version=$(printf '%s\n' "$output" | sed -n 's/.*(version \([^)]*\)).*/\1/p' | head -1)
+        if [[ -z "$new_version" ]]; then
+            new_version=$(command -v mo > /dev/null 2>&1 && mo --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+        fi
         if [[ -z "$new_version" ]]; then
             new_version="$fallback_version"
         fi
