@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/lib/core/commands.sh"
 trap cleanup_temp_files EXIT INT TERM
 
 # Version and update helpers
-VERSION="1.23.0"
+VERSION="1.23.1"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
 is_touchid_configured() {
@@ -336,6 +336,7 @@ update_mole() {
 
     process_install_output() {
         local output="$1"
+        local fallback_version="$2"
         if [[ -t 1 ]]; then stop_inline_spinner; fi
 
         local filtered_output
@@ -346,12 +347,9 @@ update_mole() {
 
         if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
             local new_version
-            new_version=$(printf '%s\n' "$output" | sed -n 's/.*(\([^)]*\)).*/\1/p' | head -1)
+            new_version=$("$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
             if [[ -z "$new_version" ]]; then
-                new_version=$("$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
-            fi
-            if [[ -z "$new_version" ]]; then
-                new_version="$latest"
+                new_version="$fallback_version"
             fi
             printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version (${new_version:-unknown})"
         else
@@ -366,10 +364,10 @@ update_mole() {
         config_dir="$HOME/.config/mole"
     fi
     if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
-        process_install_output "$install_output"
+        process_install_output "$install_output" "$latest"
     else
         if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
-            process_install_output "$install_output"
+            process_install_output "$install_output" "$latest"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
             rm -f "$tmp_installer"
