@@ -4,9 +4,9 @@ import "time"
 
 const (
 	maxEntries            = 30
-	maxLargeFiles         = 30
+	maxLargeFiles         = 20
 	barWidth              = 24
-	minLargeFileSize      = 100 << 20
+	spotlightMinFileSize  = 100 << 20
 	defaultViewport       = 12
 	overviewCacheTTL      = 7 * 24 * time.Hour
 	overviewCacheFile     = "overview_sizes.json"

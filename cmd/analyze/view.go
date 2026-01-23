@@ -112,7 +112,7 @@ func (m model) View() string {
 
 	if m.showLargeFiles {
 		if len(m.largeFiles) == 0 {
-			fmt.Fprintln(&b, "  No large files found (>=100MB)")
+			fmt.Fprintln(&b, "  No large files found")
 		} else {
 			viewport := calculateViewport(m.height, true)
 			start := max(m.largeOffset, 0)
