@@ -345,6 +345,50 @@ clean_orphaned_system_services() {
         "cn.i4tools.*:/Applications/i4Tools.app"
     )
 
+    local mdfind_cache_file=""
+    _system_service_app_exists() {
+        local bundle_id="$1"
+        local app_path="$2"
+
+        [[ -n "$app_path" && -d "$app_path" ]] && return 0
+
+        if [[ -n "$app_path" ]]; then
+            local app_name
+            app_name=$(basename "$app_path")
+            case "$app_path" in
+                /Applications/*)
+                    [[ -d "$HOME/Applications/$app_name" ]] && return 0
+                    [[ -d "/Applications/Setapp/$app_name" ]] && return 0
+                    ;;
+                /Library/Input\ Methods/*)
+                    [[ -d "$HOME/Library/Input Methods/$app_name" ]] && return 0
+                    ;;
+            esac
+        fi
+
+        if [[ -n "$bundle_id" ]] && [[ "$bundle_id" =~ ^[a-zA-Z0-9._-]+$ ]] && [[ ${#bundle_id} -ge 5 ]]; then
+            if [[ -z "$mdfind_cache_file" ]]; then
+                mdfind_cache_file=$(mktemp "${TMPDIR:-/tmp}/mole_mdfind_cache.XXXXXX")
+                register_temp_file "$mdfind_cache_file"
+            fi
+
+            if grep -Fxq "FOUND:$bundle_id" "$mdfind_cache_file" 2> /dev/null; then
+                return 0
+            fi
+            if ! grep -Fxq "NOTFOUND:$bundle_id" "$mdfind_cache_file" 2> /dev/null; then
+                local app_found
+                app_found=$(run_with_timeout 2 mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2> /dev/null | head -1 || echo "")
+                if [[ -n "$app_found" ]]; then
+                    echo "FOUND:$bundle_id" >> "$mdfind_cache_file"
+                    return 0
+                fi
+                echo "NOTFOUND:$bundle_id" >> "$mdfind_cache_file"
+            fi
+        fi
+
+        return 1
+    }
+
     # Scan system LaunchDaemons
     if [[ -d /Library/LaunchDaemons ]]; then
         while IFS= read -r -d '' plist; do
@@ -364,6 +408,9 @@ clean_orphaned_system_services() {
 
                 # shellcheck disable=SC2053
                 if [[ "$bundle_id" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
+                    if _system_service_app_exists "$bundle_id" "$app_path"; then
+                        continue
+                    fi
                     orphaned_files+=("$plist")
                     local size_kb
                     size_kb=$(sudo du -sk "$plist" 2> /dev/null | awk '{print $1}' || echo "0")
@@ -392,6 +439,9 @@ clean_orphaned_system_services() {
 
                 # shellcheck disable=SC2053
                 if [[ "$bundle_id" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
+                    if _system_service_app_exists "$bundle_id" "$app_path"; then
+                        continue
+                    fi
                     orphaned_files+=("$plist")
                     local size_kb
                     size_kb=$(sudo du -sk "$plist" 2> /dev/null | awk '{print $1}' || echo "0")
@@ -408,6 +458,7 @@ clean_orphaned_system_services() {
         while IFS= read -r -d '' helper; do
             local filename
             filename=$(basename "$helper")
+            local bundle_id="$filename"
 
             # Skip Apple system files
             [[ "$filename" == com.apple.* ]] && continue
@@ -418,6 +469,9 @@ clean_orphaned_system_services() {
 
                 # shellcheck disable=SC2053
                 if [[ "$filename" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
+                    if _system_service_app_exists "$bundle_id" "$app_path"; then
+                        continue
+                    fi
                     orphaned_files+=("$helper")
                     local size_kb
                     size_kb=$(sudo du -sk "$helper" 2> /dev/null | awk '{print $1}' || echo "0")

@@ -37,7 +37,7 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 
 	largeFilesHeap := &largeFileHeap{}
 	heap.Init(largeFilesHeap)
-	largeFileMinSize := int64(0)
+	largeFileMinSize := int64(largeFileWarmupMinSize)
 
 	// Worker pool sized for I/O-bound scanning.
 	numWorkers := max(runtime.NumCPU()*cpuMultiplier, minWorkers)
