@@ -11,11 +11,6 @@ param(
     [switch]$DebugMode,
     
     [Alias('h')]
-
-    [Alias('debug')]
-    [switch]$DebugMode,
-
-    [Alias('help')]
     [switch]$ShowHelp
 )
 

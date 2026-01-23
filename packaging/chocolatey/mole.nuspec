@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <!-- Required -->
+    <id>mole</id>
+    <version>1.0.0</version>
+    <title>Mole</title>
+    <authors>Mole Project</authors>
+    <owners>bhadraagada</owners>
+    <description>Deep clean and optimize your Windows system. All-in-one toolkit combining CCleaner, IObit Uninstaller, WinDirStat, and Task Manager functionality for comprehensive Windows system optimization and cleanup.</description>
+    
+    <!-- URLs -->
+    <projectUrl>https://github.com/bhadraagada/mole</projectUrl>
+    <licenseUrl>https://github.com/bhadraagada/mole/blob/windows/LICENSE</licenseUrl>
+    <projectSourceUrl>https://github.com/bhadraagada/mole</projectSourceUrl>
+    <docsUrl>https://github.com/bhadraagada/mole/blob/windows/README.md</docsUrl>
+    <bugTrackerUrl>https://github.com/bhadraagada/mole/issues</bugTrackerUrl>
+    <packageSourceUrl>https://github.com/bhadraagada/mole/tree/windows/packaging/chocolatey</packageSourceUrl>
+    
+    <!-- Optional -->
+    <copyright>2026 Mole Project</copyright>
+    <licenseAcceptanceRequired>false</licenseAcceptanceRequired>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <releaseNotes>https://github.com/bhadraagada/mole/releases/tag/v1.0.0</releaseNotes>
+    <summary>Windows system cleanup and optimization tool</summary>
+    
+    <!-- Tags -->
+    <tags>cleanup optimizer maintenance disk-space uninstaller system-tools windows admin</tags>
+    
+    <!-- Icon (optional, add if available) -->
+    <!-- <iconUrl>https://github.com/bhadraagada/mole/raw/windows/icon.png</iconUrl> -->
+  </metadata>
+  
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
