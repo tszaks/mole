@@ -522,6 +522,10 @@ safe_clean() {
         fi
 
         # Read results back in original order.
+        # Start spinner for cleaning phase
+        if [[ "$DRY_RUN" != "true" && ${#existing_paths[@]} -gt 0 && -t 1 ]]; then
+            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Cleaning..."
+        fi
         idx=0
         if [[ ${#existing_paths[@]} -gt 0 ]]; then
             for path in "${existing_paths[@]}"; do
@@ -558,6 +562,10 @@ safe_clean() {
         fi
 
     else
+        # Start spinner for cleaning phase (small batch)
+        if [[ "$DRY_RUN" != "true" && ${#existing_paths[@]} -gt 0 && -t 1 ]]; then
+            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Cleaning..."
+        fi
         local idx=0
         if [[ ${#existing_paths[@]} -gt 0 ]]; then
             for path in "${existing_paths[@]}"; do
