@@ -733,7 +733,7 @@ opt_dock_refresh() {
             if [[ -f "$db_file" ]]; then
                 safe_remove "$db_file" true > /dev/null 2>&1 && refreshed=true
             fi
-        done < <(find "$dock_support" -name "*.db" -type f 2> /dev/null || true)
+        done < <(command find "$dock_support" -name "*.db" -type f 2> /dev/null || true)
     fi
 
     local dock_plist="$HOME/Library/Preferences/com.apple.dock.plist"
