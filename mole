@@ -231,6 +231,7 @@ show_help() {
 
 # Update flow (Homebrew or installer).
 update_mole() {
+    local force_update="${1:-false}"
     local update_interrupted=false
     trap 'update_interrupted=true; echo ""; exit 130' INT TERM
 
@@ -250,7 +251,7 @@ update_mole() {
         exit 1
     fi
 
-    if [[ "$VERSION" == "$latest" ]]; then
+    if [[ "$VERSION" == "$latest" && "$force_update" != "true" ]]; then
         echo ""
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version (${VERSION})"
         echo ""
@@ -366,9 +367,8 @@ update_mole() {
     if [[ ! -f "$config_dir/lib/core/common.sh" ]]; then
         config_dir="$HOME/.config/mole"
     fi
-    if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
-        process_install_output "$install_output" "$latest"
-    else
+
+    if [[ "$force_update" == "true" ]]; then
         if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
             process_install_output "$install_output" "$latest"
         else
@@ -377,6 +377,20 @@ update_mole() {
             log_error "Update failed"
             echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
             exit 1
+        fi
+    else
+        if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
+            process_install_output "$install_output" "$latest"
+        else
+            if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+                process_install_output "$install_output" "$latest"
+            else
+                if [[ -t 1 ]]; then stop_inline_spinner; fi
+                rm -f "$tmp_installer"
+                log_error "Update failed"
+                echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+                exit 1
+            fi
         fi
     fi
 
@@ -766,7 +780,14 @@ main() {
             exec "$SCRIPT_DIR/bin/completion.sh" "${args[@]:1}"
             ;;
         "update")
-            update_mole
+            local force_update=false
+            for arg in "${args[@]:1}"; do
+                case "$arg" in
+                    --force | -f) force_update=true ;;
+                    *) ;;
+                esac
+            done
+            update_mole "$force_update"
             exit 0
             ;;
         "remove")
