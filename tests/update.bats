@@ -392,3 +392,52 @@ EOF
     [[ "$output" == *"Updated to latest version (1.23.1)"* ]]
     [[ "$output" != *"progress: 100%"* ]] || [[ "$output" == *"Downloading (progress: 100%)"* ]]
 }
+
+@test "update_mole with --force reinstalls even when on latest version" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" CURRENT_VERSION="$CURRENT_VERSION" PATH="$HOME/fake-bin:/usr/bin:/bin" TERM="dumb" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+curl() {
+  local out=""
+  local url=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o)
+        out="$2"
+        shift 2
+        ;;
+      http*://*)
+        url="$1"
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -n "$out" ]]; then
+    cat > "$out" << 'INSTALLER'
+#!/usr/bin/env bash
+echo "Mole installed successfully (version $CURRENT_VERSION)"
+INSTALLER
+    return 0
+  fi
+
+  if [[ "$url" == *"api.github.com"* ]]; then
+    echo "{\"tag_name\":\"$CURRENT_VERSION\"}"
+  else
+    echo "VERSION=\"$CURRENT_VERSION\""
+  fi
+}
+export -f curl
+
+brew() { exit 1; }
+export -f brew
+
+"$PROJECT_ROOT/mole" update --force
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Already on latest version"* ]]
+    [[ "$output" == *"Downloading"* ]] || [[ "$output" == *"Installing"* ]] || [[ "$output" == *"Updated"* ]]
+}
