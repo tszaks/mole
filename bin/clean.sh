@@ -365,6 +365,7 @@ safe_clean() {
         if should_protect_path "$path"; then
             skip=true
             ((skipped_count++))
+            log_operation "clean" "SKIPPED" "$path" "protected"
         fi
 
         [[ "$skip" == "true" ]] && continue
@@ -372,6 +373,7 @@ safe_clean() {
         if is_path_whitelisted "$path"; then
             skip=true
             ((skipped_count++))
+            log_operation "clean" "SKIPPED" "$path" "whitelist"
         fi
         [[ "$skip" == "true" ]] && continue
         [[ -e "$path" ]] && existing_paths+=("$path")
@@ -699,6 +701,10 @@ safe_clean() {
 }
 
 start_cleanup() {
+    # Set current command for operation logging
+    export MOLE_CURRENT_COMMAND="clean"
+    log_operation_session_start "clean"
+
     if [[ -t 1 ]]; then
         printf '\033[2J\033[H'
     fi
@@ -1064,6 +1070,9 @@ perform_cleanup() {
     if [[ $had_errexit -eq 1 ]]; then
         set -e
     fi
+
+    # Log session end with summary
+    log_operation_session_end "clean" "$files_cleaned" "$total_size_cleaned"
 
     print_summary_block "$summary_heading" "${summary_details[@]}"
     printf '\n'

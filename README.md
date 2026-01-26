@@ -76,6 +76,7 @@ mo purge --paths             # Configure project scan directories
 - **Safety**: Built with strict protections. See [Security Audit](SECURITY_AUDIT.md). Preview changes with `mo clean --dry-run`.
 - **Be Careful**: Although safe by design, file deletion is permanent. Please review operations carefully.
 - **Debug Mode**: Use `--debug` for detailed logs (e.g., `mo clean --debug`). Combine with `--dry-run` for comprehensive preview including risk levels and file details.
+- **Operation Log**: File operations are logged to `~/.config/mole/operations.log` for troubleshooting. Disable with `MO_NO_OPLOG=1`.
 - **Navigation**: Supports arrow keys and Vim bindings (`h/j/k/l`).
 - **Status Shortcuts**: In `mo status`, press `k` to toggle cat visibility and save preference, `q` to quit.
 - **Configuration**: Run `mo touchid` for Touch ID sudo, `mo completion` for shell tab completion, `mo clean --whitelist` to manage protected paths.

@@ -42,6 +42,10 @@ note_activity() {
 
 # Main purge function
 start_purge() {
+    # Set current command for operation logging
+    export MOLE_CURRENT_COMMAND="purge"
+    log_operation_session_start "purge"
+
     # Clear screen for better UX
     if [[ -t 1 ]]; then
         printf '\033[2J\033[H'
@@ -213,6 +217,9 @@ perform_purge() {
         summary_details+=("No old project artifacts to clean.")
         summary_details+=("Free space now: $(get_free_space)")
     fi
+
+    # Log session end
+    log_operation_session_end "purge" "${total_items_cleaned:-0}" "${total_size_cleaned:-0}"
 
     print_summary_block "$summary_heading" "${summary_details[@]}"
     printf '\n'

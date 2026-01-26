@@ -374,6 +374,8 @@ cleanup() {
         wait "$sudo_keepalive_pid" 2> /dev/null || true
         sudo_keepalive_pid=""
     fi
+    # Log session end
+    log_operation_session_end "uninstall" "${files_cleaned:-0}" "${total_size_cleaned:-0}"
     show_cursor
     exit "${1:-0}"
 }
@@ -381,6 +383,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 main() {
+    # Set current command for operation logging
+    export MOLE_CURRENT_COMMAND="uninstall"
+    log_operation_session_start "uninstall"
+
     local force_rescan=false
     # Global flags
     for arg in "$@"; do
