@@ -56,7 +56,7 @@ show_suggestions() {
 
     if [[ -n "${DISK_FREE_GB:-}" && "${DISK_FREE_GB:-0}" -lt 50 ]]; then
         if [[ -z "${CACHE_SIZE_GB:-}" ]] || (($(echo "${CACHE_SIZE_GB:-0} <= 5" | bc -l 2> /dev/null || echo 1))); then
-            manual_items+=("Low disk space (${DISK_FREE_GB}GB free)|Run: mo analyze to find large files")
+            manual_items+=("Low disk space, ${DISK_FREE_GB}GB free|Run: mo analyze to find large files")
             has_suggestions=true
         fi
     fi
@@ -127,7 +127,7 @@ perform_auto_fix() {
     # Ensure sudo access
     if ! has_sudo_session; then
         if ! ensure_sudo_session "System fixes require admin access"; then
-            echo -e "${YELLOW}Skipping auto fixes (admin authentication required)${NC}"
+            echo -e "${YELLOW}Skipping auto fixes, admin authentication required${NC}"
             echo ""
             return 0
         fi
@@ -176,7 +176,7 @@ auth       sufficient     pam_tid.so
     fi
 
     if [[ $fixed_count -gt 0 ]]; then
-        AUTO_FIX_SUMMARY="Auto fixes applied: ${fixed_count} issue(s)"
+        AUTO_FIX_SUMMARY="Auto fixes applied: ${fixed_count} issues"
         if [[ ${#fixed_items[@]} -gt 0 ]]; then
             AUTO_FIX_DETAILS=$(printf '%s\n' "${fixed_items[@]}")
         else

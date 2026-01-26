@@ -57,13 +57,12 @@ check_touchid_sudo() {
 check_rosetta() {
     # Check whitelist
     if command -v is_whitelisted > /dev/null && is_whitelisted "check_rosetta"; then return; fi
-    # Check Rosetta 2 (for Apple Silicon Macs)
+    # Check Rosetta 2 (for Apple Silicon Macs) - informational only, not auto-fixed
     if [[ "$(uname -m)" == "arm64" ]]; then
         if [[ -f "/Library/Apple/usr/share/rosetta/rosetta" ]]; then
             echo -e "  ${GREEN}✓${NC} Rosetta 2    Intel app translation ready"
         else
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Rosetta 2    ${YELLOW}Intel app support missing${NC}"
-            export ROSETTA_NOT_INSTALLED=true
+            echo -e "  ${GRAY}${ICON_EMPTY}${NC} Rosetta 2    ${GRAY}Not installed${NC}"
         fi
     fi
 }
@@ -344,7 +343,7 @@ check_mole_update() {
         # Compare versions
         if [[ "$(printf '%s\n' "$current_version" "$latest_version" | sort -V | head -1)" == "$current_version" ]]; then
             export MOLE_UPDATE_AVAILABLE="true"
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Mole         ${YELLOW}${latest_version} available${NC} (running ${current_version})"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Mole         ${YELLOW}${latest_version} available${NC}, running ${current_version}"
         else
             echo -e "  ${GREEN}✓${NC} Mole         Latest version ${current_version}"
         fi
@@ -406,9 +405,9 @@ check_disk_space() {
     export DISK_FREE_GB=$free_num
 
     if [[ $free_num -lt 20 ]]; then
-        echo -e "  ${RED}✗${NC} Disk Space   ${RED}${free_gb}GB free${NC} (Critical)"
+        echo -e "  ${RED}✗${NC} Disk Space   ${RED}${free_gb}GB free${NC}, Critical"
     elif [[ $free_num -lt 50 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Disk Space   ${YELLOW}${free_gb}GB free${NC} (Low)"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Disk Space   ${YELLOW}${free_gb}GB free${NC}, Low"
     else
         echo -e "  ${GREEN}✓${NC} Disk Space   ${free_gb}GB free"
     fi
@@ -452,9 +451,9 @@ check_memory_usage() {
     ((used_percent < 0)) && used_percent=0
 
     if [[ $used_percent -gt 90 ]]; then
-        echo -e "  ${RED}✗${NC} Memory       ${RED}${used_percent}% used${NC} (Critical)"
+        echo -e "  ${RED}✗${NC} Memory       ${RED}${used_percent}% used${NC}, Critical"
     elif [[ $used_percent -gt 80 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Memory       ${YELLOW}${used_percent}% used${NC} (High)"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Memory       ${YELLOW}${used_percent}% used${NC}, High"
     else
         echo -e "  ${GREEN}✓${NC} Memory       ${used_percent}% used"
     fi
@@ -568,7 +567,7 @@ check_swap_usage() {
             if [[ "$swap_used" == *"G"* ]]; then
                 local swap_gb=${swap_num%.*}
                 if [[ $swap_gb -gt 2 ]]; then
-                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Swap Usage   ${YELLOW}${swap_used}${NC} (High)"
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Swap Usage   ${YELLOW}${swap_used}${NC}, High"
                 else
                     echo -e "  ${GREEN}✓${NC} Swap Usage   ${swap_used}"
                 fi
