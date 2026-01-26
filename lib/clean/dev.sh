@@ -219,10 +219,9 @@ clean_dev_jetbrains_toolbox() {
     [[ -d "$toolbox_root" ]] || return 0
 
     local keep_previous="${MOLE_JETBRAINS_TOOLBOX_KEEP:-1}"
-    if [[ ! "$keep_previous" =~ ^[0-9]+$ ]]; then
-        keep_previous=1
-    fi
+    [[ "$keep_previous" =~ ^[0-9]+$ ]] || keep_previous=1
 
+    # Save and filter whitelist patterns for toolbox path
     local whitelist_overridden="false"
     local -a original_whitelist=()
     if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
@@ -230,14 +229,18 @@ clean_dev_jetbrains_toolbox() {
         local -a filtered_whitelist=()
         local pattern
         for pattern in "${WHITELIST_PATTERNS[@]}"; do
-            if [[ "$toolbox_root" == "$pattern" || "$pattern" == "$toolbox_root"* ]]; then
-                continue
-            fi
+            [[ "$toolbox_root" == "$pattern" || "$pattern" == "$toolbox_root"* ]] && continue
             filtered_whitelist+=("$pattern")
         done
         WHITELIST_PATTERNS=("${filtered_whitelist[@]+${filtered_whitelist[@]}}")
         whitelist_overridden="true"
     fi
+
+    # Helper to restore whitelist on exit
+    _restore_whitelist() {
+        [[ "$whitelist_overridden" == "true" ]] && WHITELIST_PATTERNS=("${original_whitelist[@]}")
+        return 0
+    }
 
     local -a product_dirs=()
     while IFS= read -r -d '' product_dir; do
@@ -245,9 +248,7 @@ clean_dev_jetbrains_toolbox() {
     done < <(command find "$toolbox_root" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null)
 
     if [[ ${#product_dirs[@]} -eq 0 ]]; then
-        if [[ "$whitelist_overridden" == "true" ]]; then
-            WHITELIST_PATTERNS=("${original_whitelist[@]}")
-        fi
+        _restore_whitelist
         return 0
     fi
 
@@ -315,9 +316,7 @@ clean_dev_jetbrains_toolbox() {
         done < <(command find "$product_dir" -mindepth 1 -maxdepth 1 -type d -name "ch-*" -print0 2> /dev/null)
     done
 
-    if [[ "$whitelist_overridden" == "true" ]]; then
-        WHITELIST_PATTERNS=("${original_whitelist[@]}")
-    fi
+    _restore_whitelist
 }
 # Other language tool caches.
 clean_dev_other_langs() {

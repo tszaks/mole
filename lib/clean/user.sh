@@ -110,10 +110,16 @@ clean_chrome_old_versions() {
 
 # Remove old Microsoft Edge versions while keeping Current.
 clean_edge_old_versions() {
-    local -a app_paths=(
-        "/Applications/Microsoft Edge.app"
-        "$HOME/Applications/Microsoft Edge.app"
-    )
+    # Allow override for testing
+    local -a app_paths
+    if [[ -n "${MOLE_EDGE_APP_PATHS:-}" ]]; then
+        IFS=':' read -ra app_paths <<< "$MOLE_EDGE_APP_PATHS"
+    else
+        app_paths=(
+            "/Applications/Microsoft Edge.app"
+            "$HOME/Applications/Microsoft Edge.app"
+        )
+    fi
 
     # Match the exact Edge process name to avoid false positives (e.g., Microsoft Teams)
     if pgrep -x "Microsoft Edge" > /dev/null 2>&1; then
