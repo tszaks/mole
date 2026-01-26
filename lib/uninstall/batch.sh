@@ -72,11 +72,19 @@ decode_file_list() {
 # Note: find_app_files() and calculate_total_size() are in lib/core/common.sh.
 
 # Stop Launch Agents/Daemons for an app.
+# Security: bundle_id is validated to be reverse-DNS format before use in find patterns
 stop_launch_services() {
     local bundle_id="$1"
     local has_system_files="${2:-false}"
 
     [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && return 0
+
+    # Validate bundle_id format: must be reverse-DNS style (e.g., com.example.app)
+    # This prevents glob injection attacks if bundle_id contains special characters
+    if [[ ! "$bundle_id" =~ ^[a-zA-Z0-9][-a-zA-Z0-9]*(\.[a-zA-Z0-9][-a-zA-Z0-9]*)+$ ]]; then
+        debug_log "Invalid bundle_id format for LaunchAgent search: $bundle_id"
+        return 0
+    fi
 
     if [[ -d ~/Library/LaunchAgents ]]; then
         while IFS= read -r -d '' plist; do
@@ -135,6 +143,7 @@ remove_login_item() {
 }
 
 # Remove files (handles symlinks, optional sudo).
+# Security: All paths pass validate_path_for_deletion() before any deletion.
 remove_file_list() {
     local file_list="$1"
     local use_sudo="${2:-false}"
@@ -147,6 +156,12 @@ remove_file_list() {
             continue
         fi
 
+        # Symlinks are handled separately using rm (not safe_remove/safe_sudo_remove)
+        # because safe_sudo_remove() refuses symlinks entirely as a TOCTOU protection.
+        # This is safe because:
+        # 1. The path has already passed validate_path_for_deletion() above
+        # 2. rm on a symlink only removes the link itself, NOT the target
+        # 3. The symlink deletion is logged via operations.log
         if [[ -L "$file" ]]; then
             if [[ "$use_sudo" == "true" ]]; then
                 sudo rm "$file" 2> /dev/null && ((++count)) || true

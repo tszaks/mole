@@ -33,6 +33,11 @@
 
 **Recent Remediations:**
 
+- **Uninstall Audit (Jan 2026)**: Enhanced security in uninstall logic per comprehensive security review.
+  - `stop_launch_services()` now validates bundle_id format (reverse-DNS) before use in find patterns to prevent glob injection attacks.
+  - `find_app_files()` LaunchAgents search now excludes common words (Music, Notes, etc.) to prevent false positive matches.
+  - `remove_file_list()` symlink handling documented with detailed security comments explaining the TOCTOU protection bypass rationale.
+  - `brew_uninstall_cask()` timeout handling improved: exit code 124 (timeout) now returns failure immediately without verification.
 - Symlink cleanup in `bin/clean.sh` now routes through `safe_remove` for target validation.
 - Orphaned helper cleanup in `lib/clean/apps.sh` now uses `safe_sudo_remove`.
 - ByHost preference cleanup in `lib/uninstall/batch.sh` validates bundle IDs and deletes via `safe_remove`.
@@ -199,6 +204,8 @@ When users uninstall applications via `mo uninstall`, Mole automatically removes
 - Unloads services via `launchctl` before deletion (via `stop_launch_services()`)
 - **Safer than orphan detection:** Only removes plists when the associated app is explicitly being uninstalled
 - Prevents accumulation of orphaned startup items that persist after app removal
+- **Common word exclusion:** LaunchAgent name searches exclude generic terms (Music, Notes, Photos, etc.) to prevent false positives
+- **Bundle ID validation:** `stop_launch_services()` validates reverse-DNS format before find patterns
 
 **Code:** `lib/core/app_protection.sh:find_app_files()`, `lib/uninstall/batch.sh:stop_launch_services()`
 

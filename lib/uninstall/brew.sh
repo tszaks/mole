@@ -196,15 +196,22 @@ brew_uninstall_cask() {
     fi
 
     # Run with timeout to prevent hangs from problematic cask scripts
+    local brew_exit=0
     if HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
         run_with_timeout "$timeout" brew uninstall --cask "$cask_name" 2>&1; then
         uninstall_ok=true
     else
         brew_exit=$?
         debug_log "brew uninstall timeout or failed with exit code: $brew_exit"
+        # Exit code 124 indicates timeout from run_with_timeout
+        # On timeout, fail immediately without verification to avoid inconsistent state
+        if [[ $brew_exit -eq 124 ]]; then
+            debug_log "brew uninstall timed out after ${timeout}s, returning failure"
+            return 1
+        fi
     fi
 
-    # Verify removal
+    # Verify removal (only if not timed out)
     local cask_gone=true app_gone=true
     HOMEBREW_NO_ENV_HINTS=1 brew list --cask 2> /dev/null | grep -qxF "$cask_name" && cask_gone=false
     [[ -n "$app_path" && -e "$app_path" ]] && app_gone=false

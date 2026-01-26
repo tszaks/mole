@@ -768,14 +768,23 @@ find_app_files() {
     # Note: LaunchDaemons are system-level and handled in find_app_system_files()
     # Minimum 5-char threshold prevents false positives (e.g., "Time" matching system agents)
     # Short-name apps (e.g., Zoom, Arc) are still cleaned via bundle_id matching above
+    # Security: Common words are excluded to prevent matching unrelated plist files
     if [[ ${#app_name} -ge 5 ]] && [[ -d ~/Library/LaunchAgents ]]; then
-        while IFS= read -r -d '' plist; do
-            local plist_name=$(basename "$plist")
-            if [[ "$plist_name" =~ ^com\.apple\. ]]; then
-                continue
-            fi
-            files_to_clean+=("$plist")
-        done < <(command find ~/Library/LaunchAgents -maxdepth 1 -name "*$app_name*.plist" -print0 2> /dev/null)
+        # Skip common words that could match many unrelated LaunchAgents
+        # These are either generic terms or names that overlap with system/common utilities
+        local common_words="Music|Notes|Photos|Finder|Safari|Preview|Calendar|Contacts|Messages|Reminders|Clock|Weather|Stocks|Books|News|Podcasts|Voice|Files|Store|System|Helper|Agent|Daemon|Service|Update|Sync|Backup|Cloud|Manager|Monitor|Server|Client|Worker|Runner|Launcher|Driver|Plugin|Extension|Widget|Utility"
+        if [[ "$app_name" =~ ^($common_words)$ ]]; then
+            debug_log "Skipping LaunchAgent name search for common word: $app_name"
+        else
+            while IFS= read -r -d '' plist; do
+                local plist_name=$(basename "$plist")
+                # Skip Apple's LaunchAgents
+                if [[ "$plist_name" =~ ^com\.apple\. ]]; then
+                    continue
+                fi
+                files_to_clean+=("$plist")
+            done < <(command find ~/Library/LaunchAgents -maxdepth 1 -name "*$app_name*.plist" -print0 2> /dev/null)
+        fi
     fi
 
     # Handle specialized toolchains and development environments
