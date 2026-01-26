@@ -500,7 +500,7 @@ clean_orphaned_system_services() {
                 if [[ "$orphan_file" == *.plist ]]; then
                     sudo launchctl unload "$orphan_file" 2> /dev/null || true
                 fi
-                if sudo rm -f "$orphan_file" 2> /dev/null; then
+                if safe_sudo_remove "$orphan_file"; then
                     debug_log "Removed orphaned service: $orphan_file"
                 fi
             fi

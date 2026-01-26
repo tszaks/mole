@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Status:** PASSED | **Risk Level:** LOW | **Version:** 1.22.1 (2026-01-17)
+**Status:** PASSED | **Risk Level:** LOW | **Version:** 1.23.2 (2026-01-26)
 
 </div>
 
@@ -12,23 +12,30 @@
 
 | Attribute | Details |
 |-----------|---------|
-| Audit Date | January 17, 2026 |
+| Audit Date | January 26, 2026 |
 | Audit Conclusion | **PASSED** |
-| Mole Version | V1.22.0 |
+| Mole Version | V1.23.2 |
 | Audited Branch | `main` (HEAD) |
 | Scope | Shell scripts, Go binaries, Configuration |
 | Methodology | Static analysis, Threat modeling, Code review |
 | Review Cycle | Every 6 months or after major feature additions |
-| Next Review | June 2026 |
+| Next Review | July 2026 |
 
 **Key Findings:**
 
 - Multi-layer validation effectively blocks risky system modifications.
 - Conservative cleaning logic ensures safety (e.g., 60-day dormancy rule).
 - Comprehensive protection for VPNs, AI tools, and core system components.
+- Operations logging improves traceability while remaining optional (MO_NO_OPLOG=1).
 - Atomic operations prevent state corruption during crashes.
 - Dry-run and whitelist features give users full control.
 - Installer cleanup scans safely and requires user confirmation.
+
+**Recent Remediations:**
+
+- Symlink cleanup in `bin/clean.sh` now routes through `safe_remove` for target validation.
+- Orphaned helper cleanup in `lib/clean/apps.sh` now uses `safe_sudo_remove`.
+- ByHost preference cleanup in `lib/uninstall/batch.sh` validates bundle IDs and deletes via `safe_remove`.
 
 ---
 

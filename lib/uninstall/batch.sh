@@ -502,8 +502,14 @@ batch_uninstall_applications() {
                 fi
 
                 # ByHost preferences (machine-specific).
-                if [[ -d ~/Library/Preferences/ByHost ]]; then
-                    find ~/Library/Preferences/ByHost -maxdepth 1 -name "${bundle_id}.*.plist" -delete 2> /dev/null || true
+                if [[ -d "$HOME/Library/Preferences/ByHost" ]]; then
+                    if [[ "$bundle_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+                        while IFS= read -r -d '' plist_file; do
+                            safe_remove "$plist_file" true > /dev/null || true
+                        done < <(command find "$HOME/Library/Preferences/ByHost" -maxdepth 1 -type f -name "${bundle_id}.*.plist" -print0 2> /dev/null || true)
+                    else
+                        debug_log "Skipping ByHost cleanup, invalid bundle id: $bundle_id"
+                    fi
                 fi
             fi
 
