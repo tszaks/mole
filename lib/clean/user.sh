@@ -7,7 +7,7 @@ clean_user_essentials() {
     stop_section_spinner
 
     safe_clean ~/Library/Logs/* "User app logs"
-    
+
     if ! is_path_whitelisted "$HOME/.Trash"; then
         local trash_count
         trash_count=$(osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null || echo "0")
