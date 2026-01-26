@@ -455,22 +455,32 @@ batch_uninstall_applications() {
                 else
                     # Fallback to manual removal if brew fails
                     if [[ "$needs_sudo" == true ]]; then
-                        safe_sudo_remove "$app_path" || reason="remove failed"
+                        if ! safe_sudo_remove "$app_path"; then
+                            reason="brew failed, manual removal failed"
+                        fi
                     else
-                        safe_remove "$app_path" true || reason="remove failed"
+                        if ! safe_remove "$app_path" true; then
+                            reason="brew failed, manual removal failed"
+                        fi
                     fi
                 fi
             elif [[ "$needs_sudo" == true ]]; then
                 if ! safe_sudo_remove "$app_path"; then
                     local app_owner=$(get_file_owner "$app_path")
                     if [[ -n "$app_owner" && "$app_owner" != "$current_user" && "$app_owner" != "root" ]]; then
-                        reason="owned by $app_owner"
+                        reason="owned by $app_owner, try 'sudo chown $(whoami) \"$app_path\"'"
                     else
-                        reason="permission denied"
+                        reason="permission denied, try 'mole touchid' for passwordless sudo"
                     fi
                 fi
             else
-                safe_remove "$app_path" true || reason="remove failed"
+                if ! safe_remove "$app_path" true; then
+                    if [[ ! -w "$(dirname "$app_path")" ]]; then
+                        reason="parent directory not writable"
+                    else
+                        reason="remove failed, check permissions"
+                    fi
+                fi
             fi
         fi
 
