@@ -220,7 +220,6 @@ read_key() {
     case "$key" in
         $'\n' | $'\r') echo "ENTER" ;;
         ' ') echo "SPACE" ;;
-        '/') echo "FILTER" ;;
         'q' | 'Q') echo "QUIT" ;;
         'R') echo "RETRY" ;;
         'm' | 'M') echo "MORE" ;;
@@ -308,7 +307,7 @@ start_inline_spinner() {
                 # Output to stderr to avoid interfering with stdout
                 printf "\r${MOLE_SPINNER_PREFIX:-}${BLUE}%s${NC} %s" "$c" "$message" >&2 || break
                 ((i++))
-                sleep 0.1
+                sleep 0.05
             done
 
             # Clean up stop file before exiting
@@ -316,7 +315,7 @@ start_inline_spinner() {
             exit 0
         ) &
         INLINE_SPINNER_PID=$!
-        disown 2> /dev/null || true
+        disown "$INLINE_SPINNER_PID" 2> /dev/null || true
     else
         echo -n "  ${BLUE}|${NC} $message" >&2 || true
     fi

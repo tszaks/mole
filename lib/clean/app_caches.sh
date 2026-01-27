@@ -18,7 +18,7 @@ clean_xcode_tools() {
         safe_clean ~/Library/Developer/Xcode/DerivedData/* "Xcode derived data"
         safe_clean ~/Library/Developer/Xcode/Archives/* "Xcode archives"
     else
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData and Archives cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData and Archives cleanup"
     fi
 }
 # Code editors.
@@ -107,7 +107,7 @@ clean_media_players() {
         fi
     fi
     if [[ "$has_offline_music" == "true" ]]; then
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Spotify cache protected · offline music detected"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Spotify cache protected · offline music detected"
         note_activity
     else
         safe_clean ~/Library/Caches/com.spotify.client/* "Spotify cache"

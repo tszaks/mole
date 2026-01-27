@@ -23,10 +23,15 @@ fi
 
 readonly LOG_FILE="${HOME}/.config/mole/mole.log"
 readonly DEBUG_LOG_FILE="${HOME}/.config/mole/mole_debug_session.log"
-readonly LOG_MAX_SIZE_DEFAULT=1048576 # 1MB
+readonly OPERATIONS_LOG_FILE="${HOME}/.config/mole/operations.log"
+readonly LOG_MAX_SIZE_DEFAULT=1048576   # 1MB
+readonly OPLOG_MAX_SIZE_DEFAULT=5242880 # 5MB
 
 # Ensure log directory and file exist with correct ownership
 ensure_user_file "$LOG_FILE"
+if [[ "${MO_NO_OPLOG:-}" != "1" ]]; then
+    ensure_user_file "$OPERATIONS_LOG_FILE"
+fi
 
 # ============================================================================
 # Log Rotation
@@ -42,6 +47,15 @@ rotate_log_once() {
     if [[ -f "$LOG_FILE" ]] && [[ $(get_file_size "$LOG_FILE") -gt "$max_size" ]]; then
         mv "$LOG_FILE" "${LOG_FILE}.old" 2> /dev/null || true
         ensure_user_file "$LOG_FILE"
+    fi
+
+    # Rotate operations log (5MB limit)
+    if [[ "${MO_NO_OPLOG:-}" != "1" ]]; then
+        local oplog_max_size="$OPLOG_MAX_SIZE_DEFAULT"
+        if [[ -f "$OPERATIONS_LOG_FILE" ]] && [[ $(get_file_size "$OPERATIONS_LOG_FILE") -gt "$oplog_max_size" ]]; then
+            mv "$OPERATIONS_LOG_FILE" "${OPERATIONS_LOG_FILE}.old" 2> /dev/null || true
+            ensure_user_file "$OPERATIONS_LOG_FILE"
+        fi
     fi
 }
 
@@ -97,6 +111,80 @@ debug_log() {
     fi
 }
 
+# ============================================================================
+# Operation Logging (Enabled by default)
+# ============================================================================
+# Records all file operations for user troubleshooting
+# Disable with MO_NO_OPLOG=1
+
+oplog_enabled() {
+    [[ "${MO_NO_OPLOG:-}" != "1" ]]
+}
+
+# Log an operation to the operations log file
+# Usage: log_operation <command> <action> <path> [detail]
+# Example: log_operation "clean" "REMOVED" "/path/to/file" "15.2MB"
+# Example: log_operation "clean" "SKIPPED" "/path/to/file" "whitelist"
+# Example: log_operation "uninstall" "REMOVED" "/Applications/App.app" "150MB"
+log_operation() {
+    # Allow disabling via environment variable
+    oplog_enabled || return 0
+
+    local command="${1:-unknown}" # clean/uninstall/optimize/purge
+    local action="${2:-UNKNOWN}"  # REMOVED/SKIPPED/FAILED/REBUILT
+    local path="${3:-}"
+    local detail="${4:-}"
+
+    # Skip if no path provided
+    [[ -z "$path" ]] && return 0
+
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    local log_line="[$timestamp] [$command] $action $path"
+    [[ -n "$detail" ]] && log_line+=" ($detail)"
+
+    echo "$log_line" >> "$OPERATIONS_LOG_FILE" 2> /dev/null || true
+}
+
+# Log session start marker
+# Usage: log_operation_session_start <command>
+log_operation_session_start() {
+    oplog_enabled || return 0
+
+    local command="${1:-mole}"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    {
+        echo ""
+        echo "# ========== $command session started at $timestamp =========="
+    } >> "$OPERATIONS_LOG_FILE" 2> /dev/null || true
+}
+
+# Log session end with summary
+# Usage: log_operation_session_end <command> <items_count> <total_size>
+log_operation_session_end() {
+    oplog_enabled || return 0
+
+    local command="${1:-mole}"
+    local items="${2:-0}"
+    local size="${3:-0}"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    local size_human=""
+    if [[ "$size" =~ ^[0-9]+$ ]] && [[ "$size" -gt 0 ]]; then
+        size_human=$(bytes_to_human "$((size * 1024))" 2> /dev/null || echo "${size}KB")
+    else
+        size_human="0B"
+    fi
+
+    {
+        echo "# ========== $command session ended at $timestamp, $items items, $size_human =========="
+    } >> "$OPERATIONS_LOG_FILE" 2> /dev/null || true
+}
+
 # Enhanced debug logging for operations
 debug_operation_start() {
     local operation_name="$1"
@@ -138,10 +226,9 @@ debug_file_action() {
     local file_age="${4:-}"
 
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        local msg="  - $file_path"
-        [[ -n "$file_size" ]] && msg+=" ($file_size"
+        local msg="  * $file_path"
+        [[ -n "$file_size" ]] && msg+=", $file_size"
         [[ -n "$file_age" ]] && msg+=", ${file_age} days old"
-        [[ -n "$file_size" ]] && msg+=")"
 
         # Output to stderr
         echo -e "${GRAY}[DEBUG] $action: $msg${NC}" >&2
@@ -165,10 +252,10 @@ debug_risk_level() {
         esac
 
         # Output to stderr with color
-        echo -e "${GRAY}[DEBUG] Risk Level: ${color}${risk_level}${GRAY} ($reason)${NC}" >&2
+        echo -e "${GRAY}[DEBUG] Risk Level: ${color}${risk_level}${GRAY}, $reason${NC}" >&2
 
         # Also log to file
-        echo "Risk Level: $risk_level ($reason)" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
+        echo "Risk Level: $risk_level, $reason" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -180,21 +267,23 @@ log_system_info() {
 
     # Reset debug log file for this new session
     ensure_user_file "$DEBUG_LOG_FILE"
-    : > "$DEBUG_LOG_FILE"
+    if ! : > "$DEBUG_LOG_FILE" 2> /dev/null; then
+        echo -e "${YELLOW}${ICON_WARNING}${NC} Debug log not writable: $DEBUG_LOG_FILE" >&2
+    fi
 
     # Start block in debug log file
     {
         echo "----------------------------------------------------------------------"
-        echo "Mole Debug Session - $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "Mole Debug Session, $(date '+%Y-%m-%d %H:%M:%S')"
         echo "----------------------------------------------------------------------"
         echo "User: $USER"
         echo "Hostname: $(hostname)"
         echo "Architecture: $(uname -m)"
         echo "Kernel: $(uname -r)"
         if command -v sw_vers > /dev/null; then
-            echo "macOS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+            echo "macOS: $(sw_vers -productVersion), $(sw_vers -buildVersion)"
         fi
-        echo "Shell: ${SHELL:-unknown} (${TERM:-unknown})"
+        echo "Shell: ${SHELL:-unknown}, ${TERM:-unknown}"
 
         # Check sudo status non-interactively
         if sudo -n true 2> /dev/null; then

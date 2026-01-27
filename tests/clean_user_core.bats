@@ -34,8 +34,8 @@ clean_user_essentials
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Trash"* ]]
-    [[ "$output" == *"whitelist"* ]]
+    # Whitelist-protected items no longer show output (UX improvement in V1.22.0)
+    [[ "$output" != *"Trash"* ]]
 }
 
 @test "clean_macos_system_caches calls safe_clean for core paths" {
@@ -88,8 +88,8 @@ clean_finder_metadata
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Finder metadata"* ]]
-    [[ "$output" == *"protected"* ]]
+    # Whitelist-protected items no longer show output (UX improvement in V1.22.0)
+    [[ "$output" == "" ]]
 }
 
 @test "check_ios_device_backups returns when no backup dir" {
@@ -117,6 +117,7 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Safari cache"* ]]
     [[ "$output" == *"Firefox cache"* ]]
+    [[ "$output" == *"Puppeteer browser cache"* ]]
 }
 
 @test "clean_application_support_logs skips when no access" {

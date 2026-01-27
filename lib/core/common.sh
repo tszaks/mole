@@ -79,8 +79,9 @@ update_via_homebrew() {
     if echo "$upgrade_output" | grep -q "already installed"; then
         local installed_version
         installed_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
+        [[ -z "$installed_version" ]] && installed_version=$(mo --version 2> /dev/null | awk '/Mole version/ {print $3; exit}')
         echo ""
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version (${installed_version:-$current_version})"
+        echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version, ${installed_version:-$current_version}"
         echo ""
     elif echo "$upgrade_output" | grep -q "Error:"; then
         log_error "Homebrew upgrade failed"
@@ -90,8 +91,9 @@ update_via_homebrew() {
         echo "$upgrade_output" | grep -Ev "^(==>|Updating Homebrew|Warning:)" || true
         local new_version
         new_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
+        [[ -z "$new_version" ]] && new_version=$(mo --version 2> /dev/null | awk '/Mole version/ {print $3; exit}')
         echo ""
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version (${new_version:-$current_version})"
+        echo -e "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version, ${new_version:-$current_version}"
         echo ""
     fi
 
@@ -125,24 +127,29 @@ remove_apps_from_dock() {
     local changed=false
     for target in "${targets[@]}"; do
         local app_path="$target"
-        # Normalize path for comparison - use original path if app already deleted
-        local full_path
-        if full_path=$(cd "$(dirname "$app_path")" 2> /dev/null && pwd); then
-            full_path="$full_path/$(basename "$app_path")"
-        else
-            # App already deleted - use the original path as-is
-            # Remove ~/ prefix and expand to full path if needed
-            if [[ "$app_path" == ~/* ]]; then
-                full_path="$HOME/${app_path#~/}"
-            elif [[ "$app_path" != /* ]]; then
-                # Relative path - skip this entry
-                continue
-            else
-                full_path="$app_path"
-            fi
+        local full_path=""
+
+        if [[ "$app_path" =~ [[:cntrl:]] ]]; then
+            debug_log "Skipping dock removal for path with control chars: $app_path"
+            continue
         fi
 
-        # URL-encode the path for matching against Dock URLs (spaces -> %20)
+        if [[ -e "$app_path" ]]; then
+            if full_path=$(cd "$(dirname "$app_path")" 2> /dev/null && pwd); then
+                full_path="$full_path/$(basename "$app_path")"
+            else
+                continue
+            fi
+        else
+            case "$app_path" in
+                ~/*) full_path="$HOME/${app_path#~/}" ;;
+                /*) full_path="$app_path" ;;
+                *) continue ;;
+            esac
+        fi
+
+        [[ -z "$full_path" ]] && continue
+
         local encoded_path="${full_path// /%20}"
 
         # Find the index of the app in persistent-apps

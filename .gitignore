@@ -48,6 +48,8 @@ tests/tmp-*
 CLAUDE.md
 GEMINI.md
 ANTIGRAVITY.md
+WARP.md
+AGENTS.md
 .cursorrules
 
 # Go build artifacts (development)

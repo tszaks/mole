@@ -131,7 +131,7 @@ type cardData struct {
 }
 
 func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int, catHidden bool) string {
-	title := titleStyle.Render("Mole Status")
+	title := titleStyle.Render("Status")
 
 	scoreStyle := getScoreStyle(m.HealthScore)
 	scoreText := subtleStyle.Render("Health ") + scoreStyle.Render(fmt.Sprintf("● %d", m.HealthScore))
@@ -145,7 +145,7 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 		cpuInfo := m.Hardware.CPUModel
 		// Append GPU core count when available.
 		if len(m.GPU) > 0 && m.GPU[0].CoreCount > 0 {
-			cpuInfo += fmt.Sprintf(" (%dGPU)", m.GPU[0].CoreCount)
+			cpuInfo += fmt.Sprintf(", %dGPU", m.GPU[0].CoreCount)
 		}
 		infoParts = append(infoParts, cpuInfo)
 	}
@@ -164,6 +164,9 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 	}
 	if m.Hardware.OSVersion != "" {
 		infoParts = append(infoParts, m.Hardware.OSVersion)
+	}
+	if m.Uptime != "" {
+		infoParts = append(infoParts, subtleStyle.Render("up "+m.Uptime))
 	}
 
 	headerLine := title + "  " + scoreText + "  " + strings.Join(infoParts, " · ")
@@ -201,15 +204,6 @@ func getScoreStyle(score int) lipgloss.Style {
 	}
 }
 
-func hasSensorData(sensors []SensorReading) bool {
-	for _, s := range sensors {
-		if s.Note == "" && s.Value > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func renderCPUCard(cpu CPUStatus, thermal ThermalStatus) cardData {
 	var lines []string
 
@@ -224,7 +218,7 @@ func renderCPUCard(cpu CPUStatus, thermal ThermalStatus) cardData {
 	lines = append(lines, fmt.Sprintf("Total  %s  %s", usageBar, headerText))
 
 	if cpu.PerCoreEstimated {
-		lines = append(lines, subtleStyle.Render("Per-core data unavailable (using averaged load)"))
+		lines = append(lines, subtleStyle.Render("Per-core data unavailable, using averaged load"))
 	} else if len(cpu.PerCore) > 0 {
 		type coreUsage struct {
 			idx int
@@ -245,10 +239,10 @@ func renderCPUCard(cpu CPUStatus, thermal ThermalStatus) cardData {
 
 	// Load line at the end
 	if cpu.PCoreCount > 0 && cpu.ECoreCount > 0 {
-		lines = append(lines, fmt.Sprintf("Load   %.2f / %.2f / %.2f (%dP+%dE)",
+		lines = append(lines, fmt.Sprintf("Load   %.2f / %.2f / %.2f, %dP+%dE",
 			cpu.Load1, cpu.Load5, cpu.Load15, cpu.PCoreCount, cpu.ECoreCount))
 	} else {
-		lines = append(lines, fmt.Sprintf("Load   %.2f / %.2f / %.2f (%d cores)",
+		lines = append(lines, fmt.Sprintf("Load   %.2f / %.2f / %.2f, %d cores",
 			cpu.Load1, cpu.Load5, cpu.Load15, cpu.LogicalCPU))
 	}
 
@@ -276,7 +270,7 @@ func renderMemoryCard(mem MemoryStatus) cardData {
 		if mem.SwapTotal > 0 {
 			swapPercent = (float64(mem.SwapUsed) / float64(mem.SwapTotal)) * 100.0
 		}
-		swapText := fmt.Sprintf("(%s/%s)", humanBytesCompact(mem.SwapUsed), humanBytesCompact(mem.SwapTotal))
+		swapText := fmt.Sprintf("%s/%s", humanBytesCompact(mem.SwapUsed), humanBytesCompact(mem.SwapTotal))
 		lines = append(lines, fmt.Sprintf("Swap   %s  %5.1f%% %s", progressBar(swapPercent), swapPercent, swapText))
 
 		lines = append(lines, fmt.Sprintf("Total  %s / %s", humanBytes(mem.Used), humanBytes(mem.Total)))
@@ -367,7 +361,7 @@ func formatDiskLine(label string, d DiskStatus) string {
 	bar := progressBar(d.UsedPercent)
 	used := humanBytesShort(d.Used)
 	total := humanBytesShort(d.Total)
-	return fmt.Sprintf("%-6s %s  %5.1f%% (%s/%s)", label, bar, d.UsedPercent, used, total)
+	return fmt.Sprintf("%-6s %s  %5.1f%%, %s/%s", label, bar, d.UsedPercent, used, total)
 }
 
 func ioBar(rate float64) string {
@@ -411,9 +405,10 @@ func buildCards(m MetricsSnapshot, width int) []cardData {
 		renderProcessCard(m.TopProcesses),
 		renderNetworkCard(m.Network, m.NetworkHistory, m.Proxy, width),
 	}
-	if hasSensorData(m.Sensors) {
-		cards = append(cards, renderSensorsCard(m.Sensors))
-	}
+	// Sensors card disabled - redundant with CPU temp
+	// if hasSensorData(m.Sensors) {
+	// 	cards = append(cards, renderSensorsCard(m.Sensors))
+	// }
 	return cards
 }
 
@@ -598,20 +593,6 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 	}
 
 	return cardData{icon: iconBattery, title: "Power", lines: lines}
-}
-
-func renderSensorsCard(sensors []SensorReading) cardData {
-	var lines []string
-	for _, s := range sensors {
-		if s.Note != "" {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%-12s %s", shorten(s.Label, 12), colorizeTemp(s.Value)+s.Unit))
-	}
-	if len(lines) == 0 {
-		lines = append(lines, subtleStyle.Render("No sensors"))
-	}
-	return cardData{icon: iconSensors, title: "Sensors", lines: lines}
 }
 
 func renderCard(data cardData, width int, height int) string {

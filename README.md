@@ -39,7 +39,7 @@ brew install mole
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 ```
 
-**Windows:** Mole is designed for macOS, but we offer an experimental Windows version based on user demand. See the [windows branch](https://github.com/tw93/Mole/tree/windows) — for early adopters only.
+**Windows:** Mole is designed for macOS, but we offer an experimental Windows version based on user demand. See the [windows branch](https://github.com/tw93/Mole/tree/windows), for early adopters only.
 
 **Run:**
 
@@ -76,6 +76,7 @@ mo purge --paths             # Configure project scan directories
 - **Safety**: Built with strict protections. See [Security Audit](SECURITY_AUDIT.md). Preview changes with `mo clean --dry-run`.
 - **Be Careful**: Although safe by design, file deletion is permanent. Please review operations carefully.
 - **Debug Mode**: Use `--debug` for detailed logs (e.g., `mo clean --debug`). Combine with `--dry-run` for comprehensive preview including risk levels and file details.
+- **Operation Log**: File operations are logged to `~/.config/mole/operations.log` for troubleshooting. Disable with `MO_NO_OPLOG=1`.
 - **Navigation**: Supports arrow keys and Vim bindings (`h/j/k/l`).
 - **Status Shortcuts**: In `mo status`, press `k` to toggle cat visibility and save preference, `q` to quit.
 - **Configuration**: Run `mo touchid` for Touch ID sudo, `mo completion` for shell tab completion, `mo clean --whitelist` to manage protected paths.
@@ -184,8 +185,8 @@ Read    ▮▯▯▯▯  2.1 MB/s                  Health  Normal · 423 cycles
 Write   ▮▮▮▯▯  18.3 MB/s                 Temp    58°C · 1200 RPM
 
 ⇅ Network                                ▶ Processes
-Down    ▮▮▯▯▯  3.2 MB/s                  Code       ▮▮▮▮▯  42.1%
-Up      ▮▯▯▯▯  0.8 MB/s                  Chrome     ▮▮▮▯▯  28.3%
+Down    ▁▁█▂▁▁▁▁▁▁▁▁▇▆▅▂  0.54 MB/s      Code       ▮▮▮▮▯  42.1%
+Up      ▄▄▄▃▃▃▄▆▆▇█▁▁▁▁▁  0.02 MB/s      Chrome     ▮▮▮▯▯  28.3%
 Proxy   HTTP · 192.168.1.100             Terminal   ▮▯▯▯▯  12.5%
 ```
 
@@ -210,7 +211,7 @@ Select Categories to Clean - 18.5GB (8 selected)
   ● backend-service    2.5GB | node_modules
 ```
 
-> **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects — less than 7 days old — are marked and unselected by default.
+> **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects, less than 7 days old, are marked and unselected by default.
 
 <details>
 <summary><strong>Custom Scan Paths</strong></summary>
@@ -258,21 +259,22 @@ Mole automatically detects your terminal, or set `MO_LAUNCHER_APP=<name>` to ove
 
 ## Community Love
 
-Mole wouldn't be possible without these amazing contributors. They've built countless features that make Mole what it is today. Go follow them! ❤️
+Big thanks to all contributors who helped build Mole. Go follow them! ❤️
 
 <a href="https://github.com/tw93/Mole/graphs/contributors">
   <img src="./CONTRIBUTORS.svg?v=2" width="1000" />
 </a>
 
-Join thousands of users worldwide who trust Mole to keep their Macs clean and optimized.
+<br/><br/>
+Real feedback from users who shared Mole on X.
 
 <img src="https://cdn.tw93.fun/pic/lovemole.jpeg" alt="Community feedback on Mole" width="1000" />
 
 ## Support
 
-- If Mole saved you disk space, consider starring the repo or [sharing it](https://twitter.com/intent/tweet?url=https://github.com/tw93/Mole&text=Mole%20-%20Deep%20clean%20and%20optimize%20your%20Mac.) with friends.
-- Have ideas or fixes? Check our [Contributing Guide](CONTRIBUTING.md), then open an issue or PR to help shape Mole's future.
-- Love Mole? <a href="https://miaoyan.app/cats.html?name=Mole" target="_blank">Buy Tw93 an ice-cold Coke</a> to keep the project alive and kicking! 🥤
+- If Mole helped you, star the repo or [share it](https://twitter.com/intent/tweet?url=https://github.com/tw93/Mole&text=Mole%20-%20Deep%20clean%20and%20optimize%20your%20Mac.) with friends.
+- Got ideas or found bugs? Check the [Contributing Guide](CONTRIBUTING.md) and open an issue or PR.
+- Like Mole? <a href="https://miaoyan.app/cats.html?name=Mole" target="_blank">Buy Tw93 a Coke</a> to support the project! 🥤
 
 <details>
 <summary><strong>Friends who bought me Coke</strong></summary>
@@ -282,4 +284,4 @@ Join thousands of users worldwide who trust Mole to keep their Macs clean and op
 
 ## License
 
-MIT License — feel free to enjoy and participate in open source.
+MIT License, feel free to enjoy and participate in open source.
