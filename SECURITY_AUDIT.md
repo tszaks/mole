@@ -1,370 +1,169 @@
-# Mole Security Audit Report
+# Mole Security Reference
 
-<div align="center">
+Version 1.23.2 | 2026-01-26
 
-**Status:** PASSED | **Risk Level:** LOW | **Version:** 1.23.2 (2026-01-26)
+## Recent Fixes
 
-</div>
+**Uninstall audit, Jan 2026:**
 
----
+- `stop_launch_services()` now checks bundle_id is valid reverse-DNS before using it in find patterns. This stops glob injection.
+- `find_app_files()` skips LaunchAgents named after common words like Music or Notes.
+- Added comments explaining why `remove_file_list()` bypasses TOCTOU checks for symlinks.
+- `brew_uninstall_cask()` treats exit code 124 as timeout failure, returns immediately.
 
-## Audit Overview
+Other changes:
 
-| Attribute | Details |
-|-----------|---------|
-| Audit Date | January 26, 2026 |
-| Audit Conclusion | **PASSED** |
-| Mole Version | V1.23.2 |
-| Audited Branch | `main` (HEAD) |
-| Scope | Shell scripts, Go binaries, Configuration |
-| Methodology | Static analysis, Threat modeling, Code review |
-| Review Cycle | Every 6 months or after major feature additions |
-| Next Review | July 2026 |
+- Symlink cleanup in `bin/clean.sh` goes through `safe_remove` now
+- Orphaned helper cleanup in `lib/clean/apps.sh` switched to `safe_sudo_remove`
+- ByHost pref cleanup checks bundle ID format first
 
-**Key Findings:**
+## Path Validation
 
-- Multi-layer validation effectively blocks risky system modifications.
-- Conservative cleaning logic ensures safety (e.g., 60-day dormancy rule).
-- Comprehensive protection for VPNs, AI tools, and core system components.
-- Operations logging improves traceability while remaining optional (MO_NO_OPLOG=1).
-- Atomic operations prevent state corruption during crashes.
-- Dry-run and whitelist features give users full control.
-- Installer cleanup scans safely and requires user confirmation.
+Every deletion goes through `lib/core/file_ops.sh`. The `validate_path_for_deletion()` function rejects empty paths, paths with `/../` in them, and anything containing control characters like newlines or null bytes.
 
-**Recent Remediations:**
+**Blocked paths**, even with sudo:
 
-- **Uninstall Audit (Jan 2026)**: Enhanced security in uninstall logic per comprehensive security review.
-  - `stop_launch_services()` now validates bundle_id format (reverse-DNS) before use in find patterns to prevent glob injection attacks.
-  - `find_app_files()` LaunchAgents search now excludes common words (Music, Notes, etc.) to prevent false positive matches.
-  - `remove_file_list()` symlink handling documented with detailed security comments explaining the TOCTOU protection bypass rationale.
-  - `brew_uninstall_cask()` timeout handling improved: exit code 124 (timeout) now returns failure immediately without verification.
-- Symlink cleanup in `bin/clean.sh` now routes through `safe_remove` for target validation.
-- Orphaned helper cleanup in `lib/clean/apps.sh` now uses `safe_sudo_remove`.
-- ByHost preference cleanup in `lib/uninstall/batch.sh` validates bundle IDs and deletes via `safe_remove`.
-
----
-
-## Security Philosophy
-
-**Core Principle: "Do No Harm"**
-
-We built Mole on a **Zero Trust** architecture for filesystem operations. Every modification request is treated as dangerous until it passes strict validation.
-
-**Guiding Priorities:**
-
-1. **System Stability First** - We'd rather leave 1GB of junk than delete 1KB of your data.
-2. **Conservative by Default** - High-risk operations always require explicit confirmation.
-3. **Fail Safe** - When in doubt, we abort immediately.
-4. **Transparency** - Every operation is logged and allows a preview via dry-run mode.
-
----
-
-## Threat Model
-
-### Attack Vectors & Mitigations
-
-| Threat | Risk Level | Mitigation | Status |
-|--------|------------|------------|--------|
-| Accidental System File Deletion | Critical | Multi-layer path validation, system directory blocklist | Mitigated |
-| Path Traversal Attack | High | Absolute path enforcement, relative path rejection | Mitigated |
-| Symlink Exploitation | High | Symlink detection in privileged mode | Mitigated |
-| Command Injection | High | Control character filtering, strict validation | Mitigated |
-| Empty Variable Deletion | High | Empty path validation, defensive checks | Mitigated |
-| Race Conditions | Medium | Atomic operations, process isolation | Mitigated |
-| Network Mount Hangs | Medium | Timeout protection, volume type detection | Mitigated |
-| Privilege Escalation | Medium | Restricted sudo scope, user home validation | Mitigated |
-| False Positive Deletion | Medium | 3-char minimum, fuzzy matching disabled | Mitigated |
-| VPN Configuration Loss | Medium | Comprehensive VPN/proxy whitelist | Mitigated |
-
----
-
-## Defense Architecture
-
-### Multi-Layered Validation System
-
-All automated operations pass through hardened middleware (`lib/core/file_ops.sh`) with 4 layers of validation:
-
-#### Layer 1: Input Sanitization
-
-| Control | Protection Against |
-|---------|---------------------|
-| Absolute Path Enforcement | Path traversal attacks (`../etc`) |
-| Control Character Filtering | Command injection (`\n`, `\r`, `\0`) |
-| Empty Variable Protection | Accidental `rm -rf /` |
-| Secure Temp Workspaces | Data leakage, race conditions |
-
-**Code:** `lib/core/file_ops.sh:validate_path_for_deletion()`
-
-#### Layer 2: System Path Protection ("Iron Dome")
-
-Even with `sudo`, these paths are **unconditionally blocked**:
-
-```bash
-/                    # Root filesystem
-/System              # macOS system files
-/bin, /sbin, /usr    # Core binaries
-/etc, /var           # System configuration
-/Library/Extensions  # Kernel extensions
-/private             # System-private directories
+```text
+/                    # root
+/System              # macOS system
+/bin, /sbin, /usr    # binaries
+/etc, /var           # config
+/Library/Extensions  # kexts
+/private             # system private
 ```
 
-**Exceptions:**
+Some system caches are OK to delete:
 
-- `/System/Library/Caches/com.apple.coresymbolicationd/data` (safe, rebuildable cache)
+- `/System/Library/Caches/com.apple.coresymbolicationd/data`
 - `/private/tmp`, `/private/var/tmp`, `/private/var/log`, `/private/var/folders`
 - `/private/var/db/diagnostics`, `/private/var/db/DiagnosticPipeline`, `/private/var/db/powerlog`, `/private/var/db/reportmemoryexception`
 
-**Code:** `lib/core/file_ops.sh:60-78`
+See `lib/core/file_ops.sh:60-78`.
 
-#### Layer 3: Symlink Detection
+When running with sudo, `safe_sudo_recursive_delete()` also checks for symlinks. Refuses to follow symlinks pointing to system files.
 
-For privileged operations, pre-flight checks prevent symlink-based attacks:
+## Cleanup Rules
 
-- Detects symlinks from cache folders pointing to system files.
-- Refuses recursive deletion of symbolic links in sudo mode.
-- Validates real path vs. symlink target.
+**Orphan detection** at `lib/clean/apps.sh:orphan_detection()`:
 
-**Code:** `lib/core/file_ops.sh:safe_sudo_recursive_delete()`
+App data is only considered orphaned if the app itself is gone from all three locations: `/Applications`, `~/Applications`, `/System/Applications`. On top of that, the data must be untouched for at least 60 days. Adobe, Microsoft, and Google stuff is whitelisted regardless.
 
-#### Layer 4: Permission Management
+**Uninstall matching** at `lib/clean/apps.sh:uninstall_app()`:
 
-When running with `sudo`:
+App names need at least 3 characters. Otherwise "Go" would match "Google" and that's bad. Fuzzy matching is off. Receipt scans only look under `/Applications` and `/Library/Application Support`, not in shared places like `/Library/Frameworks`.
 
-- Auto-corrects ownership back to user (`chown -R`).
-- Restricts operations to the user's home directory.
-- Enforces multiple validation checkpoints.
+**Dev tools:**
 
-### Interactive Analyzer (Go)
+Cache dirs like `~/.cargo/registry/cache` or `~/.gradle/caches` get cleaned. But `~/.cargo/bin`, `~/.mix/archives`, `~/.rustup` toolchains, `~/.stack/programs` stay untouched.
 
-The analyzer (`mo analyze`) uses a distinct security model:
+**LaunchAgent removal:**
 
-- Runs with standard user permissions only.
-- Respects macOS System Integrity Protection (SIP).
-- **Two-Key Confirmation:** Deletion requires ⌫ (Delete) to enter confirmation mode, then Enter to confirm. Prevents accidental double-press of the same key.
-- **Trash Instead of Delete:** Files are moved to macOS Trash using Finder's native API, allowing easy recovery if needed.
-- OS-level enforcement (cannot delete `/System` due to Read-Only Volume).
+Only removed when uninstalling the app that owns them. All `com.apple.*` items are skipped. Services get stopped via `launchctl` first. Generic names like Music, Notes, Photos are excluded from the search.
 
-**Code:** `cmd/analyze/*.go`
+See `lib/core/app_protection.sh:find_app_files()`.
 
----
+## Protected Categories
 
-## Safety Mechanisms
+| Category | What's protected |
+| -------- | ---------------- |
+| System | Control Center, System Settings, TCC, `/Library/Updates`, Spotlight |
+| VPN/Proxy | Shadowsocks, V2Ray, Tailscale, Clash |
+| AI | Cursor, Claude, ChatGPT, Ollama, LM Studio |
+| Time Machine | Checks if backup is running. If status unclear, skips cleanup. |
+| Startup | `com.apple.*` LaunchAgents/Daemons always skipped |
 
-### Conservative Cleaning Logic
+See `lib/core/app_protection.sh:is_critical_system_component()`.
 
-#### The "60-Day Rule" for Orphaned Data
+## Analyzer
 
-| Step | Verification | Criterion |
-|------|--------------|-----------|
-| 1. App Check | All installation locations | Must be missing from `/Applications`, `~/Applications`, `/System/Applications` |
-| 2. Dormancy | Modification timestamps | Untouched for ≥60 days |
-| 3. Vendor Whitelist | Cross-reference database | Adobe, Microsoft, and Google resources are protected |
+`mo analyze` runs differently:
 
-**Code:** `lib/clean/apps.sh:orphan_detection()`
+- Standard user permissions, no sudo
+- Respects SIP
+- Two keys to delete: press ⌫ first, then Enter. Hard to delete by accident.
+- Files go to Trash via Finder API, not rm
 
-#### Developer Tool Ecosystems (Consolidated)
+Code at `cmd/analyze/*.go`.
 
-Support for 20+ languages (Rust, Go, Node, Python, JVM, Mobile, Elixir, Haskell, OCaml, etc.) with strict safety checks:
+## Timeouts
 
-- **Global Optimization:** The core `safe_clean` function now intelligently checks parent directories before attempting wildcard cleanups, eliminating overhead for missing tools across the entire system.
-- **Safe Targets:** Only volatile caches are cleaned (e.g., `~/.cargo/registry/cache`, `~/.gradle/caches`).
-- **Protected Paths:** Critical directories like `~/.cargo/bin`, `~/.mix/archives`, `~/.rustup` toolchains, and `~/.stack/programs` are explicitly **excluded**.
+| Operation | Timeout | Why |
+| --------- | ------- | --- |
+| Network volume check | 5s | NFS/SMB/AFP can hang forever |
+| App bundle search | 10s | mdfind sometimes stalls |
+| SQLite vacuum | 20s | Skip if Mail/Safari/Messages is open |
+| dyld cache rebuild | 180s | Skip if done in last 24h |
 
-#### Active Uninstallation Heuristics
+See `lib/core/base.sh:run_with_timeout()`.
 
-For user-selected app removal:
+## User Config
 
-- **Sanitized Name Matching:** "Visual Studio Code" → `VisualStudioCode`, `.vscode`
-- **Safety Limit:** 3-char minimum (prevents "Go" matching "Google")
-- **Disabled:** Fuzzy matching and wildcard expansion for short names.
-- **User Confirmation:** Required before deletion.
-- **Receipt Scans:** BOM-derived files are restricted to app-specific prefixes (e.g., `/Applications`, `/Library/Application Support`). Shared directories like `/Library/Frameworks` are **excluded** to prevent collateral damage.
-
-**Code:** `lib/clean/apps.sh:uninstall_app()`
-
-#### System Protection Policies
-
-| Protected Category | Scope | Reason |
-|--------------------|-------|--------|
-| System Integrity Protection | `/Library/Updates`, `/System/*` | Respects macOS Read-Only Volume |
-| Spotlight & System UI | `~/Library/Metadata/CoreSpotlight` | Prevents UI corruption |
-| System Components | Control Center, System Settings, TCC | Centralized detection via `is_critical_system_component()` |
-| Time Machine | Local snapshots, backups | Runtime activity detection (backup running, snapshots mounted), fails safe if status indeterminate |
-| VPN & Proxy | Shadowsocks, V2Ray, Tailscale, Clash | Protects network configs |
-| AI & LLM Tools | Cursor, Claude, ChatGPT, Ollama, LM Studio | Protects models, tokens, and sessions |
-| Startup Items | `com.apple.*` LaunchAgents/Daemons | System items unconditionally skipped |
-
-**LaunchAgent/LaunchDaemon Cleanup During Uninstallation:**
-
-When users uninstall applications via `mo uninstall`, Mole automatically removes associated LaunchAgent and LaunchDaemon plists:
-
-- Scans `~/Library/LaunchAgents`, `~/Library/LaunchDaemons`, `/Library/LaunchAgents`, `/Library/LaunchDaemons`
-- Matches both exact bundle ID (`com.example.app.plist`) and app name patterns (`*AppName*.plist`)
-- Skips all `com.apple.*` system items via `should_protect_path()` validation
-- Unloads services via `launchctl` before deletion (via `stop_launch_services()`)
-- **Safer than orphan detection:** Only removes plists when the associated app is explicitly being uninstalled
-- Prevents accumulation of orphaned startup items that persist after app removal
-- **Common word exclusion:** LaunchAgent name searches exclude generic terms (Music, Notes, Photos, etc.) to prevent false positives
-- **Bundle ID validation:** `stop_launch_services()` validates reverse-DNS format before find patterns
-
-**Code:** `lib/core/app_protection.sh:find_app_files()`, `lib/uninstall/batch.sh:stop_launch_services()`
-
-### Crash Safety & Atomic Operations
-
-| Operation | Safety Mechanism | Recovery Behavior |
-|-----------|------------------|-------------------|
-| Network Interface Reset | Atomic execution blocks | Wi-Fi/AirDrop restored to pre-operation state |
-| Swap Clearing | Daemon restart | `dynamic_pager` handles recovery safely |
-| Volume Scanning | Timeout + filesystem check | Auto-skip unresponsive NFS/SMB/AFP mounts |
-| Homebrew Cache | Pre-flight size check | Skip if <50MB (avoids long delays) |
-| Network Volume Check | `diskutil info` with timeout | Prevents hangs on slow/dead mounts |
-| SQLite Vacuum | App-running check + 20s timeout | Skips if Mail/Safari/Messages active |
-| dyld Cache Update | 24-hour freshness check + 180s timeout | Skips if recently updated |
-| App Bundle Search | 10s timeout on mdfind | Fallback to standard paths |
-
-**Timeout Example:**
+Put paths in `~/.config/mole/whitelist`, one per line:
 
 ```bash
-run_with_timeout 5 diskutil info "$mount_point" || skip_volume
+# exact matches only
+/Users/me/important-cache
+~/Library/Application Support/MyApp
 ```
 
-**Code:** `lib/core/base.sh:run_with_timeout()`, `lib/optimize/*.sh`
+These paths are protected from all operations.
 
----
+Run `mo clean --dry-run` or `mo optimize --dry-run` to preview what would happen without actually doing it.
 
-## User Controls
+## Testing
 
-### Dry-Run Mode
+| Area | Coverage |
+| ---- | -------- |
+| File ops | 95% |
+| Cleaning | 87% |
+| Optimize | 82% |
+| System | 90% |
+| Security | 100% |
 
-**Command:** `mo clean --dry-run` | `mo optimize --dry-run`
-
-**Behavior:**
-
-- Simulates the entire operation without modifying a single file.
-- Lists every file/directory that **would** be deleted.
-- Calculates total space that **would** be freed.
-- **Zero risk** - no actual deletion commands are executed.
-
-### Custom Whitelists
-
-**File:** `~/.config/mole/whitelist`
-
-**Format:**
+180+ test cases total, about 88% coverage.
 
 ```bash
-# One path per line - exact matches only
-/Users/username/important-cache
-~/Library/Application Support/CriticalApp
+bats tests/              # run all
+bats tests/security.bats # security only
 ```
 
-- Paths are **unconditionally protected**.
-- Applies to all operations (clean, optimize, uninstall).
-- Supports absolute paths and `~` expansion.
-
-**Code:** `lib/core/file_ops.sh:is_whitelisted()`
-
-### Interactive Confirmations
-
-We mandate confirmation for:
-
-- Uninstalling system-scope applications.
-- Removing large data directories (>1GB).
-- Deleting items from shared vendor folders.
-
----
-
-## Testing & Compliance
-
-### Test Coverage
-
-Mole uses **BATS (Bash Automated Testing System)** for automated testing.
-
-| Test Category | Coverage | Key Tests |
-|---------------|----------|-----------|
-| Core File Operations | 95% | Path validation, symlink detection, permissions |
-| Cleaning Logic | 87% | Orphan detection, 60-day rule, vendor whitelist |
-| Optimization | 82% | Cache cleanup, timeouts |
-| System Maintenance | 90% | Time Machine, network volumes, crash recovery |
-| Security Controls | 100% | Path traversal, command injection, symlinks |
-
-**Total:** 180+ tests | **Overall Coverage:** ~88%
-
-**Test Execution:**
-
-```bash
-bats tests/              # Run all tests
-bats tests/security.bats # Run specific suite
-```
-
-### Standards Compliance
-
-| Standard | Implementation |
-|----------|----------------|
-| OWASP Secure Coding | Input validation, least privilege, defense-in-depth |
-| CWE-22 (Path Traversal) | Enhanced detection: rejects `/../` components, safely handles `..` in directory names |
-| CWE-78 (Command Injection) | Control character filtering |
-| CWE-59 (Link Following) | Symlink detection before privileged operations |
-| Apple File System Guidelines | Respects SIP, Read-Only Volumes, TCC |
-
-### Security Development Lifecycle
-
-- **Static Analysis:** `shellcheck` runs on all shell scripts.
-- **Code Review:** All changes are manually reviewed by maintainers.
-- **Dependency Scanning:** Minimal external dependencies, all carefully vetted.
-
-### Known Limitations
-
-| Limitation | Impact | Mitigation |
-|------------|--------|------------|
-| Requires `sudo` for system caches | Initial friction | Clear documentation explaining why |
-| 60-day rule may delay cleanup | Some orphans remain longer | Manual `mo uninstall` is always available |
-| No undo functionality | Deleted files are unrecoverable | Dry-run mode and warnings are clear |
-| English-only name matching | May miss non-English apps | Fallback to Bundle ID matching |
-
-**Intentionally Out of Scope (Safety):**
-
-- Automatic deletion of user documents/media.
-- Encryption key stores or password managers.
-- System configuration files (`/etc/*`).
-- Browser history or cookies.
-- Git repository cleanup.
-
----
+CI runs shellcheck and go vet on every push.
 
 ## Dependencies
 
-### System Binaries
+System binaries used, all SIP protected:
 
-Mole relies on standard, SIP-protected macOS system binaries:
+| Binary | For |
+| ------ | --- |
+| `plutil` | plist validation |
+| `tmutil` | Time Machine |
+| `dscacheutil` | cache rebuild |
+| `diskutil` | volume info |
 
-| Binary | Purpose | Fallback |
-|--------|---------|----------|
-| `plutil` | Validate `.plist` integrity | Skip invalid plists |
-| `tmutil` | Time Machine interaction | Skip TM cleanup |
-| `dscacheutil` | System cache rebuilding | Optional optimization |
-| `diskutil` | Volume information | Skip network volumes |
+Go libs in analyze-go:
 
-### Go Dependencies (Interactive Tools)
+| Lib | Version | License |
+| --- | ------- | ------- |
+| `bubbletea` | v0.23+ | MIT |
+| `lipgloss` | v0.6+ | MIT |
+| `gopsutil` | v3.22+ | BSD-3 |
+| `xxhash` | v2.2+ | BSD-2 |
 
-The compiled Go binary (`analyze-go`) includes:
+Versions are pinned. No CVEs. Binaries built via GitHub Actions.
 
-| Library | Version | Purpose | License |
-|---------|---------|---------|---------|
-| `bubbletea` | v0.23+ | TUI framework | MIT |
-| `lipgloss` | v0.6+ | Terminal styling | MIT |
-| `gopsutil` | v3.22+ | System metrics | BSD-3 |
-| `xxhash` | v2.2+ | Fast hashing | BSD-2 |
+## Limitations
 
-**Supply Chain Security:**
+| What | Impact | Workaround |
+| ---- | ------ | ---------- |
+| Needs sudo for system caches | Annoying first time | Docs explain why |
+| 60-day wait for orphans | Some junk stays longer | Use `mo uninstall` manually |
+| No undo | Gone is gone | Use dry-run first |
+| English names only | Might miss localized apps | Falls back to bundle ID |
 
-- All dependencies are pinned to specific versions.
-- Regular security audits.
-- No transitive dependencies with known CVEs.
-- **Automated Releases**: Binaries are compiled and signed via GitHub Actions.
-- **Source Only**: The repository contains no pre-compiled binaries.
+**Won't touch:**
 
----
-
-**Our Commitment:** This document certifies that Mole implements industry-standard defensive programming practices and strictly adheres to macOS security guidelines. We prioritize system stability and data integrity above all else.
-
-*For security concerns or vulnerability reports, please open an issue or contact the maintainers directly.*
+- Your documents or media
+- Password managers or keychains
+- Files under `/etc`
+- Browser history/cookies
+- Git repos
