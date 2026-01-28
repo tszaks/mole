@@ -584,7 +584,7 @@ func getDirectorySizeFromDuWithExclude(path string, excludePath string) (int64, 
 		ctx, cancel := context.WithTimeout(context.Background(), duTimeout)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, "du", "-sk", target)
+		cmd := exec.CommandContext(ctx, "du", "-skP", target)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
