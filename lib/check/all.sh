@@ -112,8 +112,31 @@ check_filevault() {
 check_firewall() {
     # Check whitelist
     if command -v is_whitelisted > /dev/null && is_whitelisted "firewall"; then return; fi
-    # Check firewall status using socketfilterfw (more reliable than defaults on modern macOS)
+
     unset FIREWALL_DISABLED
+
+    # Check third-party firewalls first (lightweight path-based detection, no sudo required)
+    local third_party_firewall=""
+    if [[ -d "/Applications/Little Snitch.app" ]] || [[ -d "/Library/Little Snitch" ]]; then
+        third_party_firewall="Little Snitch"
+    elif [[ -d "/Applications/LuLu.app" ]]; then
+        third_party_firewall="LuLu"
+    elif [[ -d "/Applications/Radio Silence.app" ]]; then
+        third_party_firewall="Radio Silence"
+    elif [[ -d "/Applications/Hands Off!.app" ]]; then
+        third_party_firewall="Hands Off!"
+    elif [[ -d "/Applications/Murus.app" ]]; then
+        third_party_firewall="Murus"
+    elif [[ -d "/Applications/Vallum.app" ]]; then
+        third_party_firewall="Vallum"
+    fi
+
+    if [[ -n "$third_party_firewall" ]]; then
+        echo -e "  ${GREEN}✓${NC} Firewall     ${third_party_firewall} active"
+        return
+    fi
+
+    # Fall back to macOS built-in firewall check
     local firewall_output=$(sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2> /dev/null || echo "")
     if [[ "$firewall_output" == *"State = 1"* ]] || [[ "$firewall_output" == *"State = 2"* ]]; then
         echo -e "  ${GREEN}✓${NC} Firewall     Network protection enabled"
