@@ -48,7 +48,7 @@ rotate_log_once() {
         local size
         size=$(get_file_size "$LOG_FILE")
         if [[ "$size" -gt "$max_size" ]]; then
-            mv "$LOG_FILE" "${LOG_FILE}.old" 2>/dev/null || true
+            mv "$LOG_FILE" "${LOG_FILE}.old" 2> /dev/null || true
             ensure_user_file "$LOG_FILE"
         fi
     fi
@@ -60,7 +60,7 @@ rotate_log_once() {
             local size
             size=$(get_file_size "$OPERATIONS_LOG_FILE")
             if [[ "$size" -gt "$oplog_max_size" ]]; then
-                mv "$OPERATIONS_LOG_FILE" "${OPERATIONS_LOG_FILE}.old" 2>/dev/null || true
+                mv "$OPERATIONS_LOG_FILE" "${OPERATIONS_LOG_FILE}.old" 2> /dev/null || true
                 ensure_user_file "$OPERATIONS_LOG_FILE"
             fi
         fi
@@ -81,9 +81,9 @@ log_info() {
     echo -e "${BLUE}$1${NC}"
     local timestamp
     timestamp=$(get_timestamp)
-    echo "[$timestamp] INFO: $1" >>"$LOG_FILE" 2>/dev/null || true
+    echo "[$timestamp] INFO: $1" >> "$LOG_FILE" 2> /dev/null || true
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        echo "[$timestamp] INFO: $1" >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        echo "[$timestamp] INFO: $1" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -92,9 +92,9 @@ log_success() {
     echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $1"
     local timestamp
     timestamp=$(get_timestamp)
-    echo "[$timestamp] SUCCESS: $1" >>"$LOG_FILE" 2>/dev/null || true
+    echo "[$timestamp] SUCCESS: $1" >> "$LOG_FILE" 2> /dev/null || true
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        echo "[$timestamp] SUCCESS: $1" >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        echo "[$timestamp] SUCCESS: $1" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -103,9 +103,9 @@ log_warning() {
     echo -e "${YELLOW}$1${NC}"
     local timestamp
     timestamp=$(get_timestamp)
-    echo "[$timestamp] WARNING: $1" >>"$LOG_FILE" 2>/dev/null || true
+    echo "[$timestamp] WARNING: $1" >> "$LOG_FILE" 2> /dev/null || true
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        echo "[$timestamp] WARNING: $1" >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        echo "[$timestamp] WARNING: $1" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -114,9 +114,9 @@ log_error() {
     echo -e "${YELLOW}${ICON_ERROR}${NC} $1" >&2
     local timestamp
     timestamp=$(get_timestamp)
-    echo "[$timestamp] ERROR: $1" >>"$LOG_FILE" 2>/dev/null || true
+    echo "[$timestamp] ERROR: $1" >> "$LOG_FILE" 2> /dev/null || true
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        echo "[$timestamp] ERROR: $1" >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        echo "[$timestamp] ERROR: $1" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -126,7 +126,7 @@ debug_log() {
         echo -e "${GRAY}[DEBUG]${NC} $*" >&2
         local timestamp
         timestamp=$(get_timestamp)
-        echo "[$timestamp] DEBUG: $*" >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        echo "[$timestamp] DEBUG: $*" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -163,7 +163,7 @@ log_operation() {
     local log_line="[$timestamp] [$command] $action $path"
     [[ -n "$detail" ]] && log_line+=" ($detail)"
 
-    echo "$log_line" >>"$OPERATIONS_LOG_FILE" 2>/dev/null || true
+    echo "$log_line" >> "$OPERATIONS_LOG_FILE" 2> /dev/null || true
 }
 
 # Log session start marker
@@ -178,7 +178,7 @@ log_operation_session_start() {
     {
         echo ""
         echo "# ========== $command session started at $timestamp =========="
-    } >>"$OPERATIONS_LOG_FILE" 2>/dev/null || true
+    } >> "$OPERATIONS_LOG_FILE" 2> /dev/null || true
 }
 
 # shellcheck disable=SC2329
@@ -193,14 +193,14 @@ log_operation_session_end() {
 
     local size_human=""
     if [[ "$size" =~ ^[0-9]+$ ]] && [[ "$size" -gt 0 ]]; then
-        size_human=$(bytes_to_human "$((size * 1024))" 2>/dev/null || echo "${size}KB")
+        size_human=$(bytes_to_human "$((size * 1024))" 2> /dev/null || echo "${size}KB")
     else
         size_human="0B"
     fi
 
     {
         echo "# ========== $command session ended at $timestamp, $items items, $size_human =========="
-    } >>"$OPERATIONS_LOG_FILE" 2>/dev/null || true
+    } >> "$OPERATIONS_LOG_FILE" 2> /dev/null || true
 }
 
 # Enhanced debug logging for operations
@@ -218,7 +218,7 @@ debug_operation_start() {
             echo ""
             echo "=== $operation_name ==="
             [[ -n "$operation_desc" ]] && echo "Description: $operation_desc"
-        } >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        } >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -232,7 +232,7 @@ debug_operation_detail() {
         echo -e "${GRAY}[DEBUG] $detail_type: $detail_value${NC}" >&2
 
         # Also log to file
-        echo "$detail_type: $detail_value" >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        echo "$detail_type: $detail_value" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -252,7 +252,7 @@ debug_file_action() {
         echo -e "${GRAY}[DEBUG] $action: $msg${NC}" >&2
 
         # Also log to file
-        echo "$action: $msg" >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        echo "$action: $msg" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -264,16 +264,16 @@ debug_risk_level() {
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
         local color="$GRAY"
         case "$risk_level" in
-        LOW) color="$GREEN" ;;
-        MEDIUM) color="$YELLOW" ;;
-        HIGH) color="$RED" ;;
+            LOW) color="$GREEN" ;;
+            MEDIUM) color="$YELLOW" ;;
+            HIGH) color="$RED" ;;
         esac
 
         # Output to stderr with color
         echo -e "${GRAY}[DEBUG] Risk Level: ${color}${risk_level}${GRAY}, $reason${NC}" >&2
 
         # Also log to file
-        echo "Risk Level: $risk_level, $reason" >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+        echo "Risk Level: $risk_level, $reason" >> "$DEBUG_LOG_FILE" 2> /dev/null || true
     fi
 }
 
@@ -285,7 +285,7 @@ log_system_info() {
 
     # Reset debug log file for this new session
     ensure_user_file "$DEBUG_LOG_FILE"
-    if ! : >"$DEBUG_LOG_FILE" 2>/dev/null; then
+    if ! : > "$DEBUG_LOG_FILE" 2> /dev/null; then
         echo -e "${YELLOW}${ICON_WARNING}${NC} Debug log not writable: $DEBUG_LOG_FILE" >&2
     fi
 
@@ -298,19 +298,19 @@ log_system_info() {
         echo "Hostname: $(hostname)"
         echo "Architecture: $(uname -m)"
         echo "Kernel: $(uname -r)"
-        if command -v sw_vers >/dev/null; then
+        if command -v sw_vers > /dev/null; then
             echo "macOS: $(sw_vers -productVersion), $(sw_vers -buildVersion)"
         fi
         echo "Shell: ${SHELL:-unknown}, ${TERM:-unknown}"
 
         # Check sudo status non-interactively
-        if sudo -n true 2>/dev/null; then
+        if sudo -n true 2> /dev/null; then
             echo "Sudo Access: Active"
         else
             echo "Sudo Access: Required"
         fi
         echo "----------------------------------------------------------------------"
-    } >>"$DEBUG_LOG_FILE" 2>/dev/null || true
+    } >> "$DEBUG_LOG_FILE" 2> /dev/null || true
 
     # Notification to stderr
     echo -e "${GRAY}[DEBUG] Debug logging enabled. Session log: $DEBUG_LOG_FILE${NC}" >&2
@@ -322,7 +322,7 @@ log_system_info() {
 
 # Run command silently (ignore errors)
 run_silent() {
-    "$@" >/dev/null 2>&1 || true
+    "$@" > /dev/null 2>&1 || true
 }
 
 # Run command with error logging
@@ -330,12 +330,12 @@ run_logged() {
     local cmd="$1"
     # Log to main file, and also to debug file if enabled
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        if ! "$@" 2>&1 | tee -a "$LOG_FILE" | tee -a "$DEBUG_LOG_FILE" >/dev/null; then
+        if ! "$@" 2>&1 | tee -a "$LOG_FILE" | tee -a "$DEBUG_LOG_FILE" > /dev/null; then
             log_warning "Command failed: $cmd"
             return 1
         fi
     else
-        if ! "$@" 2>&1 | tee -a "$LOG_FILE" >/dev/null; then
+        if ! "$@" 2>&1 | tee -a "$LOG_FILE" > /dev/null; then
             log_warning "Command failed: $cmd"
             return 1
         fi

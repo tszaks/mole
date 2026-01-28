@@ -13,7 +13,7 @@ source "$LIB_DIR/core/base.sh"
 source "$LIB_DIR/core/log.sh"
 
 show_help() {
-    cat <<EOF
+    cat << EOF
 Usage: mo log [OPTIONS]
 
 View and analyze Mole operation logs.
@@ -72,7 +72,7 @@ search_log() {
     echo "────────────────────────────────────────────────────────────────"
 
     local results
-    results=$(grep -iF -- "$term" "$OPERATIONS_LOG_FILE" 2>/dev/null || true)
+    results=$(grep -iF -- "$term" "$OPERATIONS_LOG_FILE" 2> /dev/null || true)
 
     if [[ -z "$results" ]]; then
         echo -e "${YELLOW}No matches found.${NC}"
@@ -91,24 +91,24 @@ show_stats() {
     echo "────────────────────────────────────────────────────────────────"
 
     local total_lines
-    total_lines=$(grep -c '^\[' "$OPERATIONS_LOG_FILE" 2>/dev/null || echo 0)
+    total_lines=$(grep -c '^\[' "$OPERATIONS_LOG_FILE" 2> /dev/null || echo 0)
     echo -e "${GREEN}Total operations:${NC} $total_lines"
     echo ""
 
     echo -e "${GREEN}By command:${NC}"
-    grep -o '\[clean\]\|\[uninstall\]\|\[optimize\]\|\[purge\]' "$OPERATIONS_LOG_FILE" 2>/dev/null |
+    grep -o '\[clean\]\|\[uninstall\]\|\[optimize\]\|\[purge\]' "$OPERATIONS_LOG_FILE" 2> /dev/null |
         sort | uniq -c | sort -rn | sed 's/\[//g; s/\]//g' |
         awk '{printf "  %-15s %s\n", $2":", $1}' || echo "  No command data"
     echo ""
 
     echo -e "${GREEN}By action:${NC}"
-    grep -o 'REMOVED\|SKIPPED\|FAILED\|REBUILT' "$OPERATIONS_LOG_FILE" 2>/dev/null |
+    grep -o 'REMOVED\|SKIPPED\|FAILED\|REBUILT' "$OPERATIONS_LOG_FILE" 2> /dev/null |
         sort | uniq -c | sort -rn |
         awk '{printf "  %-15s %s\n", $2":", $1}' || echo "  No action data"
     echo ""
 
     echo -e "${GREEN}Recent sessions:${NC}"
-    grep 'session started' "$OPERATIONS_LOG_FILE" 2>/dev/null | tail -n 5 || echo "  No session data"
+    grep 'session started' "$OPERATIONS_LOG_FILE" 2> /dev/null | tail -n 5 || echo "  No session data"
 }
 
 show_today() {
@@ -124,7 +124,7 @@ show_today() {
     echo "────────────────────────────────────────────────────────────────"
 
     local results
-    results=$(grep "^\[$today" "$OPERATIONS_LOG_FILE" 2>/dev/null || true)
+    results=$(grep "^\[$today" "$OPERATIONS_LOG_FILE" 2> /dev/null || true)
 
     if [[ -z "$results" ]]; then
         echo -e "${YELLOW}No operations today.${NC}"
@@ -152,7 +152,7 @@ filter_by_command() {
     echo "────────────────────────────────────────────────────────────────"
 
     local results
-    results=$(grep -F -- "[$cmd]" "$OPERATIONS_LOG_FILE" 2>/dev/null || true)
+    results=$(grep -F -- "[$cmd]" "$OPERATIONS_LOG_FILE" 2> /dev/null || true)
 
     if [[ -z "$results" ]]; then
         echo -e "${YELLOW}No operations found for ${cmd}.${NC}"
@@ -175,46 +175,46 @@ main() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-        --tail)
-            shift
-            show_tail "${1:-50}"
-            exit 0
-            ;;
-        --search)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo -e "${RED}Error: --search requires an argument${NC}"
+            --tail)
+                shift
+                show_tail "${1:-50}"
+                exit 0
+                ;;
+            --search)
+                shift
+                if [[ -z "${1:-}" ]]; then
+                    echo -e "${RED}Error: --search requires an argument${NC}"
+                    exit 1
+                fi
+                search_log "$1"
+                exit 0
+                ;;
+            --stats)
+                show_stats
+                exit 0
+                ;;
+            --today)
+                show_today
+                exit 0
+                ;;
+            --command)
+                shift
+                if [[ -z "${1:-}" ]]; then
+                    echo -e "${RED}Error: --command requires an argument${NC}"
+                    exit 1
+                fi
+                filter_by_command "$1"
+                exit 0
+                ;;
+            --help | -h)
+                show_help
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Unknown option: $1${NC}"
+                echo "Use 'mo log --help' for usage information."
                 exit 1
-            fi
-            search_log "$1"
-            exit 0
-            ;;
-        --stats)
-            show_stats
-            exit 0
-            ;;
-        --today)
-            show_today
-            exit 0
-            ;;
-        --command)
-            shift
-            if [[ -z "${1:-}" ]]; then
-                echo -e "${RED}Error: --command requires an argument${NC}"
-                exit 1
-            fi
-            filter_by_command "$1"
-            exit 0
-            ;;
-        --help | -h)
-            show_help
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}Unknown option: $1${NC}"
-            echo "Use 'mo log --help' for usage information."
-            exit 1
-            ;;
+                ;;
         esac
         # shellcheck disable=SC2317
         shift
