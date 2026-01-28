@@ -39,6 +39,95 @@ func TestFormatRate(t *testing.T) {
 	}
 }
 
+func TestColorizePercent(t *testing.T) {
+	tests := []struct {
+		name         string
+		percent      float64
+		input        string
+		expectDanger bool
+		expectWarn   bool
+		expectOk     bool
+	}{
+		{"low usage", 30.0, "30%", false, false, true},
+		{"just below warn", 59.9, "59.9%", false, false, true},
+		{"at warn threshold", 60.0, "60%", false, true, false},
+		{"mid range", 70.0, "70%", false, true, false},
+		{"just below danger", 84.9, "84.9%", false, true, false},
+		{"at danger threshold", 85.0, "85%", true, false, false},
+		{"high usage", 95.0, "95%", true, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := colorizePercent(tt.percent, tt.input)
+
+			if got == "" {
+				t.Errorf("colorizePercent(%v, %q) returned empty string", tt.percent, tt.input)
+				return
+			}
+
+			expected := ""
+			if tt.expectDanger {
+				expected = dangerStyle.Render(tt.input)
+			} else if tt.expectWarn {
+				expected = warnStyle.Render(tt.input)
+			} else if tt.expectOk {
+				expected = okStyle.Render(tt.input)
+			}
+
+			if got != expected {
+				t.Errorf("colorizePercent(%v, %q) = %q, want %q (danger=%v warn=%v ok=%v)",
+					tt.percent, tt.input, got, expected, tt.expectDanger, tt.expectWarn, tt.expectOk)
+			}
+		})
+	}
+}
+
+func TestColorizeBattery(t *testing.T) {
+	tests := []struct {
+		name         string
+		percent      float64
+		input        string
+		expectDanger bool
+		expectWarn   bool
+		expectOk     bool
+	}{
+		{"critical low", 10.0, "10%", true, false, false},
+		{"just below low", 19.9, "19.9%", true, false, false},
+		{"at low threshold", 20.0, "20%", false, true, false},
+		{"mid range", 35.0, "35%", false, true, false},
+		{"just below ok", 49.9, "49.9%", false, true, false},
+		{"at ok threshold", 50.0, "50%", false, false, true},
+		{"healthy", 80.0, "80%", false, false, true},
+		{"full", 100.0, "100%", false, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := colorizeBattery(tt.percent, tt.input)
+
+			if got == "" {
+				t.Errorf("colorizeBattery(%v, %q) returned empty string", tt.percent, tt.input)
+				return
+			}
+
+			expected := ""
+			if tt.expectDanger {
+				expected = dangerStyle.Render(tt.input)
+			} else if tt.expectWarn {
+				expected = warnStyle.Render(tt.input)
+			} else if tt.expectOk {
+				expected = okStyle.Render(tt.input)
+			}
+
+			if got != expected {
+				t.Errorf("colorizeBattery(%v, %q) = %q, want %q (danger=%v warn=%v ok=%v)",
+					tt.percent, tt.input, got, expected, tt.expectDanger, tt.expectWarn, tt.expectOk)
+			}
+		})
+	}
+}
+
 func TestShorten(t *testing.T) {
 	tests := []struct {
 		name   string
