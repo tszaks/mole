@@ -36,7 +36,7 @@ setup() {
 
     result=$(find_app_files "com.maestro.studio" "Maestro Studio")
 
-    [[ "$result" =~ ".config/maestro-studio" ]]
+    [[ "$result" =~ .config/maestro-studio ]]
 }
 
 @test "find_app_files detects no-space variant (MaestroStudio)" {
@@ -56,7 +56,7 @@ setup() {
 
     result=$(find_app_files "dev.zed.Zed-Nightly" "Zed Nightly")
 
-    [[ "$result" =~ ".config/zed" ]]
+    [[ "$result" =~ .config/zed ]]
     [[ "$result" =~ "Library/Application Support/Zed" ]]
 }
 
@@ -73,10 +73,10 @@ setup() {
 
     result=$(find_app_files "com.maestro.studio" "Maestro Studio")
 
-    [[ "$result" =~ ".config/maestro-studio" ]]
+    [[ "$result" =~ .config/maestro-studio ]]
     [[ "$result" =~ "Library/Application Support/MaestroStudio" ]]
     [[ "$result" =~ "Library/Application Support/Maestro-Studio" ]]
-    [[ "$result" =~ ".local/share/maestrostudio" ]]
+    [[ "$result" =~ .local/share/maestrostudio ]]
 }
 
 @test "find_app_files handles multi-word version suffix (Firefox Developer Edition)" {
@@ -85,7 +85,7 @@ setup() {
 
     result=$(find_app_files "org.mozilla.firefoxdeveloperedition" "Firefox Developer Edition")
 
-    [[ "$result" =~ ".local/share/firefox" ]]
+    [[ "$result" =~ .local/share/firefox ]]
 }
 
 @test "find_app_files does not match empty app name" {
