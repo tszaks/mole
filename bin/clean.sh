@@ -142,10 +142,6 @@ cleanup() {
 
     stop_inline_spinner 2> /dev/null || true
 
-    if [[ -t 1 ]]; then
-        printf "\r\033[K" >&2 || true
-    fi
-
     cleanup_temp_files
 
     stop_sudo_session
