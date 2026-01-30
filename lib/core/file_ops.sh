@@ -267,7 +267,7 @@ safe_sudo_remove() {
 
             if sudo test -e "$path" 2> /dev/null; then
                 local size_kb
-                size_kb=$(sudo du -sk "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+                size_kb=$(sudo du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
                 if [[ "$size_kb" -gt 0 ]]; then
                     file_size=$(bytes_to_human "$((size_kb * 1024))")
                 fi
@@ -297,7 +297,7 @@ safe_sudo_remove() {
     local size_human=""
     if oplog_enabled; then
         if sudo test -e "$path" 2> /dev/null; then
-            size_kb=$(sudo du -sk "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+            size_kb=$(sudo du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
             if [[ "$size_kb" =~ ^[0-9]+$ ]] && [[ "$size_kb" -gt 0 ]]; then
                 size_human=$(bytes_to_human "$((size_kb * 1024))" 2> /dev/null || echo "${size_kb}KB")
             fi

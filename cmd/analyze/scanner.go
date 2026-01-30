@@ -119,12 +119,16 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 			size := getActualFileSize(fullPath, info)
 			atomic.AddInt64(&total, size)
 
-			entryChan <- dirEntry{
+			select {
+			case entryChan <- dirEntry{
 				Name:       child.Name() + " →",
 				Path:       fullPath,
 				Size:       size,
 				IsDir:      isDir,
 				LastAccess: getLastAccessTimeFromInfo(info),
+			}:
+			case <-time.After(100 * time.Millisecond):
+				// Skip if channel is blocked
 			}
 			continue
 		}
@@ -158,12 +162,15 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 					atomic.AddInt64(&total, size)
 					atomic.AddInt64(dirsScanned, 1)
 
-					entryChan <- dirEntry{
+					select {
+					case entryChan <- dirEntry{
 						Name:       name,
 						Path:       path,
 						Size:       size,
 						IsDir:      true,
 						LastAccess: time.Time{},
+					}:
+					case <-time.After(100 * time.Millisecond):
 					}
 				}(child.Name(), fullPath)
 				continue
@@ -188,12 +195,15 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 					atomic.AddInt64(&total, size)
 					atomic.AddInt64(dirsScanned, 1)
 
-					entryChan <- dirEntry{
+					select {
+					case entryChan <- dirEntry{
 						Name:       name,
 						Path:       path,
 						Size:       size,
 						IsDir:      true,
 						LastAccess: time.Time{},
+					}:
+					case <-time.After(100 * time.Millisecond):
 					}
 				}(child.Name(), fullPath)
 				continue
@@ -209,12 +219,15 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 				atomic.AddInt64(&total, size)
 				atomic.AddInt64(dirsScanned, 1)
 
-				entryChan <- dirEntry{
+				select {
+				case entryChan <- dirEntry{
 					Name:       name,
 					Path:       path,
 					Size:       size,
 					IsDir:      true,
 					LastAccess: time.Time{},
+				}:
+				case <-time.After(100 * time.Millisecond):
 				}
 			}(child.Name(), fullPath)
 			continue
@@ -230,18 +243,25 @@ func scanPathConcurrent(root string, filesScanned, dirsScanned, bytesScanned *in
 		atomic.AddInt64(filesScanned, 1)
 		atomic.AddInt64(bytesScanned, size)
 
-		entryChan <- dirEntry{
+		select {
+		case entryChan <- dirEntry{
 			Name:       child.Name(),
 			Path:       fullPath,
 			Size:       size,
 			IsDir:      false,
 			LastAccess: getLastAccessTimeFromInfo(info),
+		}:
+		case <-time.After(100 * time.Millisecond):
 		}
+
 		// Track large files only.
 		if !shouldSkipFileForLargeTracking(fullPath) {
 			minSize := atomic.LoadInt64(&largeFileMinSize)
 			if size >= minSize {
-				largeFileChan <- fileEntry{Name: child.Name(), Path: fullPath, Size: size}
+				select {
+				case largeFileChan <- fileEntry{Name: child.Name(), Path: fullPath, Size: size}:
+				case <-time.After(100 * time.Millisecond):
+				}
 			}
 		}
 	}
@@ -516,7 +536,10 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 		if !shouldSkipFileForLargeTracking(fullPath) && largeFileMinSize != nil {
 			minSize := atomic.LoadInt64(largeFileMinSize)
 			if size >= minSize {
-				largeFileChan <- fileEntry{Name: child.Name(), Path: fullPath, Size: size}
+				select {
+				case largeFileChan <- fileEntry{Name: child.Name(), Path: fullPath, Size: size}:
+				case <-time.After(100 * time.Millisecond):
+				}
 			}
 		}
 
