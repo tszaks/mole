@@ -628,7 +628,7 @@ start_section_spinner() {
 stop_section_spinner() {
     stop_inline_spinner 2> /dev/null || true
     if [[ -t 1 ]]; then
-        echo -ne "\r\033[K" >&2 || true
+        echo -ne "\r\033[2K" >&2 || true
     fi
 }
 
@@ -646,7 +646,7 @@ safe_clear_lines() {
     # Clear lines one by one (more reliable than multi-line sequences)
     local i
     for ((i = 0; i < lines; i++)); do
-        printf "\033[1A\r\033[K" > "$tty_device" 2> /dev/null || return 1
+        printf "\033[1A\r\033[2K" > "$tty_device" 2> /dev/null || return 1
     done
 
     return 0
@@ -660,7 +660,7 @@ safe_clear_line() {
     # Use centralized ANSI support check
     is_ansi_supported 2> /dev/null || return 1
 
-    printf "\r\033[K" > "$tty_device" 2> /dev/null || return 1
+    printf "\r\033[2K" > "$tty_device" 2> /dev/null || return 1
     return 0
 }
 
