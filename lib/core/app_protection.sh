@@ -545,24 +545,53 @@ bundle_matches_pattern() {
     return 1
 }
 
+# Helper to build regex from array (Bash 3.2 compatible - no namerefs)
+# $1: Variable name to store result
+# $2...: Array elements (passed as expanded list)
+build_regex_var() {
+    local var_name="$1"
+    shift
+    local regex=""
+    for pattern in "$@"; do
+        # Escape dots . -> \.
+        local p="${pattern//./\\.}"
+        # Convert * to .*
+        p="${p//\*/.*}"
+        # Start and end anchors
+        p="^${p}$"
+
+        if [[ -z "$regex" ]]; then
+            regex="$p"
+        else
+            regex="$regex|$p"
+        fi
+    done
+    eval "$var_name=\"\$regex\""
+}
+
+# Generate Regex strings once
+APPLE_UNINSTALLABLE_REGEX=""
+build_regex_var APPLE_UNINSTALLABLE_REGEX "${APPLE_UNINSTALLABLE_APPS[@]}"
+
+SYSTEM_CRITICAL_REGEX=""
+build_regex_var SYSTEM_CRITICAL_REGEX "${SYSTEM_CRITICAL_BUNDLES[@]}"
+
+DATA_PROTECTED_REGEX=""
+build_regex_var DATA_PROTECTED_REGEX "${DATA_PROTECTED_BUNDLES[@]}"
+
 # Check if application is a protected system component
 should_protect_from_uninstall() {
     local bundle_id="$1"
 
     # First check if it's an uninstallable Apple app
-    # These apps have com.apple.* bundle IDs but are NOT system-critical
-    for pattern in "${APPLE_UNINSTALLABLE_APPS[@]}"; do
-        if bundle_matches_pattern "$bundle_id" "$pattern"; then
-            return 1 # Can be uninstalled
-        fi
-    done
+    if [[ "$bundle_id" =~ $APPLE_UNINSTALLABLE_REGEX ]]; then
+        return 1 # Can be uninstalled
+    fi
 
     # Then check system-critical components
-    for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}"; do
-        if bundle_matches_pattern "$bundle_id" "$pattern"; then
-            return 0 # Protected
-        fi
-    done
+    if [[ "$bundle_id" =~ $SYSTEM_CRITICAL_REGEX ]]; then
+        return 0 # Protected
+    fi
 
     return 1
 }
@@ -570,12 +599,17 @@ should_protect_from_uninstall() {
 # Check if application data should be protected during cleanup
 should_protect_data() {
     local bundle_id="$1"
-    # Protect both system critical and data protected bundles during cleanup
-    for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}"; do
-        if bundle_matches_pattern "$bundle_id" "$pattern"; then
-            return 0
-        fi
-    done
+
+    # Check system critical
+    if [[ "$bundle_id" =~ $SYSTEM_CRITICAL_REGEX ]]; then
+        return 0
+    fi
+
+    # Check data protected
+    if [[ "$bundle_id" =~ $DATA_PROTECTED_REGEX ]]; then
+        return 0
+    fi
+
     return 1
 }
 
