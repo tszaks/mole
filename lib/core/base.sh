@@ -15,7 +15,7 @@ readonly MOLE_BASE_LOADED=1
 # ============================================================================
 readonly ESC=$'\033'
 readonly GREEN="${ESC}[0;32m"
-readonly BLUE="${ESC}[0;34m"
+readonly BLUE="${ESC}[1;34m"
 readonly CYAN="${ESC}[0;36m"
 readonly YELLOW="${ESC}[0;33m"
 readonly PURPLE="${ESC}[0;35m"
