@@ -609,14 +609,23 @@ build_regex_var() {
     eval "$var_name=\"\$regex\""
 }
 
-# Lazy-loaded regex for uninstall operations (only built when needed)
+# Lazy-loaded regex (only built when needed)
 APPLE_UNINSTALLABLE_REGEX=""
 SYSTEM_CRITICAL_REGEX=""
+SYSTEM_CRITICAL_FAST_REGEX=""
+DATA_PROTECTED_REGEX=""
 
 _ensure_uninstall_regex() {
     if [[ -z "$SYSTEM_CRITICAL_REGEX" ]]; then
         build_regex_var APPLE_UNINSTALLABLE_REGEX "${APPLE_UNINSTALLABLE_APPS[@]}"
         build_regex_var SYSTEM_CRITICAL_REGEX "${SYSTEM_CRITICAL_BUNDLES[@]}"
+    fi
+}
+
+_ensure_data_protection_regex() {
+    if [[ -z "$SYSTEM_CRITICAL_FAST_REGEX" ]]; then
+        build_regex_var SYSTEM_CRITICAL_FAST_REGEX "${SYSTEM_CRITICAL_BUNDLES_FAST[@]}"
+        build_regex_var DATA_PROTECTED_REGEX "${DATA_PROTECTED_BUNDLES[@]}"
     fi
 }
 
@@ -641,18 +650,52 @@ should_protect_from_uninstall() {
 should_protect_data() {
     local bundle_id="$1"
 
-    for pattern in "${SYSTEM_CRITICAL_BUNDLES_FAST[@]}"; do
-        if bundle_matches_pattern "$bundle_id" "$pattern"; then
+    case "$bundle_id" in
+        com.apple.* | loginwindow | dock | systempreferences | finder | safari)
             return 0
-        fi
-    done
-
-    for pattern in "${DATA_PROTECTED_BUNDLES[@]}"; do
-        if bundle_matches_pattern "$bundle_id" "$pattern"; then
+            ;;
+        backgroundtaskmanagement* | keychain* | security* | bluetooth* | wifi* | network* | tcc)
             return 0
-        fi
-    done
+            ;;
+        notification* | accessibility* | universalaccess* | HIToolbox*)
+            return 0
+            ;;
+        *inputmethod* | *InputMethod* | *IME | textinput* | TextInput*)
+            return 0
+            ;;
+        keyboard* | Keyboard* | inputsource* | InputSource* | keylayout* | KeyLayout*)
+            return 0
+            ;;
+        GlobalPreferences | .GlobalPreferences | org.pqrs.Karabiner*)
+            return 0
+            ;;
+        com.1password.* | com.agilebits.* | com.lastpass.* | com.dashlane.* | com.bitwarden.*)
+            return 0
+            ;;
+        com.jetbrains.* | JetBrains* | com.microsoft.* | com.visualstudio.*)
+            return 0
+            ;;
+        com.sublimetext.* | com.sublimehq.* | Cursor | Claude | ChatGPT | Ollama)
+            return 0
+            ;;
+        com.nssurge.* | com.v2ray.* | ClashX* | Surge* | Shadowrocket* | Quantumult*)
+            return 0
+            ;;
+        com.docker.* | com.getpostman.* | com.insomnia.*)
+            return 0
+            ;;
+        com.tencent.* | com.sogou.* | com.baidu.* | com.googlecode.* | im.rime.*)
+            # These might have wildcards, check detailed list
+            for pattern in "${DATA_PROTECTED_BUNDLES[@]}"; do
+                if bundle_matches_pattern "$bundle_id" "$pattern"; then
+                    return 0
+                fi
+            done
+            return 1
+            ;;
+    esac
 
+    # Most apps won't match, return early
     return 1
 }
 
