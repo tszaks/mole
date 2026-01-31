@@ -19,6 +19,46 @@ fi
 
 # Application Management
 
+# ============================================================================
+# Performance Note:
+# - SYSTEM_CRITICAL_BUNDLES_FAST: Fast wildcard patterns for cleanup operations
+# - SYSTEM_CRITICAL_BUNDLES: Detailed list for uninstall protection (lazy-loaded)
+# ============================================================================
+
+# Fast patterns for cleanup operations (used by should_protect_data)
+# These wildcards provide adequate protection with minimal performance impact
+readonly SYSTEM_CRITICAL_BUNDLES_FAST=(
+    "com.apple.*"
+    "loginwindow"
+    "dock"
+    "systempreferences"
+    "finder"
+    "safari"
+    "backgroundtaskmanagement*"
+    "keychain*"
+    "security*"
+    "bluetooth*"
+    "wifi*"
+    "network*"
+    "tcc"
+    "notification*"
+    "accessibility*"
+    "universalaccess*"
+    "HIToolbox*"
+    "textinput*"
+    "TextInput*"
+    "keyboard*"
+    "Keyboard*"
+    "inputsource*"
+    "InputSource*"
+    "keylayout*"
+    "KeyLayout*"
+    "GlobalPreferences"
+    ".GlobalPreferences"
+    "org.pqrs.Karabiner*"
+)
+
+# Detailed list for uninstall protection
 # Critical system components protected from uninstallation
 # Note: We explicitly list system components instead of using "com.apple.*" wildcard
 # to allow uninstallation of user-installed Apple apps (Xcode, Final Cut Pro, etc.)
@@ -569,28 +609,29 @@ build_regex_var() {
     eval "$var_name=\"\$regex\""
 }
 
-# Generate Regex strings once
+# Lazy-loaded regex for uninstall operations (only built when needed)
 APPLE_UNINSTALLABLE_REGEX=""
-build_regex_var APPLE_UNINSTALLABLE_REGEX "${APPLE_UNINSTALLABLE_APPS[@]}"
-
 SYSTEM_CRITICAL_REGEX=""
-build_regex_var SYSTEM_CRITICAL_REGEX "${SYSTEM_CRITICAL_BUNDLES[@]}"
 
-DATA_PROTECTED_REGEX=""
-build_regex_var DATA_PROTECTED_REGEX "${DATA_PROTECTED_BUNDLES[@]}"
+_ensure_uninstall_regex() {
+    if [[ -z "$SYSTEM_CRITICAL_REGEX" ]]; then
+        build_regex_var APPLE_UNINSTALLABLE_REGEX "${APPLE_UNINSTALLABLE_APPS[@]}"
+        build_regex_var SYSTEM_CRITICAL_REGEX "${SYSTEM_CRITICAL_BUNDLES[@]}"
+    fi
+}
 
 # Check if application is a protected system component
 should_protect_from_uninstall() {
     local bundle_id="$1"
 
-    # First check if it's an uninstallable Apple app
+    _ensure_uninstall_regex
+
     if [[ "$bundle_id" =~ $APPLE_UNINSTALLABLE_REGEX ]]; then
-        return 1 # Can be uninstalled
+        return 1
     fi
 
-    # Then check system-critical components
     if [[ "$bundle_id" =~ $SYSTEM_CRITICAL_REGEX ]]; then
-        return 0 # Protected
+        return 0
     fi
 
     return 1
@@ -600,15 +641,17 @@ should_protect_from_uninstall() {
 should_protect_data() {
     local bundle_id="$1"
 
-    # Check system critical
-    if [[ "$bundle_id" =~ $SYSTEM_CRITICAL_REGEX ]]; then
-        return 0
-    fi
+    for pattern in "${SYSTEM_CRITICAL_BUNDLES_FAST[@]}"; do
+        if bundle_matches_pattern "$bundle_id" "$pattern"; then
+            return 0
+        fi
+    done
 
-    # Check data protected
-    if [[ "$bundle_id" =~ $DATA_PROTECTED_REGEX ]]; then
-        return 0
-    fi
+    for pattern in "${DATA_PROTECTED_BUNDLES[@]}"; do
+        if bundle_matches_pattern "$bundle_id" "$pattern"; then
+            return 0
+        fi
+    done
 
     return 1
 }
