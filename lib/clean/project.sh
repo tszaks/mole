@@ -45,7 +45,7 @@ readonly PURGE_TARGETS=(
 readonly MIN_AGE_DAYS=7
 # Scan depth defaults (relative to search root).
 readonly PURGE_MIN_DEPTH_DEFAULT=2
-readonly PURGE_MAX_DEPTH_DEFAULT=4
+readonly PURGE_MAX_DEPTH_DEFAULT=6
 # Search paths (default, can be overridden via config file).
 readonly DEFAULT_PURGE_SEARCH_PATHS=(
     "$HOME/www"
