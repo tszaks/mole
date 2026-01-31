@@ -20,9 +20,16 @@ clean_user_essentials() {
                 echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $trash_count items"
                 note_activity
             else
+                local cleaned_count=0
                 while IFS= read -r -d '' item; do
-                    safe_remove "$item" true || true
+                    if safe_remove "$item" true; then
+                        ((cleaned_count++))
+                    fi
                 done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+                if [[ $cleaned_count -gt 0 ]]; then
+                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $cleaned_count items"
+                    note_activity
+                fi
             fi
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
