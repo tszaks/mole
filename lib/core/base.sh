@@ -626,12 +626,12 @@ start_section_spinner() {
 # Stop spinner and clear the line
 # Usage: stop_section_spinner
 stop_section_spinner() {
-    # Only clear line if spinner was actually running
-    if [[ -n "${INLINE_SPINNER_PID:-}" ]]; then
-        stop_inline_spinner 2> /dev/null || true
-        if [[ -t 1 ]]; then
-            echo -ne "\r\033[2K" >&2 || true
-        fi
+    # Always try to stop spinner (function handles empty PID gracefully)
+    stop_inline_spinner 2> /dev/null || true
+    # Always clear line to handle edge cases where spinner output remains
+    # (e.g., spinner was stopped elsewhere but line not cleared)
+    if [[ -t 1 ]]; then
+        printf "\r\033[2K" >&2 || true
     fi
 }
 

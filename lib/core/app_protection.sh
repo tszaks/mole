@@ -280,9 +280,18 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.telerik.Fiddler"
     "com.usebruno.app"
 
-    # Network Proxy & VPN Tools
-    "*clash*"
-    "*Clash*"
+    # Network Proxy & VPN Tools (Clash variants - use specific patterns to avoid false positives)
+    "com.clash.*"
+    "ClashX*"
+    "clash-*"
+    "Clash-*"
+    "*-clash"
+    "*-Clash"
+    "clash.*"
+    "Clash.*"
+    "clash_*"
+    "clashverge*"
+    "ClashVerge*"
     "com.nssurge.surge-mac"
     "*surge*"
     "*Surge*"
@@ -678,10 +687,10 @@ should_protect_data() {
         com.sublimetext.* | com.sublimehq.* | Cursor | Claude | ChatGPT | Ollama)
             return 0
             ;;
-        com.nssurge.* | com.v2ray.* | ClashX* | Surge* | Shadowrocket* | Quantumult*)
+        com.nssurge.* | com.v2ray.* | com.clash.* | ClashX* | Surge* | Shadowrocket* | Quantumult*)
             return 0
             ;;
-        *clash* | *Clash*)
+        clash-* | Clash-* | *-clash | *-Clash | clash.* | Clash.* | clash_* | clashverge* | ClashVerge*)
             return 0
             ;;
         com.docker.* | com.getpostman.* | com.insomnia.*)
