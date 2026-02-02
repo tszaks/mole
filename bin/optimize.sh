@@ -392,7 +392,7 @@ main() {
     trap handle_interrupt INT TERM
 
     if [[ -t 1 ]]; then
-        clear
+        clear_screen
     fi
     print_header
 
