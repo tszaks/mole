@@ -994,7 +994,7 @@ clean_project_artifacts() {
         local size_str="$3"
         # Terminal width for alignment
         local terminal_width=$(tput cols 2> /dev/null || echo 80)
-        local fixed_width=28 # Reserve for size and artifact type (9 + 3 + 16)
+        local fixed_width=32 # Reserve for size and artifact type (9 + 3 + 20)
         local available_width=$((terminal_width - fixed_width))
         # Bounds: 30-50 chars for project path (increased to accommodate full paths)
         [[ $available_width -lt 30 ]] && available_width=30
@@ -1006,7 +1006,7 @@ clean_project_artifacts() {
         local padding=$((available_width - current_width))
         local printf_width=$((char_count + padding))
         # Format: "project_path  size | artifact_type"
-        printf "%-*s %9s | %-13s" "$printf_width" "$truncated_path" "$size_str" "$artifact_type"
+        printf "%-*s %9s | %-17s" "$printf_width" "$truncated_path" "$size_str" "$artifact_type"
     }
     # Build menu options - one line per artifact
     for item in "${safe_to_clean[@]}"; do
