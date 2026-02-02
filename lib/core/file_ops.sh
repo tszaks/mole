@@ -366,7 +366,7 @@ safe_sudo_remove() {
 
     local output
     local ret
-    output=$(sudo rm -rf "$path" 2>&1)
+    output=$(sudo rm -rf "$path" 2>&1) # safe_remove
     ret=$?
 
     if [[ $ret -eq 0 ]]; then
