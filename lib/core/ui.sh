@@ -171,24 +171,25 @@ read_key() {
             $'\n' | $'\r') echo "ENTER" ;;
             $'\x7f' | $'\x08') echo "DELETE" ;;
             $'\x1b')
-                # Check if this is an escape sequence (arrow keys) or ESC key
-                if IFS= read -r -s -n 1 -t 0.1 rest 2> /dev/null; then
+                if IFS= read -r -s -n 1 -t 1 rest 2> /dev/null; then
                     if [[ "$rest" == "[" ]]; then
-                        if IFS= read -r -s -n 1 -t 0.1 rest2 2> /dev/null; then
+                        if IFS= read -r -s -n 1 -t 1 rest2 2> /dev/null; then
                             case "$rest2" in
                                 "A") echo "UP" ;;
                                 "B") echo "DOWN" ;;
                                 "C") echo "RIGHT" ;;
                                 "D") echo "LEFT" ;;
                                 "3")
-                                    IFS= read -r -s -n 1 -t 0.1 rest3 2> /dev/null
+                                    IFS= read -r -s -n 1 -t 1 rest3 2> /dev/null
                                     [[ "$rest3" == "~" ]] && echo "DELETE" || echo "OTHER"
                                     ;;
                                 *) echo "OTHER" ;;
                             esac
-                        else echo "QUIT"; fi
+                        else
+                            echo "QUIT"
+                        fi
                     elif [[ "$rest" == "O" ]]; then
-                        if IFS= read -r -s -n 1 -t 0.1 rest2 2> /dev/null; then
+                        if IFS= read -r -s -n 1 -t 1 rest2 2> /dev/null; then
                             case "$rest2" in
                                 "A") echo "UP" ;;
                                 "B") echo "DOWN" ;;
@@ -198,11 +199,9 @@ read_key() {
                             esac
                         else echo "OTHER"; fi
                     else
-                        # Not an escape sequence, it's ESC key
                         echo "QUIT"
                     fi
                 else
-                    # No following characters, it's ESC key
                     echo "QUIT"
                 fi
                 ;;

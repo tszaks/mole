@@ -111,15 +111,13 @@ select_apps_for_uninstall() {
     [[ $max_name_width -gt 60 ]] && max_name_width=60
 
     local -a menu_options=()
-    # Prepare metadata (comma-separated) for sorting/filtering inside the menu
     local epochs_csv=""
     local sizekb_csv=""
+    local -a names_arr=()
     local idx=0
     for app_data in "${apps_data[@]}"; do
-        # Keep extended field 7 (size_kb) if present
         IFS='|' read -r epoch _ display_name _ size last_used size_kb <<< "$app_data"
         menu_options+=("$(format_app_display "$display_name" "$size" "$last_used" "$terminal_width" "$max_name_width")")
-        # Build csv lists (avoid trailing commas)
         if [[ $idx -eq 0 ]]; then
             epochs_csv="${epoch:-0}"
             sizekb_csv="${size_kb:-0}"
@@ -127,8 +125,12 @@ select_apps_for_uninstall() {
             epochs_csv+=",${epoch:-0}"
             sizekb_csv+=",${size_kb:-0}"
         fi
+        names_arr+=("$display_name")
         ((idx++))
     done
+    # Use newline separator for names (safe for names with commas)
+    local names_newline
+    names_newline=$(printf '%s\n' "${names_arr[@]}")
 
     # Clear loading message
     if [[ $app_count -gt 100 ]]; then
@@ -143,8 +145,7 @@ select_apps_for_uninstall() {
     # The menu will gracefully fallback if these are unset or malformed.
     export MOLE_MENU_META_EPOCHS="$epochs_csv"
     export MOLE_MENU_META_SIZEKB="$sizekb_csv"
-    # Optional: allow default sort override via env (date|name|size)
-    # export MOLE_MENU_SORT_DEFAULT="${MOLE_MENU_SORT_DEFAULT:-date}"
+    export MOLE_MENU_FILTER_NAMES="$names_newline"
 
     # Use paginated menu - result will be stored in MOLE_SELECTION_RESULT
     # Note: paginated_multi_select enters alternate screen and handles clearing
