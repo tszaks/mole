@@ -40,7 +40,7 @@ clean_deep_system() {
         local mtime=$(get_file_mtime "/macOS Install Data")
         local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
         debug_log "Found macOS Install Data, age ${age_days} days"
-        if [[ $age_days -ge 30 ]]; then
+        if [[ $age_days -ge 14 ]]; then
             local size_kb=$(get_path_size_kb "/macOS Install Data")
             if [[ -n "$size_kb" && "$size_kb" -gt 0 ]]; then
                 local size_human=$(bytes_to_human "$((size_kb * 1024))")
@@ -50,9 +50,38 @@ clean_deep_system() {
                 fi
             fi
         else
-            debug_log "Keeping macOS Install Data, only ${age_days} days old, needs 30+"
+            debug_log "Keeping macOS Install Data, only ${age_days} days old, needs 14+"
         fi
     fi
+    # Clean macOS installer apps (e.g., "Install macOS Sequoia.app")
+    # Only remove installers older than 14 days and not currently running
+    local installer_cleaned=0
+    for installer_app in /Applications/Install\ macOS*.app; do
+        [[ -d "$installer_app" ]] || continue
+        local app_name=$(basename "$installer_app")
+        # Skip if installer is currently running
+        if pgrep -f "$installer_app" > /dev/null 2>&1; then
+            debug_log "Skipping $app_name: currently running"
+            continue
+        fi
+        # Check age (same 14-day threshold as /macOS Install Data)
+        local mtime=$(get_file_mtime "$installer_app")
+        local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
+        if [[ $age_days -lt 14 ]]; then
+            debug_log "Keeping $app_name: only ${age_days} days old, needs 14+"
+            continue
+        fi
+        local size_kb=$(get_path_size_kb "$installer_app")
+        if [[ -n "$size_kb" && "$size_kb" -gt 0 ]]; then
+            local size_human=$(bytes_to_human "$((size_kb * 1024))")
+            debug_log "Cleaning macOS installer: $app_name, $size_human, ${age_days} days old"
+            if safe_sudo_remove "$installer_app"; then
+                log_success "$app_name, $size_human"
+                ((installer_cleaned++))
+            fi
+        fi
+    done
+    [[ $installer_cleaned -gt 0 ]] && debug_log "Cleaned $installer_cleaned macOS installer(s)"
     start_section_spinner "Scanning system caches..."
     local code_sign_cleaned=0
     local found_count=0
