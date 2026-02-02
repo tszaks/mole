@@ -156,18 +156,8 @@ remove_file_list() {
             continue
         fi
 
-        # Symlinks are handled separately using rm (not safe_remove/safe_sudo_remove)
-        # because safe_sudo_remove() refuses symlinks entirely as a TOCTOU protection.
-        # This is safe because:
-        # 1. The path has already passed validate_path_for_deletion() above
-        # 2. rm on a symlink only removes the link itself, NOT the target
-        # 3. The symlink deletion is logged via operations.log
         if [[ -L "$file" ]]; then
-            if [[ "$use_sudo" == "true" ]]; then
-                sudo rm "$file" 2> /dev/null && ((++count)) || true
-            else
-                rm "$file" 2> /dev/null && ((++count)) || true
-            fi
+            safe_remove_symlink "$file" "$use_sudo" && ((++count)) || true
         else
             if [[ "$use_sudo" == "true" ]]; then
                 safe_sudo_remove "$file" && ((++count)) || true
@@ -194,7 +184,16 @@ batch_uninstall_applications() {
     old_trap_int=$(trap -p INT)
     old_trap_term=$(trap -p TERM)
 
+    _cleanup_sudo_keepalive() {
+        if [[ -n "${sudo_keepalive_pid:-}" ]]; then
+            kill "$sudo_keepalive_pid" 2> /dev/null || true
+            wait "$sudo_keepalive_pid" 2> /dev/null || true
+            sudo_keepalive_pid=""
+        fi
+    }
+
     _restore_uninstall_traps() {
+        _cleanup_sudo_keepalive
         if [[ -n "$old_trap_int" ]]; then
             eval "$old_trap_int"
         else
@@ -207,8 +206,8 @@ batch_uninstall_applications() {
         fi
     }
 
-    # Trap to clean up spinner and uninstall mode on interrupt
-    trap 'stop_inline_spinner 2>/dev/null; unset MOLE_UNINSTALL_MODE; echo ""; _restore_uninstall_traps; return 130' INT TERM
+    # Trap to clean up spinner, sudo keepalive, and uninstall mode on interrupt
+    trap 'stop_inline_spinner 2>/dev/null; _cleanup_sudo_keepalive; unset MOLE_UNINSTALL_MODE; echo ""; _restore_uninstall_traps; return 130' INT TERM
 
     # Pre-scan: running apps, sudo needs, size.
     local -a running_apps=()
@@ -260,16 +259,16 @@ batch_uninstall_applications() {
         fi
 
         # Size estimate includes related and system files.
-        local app_size_kb=$(get_path_size_kb "$app_path")
-        local related_files=$(find_app_files "$bundle_id" "$app_name")
-        local related_size_kb=$(calculate_total_size "$related_files")
+        local app_size_kb=$(get_path_size_kb "$app_path" || echo "0")
+        local related_files=$(find_app_files "$bundle_id" "$app_name" || true)
+        local related_size_kb=$(calculate_total_size "$related_files" || echo "0")
         # system_files is a newline-separated string, not an array.
         # shellcheck disable=SC2178,SC2128
-        local system_files=$(find_app_system_files "$bundle_id" "$app_name")
+        local system_files=$(find_app_system_files "$bundle_id" "$app_name" || true)
         # shellcheck disable=SC2128
-        local system_size_kb=$(calculate_total_size "$system_files")
+        local system_size_kb=$(calculate_total_size "$system_files" || echo "0")
         local total_kb=$((app_size_kb + related_size_kb + system_size_kb))
-        ((total_estimated_size += total_kb))
+        ((total_estimated_size += total_kb)) || true
 
         # shellcheck disable=SC2128
         if [[ -n "$system_files" ]]; then
@@ -282,15 +281,15 @@ batch_uninstall_applications() {
 
         # Check for sensitive user data once.
         local has_sensitive_data="false"
-        if has_sensitive_data "$related_files"; then
+        if has_sensitive_data "$related_files" 2> /dev/null; then
             has_sensitive_data="true"
         fi
 
         # Store details for later use (base64 keeps lists on one line).
         local encoded_files
-        encoded_files=$(printf '%s' "$related_files" | base64 | tr -d '\n')
+        encoded_files=$(printf '%s' "$related_files" | base64 | tr -d '\n' || echo "")
         local encoded_system_files
-        encoded_system_files=$(printf '%s' "$system_files" | base64 | tr -d '\n')
+        encoded_system_files=$(printf '%s' "$system_files" | base64 | tr -d '\n' || echo "")
         app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name")
     done
     if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -480,12 +479,38 @@ batch_uninstall_applications() {
                     fi
                 fi
             elif [[ "$needs_sudo" == true ]]; then
-                if ! safe_sudo_remove "$app_path"; then
-                    local app_owner=$(get_file_owner "$app_path")
-                    if [[ -n "$app_owner" && "$app_owner" != "$current_user" && "$app_owner" != "root" ]]; then
-                        reason="owned by $app_owner, try 'sudo chown $(whoami) \"$app_path\"'"
+                if [[ -L "$app_path" ]]; then
+                    local link_target
+                    link_target=$(readlink "$app_path" 2> /dev/null)
+                    if [[ -n "$link_target" ]]; then
+                        local resolved_target="$link_target"
+                        if [[ "$link_target" != /* ]]; then
+                            local link_dir
+                            link_dir=$(dirname "$app_path")
+                            resolved_target=$(cd "$link_dir" 2> /dev/null && cd "$(dirname "$link_target")" 2> /dev/null && pwd)/$(basename "$link_target") 2> /dev/null || echo ""
+                        fi
+                        case "$resolved_target" in
+                            /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/* | /private/etc/*)
+                                reason="protected system symlink, cannot remove"
+                                ;;
+                            *)
+                                if ! safe_remove_symlink "$app_path" "true"; then
+                                    reason="failed to remove symlink"
+                                fi
+                                ;;
+                        esac
                     else
-                        reason="permission denied, try 'mole touchid' for passwordless sudo"
+                        if ! safe_remove_symlink "$app_path" "true"; then
+                            reason="failed to remove symlink"
+                        fi
+                    fi
+                else
+                    local ret=0
+                    safe_sudo_remove "$app_path" || ret=$?
+                    if [[ $ret -ne 0 ]]; then
+                        local diagnosis
+                        diagnosis=$(diagnose_removal_failure "$ret" "$app_name")
+                        IFS='|' read -r reason suggestion <<< "$diagnosis"
                     fi
                 fi
             else
@@ -544,17 +569,19 @@ batch_uninstall_applications() {
             ((total_items++))
             success_items+=("$app_name")
         else
-            # Show failure
             if [[ -t 1 ]]; then
                 if [[ ${#app_details[@]} -gt 1 ]]; then
                     echo -e "${ICON_ERROR} [$current_index/${#app_details[@]}] ${app_name} ${GRAY}, $reason${NC}"
                 else
                     echo -e "${ICON_ERROR} ${app_name} failed: $reason"
                 fi
+                if [[ -n "${suggestion:-}" ]]; then
+                    echo -e "${GRAY}   → ${suggestion}${NC}"
+                fi
             fi
 
             ((failed_count++))
-            failed_items+=("$app_name:$reason")
+            failed_items+=("$app_name:$reason:${suggestion:-}")
         fi
     done
 
@@ -617,8 +644,20 @@ batch_uninstall_applications() {
         local failed_list="${failed_names[*]}"
 
         local reason_summary="could not be removed"
+        local suggestion_text=""
         if [[ $failed_count -eq 1 ]]; then
-            local first_reason=${failed_items[0]#*:}
+            # Extract reason and suggestion from format: app:reason:suggestion
+            local item="${failed_items[0]}"
+            local without_app="${item#*:}"
+            local first_reason="${without_app%%:*}"
+            local first_suggestion="${without_app#*:}"
+
+            # If suggestion is same as reason, there was no suggestion part
+            # Also check if suggestion is empty
+            if [[ "$first_suggestion" != "$first_reason" && -n "$first_suggestion" ]]; then
+                suggestion_text="${GRAY}   → ${first_suggestion}${NC}"
+            fi
+
             case "$first_reason" in
                 still*running*) reason_summary="is still running" ;;
                 remove*failed*) reason_summary="could not be removed" ;;
@@ -628,6 +667,9 @@ batch_uninstall_applications() {
             esac
         fi
         summary_details+=("Failed: ${RED}${failed_list}${NC} ${reason_summary}")
+        if [[ -n "$suggestion_text" ]]; then
+            summary_details+=("$suggestion_text")
+        fi
     fi
 
     if [[ $success_count -eq 0 && $failed_count -eq 0 ]]; then
@@ -683,20 +725,55 @@ batch_uninstall_applications() {
         fi
     fi
 
-    # Clean up sudo keepalive if it was started.
-    if [[ -n "${sudo_keepalive_pid:-}" ]]; then
-        kill "$sudo_keepalive_pid" 2> /dev/null || true
-        wait "$sudo_keepalive_pid" 2> /dev/null || true
-        sudo_keepalive_pid=""
-    fi
+    _cleanup_sudo_keepalive
 
     # Disable uninstall mode
     unset MOLE_UNINSTALL_MODE
 
-    # Invalidate cache if any apps were successfully uninstalled.
     if [[ $success_count -gt 0 ]]; then
         local cache_file="$HOME/.cache/mole/app_scan_cache"
-        rm -f "$cache_file" 2> /dev/null || true
+        if [[ -f "$cache_file" ]]; then
+            local -a removed_paths=()
+            for detail in "${app_details[@]}"; do
+                IFS='|' read -r app_name app_path _ _ _ _ <<< "$detail"
+                for success_name in "${success_items[@]}"; do
+                    if [[ "$success_name" == "$app_name" ]]; then
+                        removed_paths+=("$app_path")
+                        break
+                    fi
+                done
+            done
+
+            if [[ ${#removed_paths[@]} -gt 0 ]]; then
+                local temp_cache
+                temp_cache=$(create_temp_file)
+                local line_removed=false
+                while IFS='|' read -r epoch path rest; do
+                    local keep_line=true
+                    for removed_path in "${removed_paths[@]}"; do
+                        if [[ "$path" == "$removed_path" ]]; then
+                            keep_line=false
+                            line_removed=true
+                            break
+                        fi
+                    done
+                    if [[ $keep_line == true && -n "$path" ]]; then
+                        echo "${epoch}|${path}|${rest}"
+                    fi
+                done < "$cache_file" > "$temp_cache"
+
+                if [[ $line_removed == true ]]; then
+                    if [[ -s "$temp_cache" ]]; then
+                        mv "$temp_cache" "$cache_file" 2> /dev/null || rm -f "$temp_cache"
+                    else
+                        # All apps removed, delete cache to force rescan
+                        rm -f "$cache_file" "$temp_cache"
+                    fi
+                else
+                    rm -f "$temp_cache"
+                fi
+            fi
+        fi
     fi
 
     _restore_uninstall_traps

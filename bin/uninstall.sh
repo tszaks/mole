@@ -39,11 +39,12 @@ scan_applications() {
 
     if [[ $force_rescan == false && -f "$cache_file" ]]; then
         local cache_age=$(($(get_epoch_seconds) - $(get_file_mtime "$cache_file")))
-        [[ $cache_age -eq $(get_epoch_seconds) ]] && cache_age=86401 # Handle mtime read failure
+        [[ $cache_age -eq $(get_epoch_seconds) ]] && cache_age=86401
+
         if [[ $cache_age -lt $cache_ttl ]]; then
             if [[ -t 2 ]]; then
                 echo -e "${GREEN}Loading from cache...${NC}" >&2
-                sleep 0.3 # Brief pause so user sees the message
+                sleep 0.3
             fi
             echo "$cache_file"
             return 0
@@ -122,7 +123,24 @@ scan_applications() {
                 continue
             fi
 
-            # Bundle ID from plist (fast path).
+            if [[ -L "$app_path" ]]; then
+                local link_target
+                link_target=$(readlink "$app_path" 2> /dev/null)
+                if [[ -n "$link_target" ]]; then
+                    local resolved_target="$link_target"
+                    if [[ "$link_target" != /* ]]; then
+                        local link_dir
+                        link_dir=$(dirname "$app_path")
+                        resolved_target=$(cd "$link_dir" 2> /dev/null && cd "$(dirname "$link_target")" 2> /dev/null && pwd)/$(basename "$link_target") 2> /dev/null || echo ""
+                    fi
+                    case "$resolved_target" in
+                        /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/* | /private/etc/*)
+                            continue
+                            ;;
+                    esac
+                fi
+            fi
+
             local bundle_id="unknown"
             if [[ -f "$app_path/Contents/Info.plist" ]]; then
                 bundle_id=$(defaults read "$app_path/Contents/Info.plist" CFBundleIdentifier 2> /dev/null || echo "unknown")
@@ -459,7 +477,7 @@ main() {
                 unset MOLE_ALT_SCREEN_ACTIVE
                 unset MOLE_INLINE_LOADING MOLE_MANAGED_ALT_SCREEN
             fi
-            rm -f "$apps_file"
+            [[ "$apps_file" != "$cache_file" ]] && rm -f "$apps_file"
             return 1
         fi
 
@@ -477,7 +495,8 @@ main() {
             show_cursor
             clear_screen
             printf '\033[2J\033[H' >&2
-            rm -f "$apps_file"
+            # Only delete temp files, never the permanent cache
+            [[ "$apps_file" != "$cache_file" ]] && rm -f "$apps_file"
 
             if [[ $exit_code -eq 10 ]]; then
                 force_rescan=true
@@ -499,7 +518,7 @@ main() {
         local selection_count=${#selected_apps[@]}
         if [[ $selection_count -eq 0 ]]; then
             echo "No apps selected"
-            rm -f "$apps_file"
+            [[ "$apps_file" != "$cache_file" ]] && rm -f "$apps_file"
             continue
         fi
         echo -e "${BLUE}${ICON_CONFIRM}${NC} Selected ${selection_count} apps:"
@@ -519,6 +538,7 @@ main() {
         done
         ((max_size_width < 5)) && max_size_width=5
         ((max_last_width < 5)) && max_last_width=5
+        ((max_name_display_width < 16)) && max_name_display_width=16
 
         local term_width=$(tput cols 2> /dev/null || echo 100)
         local available_for_name=$((term_width - 17 - max_size_width - max_last_width))
@@ -577,7 +597,8 @@ main() {
 
         batch_uninstall_applications
 
-        rm -f "$apps_file"
+        # Only delete temp files, never the permanent cache
+        [[ "$apps_file" != "$cache_file" ]] && rm -f "$apps_file"
 
         echo -e "${GRAY}Press Enter to return to application list, any other key to exit...${NC}"
         local key
