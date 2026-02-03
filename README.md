@@ -255,7 +255,22 @@ curl -fsSL https://raw.githubusercontent.com/tw93/Mole/main/scripts/setup-quick-
 
 Adds 5 commands: `clean`, `uninstall`, `optimize`, `analyze`, `status`.
 
-Mole automatically detects your terminal, or set `MO_LAUNCHER_APP=<name>` to override. For Raycast users: if this is your first script directory, add it via Raycast Extensions → Add Script Directory, then run "Reload Script Directories".
+### Raycast Setup
+
+After running the script above, **complete these steps in Raycast**:
+
+1. Open Raycast Settings (⌘ + ,)
+2. Go to **Extensions** → **Script Commands**
+3. Click **"Add Script Directory"** (or **"+"**)
+4. Add path: `~/Library/Application Support/Raycast/script-commands`
+5. Search in Raycast for: **"Reload Script Directories"** and run it
+6. Done! Search for `mole`, `clean`, or `optimize` to use the commands
+
+> **Note**: The script creates the commands automatically, but Raycast requires you to manually add the script directory. This is a one-time setup.
+
+### Terminal Detection
+
+Mole automatically detects your terminal app (Warp, Ghostty, Alacritty, Kitty, WezTerm, etc.). To override, set `MO_LAUNCHER_APP=<name>` in your environment.
 
 ## Community Love
 
