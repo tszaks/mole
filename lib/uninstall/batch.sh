@@ -300,18 +300,15 @@ batch_uninstall_applications() {
     echo -e "${PURPLE_BOLD}Files to be removed:${NC}"
     echo ""
 
-    # Warn if user data is detected.
-    local has_user_data=false
+    # Warn if brew cask apps are present.
+    local has_brew_cask=false
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r _ _ _ _ _ _ has_sensitive_data <<< "$detail"
-        if [[ "$has_sensitive_data" == "true" ]]; then
-            has_user_data=true
-            break
-        fi
+        IFS='|' read -r _ _ _ _ _ _ _ _ is_brew_cask_flag _ <<< "$detail"
+        [[ "$is_brew_cask_flag" == "true" ]] && has_brew_cask=true
     done
 
-    if [[ "$has_user_data" == "true" ]]; then
-        echo -e "${GRAY}${ICON_WARNING}${NC} ${YELLOW}Note: Some apps contain user configurations/themes${NC}"
+    if [[ "$has_brew_cask" == "true" ]]; then
+        echo -e "${GRAY}${ICON_WARNING}${NC} ${YELLOW}Homebrew apps will be fully cleaned (--zap: removes configs & data)${NC}"
         echo ""
     fi
 
@@ -431,6 +428,7 @@ batch_uninstall_applications() {
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local reason=""
+        local suggestion=""
 
         # Show progress for current app
         local brew_tag=""
@@ -567,7 +565,7 @@ batch_uninstall_applications() {
             [[ "$used_brew_successfully" == "true" ]] && ((brew_apps_removed++))
             ((files_cleaned++))
             ((total_items++))
-            success_items+=("$app_name")
+            success_items+=("$app_path")
         else
             if [[ -t 1 ]]; then
                 if [[ ${#app_details[@]} -gt 1 ]]; then
@@ -593,7 +591,6 @@ batch_uninstall_applications() {
     local -a summary_details=()
 
     if [[ $success_count -gt 0 ]]; then
-        local success_list="${success_items[*]}"
         local success_text="app"
         [[ $success_count -gt 1 ]] && success_text="apps"
         local success_line="Removed ${success_count} ${success_text}"
@@ -602,13 +599,15 @@ batch_uninstall_applications() {
         fi
 
         # Format app list with max 3 per line.
-        if [[ -n "$success_list" ]]; then
+        if [[ ${#success_items[@]} -gt 0 ]]; then
             local idx=0
             local is_first_line=true
             local current_line=""
 
-            for app_name in "${success_items[@]}"; do
-                local display_item="${GREEN}${app_name}${NC}"
+            for success_path in "${success_items[@]}"; do
+                local display_name
+                display_name=$(basename "$success_path" .app)
+                local display_item="${GREEN}${display_name}${NC}"
 
                 if ((idx % 3 == 0)); then
                     if [[ -n "$current_line" ]]; then
@@ -709,20 +708,8 @@ batch_uninstall_applications() {
     fi
 
     # Clean up Dock entries for uninstalled apps.
-    if [[ $success_count -gt 0 ]]; then
-        local -a removed_paths=()
-        for detail in "${app_details[@]}"; do
-            IFS='|' read -r app_name app_path _ _ _ _ <<< "$detail"
-            for success_name in "${success_items[@]}"; do
-                if [[ "$success_name" == "$app_name" ]]; then
-                    removed_paths+=("$app_path")
-                    break
-                fi
-            done
-        done
-        if [[ ${#removed_paths[@]} -gt 0 ]]; then
-            remove_apps_from_dock "${removed_paths[@]}" 2> /dev/null || true
-        fi
+    if [[ $success_count -gt 0 && ${#success_items[@]} -gt 0 ]]; then
+        remove_apps_from_dock "${success_items[@]}" 2> /dev/null || true
     fi
 
     _cleanup_sudo_keepalive
@@ -733,18 +720,8 @@ batch_uninstall_applications() {
     if [[ $success_count -gt 0 ]]; then
         local cache_file="$HOME/.cache/mole/app_scan_cache"
         if [[ -f "$cache_file" ]]; then
-            local -a removed_paths=()
-            for detail in "${app_details[@]}"; do
-                IFS='|' read -r app_name app_path _ _ _ _ <<< "$detail"
-                for success_name in "${success_items[@]}"; do
-                    if [[ "$success_name" == "$app_name" ]]; then
-                        removed_paths+=("$app_path")
-                        break
-                    fi
-                done
-            done
-
-            if [[ ${#removed_paths[@]} -gt 0 ]]; then
+            if [[ ${#success_items[@]} -gt 0 ]]; then
+                local -a removed_paths=("${success_items[@]}")
                 local temp_cache
                 temp_cache=$(create_temp_file)
                 local line_removed=false

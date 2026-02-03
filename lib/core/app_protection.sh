@@ -707,7 +707,13 @@ should_protect_data() {
             ;;
     esac
 
-    # Most apps won't match, return early
+    # Fallback: check against the full DATA_PROTECTED_BUNDLES list
+    for pattern in "${DATA_PROTECTED_BUNDLES[@]}"; do
+        if bundle_matches_pattern "$bundle_id" "$pattern"; then
+            return 0
+        fi
+    done
+
     return 1
 }
 
@@ -772,7 +778,8 @@ should_protect_path() {
     # Matches: .../Library/Group Containers/group.id/...
     if [[ "$path" =~ /Library/Containers/([^/]+) ]] || [[ "$path" =~ /Library/Group\ Containers/([^/]+) ]]; then
         local bundle_id="${BASH_REMATCH[1]}"
-        if should_protect_data "$bundle_id"; then
+        # In uninstall mode, only system components are protected; skip data protection
+        if [[ "${MOLE_UNINSTALL_MODE:-0}" != "1" ]] && should_protect_data "$bundle_id"; then
             return 0
         fi
     fi

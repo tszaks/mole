@@ -657,6 +657,14 @@ paginated_multi_select() {
                 fi
                 ;;
             "SPACE")
+                # In filter mode with active text, treat space as search character
+                if [[ -n "$filter_text" ]]; then
+                    filter_text+=" "
+                    rebuild_view
+                    cursor_pos=0
+                    need_full_redraw=true
+                    continue
+                fi
                 local idx=$((top_index + cursor_pos))
                 if [[ $idx -lt ${#view_indices[@]} ]]; then
                     local real="${view_indices[idx]}"
