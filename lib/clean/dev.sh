@@ -207,9 +207,8 @@ clean_dev_mobile() {
     safe_clean ~/.cache/swift-package-manager/* "Swift package manager cache"
 }
 # JVM ecosystem caches.
+# Gradle excluded (default whitelist, like Maven). Remove via: mo clean --whitelist
 clean_dev_jvm() {
-    safe_clean ~/.gradle/caches/* "Gradle caches"
-    safe_clean ~/.gradle/daemon/* "Gradle daemon logs"
     safe_clean ~/.sbt/* "SBT cache"
     safe_clean ~/.ivy2/cache/* "Ivy cache"
 }

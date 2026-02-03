@@ -63,6 +63,8 @@ declare -a DEFAULT_WHITELIST_PATTERNS=(
     "$HOME/Library/Caches/ms-playwright*"
     "$HOME/.cache/huggingface*"
     "$HOME/.m2/repository/*"
+    "$HOME/.gradle/caches/*"
+    "$HOME/.gradle/daemon/*"
     "$HOME/.ollama/models/*"
     "$HOME/Library/Caches/com.nssurge.surge-mac/*"
     "$HOME/Library/Application Support/com.nssurge.surge-mac/*"
