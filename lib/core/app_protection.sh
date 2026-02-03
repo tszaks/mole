@@ -1093,28 +1093,28 @@ find_app_files() {
 
     # 7. Raycast
     if [[ "$bundle_id" == "com.raycast.macos" ]]; then
-        local raycast_parents=(
+        # Standard user directories
+        local raycast_dirs=(
             "$HOME/Library/Application Support"
             "$HOME/Library/Application Scripts"
             "$HOME/Library/Containers"
         )
-        for parent in "${raycast_parents[@]}"; do
-            [[ -d "$parent" ]] || continue
-            while IFS= read -r -d '' p; do
+        for dir in "${raycast_dirs[@]}"; do
+            [[ -d "$dir" ]] && while IFS= read -r -d '' p; do
                 files_to_clean+=("$p")
-            done < <(command find "$parent" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
+            done < <(command find "$dir" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
         done
-        if [[ -d "$HOME/Library/Caches" ]]; then
-            while IFS= read -r -d '' p; do
-                files_to_clean+=("$p")
-            done < <(command find "$HOME/Library/Caches" -maxdepth 2 -type d -iname "*raycast*" -print0 2> /dev/null)
-        fi
-        local code_storage="$HOME/Library/Application Support/Code/User/globalStorage"
-        if [[ -d "$code_storage" ]]; then
-            while IFS= read -r -d '' p; do
-                files_to_clean+=("$p")
-            done < <(command find "$code_storage" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
-        fi
+
+        # Cache (deeper search)
+        [[ -d "$HOME/Library/Caches" ]] && while IFS= read -r -d '' p; do
+            files_to_clean+=("$p")
+        done < <(command find "$HOME/Library/Caches" -maxdepth 2 -type d -iname "*raycast*" -print0 2> /dev/null)
+
+        # VSCode extension storage
+        local vscode_global="$HOME/Library/Application Support/Code/User/globalStorage"
+        [[ -d "$vscode_global" ]] && while IFS= read -r -d '' p; do
+            files_to_clean+=("$p")
+        done < <(command find "$vscode_global" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
     fi
 
     # Output results
@@ -1210,9 +1210,9 @@ find_app_system_files() {
         done < <(command find /private/var/db/receipts -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
     fi
 
-    # Raycast system-level (*raycast* under /Library/Application Support)
-    if [[ "$bundle_id" == "com.raycast.macos" && -d "/Library/Application Support" ]]; then
-        while IFS= read -r -d '' p; do
+    # Raycast system-level files
+    if [[ "$bundle_id" == "com.raycast.macos" ]]; then
+        [[ -d "/Library/Application Support" ]] && while IFS= read -r -d '' p; do
             system_files+=("$p")
         done < <(command find "/Library/Application Support" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
     fi
