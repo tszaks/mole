@@ -257,7 +257,8 @@ create_raycast_commands() {
 
     if is_interactive; then
         log_header "Finalizing Setup"
-        prompt_enter "Press [Enter] after finishing the steps above in Raycast..."
+        log_warn "Please complete the Raycast steps above before continuing."
+        prompt_enter "Press [Enter] to continue..."
         log_success "Raycast setup complete!"
     else
         log_warn "Non-interactive mode; skip Raycast reload. Please run 'Reload Script Directories' in Raycast."
