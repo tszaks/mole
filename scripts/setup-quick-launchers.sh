@@ -251,12 +251,13 @@ create_raycast_commands() {
 
     log_header "Raycast Configuration"
     log_step "Open Raycast → Settings → Extensions → Script Commands."
-    echo "If Raycast asks to add a Script Directory, use:"
-    echo "  $dir"
+    echo "1. Click \"+\" → Add Script Directory."
+    echo "2. Choose: $dir"
+    echo "3. Click \"Reload Script Directories\"."
 
     if is_interactive; then
         log_header "Finalizing Setup"
-        prompt_enter "Press [Enter] after clicking 'Reload Script Directories' in Raycast..."
+        prompt_enter "Press [Enter] after finishing the steps above in Raycast..."
         log_success "Raycast setup complete!"
     else
         log_warn "Non-interactive mode; skip Raycast reload. Please run 'Reload Script Directories' in Raycast."
