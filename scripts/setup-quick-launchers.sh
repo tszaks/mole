@@ -44,9 +44,10 @@ write_raycast_script() {
     local title="$2"
     local mo_bin="$3"
     local subcommand="$4"
-    local raw_cmd="\"${mo_bin}\" ${subcommand}"
-    local cmd_escaped="${raw_cmd//\\/\\\\}"
-    cmd_escaped="${cmd_escaped//\"/\\\"}"
+
+    local cmd_for_applescript="${mo_bin//\\/\\\\}"
+    cmd_for_applescript="${cmd_for_applescript//\"/\\\"}"
+
     cat > "$target" << EOF
 #!/bin/bash
 
@@ -68,9 +69,9 @@ set -euo pipefail
 echo "🐹 Running ${title}..."
 echo ""
 
-# Command to execute
-_MO_RAW_CMD='${raw_cmd}'
-_MO_CMD_ESCAPED="${cmd_escaped}"
+MO_BIN="${mo_bin}"
+MO_SUBCOMMAND="${subcommand}"
+MO_BIN_ESCAPED="${cmd_for_applescript}"
 
 has_app() {
     local name="\$1"
@@ -119,8 +120,8 @@ launch_with_app() {
     case "\$app" in
         Terminal)
             if command -v osascript >/dev/null 2>&1; then
-                osascript <<'APPLESCRIPT'
-set targetCommand to "\${_MO_CMD_ESCAPED}"
+                osascript <<APPLESCRIPT
+set targetCommand to "\${MO_BIN_ESCAPED} \${MO_SUBCOMMAND}"
 tell application "Terminal"
     activate
     do script targetCommand
@@ -131,8 +132,8 @@ APPLESCRIPT
             ;;
         iTerm|iTerm2)
             if command -v osascript >/dev/null 2>&1; then
-                osascript <<'APPLESCRIPT'
-set targetCommand to "\${_MO_CMD_ESCAPED}"
+                osascript <<APPLESCRIPT
+set targetCommand to "\${MO_BIN_ESCAPED} \${MO_SUBCOMMAND}"
 tell application "iTerm2"
     activate
     try
@@ -156,52 +157,52 @@ APPLESCRIPT
             ;;
         Alacritty)
             if launcher_available "Alacritty" && command -v open >/dev/null 2>&1; then
-                open -na "Alacritty" --args -e /bin/zsh -lc "\${_MO_RAW_CMD}"
+                open -na "Alacritty" --args -e /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         Kitty)
             if has_bin "kitty"; then
-                kitty --hold /bin/zsh -lc "\${_MO_RAW_CMD}"
+                kitty --hold /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             elif [[ -x "/Applications/kitty.app/Contents/MacOS/kitty" ]]; then
-                "/Applications/kitty.app/Contents/MacOS/kitty" --hold /bin/zsh -lc "\${_MO_RAW_CMD}"
+                "/Applications/kitty.app/Contents/MacOS/kitty" --hold /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         WezTerm)
             if has_bin "wezterm"; then
-                wezterm start -- /bin/zsh -lc "\${_MO_RAW_CMD}"
+                wezterm start -- /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             elif [[ -x "/Applications/WezTerm.app/Contents/MacOS/wezterm" ]]; then
-                "/Applications/WezTerm.app/Contents/MacOS/wezterm" start -- /bin/zsh -lc "\${_MO_RAW_CMD}"
+                "/Applications/WezTerm.app/Contents/MacOS/wezterm" start -- /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         Ghostty)
             if has_bin "ghostty"; then
-                ghostty --command "/bin/zsh" -- -lc "\${_MO_RAW_CMD}"
+                ghostty --command "/bin/zsh" -- -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             elif [[ -x "/Applications/Ghostty.app/Contents/MacOS/ghostty" ]]; then
-                "/Applications/Ghostty.app/Contents/MacOS/ghostty" --command "/bin/zsh" -- -lc "\${_MO_RAW_CMD}"
+                "/Applications/Ghostty.app/Contents/MacOS/ghostty" --command "/bin/zsh" -- -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         Hyper)
             if launcher_available "Hyper" && command -v open >/dev/null 2>&1; then
-                open -na "Hyper" --args /bin/zsh -lc "\${_MO_RAW_CMD}"
+                open -na "Hyper" --args /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         WindTerm)
             if launcher_available "WindTerm" && command -v open >/dev/null 2>&1; then
-                open -na "WindTerm" --args /bin/zsh -lc "\${_MO_RAW_CMD}"
+                open -na "WindTerm" --args /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         Warp)
             if launcher_available "Warp" && command -v open >/dev/null 2>&1; then
-                open -na "Warp" --args /bin/zsh -lc "\${_MO_RAW_CMD}"
+                open -na "Warp" --args /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
@@ -210,7 +211,7 @@ APPLESCRIPT
 }
 
 if [[ -n "\${TERM:-}" && "\${TERM}" != "dumb" ]]; then
-    "${mo_bin}" ${subcommand}
+    "\${MO_BIN}" \${MO_SUBCOMMAND}
     exit \$?
 fi
 
@@ -229,7 +230,7 @@ fi
 
 echo "TERM environment variable not set and no launcher succeeded."
 echo "Run this manually:"
-echo "    \${_MO_RAW_CMD}"
+echo "    \"\${MO_BIN}\" \${MO_SUBCOMMAND}"
 exit 1
 EOF
     chmod +x "$target"
