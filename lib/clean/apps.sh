@@ -291,7 +291,9 @@ clean_orphaned_app_data() {
                 local iteration_count=0
                 local old_ifs=$IFS
                 IFS=$'\n'
-                local -a matches=($item_path)
+                local -a matches=()
+                # shellcheck disable=SC2206
+                matches=($item_path)
                 IFS=$old_ifs
                 if [[ ${#matches[@]} -eq 0 ]]; then
                     continue
