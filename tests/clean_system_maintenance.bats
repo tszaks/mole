@@ -28,7 +28,23 @@ CALL_LOG="$HOME/system_calls.log"
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
-sudo() { return 0; }
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "find" ]]; then
+        case "$2" in
+            /Library/Caches) printf '%s\0' "/Library/Caches/test.log" ;;
+            /private/var/log) printf '%s\0' "/private/var/log/system.log" ;;
+        esac
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "0"
+        return 0
+    fi
+    return 0
+}
 safe_sudo_find_delete() {
     echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
     return 0
@@ -562,11 +578,24 @@ CALL_LOG="$HOME/memory_exception_calls.log"
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
-sudo() { return 0; }
-safe_sudo_find_delete() {
-    echo "safe_sudo_find_delete:$1:$2:$3:$4" >> "$CALL_LOG"
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "find" ]]; then
+        echo "sudo_find:$*" >> "$CALL_LOG"
+        if [[ "$2" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" && "$*" != *"-delete"* ]]; then
+            printf '%s\0' "/private/var/db/reportmemoryexception/MemoryLimitViolations/report.bin"
+        fi
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "1024"
+        return 0
+    fi
     return 0
 }
+safe_sudo_find_delete() { return 0; }
 safe_sudo_remove() { return 0; }
 log_success() { :; }
 is_sip_enabled() { return 1; }
@@ -579,7 +608,8 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"reportmemoryexception/MemoryLimitViolations"* ]]
-    [[ "$output" == *":30:"* ]]  # 30-day retention
+    [[ "$output" == *"-mtime +30"* ]]  # 30-day retention
+    [[ "$output" == *"-delete"* ]]
 }
 
 @test "clean_deep_system cleans diagnostic trace logs" {
@@ -590,12 +620,29 @@ CALL_LOG="$HOME/diag_calls.log"
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
-sudo() { return 0; }
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "find" ]]; then
+        echo "sudo_find:$*" >> "$CALL_LOG"
+        if [[ "$2" == "/private/var/db/diagnostics" ]]; then
+            printf '%s\0' \
+                "/private/var/db/diagnostics/Persist/test.tracev3" \
+                "/private/var/db/diagnostics/Special/test.tracev3"
+        fi
+        return 0
+    fi
+    return 0
+}
 safe_sudo_find_delete() {
     echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
     return 0
 }
-safe_sudo_remove() { return 0; }
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
 log_success() { :; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }

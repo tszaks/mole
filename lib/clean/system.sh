@@ -5,19 +5,47 @@ set -euo pipefail
 clean_deep_system() {
     stop_section_spinner
     local cache_cleaned=0
-    safe_sudo_find_delete "/Library/Caches" "*.cache" "$MOLE_TEMP_FILE_AGE_DAYS" "f" && cache_cleaned=1 || true
-    safe_sudo_find_delete "/Library/Caches" "*.tmp" "$MOLE_TEMP_FILE_AGE_DAYS" "f" && cache_cleaned=1 || true
-    safe_sudo_find_delete "/Library/Caches" "*.log" "$MOLE_LOG_AGE_DAYS" "f" && cache_cleaned=1 || true
+    # Optimized: Single pass for /Library/Caches (3 patterns in 1 scan)
+    if sudo test -d "/Library/Caches" 2> /dev/null; then
+        while IFS= read -r -d '' file; do
+            if should_protect_path "$file"; then
+                continue
+            fi
+            if safe_sudo_remove "$file"; then
+                cache_cleaned=1
+            fi
+        done < <(sudo find "/Library/Caches" -maxdepth 5 -type f \( \
+            \( -name "*.cache" -mtime "+$MOLE_TEMP_FILE_AGE_DAYS" \) -o \
+            \( -name "*.tmp" -mtime "+$MOLE_TEMP_FILE_AGE_DAYS" \) -o \
+            \( -name "*.log" -mtime "+$MOLE_LOG_AGE_DAYS" \) \
+            \) -print0 2> /dev/null || true)
+    fi
     [[ $cache_cleaned -eq 1 ]] && log_success "System caches"
+    start_section_spinner "Cleaning system temporary files..."
     local tmp_cleaned=0
     safe_sudo_find_delete "/private/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
     safe_sudo_find_delete "/private/var/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
+    stop_section_spinner
     [[ $tmp_cleaned -eq 1 ]] && log_success "System temp files"
+    start_section_spinner "Cleaning system crash reports..."
     safe_sudo_find_delete "/Library/Logs/DiagnosticReports" "*" "$MOLE_CRASH_REPORT_AGE_DAYS" "f" || true
+    stop_section_spinner
     log_success "System crash reports"
-    safe_sudo_find_delete "/private/var/log" "*.log" "$MOLE_LOG_AGE_DAYS" "f" || true
-    safe_sudo_find_delete "/private/var/log" "*.gz" "$MOLE_LOG_AGE_DAYS" "f" || true
+    start_section_spinner "Cleaning system logs..."
+    # Optimized: Single pass for /private/var/log (2 patterns in 1 scan)
+    if sudo test -d "/private/var/log" 2> /dev/null; then
+        while IFS= read -r -d '' file; do
+            if should_protect_path "$file"; then
+                continue
+            fi
+            safe_sudo_remove "$file" || true
+        done < <(sudo find "/private/var/log" -maxdepth 5 -type f \( \
+            -name "*.log" -o -name "*.gz" \
+            \) -mtime "+$MOLE_LOG_AGE_DAYS" -print0 2> /dev/null || true)
+    fi
+    stop_section_spinner
     log_success "System logs"
+    start_section_spinner "Scanning system library updates..."
     if [[ -d "/Library/Updates" && ! -L "/Library/Updates" ]]; then
         local updates_cleaned=0
         while IFS= read -r -d '' item; do
@@ -34,8 +62,12 @@ clean_deep_system() {
                 ((updates_cleaned++))
             fi
         done < <(find /Library/Updates -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+        stop_section_spinner
         [[ $updates_cleaned -gt 0 ]] && log_success "System library updates"
+    else
+        stop_section_spinner
     fi
+    start_section_spinner "Scanning macOS installer files..."
     if [[ -d "/macOS Install Data" ]]; then
         local mtime=$(get_file_mtime "/macOS Install Data")
         local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
@@ -81,6 +113,7 @@ clean_deep_system() {
             fi
         fi
     done
+    stop_section_spinner
     [[ $installer_cleaned -gt 0 ]] && debug_log "Cleaned $installer_cleaned macOS installer(s)"
     start_section_spinner "Scanning system caches..."
     local code_sign_cleaned=0
@@ -107,23 +140,54 @@ clean_deep_system() {
     stop_section_spinner
     [[ $code_sign_cleaned -gt 0 ]] && log_success "Browser code signature caches, $code_sign_cleaned items"
 
-    start_section_spinner "Cleaning system diagnostic logs..."
-    local diag_cleaned=0
-    safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*" "$MOLE_LOG_AGE_DAYS" "f" && diag_cleaned=1 || true
-    safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*" "$MOLE_LOG_AGE_DAYS" "f" && diag_cleaned=1 || true
-    safe_sudo_find_delete "/private/var/db/DiagnosticPipeline" "*" "$MOLE_LOG_AGE_DAYS" "f" && diag_cleaned=1 || true
-    safe_sudo_find_delete "/private/var/db/powerlog" "*" "$MOLE_LOG_AGE_DAYS" "f" && diag_cleaned=1 || true
-    safe_sudo_find_delete "/private/var/db/reportmemoryexception/MemoryLimitViolations" "*" "30" "f" && diag_cleaned=1 || true
-    stop_section_spinner
+    # Optimized: Single pass for diagnostics directory (Special + Persist + tracev3)
+    # Replaces 4 separate find operations with 1 combined operation
+    local diag_base="/private/var/db/diagnostics"
+    if sudo test -d "$diag_base" 2> /dev/null; then
+        while IFS= read -r -d '' file; do
+            if should_protect_path "$file"; then
+                continue
+            fi
+            safe_sudo_remove "$file" || true
+        done < <(sudo find "$diag_base" -maxdepth 5 -type f \( \
+            \( -mtime "+$MOLE_LOG_AGE_DAYS" \) -o \
+            \( -name "*.tracev3" -mtime +30 \) \
+            \) -print0 2> /dev/null || true)
+    fi
+    safe_sudo_find_delete "/private/var/db/DiagnosticPipeline" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
+    log_success "System diagnostic logs"
+    safe_sudo_find_delete "/private/var/db/powerlog" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
+    log_success "Power logs"
+    start_section_spinner "Cleaning memory exception reports..."
+    local mem_reports_dir="/private/var/db/reportmemoryexception/MemoryLimitViolations"
+    if sudo test -d "$mem_reports_dir" 2> /dev/null; then
+        # Count and size old files before deletion
+        local file_count=0
+        local total_size_kb=0
+        while IFS= read -r -d '' file; do
+            ((file_count++))
+            local file_size
+            file_size=$(sudo stat -f%z "$file" 2> /dev/null || echo "0")
+            ((total_size_kb += file_size / 1024))
+        done < <(sudo find "$mem_reports_dir" -type f -mtime +30 -print0 2> /dev/null || true)
 
-    [[ $diag_cleaned -eq 1 ]] && log_success "System diagnostic logs"
-
-    start_section_spinner "Cleaning diagnostic trace logs..."
-    local trace_cleaned=0
-    safe_sudo_find_delete "/private/var/db/diagnostics/Persist" "*.tracev3" "30" "f" && trace_cleaned=1 || true
-    safe_sudo_find_delete "/private/var/db/diagnostics/Special" "*.tracev3" "30" "f" && trace_cleaned=1 || true
+        # For directories with many files, use find -delete for performance
+        if [[ "$file_count" -gt 0 ]]; then
+            if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+                sudo find "$mem_reports_dir" -type f -mtime +30 -delete 2> /dev/null || true
+                # Log summary to operations.log
+                if oplog_enabled && [[ "$total_size_kb" -gt 0 ]]; then
+                    local size_human
+                    size_human=$(bytes_to_human "$((total_size_kb * 1024))")
+                    log_operation "[clean] REMOVED $mem_reports_dir ($file_count files, $size_human)"
+                fi
+            else
+                log_info "[DRY-RUN] Would remove $file_count old memory exception reports ($total_size_kb KB)"
+            fi
+        fi
+    fi
     stop_section_spinner
-    [[ $trace_cleaned -eq 1 ]] && log_success "System diagnostic trace logs"
+    log_success "Memory exception reports"
 }
 # Incomplete Time Machine backups.
 clean_time_machine_failed_backups() {
@@ -304,15 +368,18 @@ clean_local_snapshots() {
         return 0
     fi
 
+    start_section_spinner "Checking Time Machine status..."
     local rc_running=0
     tm_is_running || rc_running=$?
 
     if [[ $rc_running -eq 2 ]]; then
+        stop_section_spinner
         echo -e "  ${YELLOW}!${NC} Could not determine Time Machine status; skipping snapshot check"
         return 0
     fi
 
     if [[ $rc_running -eq 0 ]]; then
+        stop_section_spinner
         echo -e "  ${YELLOW}!${NC} Time Machine is active; skipping snapshot check"
         return 0
     fi
