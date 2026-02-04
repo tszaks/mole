@@ -1112,6 +1112,10 @@ find_app_files() {
             done < <(command find "$dir" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
         done
 
+        # Explicit Raycast container directories (hardcoded leftovers)
+        [[ -d "$HOME/Library/Containers/com.raycast.macos.BrowserExtension" ]] && files_to_clean+=("$HOME/Library/Containers/com.raycast.macos.BrowserExtension")
+        [[ -d "$HOME/Library/Containers/com.raycast.macos.RaycastAppIntents" ]] && files_to_clean+=("$HOME/Library/Containers/com.raycast.macos.RaycastAppIntents")
+
         # Cache (deeper search)
         [[ -d "$HOME/Library/Caches" ]] && while IFS= read -r -d '' p; do
             files_to_clean+=("$p")
