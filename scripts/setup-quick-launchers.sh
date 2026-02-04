@@ -59,12 +59,18 @@ write_raycast_script() {
 # Optional parameters:
 # @raycast.icon 🐹
 
+# ──────────────────────────────────────────────────────────
+# Script execution begins below
+# ──────────────────────────────────────────────────────────
+
 set -euo pipefail
 
 echo "🐹 Running ${title}..."
 echo ""
-CMD="${raw_cmd}"
-CMD_ESCAPED="${cmd_escaped}"
+
+# Command to execute
+_MO_RAW_CMD="${raw_cmd}"
+_MO_CMD_ESCAPED="${cmd_escaped}"
 
 has_app() {
     local name="\$1"
@@ -114,7 +120,7 @@ launch_with_app() {
         Terminal)
             if command -v osascript >/dev/null 2>&1; then
                 osascript <<'APPLESCRIPT'
-set targetCommand to "${cmd_escaped}"
+set targetCommand to "\${_MO_CMD_ESCAPED}"
 tell application "Terminal"
     activate
     do script targetCommand
@@ -126,7 +132,7 @@ APPLESCRIPT
         iTerm|iTerm2)
             if command -v osascript >/dev/null 2>&1; then
                 osascript <<'APPLESCRIPT'
-set targetCommand to "${cmd_escaped}"
+set targetCommand to "\${_MO_CMD_ESCAPED}"
 tell application "iTerm2"
     activate
     try
@@ -150,52 +156,52 @@ APPLESCRIPT
             ;;
         Alacritty)
             if launcher_available "Alacritty" && command -v open >/dev/null 2>&1; then
-                open -na "Alacritty" --args -e /bin/zsh -lc "${raw_cmd}"
+                open -na "Alacritty" --args -e /bin/zsh -lc "\${_MO_RAW_CMD}"
                 return \$?
             fi
             ;;
         Kitty)
             if has_bin "kitty"; then
-                kitty --hold /bin/zsh -lc "${raw_cmd}"
+                kitty --hold /bin/zsh -lc "\${_MO_RAW_CMD}"
                 return \$?
             elif [[ -x "/Applications/kitty.app/Contents/MacOS/kitty" ]]; then
-                "/Applications/kitty.app/Contents/MacOS/kitty" --hold /bin/zsh -lc "${raw_cmd}"
+                "/Applications/kitty.app/Contents/MacOS/kitty" --hold /bin/zsh -lc "\${_MO_RAW_CMD}"
                 return \$?
             fi
             ;;
         WezTerm)
             if has_bin "wezterm"; then
-                wezterm start -- /bin/zsh -lc "${raw_cmd}"
+                wezterm start -- /bin/zsh -lc "\${_MO_RAW_CMD}"
                 return \$?
             elif [[ -x "/Applications/WezTerm.app/Contents/MacOS/wezterm" ]]; then
-                "/Applications/WezTerm.app/Contents/MacOS/wezterm" start -- /bin/zsh -lc "${raw_cmd}"
+                "/Applications/WezTerm.app/Contents/MacOS/wezterm" start -- /bin/zsh -lc "\${_MO_RAW_CMD}"
                 return \$?
             fi
             ;;
         Ghostty)
             if has_bin "ghostty"; then
-                ghostty --command "/bin/zsh" -- -lc "${raw_cmd}"
+                ghostty --command "/bin/zsh" -- -lc "\${_MO_RAW_CMD}"
                 return \$?
             elif [[ -x "/Applications/Ghostty.app/Contents/MacOS/ghostty" ]]; then
-                "/Applications/Ghostty.app/Contents/MacOS/ghostty" --command "/bin/zsh" -- -lc "${raw_cmd}"
+                "/Applications/Ghostty.app/Contents/MacOS/ghostty" --command "/bin/zsh" -- -lc "\${_MO_RAW_CMD}"
                 return \$?
             fi
             ;;
         Hyper)
             if launcher_available "Hyper" && command -v open >/dev/null 2>&1; then
-                open -na "Hyper" --args /bin/zsh -lc "${raw_cmd}"
+                open -na "Hyper" --args /bin/zsh -lc "\${_MO_RAW_CMD}"
                 return \$?
             fi
             ;;
         WindTerm)
             if launcher_available "WindTerm" && command -v open >/dev/null 2>&1; then
-                open -na "WindTerm" --args /bin/zsh -lc "${raw_cmd}"
+                open -na "WindTerm" --args /bin/zsh -lc "\${_MO_RAW_CMD}"
                 return \$?
             fi
             ;;
         Warp)
             if launcher_available "Warp" && command -v open >/dev/null 2>&1; then
-                open -na "Warp" --args /bin/zsh -lc "${raw_cmd}"
+                open -na "Warp" --args /bin/zsh -lc "\${_MO_RAW_CMD}"
                 return \$?
             fi
             ;;
@@ -223,7 +229,7 @@ fi
 
 echo "TERM environment variable not set and no launcher succeeded."
 echo "Run this manually:"
-echo "    ${raw_cmd}"
+echo "    \${_MO_RAW_CMD}"
 exit 1
 EOF
     chmod +x "$target"
