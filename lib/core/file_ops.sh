@@ -467,7 +467,12 @@ safe_sudo_find_delete() {
 
     debug_log "Finding, sudo, in $base_dir: $pattern, age: ${age_days}d, type: $type_filter"
 
-    local find_args=("-maxdepth" "5" "-name" "$pattern" "-type" "$type_filter")
+    local find_args=("-maxdepth" "5")
+    # Skip -name if pattern is "*" (matches everything anyway, but adds overhead)
+    if [[ "$pattern" != "*" ]]; then
+        find_args+=("-name" "$pattern")
+    fi
+    find_args+=("-type" "$type_filter")
     if [[ "$age_days" -gt 0 ]]; then
         find_args+=("-mtime" "+$age_days")
     fi
