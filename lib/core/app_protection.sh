@@ -997,6 +997,14 @@ find_app_files() {
         )
     fi
 
+    # Issue #422: Zed channel builds can leave data under another channel bundle id.
+    # Example: uninstalling dev.zed.Zed-Nightly should also detect dev.zed.Zed-Preview leftovers.
+    if [[ "$bundle_id" =~ ^dev\.zed\.Zed- ]] && [[ -d "$HOME/Library/HTTPStorages" ]]; then
+        while IFS= read -r -d '' zed_http_storage; do
+            files_to_clean+=("$zed_http_storage")
+        done < <(command find "$HOME/Library/HTTPStorages" -maxdepth 1 -name "dev.zed.Zed-*" -print0 2> /dev/null)
+    fi
+
     # Process standard patterns
     for p in "${user_patterns[@]}"; do
         local expanded_path="${p/#\~/$HOME}"

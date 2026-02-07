@@ -60,6 +60,18 @@ setup() {
     [[ "$result" =~ "Library/Application Support/Zed" ]]
 }
 
+@test "find_app_files detects Zed channel variants in HTTPStorages only" {
+    mkdir -p "$HOME/Library/HTTPStorages/dev.zed.Zed-Preview"
+    mkdir -p "$HOME/Library/Application Support/Firefox/Profiles/default/storage/default/https+++zed.dev"
+    echo "test" > "$HOME/Library/HTTPStorages/dev.zed.Zed-Preview/data"
+    echo "test" > "$HOME/Library/Application Support/Firefox/Profiles/default/storage/default/https+++zed.dev/data"
+
+    result=$(find_app_files "dev.zed.Zed-Nightly" "Zed Nightly")
+
+    [[ "$result" =~ "Library/HTTPStorages/dev.zed.Zed-Preview" ]]
+    [[ ! "$result" =~ "storage/default/https\+\+\+zed\.dev" ]]
+}
+
 @test "find_app_files detects multiple naming variants simultaneously" {
     mkdir -p "$HOME/.config/maestro-studio"
     mkdir -p "$HOME/Library/Application Support/MaestroStudio"
