@@ -717,42 +717,6 @@ batch_uninstall_applications() {
     # Disable uninstall mode
     unset MOLE_UNINSTALL_MODE
 
-    if [[ $success_count -gt 0 ]]; then
-        local cache_file="$HOME/.cache/mole/app_scan_cache"
-        if [[ -f "$cache_file" ]]; then
-            if [[ ${#success_items[@]} -gt 0 ]]; then
-                local -a removed_paths=("${success_items[@]}")
-                local temp_cache
-                temp_cache=$(create_temp_file)
-                local line_removed=false
-                while IFS='|' read -r epoch path rest; do
-                    local keep_line=true
-                    for removed_path in "${removed_paths[@]}"; do
-                        if [[ "$path" == "$removed_path" ]]; then
-                            keep_line=false
-                            line_removed=true
-                            break
-                        fi
-                    done
-                    if [[ $keep_line == true && -n "$path" ]]; then
-                        echo "${epoch}|${path}|${rest}"
-                    fi
-                done < "$cache_file" > "$temp_cache"
-
-                if [[ $line_removed == true ]]; then
-                    if [[ -s "$temp_cache" ]]; then
-                        mv "$temp_cache" "$cache_file" 2> /dev/null || rm -f "$temp_cache"
-                    else
-                        # All apps removed, delete cache to force rescan
-                        rm -f "$cache_file" "$temp_cache"
-                    fi
-                else
-                    rm -f "$temp_cache"
-                fi
-            fi
-        fi
-    fi
-
     _restore_uninstall_traps
     unset -f _restore_uninstall_traps
 
