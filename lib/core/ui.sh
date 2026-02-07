@@ -170,6 +170,7 @@ read_key() {
         case "$key" in
             $'\n' | $'\r') echo "ENTER" ;;
             $'\x7f' | $'\x08') echo "DELETE" ;;
+            $'\x15') echo "CLEAR_LINE" ;; # Ctrl+U (often mapped from Cmd+Delete in terminals)
             $'\x1b')
                 if IFS= read -r -s -n 1 -t 1 rest 2> /dev/null; then
                     if [[ "$rest" == "[" ]]; then
@@ -230,6 +231,7 @@ read_key() {
         'l' | 'L') echo "RIGHT" ;;
         $'\x03') echo "QUIT" ;;
         $'\x7f' | $'\x08') echo "DELETE" ;;
+        $'\x15') echo "CLEAR_LINE" ;; # Ctrl+U
         $'\x1b')
             if IFS= read -r -s -n 1 -t 1 rest 2> /dev/null; then
                 if [[ "$rest" == "[" ]]; then
