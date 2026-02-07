@@ -16,6 +16,8 @@ const (
 	maxConcurrentOverview  = 8
 	batchUpdateSize        = 100
 	cacheModTimeGrace      = 30 * time.Minute
+	cacheReuseWindow       = 24 * time.Hour
+	staleCacheTTL          = 3 * 24 * time.Hour
 
 	// Worker pool limits.
 	minWorkers         = 16

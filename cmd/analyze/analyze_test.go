@@ -415,6 +415,221 @@ func TestLoadCacheExpiresWhenDirectoryChanges(t *testing.T) {
 	}
 }
 
+func TestLoadCacheReusesRecentEntryAfterDirectoryChanges(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "recent-change-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	result := scanResult{TotalSize: 5, TotalFiles: 1}
+	if err := saveCacheToDisk(target, result); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+
+	file, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache: %v", err)
+	}
+	var entry cacheEntry
+	if err := gob.NewDecoder(file).Decode(&entry); err != nil {
+		t.Fatalf("decode cache: %v", err)
+	}
+	_ = file.Close()
+
+	// Make cache entry look recently scanned, but older than mod time grace.
+	entry.ModTime = time.Now().Add(-2 * time.Hour)
+	entry.ScanTime = time.Now().Add(-1 * time.Hour)
+
+	tmp := cachePath + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		t.Fatalf("create tmp cache: %v", err)
+	}
+	if err := gob.NewEncoder(f).Encode(&entry); err != nil {
+		t.Fatalf("encode tmp cache: %v", err)
+	}
+	_ = f.Close()
+	if err := os.Rename(tmp, cachePath); err != nil {
+		t.Fatalf("rename tmp cache: %v", err)
+	}
+
+	if err := os.Chtimes(target, time.Now(), time.Now()); err != nil {
+		t.Fatalf("chtimes target: %v", err)
+	}
+
+	if _, err := loadCacheFromDisk(target); err != nil {
+		t.Fatalf("expected recent cache to be reused, got error: %v", err)
+	}
+}
+
+func TestLoadCacheExpiresWhenModifiedAndReuseWindowPassed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "reuse-window-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	result := scanResult{TotalSize: 5, TotalFiles: 1}
+	if err := saveCacheToDisk(target, result); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+
+	file, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache: %v", err)
+	}
+	var entry cacheEntry
+	if err := gob.NewDecoder(file).Decode(&entry); err != nil {
+		t.Fatalf("decode cache: %v", err)
+	}
+	_ = file.Close()
+
+	// Within overall 7-day TTL but beyond reuse window.
+	entry.ModTime = time.Now().Add(-48 * time.Hour)
+	entry.ScanTime = time.Now().Add(-(cacheReuseWindow + time.Hour))
+
+	tmp := cachePath + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		t.Fatalf("create tmp cache: %v", err)
+	}
+	if err := gob.NewEncoder(f).Encode(&entry); err != nil {
+		t.Fatalf("encode tmp cache: %v", err)
+	}
+	_ = f.Close()
+	if err := os.Rename(tmp, cachePath); err != nil {
+		t.Fatalf("rename tmp cache: %v", err)
+	}
+
+	if err := os.Chtimes(target, time.Now(), time.Now()); err != nil {
+		t.Fatalf("chtimes target: %v", err)
+	}
+
+	if _, err := loadCacheFromDisk(target); err == nil {
+		t.Fatalf("expected cache load to fail after reuse window passes")
+	}
+}
+
+func TestLoadStaleCacheFromDiskAllowsRecentExpiredCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "stale-cache-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	result := scanResult{TotalSize: 7, TotalFiles: 2}
+	if err := saveCacheToDisk(target, result); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+	file, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache: %v", err)
+	}
+	var entry cacheEntry
+	if err := gob.NewDecoder(file).Decode(&entry); err != nil {
+		t.Fatalf("decode cache: %v", err)
+	}
+	_ = file.Close()
+
+	// Expired for normal cache validation but still inside stale fallback window.
+	entry.ModTime = time.Now().Add(-48 * time.Hour)
+	entry.ScanTime = time.Now().Add(-48 * time.Hour)
+
+	tmp := cachePath + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		t.Fatalf("create tmp cache: %v", err)
+	}
+	if err := gob.NewEncoder(f).Encode(&entry); err != nil {
+		t.Fatalf("encode tmp cache: %v", err)
+	}
+	_ = f.Close()
+	if err := os.Rename(tmp, cachePath); err != nil {
+		t.Fatalf("rename tmp cache: %v", err)
+	}
+
+	if err := os.Chtimes(target, time.Now(), time.Now()); err != nil {
+		t.Fatalf("chtimes target: %v", err)
+	}
+
+	if _, err := loadCacheFromDisk(target); err == nil {
+		t.Fatalf("expected normal cache load to fail")
+	}
+	if _, err := loadStaleCacheFromDisk(target); err != nil {
+		t.Fatalf("expected stale cache load to succeed, got error: %v", err)
+	}
+}
+
+func TestLoadStaleCacheFromDiskExpiresByStaleTTL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "stale-cache-expired-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	result := scanResult{TotalSize: 9, TotalFiles: 3}
+	if err := saveCacheToDisk(target, result); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+	file, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache: %v", err)
+	}
+	var entry cacheEntry
+	if err := gob.NewDecoder(file).Decode(&entry); err != nil {
+		t.Fatalf("decode cache: %v", err)
+	}
+	_ = file.Close()
+
+	entry.ScanTime = time.Now().Add(-(staleCacheTTL + time.Hour))
+
+	tmp := cachePath + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		t.Fatalf("create tmp cache: %v", err)
+	}
+	if err := gob.NewEncoder(f).Encode(&entry); err != nil {
+		t.Fatalf("encode tmp cache: %v", err)
+	}
+	_ = f.Close()
+	if err := os.Rename(tmp, cachePath); err != nil {
+		t.Fatalf("rename tmp cache: %v", err)
+	}
+
+	if _, err := loadStaleCacheFromDisk(target); err == nil {
+		t.Fatalf("expected stale cache load to fail after stale TTL")
+	}
+}
+
 func TestScanPathPermissionError(t *testing.T) {
 	root := t.TempDir()
 	lockedDir := filepath.Join(root, "locked")
