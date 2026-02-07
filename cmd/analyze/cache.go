@@ -182,7 +182,7 @@ func getCachePath(path string) (string, error) {
 	return filepath.Join(cacheDir, filename), nil
 }
 
-func loadCacheFromDisk(path string) (*cacheEntry, error) {
+func loadRawCacheFromDisk(path string) (*cacheEntry, error) {
 	cachePath, err := getCachePath(path)
 	if err != nil {
 		return nil, err
@@ -200,23 +200,56 @@ func loadCacheFromDisk(path string) (*cacheEntry, error) {
 		return nil, err
 	}
 
+	return &entry, nil
+}
+
+func loadCacheFromDisk(path string) (*cacheEntry, error) {
+	entry, err := loadRawCacheFromDisk(path)
+	if err != nil {
+		return nil, err
+	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 
-	if info.ModTime().After(entry.ModTime) {
-		// Allow grace window.
-		if cacheModTimeGrace <= 0 || info.ModTime().Sub(entry.ModTime) > cacheModTimeGrace {
-			return nil, fmt.Errorf("cache expired: directory modified")
-		}
-	}
-
-	if time.Since(entry.ScanTime) > 7*24*time.Hour {
+	scanAge := time.Since(entry.ScanTime)
+	if scanAge > 7*24*time.Hour {
 		return nil, fmt.Errorf("cache expired: too old")
 	}
 
-	return &entry, nil
+	if info.ModTime().After(entry.ModTime) {
+		// Allow grace window.
+		if cacheModTimeGrace <= 0 || info.ModTime().Sub(entry.ModTime) > cacheModTimeGrace {
+			// Directory mod time is noisy on macOS; reuse recent cache to avoid
+			// frequent full rescans while still forcing refresh for older entries.
+			if cacheReuseWindow <= 0 || scanAge > cacheReuseWindow {
+				return nil, fmt.Errorf("cache expired: directory modified")
+			}
+		}
+	}
+
+	return entry, nil
+}
+
+// loadStaleCacheFromDisk loads cache without strict freshness checks.
+// It is used for fast first paint before triggering a background refresh.
+func loadStaleCacheFromDisk(path string) (*cacheEntry, error) {
+	entry, err := loadRawCacheFromDisk(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+
+	if time.Since(entry.ScanTime) > staleCacheTTL {
+		return nil, fmt.Errorf("stale cache expired")
+	}
+
+	return entry, nil
 }
 
 func saveCacheToDisk(path string, result scanResult) error {
