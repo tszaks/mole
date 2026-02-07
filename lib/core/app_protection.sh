@@ -1106,6 +1106,11 @@ find_app_files() {
     [[ "$bundle_id" =~ microsoft.*vscode ]] && [[ -d ~/.vscode ]] && files_to_clean+=("$HOME/.vscode")
     [[ "$app_name" =~ Docker ]] && [[ -d ~/.docker ]] && files_to_clean+=("$HOME/.docker")
 
+    # 6.1 Maestro Studio
+    if [[ "$bundle_id" == "com.maestro.studio" ]] || [[ "$lowercase_name" =~ maestro[[:space:]]*studio ]]; then
+        [[ -d ~/.mobiledev ]] && files_to_clean+=("$HOME/.mobiledev")
+    fi
+
     # 7. Raycast
     if [[ "$bundle_id" == "com.raycast.macos" ]]; then
         # Standard user directories

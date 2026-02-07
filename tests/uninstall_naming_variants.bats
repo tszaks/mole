@@ -48,6 +48,15 @@ setup() {
     [[ "$result" =~ "Library/Application Support/MaestroStudio" ]]
 }
 
+@test "find_app_files detects Maestro Studio auth directory (.mobiledev)" {
+    mkdir -p "$HOME/.mobiledev"
+    echo "token" > "$HOME/.mobiledev/authtoken"
+
+    result=$(find_app_files "com.maestro.studio" "Maestro Studio")
+
+    [[ "$result" =~ .mobiledev ]]
+}
+
 @test "find_app_files extracts base name from version suffix (Zed Nightly -> zed)" {
     mkdir -p "$HOME/.config/zed"
     mkdir -p "$HOME/Library/Application Support/Zed"
