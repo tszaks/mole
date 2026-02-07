@@ -77,8 +77,8 @@ setup() {
 
     result=$(find_app_files "dev.zed.Zed-Nightly" "Zed Nightly")
 
-    [[ "$result" =~ "Library/HTTPStorages/dev.zed.Zed-Preview" ]]
-    [[ ! "$result" =~ "storage/default/https\+\+\+zed\.dev" ]]
+    [[ "$result" =~ Library/HTTPStorages/dev\.zed\.Zed-Preview ]]
+    [[ ! "$result" =~ storage/default/https\+\+\+zed\.dev ]]
 }
 
 @test "find_app_files detects multiple naming variants simultaneously" {
