@@ -182,6 +182,7 @@ paginated_multi_select() {
     # Cleanup function
     cleanup() {
         trap - EXIT INT TERM
+        unset MOLE_READ_KEY_FORCE_CHAR
         export MOLE_MENU_SORT_MODE="${sort_mode:-name}"
         export MOLE_MENU_SORT_REVERSE="${sort_reverse:-false}"
         restore_terminal
@@ -862,6 +863,7 @@ paginated_multi_select() {
 
                 trap - EXIT INT TERM
                 MOLE_SELECTION_RESULT="$final_result"
+                unset MOLE_READ_KEY_FORCE_CHAR
                 export MOLE_MENU_SORT_MODE="${sort_mode:-name}"
                 export MOLE_MENU_SORT_REVERSE="${sort_reverse:-false}"
                 restore_terminal

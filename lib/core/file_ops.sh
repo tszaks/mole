@@ -366,8 +366,7 @@ safe_sudo_remove() {
 
     local output
     local ret
-    output=$(sudo rm -rf "$path" 2>&1) # safe_remove
-    ret=$?
+    output=$(sudo rm -rf "$path" 2>&1) || ret=$? # safe_remove
 
     if [[ $ret -eq 0 ]]; then
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "REMOVED" "$path" "$size_human"

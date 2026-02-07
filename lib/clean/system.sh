@@ -179,7 +179,7 @@ clean_deep_system() {
                 if oplog_enabled && [[ "$total_size_kb" -gt 0 ]]; then
                     local size_human
                     size_human=$(bytes_to_human "$((total_size_kb * 1024))")
-                    log_operation "[clean] REMOVED $mem_reports_dir ($file_count files, $size_human)"
+                    log_operation "clean" "REMOVED" "$mem_reports_dir" "$file_count files, $size_human"
                 fi
             else
                 log_info "[DRY-RUN] Would remove $file_count old memory exception reports ($total_size_kb KB)"
