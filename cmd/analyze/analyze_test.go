@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/gob"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -446,5 +447,42 @@ func TestScanPathPermissionError(t *testing.T) {
 	}
 	if !os.IsPermission(err) {
 		t.Logf("unexpected error type: %v", err)
+	}
+}
+
+func TestCalculateDirSizeFastHighFanoutCompletes(t *testing.T) {
+	root := t.TempDir()
+
+	// Reproduce high fan-out nested directory pattern that previously risked semaphore deadlock.
+	const fanout = 256
+	for i := 0; i < fanout; i++ {
+		nested := filepath.Join(root, fmt.Sprintf("dir-%03d", i), "nested")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("create nested dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(nested, "data.bin"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write nested file: %v", err)
+		}
+	}
+
+	var files, dirs, bytes int64
+	current := &atomic.Value{}
+	current.Store("")
+
+	done := make(chan int64, 1)
+	go func() {
+		done <- calculateDirSizeFast(root, &files, &dirs, &bytes, current)
+	}()
+
+	select {
+	case total := <-done:
+		if total <= 0 {
+			t.Fatalf("expected positive total size, got %d", total)
+		}
+		if got := atomic.LoadInt64(&files); got < fanout {
+			t.Fatalf("expected at least %d files scanned, got %d", fanout, got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("calculateDirSizeFast did not complete under high fan-out")
 	}
 }

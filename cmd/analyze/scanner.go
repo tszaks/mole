@@ -351,14 +351,20 @@ func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *
 		for _, entry := range entries {
 			if entry.IsDir() {
 				subDir := filepath.Join(dirPath, entry.Name())
-				sem <- struct{}{}
-				wg.Add(1)
-				go func(p string) {
-					defer wg.Done()
-					defer func() { <-sem }()
-					walk(p)
-				}(subDir)
 				atomic.AddInt64(dirsScanned, 1)
+
+				select {
+				case sem <- struct{}{}:
+					wg.Add(1)
+					go func(p string) {
+						defer wg.Done()
+						defer func() { <-sem }()
+						walk(p)
+					}(subDir)
+				default:
+					// Fallback to synchronous traversal to avoid semaphore deadlock under high fan-out.
+					walk(subDir)
+				}
 			} else {
 				info, err := entry.Info()
 				if err == nil {
