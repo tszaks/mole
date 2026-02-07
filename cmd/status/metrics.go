@@ -160,7 +160,7 @@ const NetworkHistorySize = 120 // Increased history size for wider graph
 
 type ProxyStatus struct {
 	Enabled bool
-	Type    string // HTTP, SOCKS, System
+	Type    string // HTTP, HTTPS, SOCKS, PAC, WPAD, TUN
 	Host    string
 }
 
