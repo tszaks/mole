@@ -36,6 +36,8 @@ readonly MOLE_UNINSTALL_META_CACHE_FILE="$MOLE_UNINSTALL_META_CACHE_DIR/uninstal
 readonly MOLE_UNINSTALL_META_CACHE_LOCK="${MOLE_UNINSTALL_META_CACHE_FILE}.lock"
 readonly MOLE_UNINSTALL_META_REFRESH_TTL=604800 # 7 days
 readonly MOLE_UNINSTALL_SCAN_SPINNER_DELAY_SEC="0.15"
+readonly MOLE_UNINSTALL_INLINE_METADATA_LIMIT=4
+readonly MOLE_UNINSTALL_INLINE_MDLS_TIMEOUT_SEC="0.08"
 
 uninstall_relative_time_from_epoch() {
     local value_epoch="${1:-0}"
@@ -152,6 +154,34 @@ uninstall_acquire_metadata_lock() {
 uninstall_release_metadata_lock() {
     local lock_dir="$1"
     [[ -d "$lock_dir" ]] && rmdir "$lock_dir" 2> /dev/null || true
+}
+
+uninstall_collect_inline_metadata() {
+    local app_path="$1"
+    local app_mtime="${2:-0}"
+    local now_epoch="${3:-0}"
+
+    local size_kb
+    size_kb=$(get_path_size_kb "$app_path")
+    [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+    local last_used_epoch=0
+    local metadata_date
+    metadata_date=$(run_with_timeout "$MOLE_UNINSTALL_INLINE_MDLS_TIMEOUT_SEC" mdls -name kMDItemLastUsedDate -raw "$app_path" 2> /dev/null || echo "")
+    if [[ "$metadata_date" != "(null)" && -n "$metadata_date" ]]; then
+        last_used_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$metadata_date" "+%s" 2> /dev/null || echo "0")
+    fi
+
+    # Fallback to app mtime so first scan does not show "...".
+    if [[ ! "$last_used_epoch" =~ ^[0-9]+$ || $last_used_epoch -le 0 ]]; then
+        if [[ "$app_mtime" =~ ^[0-9]+$ && $app_mtime -gt 0 ]]; then
+            last_used_epoch="$app_mtime"
+        else
+            last_used_epoch=0
+        fi
+    fi
+
+    printf "%s|%s|%s\n" "$size_kb" "$last_used_epoch" "$now_epoch"
 }
 
 start_uninstall_metadata_refresh() {
@@ -567,6 +597,7 @@ scan_applications() {
 
     local current_epoch
     current_epoch=$(get_epoch_seconds)
+    local inline_metadata_count=0
 
     while IFS='|' read -r app_path display_name bundle_id app_mtime cached_mtime cached_size_kb cached_epoch cached_updated_epoch cached_bundle_id cached_display_name; do
         [[ -n "$app_path" && -e "$app_path" ]] || continue
@@ -610,6 +641,24 @@ scan_applications() {
         fi
 
         if [[ $needs_refresh == true ]]; then
+            if [[ $inline_metadata_count -lt $MOLE_UNINSTALL_INLINE_METADATA_LIMIT ]]; then
+                local inline_metadata inline_size_kb inline_epoch inline_updated_epoch
+                inline_metadata=$(uninstall_collect_inline_metadata "$app_path" "${app_mtime:-0}" "$current_epoch")
+                IFS='|' read -r inline_size_kb inline_epoch inline_updated_epoch <<< "$inline_metadata"
+                ((inline_metadata_count++))
+
+                if [[ "$inline_size_kb" =~ ^[0-9]+$ && $inline_size_kb -gt 0 ]]; then
+                    final_size_kb="$inline_size_kb"
+                    final_size=$(bytes_to_human "$((inline_size_kb * 1024))")
+                fi
+                if [[ "$inline_epoch" =~ ^[0-9]+$ && $inline_epoch -gt 0 ]]; then
+                    final_epoch="$inline_epoch"
+                    final_last_used=$(uninstall_relative_time_from_epoch "$final_epoch" "$current_epoch")
+                fi
+                if [[ "$inline_updated_epoch" =~ ^[0-9]+$ && $inline_updated_epoch -gt 0 ]]; then
+                    cached_updated_epoch="$inline_updated_epoch"
+                fi
+            fi
             printf "%s|%s|%s|%s\n" "$app_path" "${app_mtime:-0}" "$bundle_id" "$display_name" >> "$refresh_file"
         fi
 
