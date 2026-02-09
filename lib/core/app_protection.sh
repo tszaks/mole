@@ -1103,7 +1103,11 @@ find_app_files() {
     [[ "$app_name" =~ Godot|godot ]] && [[ -d ~/Library/Application\ Support/Godot ]] && files_to_clean+=("$HOME/Library/Application Support/Godot")
 
     # 6. Tools
-    [[ "$bundle_id" =~ microsoft.*vscode ]] && [[ -d ~/.vscode ]] && files_to_clean+=("$HOME/.vscode")
+    if [[ "$bundle_id" =~ microsoft.*[vV][sS][cC]ode ]]; then
+        [[ -d "$HOME/.vscode" ]] && files_to_clean+=("$HOME/.vscode")
+        [[ -d "$HOME/Library/Caches/com.microsoft.VSCode.ShipIt" ]] && files_to_clean+=("$HOME/Library/Caches/com.microsoft.VSCode.ShipIt")
+        [[ -d "$HOME/Library/Caches/com.microsoft.VSCodeInsiders.ShipIt" ]] && files_to_clean+=("$HOME/Library/Caches/com.microsoft.VSCodeInsiders.ShipIt")
+    fi
     [[ "$app_name" =~ Docker ]] && [[ -d ~/.docker ]] && files_to_clean+=("$HOME/.docker")
 
     # 6.1 Maestro Studio
