@@ -12,12 +12,12 @@ format_app_display() {
     # Use common function from ui.sh to format last used time
     local compact_last_used
     compact_last_used=$(format_last_used_summary "$last_used")
-    if [[ -z "$compact_last_used" || "$compact_last_used" == "Unknown" || "$compact_last_used" == "Never" ]]; then
-        compact_last_used="..."
+    if [[ -z "$compact_last_used" || "$compact_last_used" == "Never" ]]; then
+        compact_last_used="Unknown"
     fi
 
     # Format size
-    local size_str="..."
+    local size_str="N/A"
     [[ "$size" != "0" && "$size" != "" && "$size" != "Unknown" ]] && size_str="$size"
 
     # Calculate available width for app name based on terminal width

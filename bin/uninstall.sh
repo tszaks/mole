@@ -35,8 +35,8 @@ readonly MOLE_UNINSTALL_META_CACHE_DIR="$HOME/.cache/mole"
 readonly MOLE_UNINSTALL_META_CACHE_FILE="$MOLE_UNINSTALL_META_CACHE_DIR/uninstall_app_metadata_v1"
 readonly MOLE_UNINSTALL_META_CACHE_LOCK="${MOLE_UNINSTALL_META_CACHE_FILE}.lock"
 readonly MOLE_UNINSTALL_META_REFRESH_TTL=604800 # 7 days
-readonly MOLE_UNINSTALL_SCAN_SPINNER_DELAY_SEC="0.15"
-readonly MOLE_UNINSTALL_INLINE_METADATA_LIMIT=4
+readonly MOLE_UNINSTALL_SCAN_SPINNER_DELAY_SEC="0.25"
+readonly MOLE_UNINSTALL_INLINE_METADATA_LIMIT=8
 readonly MOLE_UNINSTALL_INLINE_MDLS_TIMEOUT_SEC="0.08"
 
 uninstall_relative_time_from_epoch() {
@@ -44,7 +44,7 @@ uninstall_relative_time_from_epoch() {
     local now_epoch="${2:-0}"
 
     if [[ ! "$value_epoch" =~ ^[0-9]+$ || $value_epoch -le 0 ]]; then
-        echo "..."
+        echo "Unknown"
         return 0
     fi
 
@@ -613,10 +613,17 @@ scan_applications() {
         fi
 
         local final_size_kb=0
-        local final_size="..."
+        local final_size="N/A"
         if [[ "$cached_size_kb" =~ ^[0-9]+$ && $cached_size_kb -gt 0 ]]; then
             final_size_kb="$cached_size_kb"
             final_size=$(bytes_to_human "$((cached_size_kb * 1024))")
+        fi
+
+        # Fallback to app mtime to avoid unknown "last used" on first scan.
+        if [[ ! "$final_epoch" =~ ^[0-9]+$ || $final_epoch -le 0 ]]; then
+            if [[ "$app_mtime" =~ ^[0-9]+$ && $app_mtime -gt 0 ]]; then
+                final_epoch="$app_mtime"
+            fi
         fi
 
         local final_last_used
@@ -769,8 +776,14 @@ main() {
 
     hide_cursor
 
+    local first_scan=true
     while true; do
         unset MOLE_INLINE_LOADING MOLE_MANAGED_ALT_SCREEN
+
+        if [[ $first_scan == false ]]; then
+            echo -e "${GRAY}Refreshing application list...${NC}" >&2
+        fi
+        first_scan=false
 
         local apps_file=""
         if ! apps_file=$(scan_applications); then
@@ -819,10 +832,10 @@ main() {
             local name_width=$(get_display_width "$app_name")
             [[ $name_width -gt $max_name_display_width ]] && max_name_display_width=$name_width
             local size_display="$size"
-            [[ -z "$size_display" || "$size_display" == "0" || "$size_display" == "N/A" || "$size_display" == "Unknown" ]] && size_display="..."
+            [[ -z "$size_display" || "$size_display" == "0" || "$size_display" == "Unknown" ]] && size_display="N/A"
             [[ ${#size_display} -gt $max_size_width ]] && max_size_width=${#size_display}
             local last_display=$(format_last_used_summary "$last_used")
-            [[ -z "$last_display" || "$last_display" == "Unknown" || "$last_display" == "Never" ]] && last_display="..."
+            [[ -z "$last_display" || "$last_display" == "Never" ]] && last_display="Unknown"
             [[ ${#last_display} -gt $max_last_width ]] && max_last_width=${#last_display}
         done
         ((max_size_width < 5)) && max_size_width=5
@@ -859,13 +872,13 @@ main() {
             [[ $current_width -gt $max_name_display_width ]] && max_name_display_width=$current_width
 
             local size_display="$size"
-            if [[ -z "$size_display" || "$size_display" == "0" || "$size_display" == "N/A" || "$size_display" == "Unknown" ]]; then
-                size_display="..."
+            if [[ -z "$size_display" || "$size_display" == "0" || "$size_display" == "Unknown" ]]; then
+                size_display="N/A"
             fi
 
             local last_display
             last_display=$(format_last_used_summary "$last_used")
-            [[ -z "$last_display" || "$last_display" == "Unknown" || "$last_display" == "Never" ]] && last_display="..."
+            [[ -z "$last_display" || "$last_display" == "Never" ]] && last_display="Unknown"
 
             summary_rows+=("$display_name|$size_display|$last_display")
         done
