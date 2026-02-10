@@ -197,6 +197,7 @@ clean_xcode_documentation_cache() {
         sorted_entries+=("${line#* }")
     done < <(
         for entry in "${index_entries[@]}"; do
+            local mtime
             mtime=$(stat -f%m "$entry" 2> /dev/null || echo "0")
             printf '%s %s\n' "$mtime" "$entry"
         done | sort -rn
