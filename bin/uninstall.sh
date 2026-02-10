@@ -71,6 +71,26 @@ uninstall_relative_time_from_epoch() {
     fi
 }
 
+uninstall_normalize_size_display() {
+    local size="${1:-}"
+    if [[ -z "$size" || "$size" == "0" || "$size" == "Unknown" ]]; then
+        echo "N/A"
+        return 0
+    fi
+    echo "$size"
+}
+
+uninstall_normalize_last_used_display() {
+    local last_used="${1:-}"
+    local display
+    display=$(format_last_used_summary "$last_used")
+    if [[ -z "$display" || "$display" == "Never" ]]; then
+        echo "Unknown"
+        return 0
+    fi
+    echo "$display"
+}
+
 uninstall_resolve_display_name() {
     local app_path="$1"
     local app_name="$2"
@@ -831,11 +851,11 @@ main() {
             IFS='|' read -r _ _ app_name _ size last_used _ <<< "$selected_app"
             local name_width=$(get_display_width "$app_name")
             [[ $name_width -gt $max_name_display_width ]] && max_name_display_width=$name_width
-            local size_display="$size"
-            [[ -z "$size_display" || "$size_display" == "0" || "$size_display" == "Unknown" ]] && size_display="N/A"
+            local size_display
+            size_display=$(uninstall_normalize_size_display "$size")
             [[ ${#size_display} -gt $max_size_width ]] && max_size_width=${#size_display}
-            local last_display=$(format_last_used_summary "$last_used")
-            [[ -z "$last_display" || "$last_display" == "Never" ]] && last_display="Unknown"
+            local last_display
+            last_display=$(uninstall_normalize_last_used_display "$last_used")
             [[ ${#last_display} -gt $max_last_width ]] && max_last_width=${#last_display}
         done
         ((max_size_width < 5)) && max_size_width=5
@@ -871,14 +891,11 @@ main() {
             current_width=$(get_display_width "$display_name")
             [[ $current_width -gt $max_name_display_width ]] && max_name_display_width=$current_width
 
-            local size_display="$size"
-            if [[ -z "$size_display" || "$size_display" == "0" || "$size_display" == "Unknown" ]]; then
-                size_display="N/A"
-            fi
+            local size_display
+            size_display=$(uninstall_normalize_size_display "$size")
 
             local last_display
-            last_display=$(format_last_used_summary "$last_used")
-            [[ -z "$last_display" || "$last_display" == "Never" ]] && last_display="Unknown"
+            last_display=$(uninstall_normalize_last_used_display "$last_used")
 
             summary_rows+=("$display_name|$size_display|$last_display")
         done
