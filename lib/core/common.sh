@@ -18,6 +18,7 @@ source "$_MOLE_CORE_DIR/log.sh"
 
 source "$_MOLE_CORE_DIR/timeout.sh"
 source "$_MOLE_CORE_DIR/file_ops.sh"
+source "$_MOLE_CORE_DIR/help.sh"
 source "$_MOLE_CORE_DIR/ui.sh"
 source "$_MOLE_CORE_DIR/app_protection.sh"
 
