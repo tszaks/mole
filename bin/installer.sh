@@ -47,9 +47,9 @@ readonly MAX_ZIP_ENTRIES=50
 ZIP_LIST_CMD=()
 IN_ALT_SCREEN=0
 
-if command -v zipinfo >/dev/null 2>&1; then
+if command -v zipinfo > /dev/null 2>&1; then
     ZIP_LIST_CMD=(zipinfo -1)
-elif command -v unzip >/dev/null 2>&1; then
+elif command -v unzip > /dev/null 2>&1; then
     ZIP_LIST_CMD=(unzip -Z -1)
 fi
 
@@ -62,7 +62,7 @@ is_installer_zip() {
 
     [[ ${#ZIP_LIST_CMD[@]} -gt 0 ]] || return 1
 
-    if ! "${ZIP_LIST_CMD[@]}" "$zip" 2>/dev/null |
+    if ! "${ZIP_LIST_CMD[@]}" "$zip" 2> /dev/null |
         head -n "$cap" |
         awk '
             /\.(app|pkg|dmg|xip)(\/|$)/ { found=1; exit 0 }
@@ -79,15 +79,15 @@ handle_candidate_file() {
 
     [[ -L "$file" ]] && return 0 # Skip symlinks explicitly
     case "$file" in
-    *.dmg | *.pkg | *.mpkg | *.iso | *.xip)
-        echo "$file"
-        ;;
-    *.zip)
-        [[ -r "$file" ]] || return 0
-        if is_installer_zip "$file" 2>/dev/null; then
+        *.dmg | *.pkg | *.mpkg | *.iso | *.xip)
             echo "$file"
-        fi
-        ;;
+            ;;
+        *.zip)
+            [[ -r "$file" ]] || return 0
+            if is_installer_zip "$file" 2> /dev/null; then
+                echo "$file"
+            fi
+            ;;
     esac
 }
 
@@ -99,13 +99,13 @@ scan_installers_in_path() {
 
     local file
 
-    if command -v fd >/dev/null 2>&1; then
+    if command -v fd > /dev/null 2>&1; then
         while IFS= read -r file; do
             handle_candidate_file "$file"
         done < <(
             fd --no-ignore --hidden --type f --max-depth "$max_depth" \
                 -e dmg -e pkg -e mpkg -e iso -e xip -e zip \
-                . "$path" 2>/dev/null || true
+                . "$path" 2> /dev/null || true
         )
     else
         while IFS= read -r file; do
@@ -114,7 +114,7 @@ scan_installers_in_path() {
             find "$path" -maxdepth "$max_depth" -type f \
                 \( -name '*.dmg' -o -name '*.pkg' -o -name '*.mpkg' \
                 -o -name '*.iso' -o -name '*.xip' -o -name '*.zip' \) \
-                2>/dev/null || true
+                2> /dev/null || true
         )
     fi
 }
@@ -142,23 +142,23 @@ get_source_display() {
 
     # Match against known paths and return friendly names
     case "$dir_path" in
-    "$HOME/Downloads"*) echo "Downloads" ;;
-    "$HOME/Desktop"*) echo "Desktop" ;;
-    "$HOME/Documents"*) echo "Documents" ;;
-    "$HOME/Public"*) echo "Public" ;;
-    "$HOME/Library/Downloads"*) echo "Library" ;;
-    "/Users/Shared"*) echo "Shared" ;;
-    "$HOME/Library/Caches/Homebrew"*) echo "Homebrew" ;;
-    "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Downloads"*) echo "iCloud" ;;
-    "$HOME/Library/Containers/com.apple.mail"*) echo "Mail" ;;
-    *"Telegram Desktop"*) echo "Telegram" ;;
-    *) echo "${dir_path##*/}" ;;
+        "$HOME/Downloads"*) echo "Downloads" ;;
+        "$HOME/Desktop"*) echo "Desktop" ;;
+        "$HOME/Documents"*) echo "Documents" ;;
+        "$HOME/Public"*) echo "Public" ;;
+        "$HOME/Library/Downloads"*) echo "Library" ;;
+        "/Users/Shared"*) echo "Shared" ;;
+        "$HOME/Library/Caches/Homebrew"*) echo "Homebrew" ;;
+        "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Downloads"*) echo "iCloud" ;;
+        "$HOME/Library/Containers/com.apple.mail"*) echo "Mail" ;;
+        *"Telegram Desktop"*) echo "Telegram" ;;
+        *) echo "${dir_path##*/}" ;;
     esac
 }
 
 get_terminal_width() {
     if [[ $TERMINAL_WIDTH -le 0 ]]; then
-        TERMINAL_WIDTH=$(tput cols 2>/dev/null || echo 80)
+        TERMINAL_WIDTH=$(tput cols 2> /dev/null || echo 80)
     fi
     echo "$TERMINAL_WIDTH"
 }
@@ -291,11 +291,11 @@ select_installers() {
     _get_items_per_page() {
         local term_height=24
         if [[ -t 0 ]] || [[ -t 2 ]]; then
-            term_height=$(stty size </dev/tty 2>/dev/null | awk '{print $1}')
+            term_height=$(stty size < /dev/tty 2> /dev/null | awk '{print $1}')
         fi
         if [[ -z "$term_height" || $term_height -le 0 ]]; then
-            if command -v tput >/dev/null 2>&1; then
-                term_height=$(tput lines 2>/dev/null || echo "24")
+            if command -v tput > /dev/null 2>&1; then
+                term_height=$(tput lines 2> /dev/null || echo "24")
             else
                 term_height=24
             fi
@@ -322,8 +322,8 @@ select_installers() {
     done
 
     local original_stty=""
-    if [[ -t 0 ]] && command -v stty >/dev/null 2>&1; then
-        original_stty=$(stty -g 2>/dev/null || echo "")
+    if [[ -t 0 ]] && command -v stty > /dev/null 2>&1; then
+        original_stty=$(stty -g 2> /dev/null || echo "")
     fi
 
     restore_terminal() {
@@ -334,7 +334,7 @@ select_installers() {
         fi
         show_cursor
         if [[ -n "${original_stty:-}" ]]; then
-            stty "${original_stty}" 2>/dev/null || stty sane 2>/dev/null || true
+            stty "${original_stty}" 2> /dev/null || stty sane 2> /dev/null || true
         fi
     }
 
@@ -417,7 +417,7 @@ select_installers() {
 
     trap restore_terminal EXIT
     trap handle_interrupt INT TERM
-    stty -echo -icanon intr ^C 2>/dev/null || true
+    stty -echo -icanon intr ^C 2> /dev/null || true
     hide_cursor
     if [[ -t 1 ]]; then
         printf "\033[2J\033[H" >&2
@@ -429,75 +429,75 @@ select_installers() {
 
         IFS= read -r -s -n1 key || key=""
         case "$key" in
-        $'\x1b')
-            IFS= read -r -s -n1 -t 1 key2 || key2=""
-            if [[ "$key2" == "[" ]]; then
-                IFS= read -r -s -n1 -t 1 key3 || key3=""
-                case "$key3" in
-                A) # Up arrow
-                    if [[ $cursor_pos -gt 0 ]]; then
-                        ((cursor_pos--))
-                    elif [[ $top_index -gt 0 ]]; then
-                        ((top_index--))
+            $'\x1b')
+                IFS= read -r -s -n1 -t 1 key2 || key2=""
+                if [[ "$key2" == "[" ]]; then
+                    IFS= read -r -s -n1 -t 1 key3 || key3=""
+                    case "$key3" in
+                        A) # Up arrow
+                            if [[ $cursor_pos -gt 0 ]]; then
+                                ((cursor_pos--))
+                            elif [[ $top_index -gt 0 ]]; then
+                                ((top_index--))
+                            fi
+                            ;;
+                        B) # Down arrow
+                            local absolute_index=$((top_index + cursor_pos))
+                            local last_index=$((total_items - 1))
+                            if [[ $absolute_index -lt $last_index ]]; then
+                                local visible_count=$((total_items - top_index))
+                                [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
+                                if [[ $cursor_pos -lt $((visible_count - 1)) ]]; then
+                                    ((cursor_pos++))
+                                elif [[ $((top_index + visible_count)) -lt $total_items ]]; then
+                                    ((top_index++))
+                                fi
+                            fi
+                            ;;
+                    esac
+                else
+                    # ESC alone
+                    restore_terminal
+                    return 1
+                fi
+                ;;
+            " ") # Space - toggle current item
+                local idx=$((top_index + cursor_pos))
+                if [[ ${selected[idx]} == true ]]; then
+                    selected[idx]=false
+                else
+                    selected[idx]=true
+                fi
+                ;;
+            "a" | "A") # Select all
+                for ((i = 0; i < total_items; i++)); do
+                    selected[i]=true
+                done
+                ;;
+            "i" | "I") # Invert selection
+                for ((i = 0; i < total_items; i++)); do
+                    if [[ ${selected[i]} == true ]]; then
+                        selected[i]=false
+                    else
+                        selected[i]=true
                     fi
-                    ;;
-                B) # Down arrow
-                    local absolute_index=$((top_index + cursor_pos))
-                    local last_index=$((total_items - 1))
-                    if [[ $absolute_index -lt $last_index ]]; then
-                        local visible_count=$((total_items - top_index))
-                        [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
-                        if [[ $cursor_pos -lt $((visible_count - 1)) ]]; then
-                            ((cursor_pos++))
-                        elif [[ $((top_index + visible_count)) -lt $total_items ]]; then
-                            ((top_index++))
-                        fi
-                    fi
-                    ;;
-                esac
-            else
-                # ESC alone
+                done
+                ;;
+            "q" | "Q" | $'\x03') # Quit or Ctrl-C
                 restore_terminal
                 return 1
-            fi
-            ;;
-        " ") # Space - toggle current item
-            local idx=$((top_index + cursor_pos))
-            if [[ ${selected[idx]} == true ]]; then
-                selected[idx]=false
-            else
-                selected[idx]=true
-            fi
-            ;;
-        "a" | "A") # Select all
-            for ((i = 0; i < total_items; i++)); do
-                selected[i]=true
-            done
-            ;;
-        "i" | "I") # Invert selection
-            for ((i = 0; i < total_items; i++)); do
-                if [[ ${selected[i]} == true ]]; then
-                    selected[i]=false
-                else
-                    selected[i]=true
-                fi
-            done
-            ;;
-        "q" | "Q" | $'\x03') # Quit or Ctrl-C
-            restore_terminal
-            return 1
-            ;;
-        "" | $'\n' | $'\r') # Enter - confirm
-            MOLE_SELECTION_RESULT=""
-            for ((i = 0; i < total_items; i++)); do
-                if [[ ${selected[i]} == true ]]; then
-                    [[ -n "$MOLE_SELECTION_RESULT" ]] && MOLE_SELECTION_RESULT+=","
-                    MOLE_SELECTION_RESULT+="$i"
-                fi
-            done
-            restore_terminal
-            return 0
-            ;;
+                ;;
+            "" | $'\n' | $'\r') # Enter - confirm
+                MOLE_SELECTION_RESULT=""
+                for ((i = 0; i < total_items; i++)); do
+                    if [[ ${selected[i]} == true ]]; then
+                        [[ -n "$MOLE_SELECTION_RESULT" ]] && MOLE_SELECTION_RESULT+=","
+                        MOLE_SELECTION_RESULT+="$i"
+                    fi
+                done
+                restore_terminal
+                return 0
+                ;;
         esac
     done
 }
@@ -522,7 +522,7 @@ show_installer_menu() {
 delete_selected_installers() {
     # Parse selection indices
     local -a selected_indices=()
-    [[ -n "$MOLE_SELECTION_RESULT" ]] && IFS=',' read -ra selected_indices <<<"$MOLE_SELECTION_RESULT"
+    [[ -n "$MOLE_SELECTION_RESULT" ]] && IFS=',' read -ra selected_indices <<< "$MOLE_SELECTION_RESULT"
 
     if [[ ${#selected_indices[@]} -eq 0 ]]; then
         return 1
@@ -556,16 +556,16 @@ delete_selected_installers() {
 
     IFS= read -r -s -n1 confirm || confirm=""
     case "$confirm" in
-    $'\e' | q | Q)
-        return 1
-        ;;
-    "" | $'\n' | $'\r')
-        printf "\r\033[K" # Clear prompt line
-        echo ""           # Single line break
-        ;;
-    *)
-        return 1
-        ;;
+        $'\e' | q | Q)
+            return 1
+            ;;
+        "" | $'\n' | $'\r')
+            printf "\r\033[K" # Clear prompt line
+            echo ""           # Single line break
+            ;;
+        *)
+            return 1
+            ;;
     esac
 
     # Delete each selected installer with spinner
@@ -668,17 +668,17 @@ show_summary() {
 main() {
     for arg in "$@"; do
         case "$arg" in
-        "--help" | "-h")
-            show_installer_help
-            exit 0
-            ;;
-        "--debug")
-            export MO_DEBUG=1
-            ;;
-        *)
-            echo "Unknown option: $arg"
-            exit 1
-            ;;
+            "--help" | "-h")
+                show_installer_help
+                exit 0
+                ;;
+            "--debug")
+                export MO_DEBUG=1
+                ;;
+            *)
+                echo "Unknown option: $arg"
+                exit 1
+                ;;
         esac
     done
 
@@ -688,15 +688,15 @@ main() {
     show_cursor
 
     case $exit_code in
-    0)
-        show_summary
-        ;;
-    1)
-        printf '\n'
-        ;;
-    2)
-        # Already handled by collect_installers
-        ;;
+        0)
+            show_summary
+            ;;
+        1)
+            printf '\n'
+            ;;
+        2)
+            # Already handled by collect_installers
+            ;;
     esac
 
     return 0

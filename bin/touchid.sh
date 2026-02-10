@@ -26,21 +26,21 @@ readonly PAM_TID_LINE="auth       sufficient     pam_tid.so"
 is_touchid_configured() {
     # Check sudo_local first
     if [[ -f "$PAM_SUDO_LOCAL_FILE" ]]; then
-        grep -q "pam_tid.so" "$PAM_SUDO_LOCAL_FILE" 2>/dev/null && return 0
+        grep -q "pam_tid.so" "$PAM_SUDO_LOCAL_FILE" 2> /dev/null && return 0
     fi
 
     # Fallback to standard sudo file
     if [[ ! -f "$PAM_SUDO_FILE" ]]; then
         return 1
     fi
-    grep -q "pam_tid.so" "$PAM_SUDO_FILE" 2>/dev/null
+    grep -q "pam_tid.so" "$PAM_SUDO_FILE" 2> /dev/null
 }
 
 # Check if system supports Touch ID
 supports_touchid() {
     # Check if bioutil exists and has Touch ID capability
-    if command -v bioutil &>/dev/null; then
-        bioutil -r 2>/dev/null | grep -q "Touch ID" && return 0
+    if command -v bioutil &> /dev/null; then
+        bioutil -r 2> /dev/null | grep -q "Touch ID" && return 0
     fi
 
     # Fallback: check if running on Apple Silicon or modern Intel Mac
@@ -52,7 +52,7 @@ supports_touchid() {
 
     # For Intel Macs, check if it's 2018 or later (approximation)
     local model_year
-    model_year=$(system_profiler SPHardwareDataType 2>/dev/null | grep "Model Identifier" | grep -o "[0-9]\{4\}" | head -1)
+    model_year=$(system_profiler SPHardwareDataType 2> /dev/null | grep "Model Identifier" | grep -o "[0-9]\{4\}" | head -1)
     if [[ -n "$model_year" ]] && [[ "$model_year" -ge 2018 ]]; then
         return 0
     fi
@@ -93,8 +93,8 @@ enable_touchid() {
             if grep -q "pam_tid.so" "$PAM_SUDO_FILE"; then
                 # Clean up legacy config
                 temp_file=$(create_temp_file)
-                grep -v "pam_tid.so" "$PAM_SUDO_FILE" >"$temp_file"
-                if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2>/dev/null; then
+                grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
+                if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2> /dev/null; then
                     echo -e "${GREEN}${ICON_SUCCESS} Cleanup legacy configuration${NC}"
                 fi
             fi
@@ -113,8 +113,8 @@ enable_touchid() {
         local write_success=false
         if [[ ! -f "$PAM_SUDO_LOCAL_FILE" ]]; then
             # Create the file
-            echo "# sudo_local: local customizations for sudo" | sudo tee "$PAM_SUDO_LOCAL_FILE" >/dev/null
-            echo "$PAM_TID_LINE" | sudo tee -a "$PAM_SUDO_LOCAL_FILE" >/dev/null
+            echo "# sudo_local: local customizations for sudo" | sudo tee "$PAM_SUDO_LOCAL_FILE" > /dev/null
+            echo "$PAM_TID_LINE" | sudo tee -a "$PAM_SUDO_LOCAL_FILE" > /dev/null
             sudo chmod 444 "$PAM_SUDO_LOCAL_FILE"
             sudo chown root:wheel "$PAM_SUDO_LOCAL_FILE"
             write_success=true
@@ -123,7 +123,7 @@ enable_touchid() {
             if ! grep -q "pam_tid.so" "$PAM_SUDO_LOCAL_FILE"; then
                 temp_file=$(create_temp_file)
                 cp "$PAM_SUDO_LOCAL_FILE" "$temp_file"
-                echo "$PAM_TID_LINE" >>"$temp_file"
+                echo "$PAM_TID_LINE" >> "$temp_file"
                 sudo mv "$temp_file" "$PAM_SUDO_LOCAL_FILE"
                 sudo chmod 444 "$PAM_SUDO_LOCAL_FILE"
                 sudo chown root:wheel "$PAM_SUDO_LOCAL_FILE"
@@ -137,7 +137,7 @@ enable_touchid() {
             # If we migrated from legacy, clean it up now
             if $is_legacy_configured; then
                 temp_file=$(create_temp_file)
-                grep -v "pam_tid.so" "$PAM_SUDO_FILE" >"$temp_file"
+                grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
                 sudo mv "$temp_file" "$PAM_SUDO_FILE"
                 log_success "Touch ID migrated to sudo_local"
             else
@@ -160,7 +160,7 @@ enable_touchid() {
 
     # Create backup only if it doesn't exist to preserve original state
     if [[ ! -f "${PAM_SUDO_FILE}.mole-backup" ]]; then
-        if ! sudo cp "$PAM_SUDO_FILE" "${PAM_SUDO_FILE}.mole-backup" 2>/dev/null; then
+        if ! sudo cp "$PAM_SUDO_FILE" "${PAM_SUDO_FILE}.mole-backup" 2> /dev/null; then
             log_error "Failed to create backup"
             return 1
         fi
@@ -178,7 +178,7 @@ enable_touchid() {
             inserted = 1
         }
         { print }
-    ' "$PAM_SUDO_FILE" >"$temp_file"
+    ' "$PAM_SUDO_FILE" > "$temp_file"
 
     # Verify content change
     if cmp -s "$PAM_SUDO_FILE" "$temp_file"; then
@@ -187,7 +187,7 @@ enable_touchid() {
     fi
 
     # Apply the changes
-    if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2>/dev/null; then
+    if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2> /dev/null; then
         log_success "Touch ID enabled, try: sudo ls"
         return 0
     else
@@ -210,13 +210,13 @@ disable_touchid() {
     if [[ -f "$PAM_SUDO_LOCAL_FILE" ]] && grep -q "pam_tid.so" "$PAM_SUDO_LOCAL_FILE"; then
         # Remove from sudo_local
         temp_file=$(create_temp_file)
-        grep -v "pam_tid.so" "$PAM_SUDO_LOCAL_FILE" >"$temp_file"
+        grep -v "pam_tid.so" "$PAM_SUDO_LOCAL_FILE" > "$temp_file"
 
-        if sudo mv "$temp_file" "$PAM_SUDO_LOCAL_FILE" 2>/dev/null; then
+        if sudo mv "$temp_file" "$PAM_SUDO_LOCAL_FILE" 2> /dev/null; then
             # Since we modified sudo_local, we should also check if it's in sudo file (legacy cleanup)
             if grep -q "pam_tid.so" "$PAM_SUDO_FILE"; then
                 temp_file=$(create_temp_file)
-                grep -v "pam_tid.so" "$PAM_SUDO_FILE" >"$temp_file"
+                grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
                 sudo mv "$temp_file" "$PAM_SUDO_FILE"
             fi
             echo -e "${GREEN}${ICON_SUCCESS} Touch ID disabled, removed from sudo_local${NC}"
@@ -232,7 +232,7 @@ disable_touchid() {
     if grep -q "pam_tid.so" "$PAM_SUDO_FILE"; then
         # Create backup only if it doesn't exist
         if [[ ! -f "${PAM_SUDO_FILE}.mole-backup" ]]; then
-            if ! sudo cp "$PAM_SUDO_FILE" "${PAM_SUDO_FILE}.mole-backup" 2>/dev/null; then
+            if ! sudo cp "$PAM_SUDO_FILE" "${PAM_SUDO_FILE}.mole-backup" 2> /dev/null; then
                 log_error "Failed to create backup"
                 return 1
             fi
@@ -240,9 +240,9 @@ disable_touchid() {
 
         # Remove pam_tid.so line
         temp_file=$(create_temp_file)
-        grep -v "pam_tid.so" "$PAM_SUDO_FILE" >"$temp_file"
+        grep -v "pam_tid.so" "$PAM_SUDO_FILE" > "$temp_file"
 
-        if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2>/dev/null; then
+        if sudo mv "$temp_file" "$PAM_SUDO_FILE" 2> /dev/null; then
             echo -e "${GREEN}${ICON_SUCCESS} Touch ID disabled${NC}"
             echo ""
             return 0
@@ -268,17 +268,17 @@ show_menu() {
         echo ""
 
         case "$key" in
-        $'\e') # ESC
-            return 0
-            ;;
-        "" | $'\n' | $'\r')   # Enter
-            printf "\r\033[K" # Clear the prompt line
-            disable_touchid
-            ;;
-        *)
-            echo ""
-            log_error "Invalid key"
-            ;;
+            $'\e') # ESC
+                return 0
+                ;;
+            "" | $'\n' | $'\r')   # Enter
+                printf "\r\033[K" # Clear the prompt line
+                disable_touchid
+                ;;
+            *)
+                echo ""
+                log_error "Invalid key"
+                ;;
         esac
     else
         echo -ne "${PURPLE}☛${NC} Press ${GREEN}Enter${NC} to enable, ${GRAY}Q${NC} to quit: "
@@ -286,17 +286,17 @@ show_menu() {
         drain_pending_input # Clean up any escape sequence remnants
 
         case "$key" in
-        $'\e') # ESC
-            return 0
-            ;;
-        "" | $'\n' | $'\r')   # Enter
-            printf "\r\033[K" # Clear the prompt line
-            enable_touchid
-            ;;
-        *)
-            echo ""
-            log_error "Invalid key"
-            ;;
+            $'\e') # ESC
+                return 0
+                ;;
+            "" | $'\n' | $'\r')   # Enter
+                printf "\r\033[K" # Clear the prompt line
+                enable_touchid
+                ;;
+            *)
+                echo ""
+                log_error "Invalid key"
+                ;;
         esac
     fi
 }
@@ -306,25 +306,25 @@ main() {
     local command="${1:-}"
 
     case "$command" in
-    "--help" | "-h")
-        show_touchid_help
-        ;;
-    enable)
-        enable_touchid
-        ;;
-    disable)
-        disable_touchid
-        ;;
-    status)
-        show_status
-        ;;
-    "")
-        show_menu
-        ;;
-    *)
-        log_error "Unknown command: $command"
-        exit 1
-        ;;
+        "--help" | "-h")
+            show_touchid_help
+            ;;
+        enable)
+            enable_touchid
+            ;;
+        disable)
+            disable_touchid
+            ;;
+        status)
+            show_status
+            ;;
+        "")
+            show_menu
+            ;;
+        *)
+            log_error "Unknown command: $command"
+            exit 1
+            ;;
     esac
 }
 
