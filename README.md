@@ -68,7 +68,7 @@ mo optimize --dry-run        # Preview optimization actions
 mo optimize --debug          # Run with detailed operation logs
 mo optimize --whitelist      # Manage protected optimization rules
 mo purge --paths             # Configure project scan directories
-mo analyze --exclude-volumes # Skip external drives under /Volumes in overview
+mo analyze /Volumes          # Analyze external drives only
 ```
 
 ## Tips
@@ -150,7 +150,7 @@ Use `mo optimize --whitelist` to exclude specific optimizations.
 
 ### Disk Space Analyzer
 
-Use `--exclude-volumes` to skip external drives under `/Volumes` in the overview (faster when many volumes are attached).
+By default, overview skips external drives mounted under `/Volumes` for faster startup. To inspect external drives, run `mo analyze /Volumes` (or a specific mount path).
 
 ```bash
 $ mo analyze
