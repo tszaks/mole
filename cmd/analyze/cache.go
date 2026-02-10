@@ -332,8 +332,8 @@ func removeOverviewSnapshot(path string) {
 }
 
 // prefetchOverviewCache warms overview cache in background.
-func prefetchOverviewCache(ctx context.Context) {
-	entries := createOverviewEntries()
+func prefetchOverviewCache(ctx context.Context, excludeVolumes bool) {
+	entries := createOverviewEntries(excludeVolumes)
 
 	var needScan []string
 	for _, entry := range entries {

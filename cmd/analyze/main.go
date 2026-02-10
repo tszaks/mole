@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
@@ -122,6 +123,7 @@ type model struct {
 	largeMultiSelected   map[string]bool // Track multi-selected large files by path (safer than index)
 	totalFiles           int64           // Total files found in current/last scan
 	lastTotalFiles       int64           // Total files from previous scan (for progress bar)
+	excludeVolumes       bool            // Skip /Volumes in overview (--exclude-volumes)
 }
 
 func (m model) inOverviewMode() bool {
@@ -129,9 +131,13 @@ func (m model) inOverviewMode() bool {
 }
 
 func main() {
+	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	excludeVolumes := fs.Bool("exclude-volumes", false, "exclude /Volumes (external drives) from overview")
+	_ = fs.Parse(os.Args[1:])
+
 	target := os.Getenv("MO_ANALYZE_PATH")
-	if target == "" && len(os.Args) > 1 {
-		target = os.Args[1]
+	if target == "" && fs.NArg() > 0 {
+		target = fs.Arg(0)
 	}
 
 	var abs string
@@ -153,16 +159,16 @@ func main() {
 	// Warm overview cache in background.
 	prefetchCtx, prefetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer prefetchCancel()
-	go prefetchOverviewCache(prefetchCtx)
+	go prefetchOverviewCache(prefetchCtx, *excludeVolumes)
 
-	p := tea.NewProgram(newModel(abs, isOverview), tea.WithAltScreen())
+	p := tea.NewProgram(newModel(abs, isOverview, *excludeVolumes), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "analyzer error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func newModel(path string, isOverview bool) model {
+func newModel(path string, isOverview bool, excludeVolumes bool) model {
 	var filesScanned, dirsScanned, bytesScanned int64
 	currentPath := &atomic.Value{}
 	currentPath.Store("")
@@ -189,6 +195,7 @@ func newModel(path string, isOverview bool) model {
 		overviewScanningSet:  make(map[string]bool),
 		multiSelected:        make(map[string]bool),
 		largeMultiSelected:   make(map[string]bool),
+		excludeVolumes:       excludeVolumes,
 	}
 
 	if isOverview {
@@ -214,7 +221,7 @@ func newModel(path string, isOverview bool) model {
 	return m
 }
 
-func createOverviewEntries() []dirEntry {
+func createOverviewEntries(excludeVolumes bool) []dirEntry {
 	home := os.Getenv("HOME")
 	entries := []dirEntry{}
 
@@ -233,8 +240,8 @@ func createOverviewEntries() []dirEntry {
 		dirEntry{Name: "System Library", Path: "/Library", IsDir: true, Size: -1},
 	)
 
-	// Include Volumes only when real mounts exist.
-	if hasUsefulVolumeMounts("/Volumes") {
+	// Include Volumes only when real mounts exist and not excluded by --exclude-volumes.
+	if !excludeVolumes && hasUsefulVolumeMounts("/Volumes") {
 		entries = append(entries, dirEntry{Name: "Volumes", Path: "/Volumes", IsDir: true, Size: -1})
 	}
 
@@ -268,7 +275,7 @@ func hasUsefulVolumeMounts(path string) bool {
 }
 
 func (m *model) hydrateOverviewEntries() {
-	m.entries = createOverviewEntries()
+	m.entries = createOverviewEntries(m.excludeVolumes)
 	if m.overviewSizeCache == nil {
 		m.overviewSizeCache = make(map[string]int64)
 	}
