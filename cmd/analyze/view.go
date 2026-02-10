@@ -220,11 +220,7 @@ func (m model) View() string {
 					if entry.IsDir && isCleanableDir(entry.Path) {
 						hintLabel = fmt.Sprintf("%s🧹%s", colorYellow, colorReset)
 					} else {
-						lastAccess := entry.LastAccess
-						if lastAccess.IsZero() && entry.Path != "" {
-							lastAccess = getLastAccessTime(entry.Path)
-						}
-						if unusedTime := formatUnusedTime(lastAccess); unusedTime != "" {
+						if unusedTime := formatUnusedTime(entry.LastAccess); unusedTime != "" {
 							hintLabel = fmt.Sprintf("%s%s%s", colorGray, unusedTime, colorReset)
 						}
 					}
@@ -309,11 +305,7 @@ func (m model) View() string {
 					if entry.IsDir && isCleanableDir(entry.Path) {
 						hintLabel = fmt.Sprintf("%s🧹%s", colorYellow, colorReset)
 					} else {
-						lastAccess := entry.LastAccess
-						if lastAccess.IsZero() && entry.Path != "" {
-							lastAccess = getLastAccessTime(entry.Path)
-						}
-						if unusedTime := formatUnusedTime(lastAccess); unusedTime != "" {
+						if unusedTime := formatUnusedTime(entry.LastAccess); unusedTime != "" {
 							hintLabel = fmt.Sprintf("%s%s%s", colorGray, unusedTime, colorReset)
 						}
 					}
