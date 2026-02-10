@@ -90,6 +90,7 @@ clean_dev_cloud() { :; }
 clean_dev_nix() { :; }
 clean_dev_shell() { :; }
 clean_dev_frontend() { :; }
+clean_xcode_documentation_cache() { :; }
 clean_dev_mobile() { :; }
 clean_dev_jvm() { :; }
 clean_dev_other_langs() { :; }

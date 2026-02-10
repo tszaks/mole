@@ -136,6 +136,53 @@ EOF
     [[ "$output" != *"NDK versions"* ]]
 }
 
+@test "clean_xcode_documentation_cache keeps newest DeveloperDocumentation index" {
+    local doc_root="$HOME/DocumentationCache"
+    mkdir -p "$doc_root"
+    touch "$doc_root/DeveloperDocumentation.index"
+    touch "$doc_root/DeveloperDocumentation-16.0.index"
+    touch -t 202402010000 "$doc_root/DeveloperDocumentation.index"
+    touch -t 202401010000 "$doc_root/DeveloperDocumentation-16.0.index"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DOCUMENTATION_CACHE_DIR="$doc_root" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() {
+    local description="${*: -1}"
+    local target="$1"
+    echo "CLEAN:$target:$description"
+}
+clean_xcode_documentation_cache
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CLEAN:$doc_root/DeveloperDocumentation-16.0.index:Xcode documentation cache (old indexes)"* ]]
+    [[ "$output" != *"CLEAN:$doc_root/DeveloperDocumentation.index:Xcode documentation cache (old indexes)"* ]]
+}
+
+@test "clean_xcode_documentation_cache skips when Xcode is running" {
+    local doc_root="$HOME/DocumentationCache"
+    mkdir -p "$doc_root"
+    touch "$doc_root/DeveloperDocumentation.index"
+    touch "$doc_root/DeveloperDocumentation-16.0.index"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DOCUMENTATION_CACHE_DIR="$doc_root" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 0; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN"; }
+clean_xcode_documentation_cache
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"skipping documentation cache cleanup"* ]]
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+}
+
 @test "check_rust_toolchains reports multiple toolchains" {
     run bash -c 'HOME=$(mktemp -d) && mkdir -p "$HOME/.rustup/toolchains"/{stable,nightly,1.75.0}-aarch64-apple-darwin && source "$0" && note_activity() { :; } && NC="" && GREEN="" && GRAY="" && YELLOW="" && ICON_SUCCESS="✓" && rustup() { :; } && export -f rustup && check_rust_toolchains' "$PROJECT_ROOT/lib/clean/dev.sh"
 

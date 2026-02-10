@@ -173,8 +173,56 @@ check_android_ndk() {
         "Android Studio → SDK Manager"
 }
 
+clean_xcode_documentation_cache() {
+    local doc_cache_root="${MOLE_XCODE_DOCUMENTATION_CACHE_DIR:-/Library/Developer/Xcode/DocumentationCache}"
+    [[ -d "$doc_cache_root" ]] || return 0
+
+    if pgrep -x "Xcode" > /dev/null 2>&1; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping documentation cache cleanup"
+        note_activity
+        return 0
+    fi
+
+    local -a index_entries=()
+    while IFS= read -r -d '' entry; do
+        index_entries+=("$entry")
+    done < <(command find "$doc_cache_root" -mindepth 1 -maxdepth 1 \( -name "DeveloperDocumentation.index" -o -name "DeveloperDocumentation*.index" \) -print0 2> /dev/null)
+
+    if [[ ${#index_entries[@]} -le 1 ]]; then
+        return 0
+    fi
+
+    local -a sorted_entries=()
+    while IFS= read -r line; do
+        sorted_entries+=("${line#* }")
+    done < <(
+        for entry in "${index_entries[@]}"; do
+            mtime=$(stat -f%m "$entry" 2> /dev/null || echo "0")
+            printf '%s %s\n' "$mtime" "$entry"
+        done | sort -rn
+    )
+
+    local -a stale_entries=()
+    local idx=0
+    local entry
+    for entry in "${sorted_entries[@]}"; do
+        if [[ $idx -eq 0 ]]; then
+            ((idx++))
+            continue
+        fi
+        stale_entries+=("$entry")
+        ((idx++))
+    done
+
+    if [[ ${#stale_entries[@]} -gt 0 ]]; then
+        safe_clean "${stale_entries[@]}" "Xcode documentation cache (old indexes)"
+        note_activity
+    fi
+}
+
 clean_dev_mobile() {
     check_android_ndk
+    clean_xcode_documentation_cache
 
     if command -v xcrun > /dev/null 2>&1; then
         debug_log "Checking for unavailable Xcode simulators"
