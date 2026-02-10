@@ -10,6 +10,11 @@ if [[ -n "${MOLE_FILE_OPS_LOADED:-}" ]]; then
 fi
 readonly MOLE_FILE_OPS_LOADED=1
 
+# Error codes for removal operations
+readonly MOLE_ERR_SIP_PROTECTED=10
+readonly MOLE_ERR_AUTH_FAILED=11
+readonly MOLE_ERR_READONLY_FS=12
+
 # Ensure dependencies are loaded
 _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "${MOLE_BASE_LOADED:-}" ]]; then
@@ -24,6 +29,35 @@ if [[ -z "${MOLE_TIMEOUT_LOADED:-}" ]]; then
     # shellcheck source=lib/core/timeout.sh
     source "$_MOLE_CORE_DIR/timeout.sh"
 fi
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+# Format duration in seconds to human readable string (e.g., "5 days", "2 months")
+format_duration_human() {
+    local seconds="${1:-0}"
+    [[ ! "$seconds" =~ ^[0-9]+$ ]] && seconds=0
+
+    local days=$((seconds / 86400))
+
+    if [[ $days -eq 0 ]]; then
+        echo "today"
+    elif [[ $days -eq 1 ]]; then
+        echo "1 day"
+    elif [[ $days -lt 7 ]]; then
+        echo "${days} days"
+    elif [[ $days -lt 30 ]]; then
+        local weeks=$((days / 7))
+        [[ $weeks -eq 1 ]] && echo "1 week" || echo "${weeks} weeks"
+    elif [[ $days -lt 365 ]]; then
+        local months=$((days / 30))
+        [[ $months -eq 1 ]] && echo "1 month" || echo "${months} months"
+    else
+        local years=$((days / 365))
+        [[ $years -eq 1 ]] && echo "1 year" || echo "${years} years"
+    fi
+}
 
 # ============================================================================
 # Path Validation
@@ -235,28 +269,54 @@ safe_remove() {
     fi
 }
 
+# Safe symlink removal (for pre-validated symlinks only)
+safe_remove_symlink() {
+    local path="$1"
+    local use_sudo="${2:-false}"
+
+    if [[ ! -L "$path" ]]; then
+        return 1
+    fi
+
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        debug_log "[DRY RUN] Would remove symlink: $path"
+        return 0
+    fi
+
+    local rm_exit=0
+    if [[ "$use_sudo" == "true" ]]; then
+        sudo rm "$path" 2> /dev/null || rm_exit=$?
+    else
+        rm "$path" 2> /dev/null || rm_exit=$?
+    fi
+
+    if [[ $rm_exit -eq 0 ]]; then
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "REMOVED" "$path" "symlink"
+        return 0
+    else
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "symlink removal failed"
+        return 1
+    fi
+}
+
 # Safe sudo removal with symlink protection
 safe_sudo_remove() {
     local path="$1"
 
-    # Validate path
     if ! validate_path_for_deletion "$path"; then
         log_error "Path validation failed for sudo remove: $path"
         return 1
     fi
 
-    # Check if path exists
     if [[ ! -e "$path" ]]; then
         return 0
     fi
 
-    # Additional check: reject symlinks for sudo operations
     if [[ -L "$path" ]]; then
         log_error "Refusing to sudo remove symlink: $path"
         return 1
     fi
 
-    # Dry-run mode: log but don't delete
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         if [[ "${MO_DEBUG:-}" == "1" ]]; then
             local file_type="file"
@@ -278,21 +338,21 @@ safe_sudo_remove() {
                     local now
                     now=$(date +%s 2> /dev/null || echo "0")
                     if [[ "$mod_time" -gt 0 && "$now" -gt 0 ]]; then
-                        file_age=$(((now - mod_time) / 86400))
+                        local age_seconds=$((now - mod_time))
+                        file_age=$(format_duration_human "$age_seconds")
                     fi
                 fi
             fi
 
-            debug_file_action "[DRY RUN] Would remove, sudo" "$path" "$file_size" "$file_age"
+            log_info "[DRY-RUN] Would sudo remove: $file_type $path"
+            [[ -n "$file_size" ]] && log_info "  Size: $file_size"
+            [[ -n "$file_age" ]] && log_info "  Age: $file_age"
         else
-            debug_log "[DRY RUN] Would remove, sudo: $path"
+            log_info "[DRY-RUN] Would sudo remove: $path"
         fi
         return 0
     fi
 
-    debug_log "Removing, sudo: $path"
-
-    # Calculate size before deletion for logging
     local size_kb=0
     local size_human=""
     if oplog_enabled; then
@@ -304,15 +364,34 @@ safe_sudo_remove() {
         fi
     fi
 
-    # Perform the deletion
-    if sudo rm -rf "$path" 2> /dev/null; then # SAFE: safe_sudo_remove implementation
+    local output
+    local ret=0
+    output=$(sudo rm -rf "$path" 2>&1) || ret=$? # safe_remove
+
+    if [[ $ret -eq 0 ]]; then
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "REMOVED" "$path" "$size_human"
         return 0
-    else
-        log_error "Failed to remove, sudo: $path"
-        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "sudo error"
-        return 1
     fi
+
+    case "$output" in
+        *"Operation not permitted"*)
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "sip/mdm protected"
+            return "$MOLE_ERR_SIP_PROTECTED"
+            ;;
+        *"Read-only file system"*)
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "readonly filesystem"
+            return "$MOLE_ERR_READONLY_FS"
+            ;;
+        *"Sorry, try again"* | *"incorrect passphrase"* | *"incorrect credentials"*)
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "auth failed"
+            return "$MOLE_ERR_AUTH_FAILED"
+            ;;
+        *)
+            log_error "Failed to remove, sudo: $path"
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "sudo error"
+            return 1
+            ;;
+    esac
 }
 
 # ============================================================================
@@ -387,7 +466,12 @@ safe_sudo_find_delete() {
 
     debug_log "Finding, sudo, in $base_dir: $pattern, age: ${age_days}d, type: $type_filter"
 
-    local find_args=("-maxdepth" "5" "-name" "$pattern" "-type" "$type_filter")
+    local find_args=("-maxdepth" "5")
+    # Skip -name if pattern is "*" (matches everything anyway, but adds overhead)
+    if [[ "$pattern" != "*" ]]; then
+        find_args+=("-name" "$pattern")
+    fi
+    find_args+=("-type" "$type_filter")
     if [[ "$age_days" -gt 0 ]]; then
         find_args+=("-mtime" "+$age_days")
     fi
@@ -414,16 +498,13 @@ get_path_size_kb() {
         echo "0"
         return
     }
-    # Direct execution without timeout overhead - critical for performance in loops
-    # Use || echo 0 to ensure failure in du (e.g. permission error) doesn't exit script under set -e
-    # Pipefail would normally cause the pipeline to fail if du fails, but || handle catches it.
     local size
     size=$(command du -skP "$path" 2> /dev/null | awk 'NR==1 {print $1; exit}' || true)
 
-    # Ensure size is a valid number (fix for non-numeric du output)
     if [[ "$size" =~ ^[0-9]+$ ]]; then
         echo "$size"
     else
+        [[ "${MO_DEBUG:-}" == "1" ]] && debug_log "get_path_size_kb: Failed to get size for $path (returned: $size)"
         echo "0"
     fi
 }
@@ -442,4 +523,41 @@ calculate_total_size() {
     done <<< "$files"
 
     echo "$total_kb"
+}
+
+diagnose_removal_failure() {
+    local exit_code="$1"
+    local app_name="${2:-application}"
+
+    local reason=""
+    local suggestion=""
+    local touchid_file="/etc/pam.d/sudo"
+
+    case "$exit_code" in
+        "$MOLE_ERR_SIP_PROTECTED")
+            reason="protected by macOS (SIP/MDM)"
+            ;;
+        "$MOLE_ERR_AUTH_FAILED")
+            reason="authentication failed"
+            if [[ -f "$touchid_file" ]] && grep -q "pam_tid.so" "$touchid_file" 2> /dev/null; then
+                suggestion="Check your credentials or restart Terminal"
+            else
+                suggestion="Try 'mole touchid' to enable fingerprint auth"
+            fi
+            ;;
+        "$MOLE_ERR_READONLY_FS")
+            reason="filesystem is read-only"
+            suggestion="Check if disk needs repair"
+            ;;
+        *)
+            reason="permission denied"
+            if [[ -f "$touchid_file" ]] && grep -q "pam_tid.so" "$touchid_file" 2> /dev/null; then
+                suggestion="Try running again or check file ownership"
+            else
+                suggestion="Try 'mole touchid' or check with 'ls -l'"
+            fi
+            ;;
+    esac
+
+    echo "$reason|$suggestion"
 }

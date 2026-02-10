@@ -44,9 +44,10 @@ write_raycast_script() {
     local title="$2"
     local mo_bin="$3"
     local subcommand="$4"
-    local raw_cmd="\"${mo_bin}\" ${subcommand}"
-    local cmd_escaped="${raw_cmd//\\/\\\\}"
-    cmd_escaped="${cmd_escaped//\"/\\\"}"
+
+    local cmd_for_applescript="${mo_bin//\\/\\\\}"
+    cmd_for_applescript="${cmd_for_applescript//\"/\\\"}"
+
     cat > "$target" << EOF
 #!/bin/bash
 
@@ -59,12 +60,18 @@ write_raycast_script() {
 # Optional parameters:
 # @raycast.icon 🐹
 
+# ──────────────────────────────────────────────────────────
+# Script execution begins below
+# ──────────────────────────────────────────────────────────
+
 set -euo pipefail
 
 echo "🐹 Running ${title}..."
 echo ""
-CMD="${raw_cmd}"
-CMD_ESCAPED="${cmd_escaped}"
+
+MO_BIN="${mo_bin}"
+MO_SUBCOMMAND="${subcommand}"
+MO_BIN_ESCAPED="${cmd_for_applescript}"
 
 has_app() {
     local name="\$1"
@@ -113,8 +120,8 @@ launch_with_app() {
     case "\$app" in
         Terminal)
             if command -v osascript >/dev/null 2>&1; then
-                osascript <<'APPLESCRIPT'
-set targetCommand to "${cmd_escaped}"
+                osascript <<APPLESCRIPT
+set targetCommand to "\${MO_BIN_ESCAPED} \${MO_SUBCOMMAND}"
 tell application "Terminal"
     activate
     do script targetCommand
@@ -125,8 +132,8 @@ APPLESCRIPT
             ;;
         iTerm|iTerm2)
             if command -v osascript >/dev/null 2>&1; then
-                osascript <<'APPLESCRIPT'
-set targetCommand to "${cmd_escaped}"
+                osascript <<APPLESCRIPT
+set targetCommand to "\${MO_BIN_ESCAPED} \${MO_SUBCOMMAND}"
 tell application "iTerm2"
     activate
     try
@@ -150,52 +157,49 @@ APPLESCRIPT
             ;;
         Alacritty)
             if launcher_available "Alacritty" && command -v open >/dev/null 2>&1; then
-                open -na "Alacritty" --args -e /bin/zsh -lc "${raw_cmd}"
+                open -na "Alacritty" --args -e /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         Kitty)
             if has_bin "kitty"; then
-                kitty --hold /bin/zsh -lc "${raw_cmd}"
+                kitty --hold /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             elif [[ -x "/Applications/kitty.app/Contents/MacOS/kitty" ]]; then
-                "/Applications/kitty.app/Contents/MacOS/kitty" --hold /bin/zsh -lc "${raw_cmd}"
+                "/Applications/kitty.app/Contents/MacOS/kitty" --hold /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         WezTerm)
             if has_bin "wezterm"; then
-                wezterm start -- /bin/zsh -lc "${raw_cmd}"
+                wezterm start -- /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             elif [[ -x "/Applications/WezTerm.app/Contents/MacOS/wezterm" ]]; then
-                "/Applications/WezTerm.app/Contents/MacOS/wezterm" start -- /bin/zsh -lc "${raw_cmd}"
+                "/Applications/WezTerm.app/Contents/MacOS/wezterm" start -- /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         Ghostty)
-            if has_bin "ghostty"; then
-                ghostty --command "/bin/zsh" -- -lc "${raw_cmd}"
-                return \$?
-            elif [[ -x "/Applications/Ghostty.app/Contents/MacOS/ghostty" ]]; then
-                "/Applications/Ghostty.app/Contents/MacOS/ghostty" --command "/bin/zsh" -- -lc "${raw_cmd}"
+            if launcher_available "Ghostty" && command -v open >/dev/null 2>&1; then
+                open -na "Ghostty" --args -e /bin/zsh -lc "\${MO_BIN} \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         Hyper)
             if launcher_available "Hyper" && command -v open >/dev/null 2>&1; then
-                open -na "Hyper" --args /bin/zsh -lc "${raw_cmd}"
+                open -na "Hyper" --args /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         WindTerm)
             if launcher_available "WindTerm" && command -v open >/dev/null 2>&1; then
-                open -na "WindTerm" --args /bin/zsh -lc "${raw_cmd}"
+                open -na "WindTerm" --args /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
         Warp)
             if launcher_available "Warp" && command -v open >/dev/null 2>&1; then
-                open -na "Warp" --args /bin/zsh -lc "${raw_cmd}"
+                open -na "Warp" --args /bin/zsh -lc "\"\${MO_BIN}\" \${MO_SUBCOMMAND}"
                 return \$?
             fi
             ;;
@@ -204,7 +208,7 @@ APPLESCRIPT
 }
 
 if [[ -n "\${TERM:-}" && "\${TERM}" != "dumb" ]]; then
-    "${mo_bin}" ${subcommand}
+    "\${MO_BIN}" \${MO_SUBCOMMAND}
     exit \$?
 fi
 
@@ -223,7 +227,7 @@ fi
 
 echo "TERM environment variable not set and no launcher succeeded."
 echo "Run this manually:"
-echo "    ${raw_cmd}"
+echo "    \"\${MO_BIN}\" \${MO_SUBCOMMAND}"
 exit 1
 EOF
     chmod +x "$target"
@@ -244,28 +248,15 @@ create_raycast_commands() {
     log_success "Scripts ready in: $dir"
 
     log_header "Raycast Configuration"
-    if command -v open > /dev/null 2>&1; then
-        if open "raycast://extensions/raycast/raycast-settings/extensions" > /dev/null 2>&1; then
-            log_step "Raycast settings opened."
-        else
-            log_warn "Could not auto-open Raycast."
-        fi
-    else
-        log_warn "open command not available; please open Raycast manually."
-    fi
-
-    echo "If Raycast asks to add a Script Directory, use:"
-    echo "  $dir"
+    log_step "Open Raycast → Settings → Extensions → Script Commands."
+    echo "1. Click \"+\" → Add Script Directory."
+    echo "2. Choose: $dir"
+    echo "3. Click \"Reload Script Directories\"."
 
     if is_interactive; then
         log_header "Finalizing Setup"
-        prompt_enter "Press [Enter] to reload script directories in Raycast..."
-        if command -v open > /dev/null 2>&1 && open "raycast://extensions/raycast/raycast/reload-script-directories" > /dev/null 2>&1; then
-            log_step "Raycast script directories reloaded."
-        else
-            log_warn "Could not auto-reload Raycast script directories."
-        fi
-
+        log_warn "Please complete the Raycast steps above before continuing."
+        prompt_enter "Press [Enter] to continue..."
         log_success "Raycast setup complete!"
     else
         log_warn "Non-interactive mode; skip Raycast reload. Please run 'Reload Script Directories' in Raycast."

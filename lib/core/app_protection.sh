@@ -280,9 +280,18 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.telerik.Fiddler"
     "com.usebruno.app"
 
-    # Network Proxy & VPN Tools
-    "*clash*"
-    "*Clash*"
+    # Network Proxy & VPN Tools (Clash variants - use specific patterns to avoid false positives)
+    "com.clash.*"
+    "ClashX*"
+    "clash-*"
+    "Clash-*"
+    "*-clash"
+    "*-Clash"
+    "clash.*"
+    "Clash.*"
+    "clash_*"
+    "clashverge*"
+    "ClashVerge*"
     "com.nssurge.surge-mac"
     "*surge*"
     "*Surge*"
@@ -678,7 +687,14 @@ should_protect_data() {
         com.sublimetext.* | com.sublimehq.* | Cursor | Claude | ChatGPT | Ollama)
             return 0
             ;;
-        com.nssurge.* | com.v2ray.* | ClashX* | Surge* | Shadowrocket* | Quantumult*)
+        # Specific match to avoid ShellCheck redundancy warning with com.clash.*
+        com.clash.app)
+            return 0
+            ;;
+        com.nssurge.* | com.v2ray.* | com.clash.* | ClashX* | Surge* | Shadowrocket* | Quantumult*)
+            return 0
+            ;;
+        clash-* | Clash-* | *-clash | *-Clash | clash.* | Clash.* | clash_* | clashverge* | ClashVerge*)
             return 0
             ;;
         com.docker.* | com.getpostman.* | com.insomnia.*)
@@ -695,7 +711,13 @@ should_protect_data() {
             ;;
     esac
 
-    # Most apps won't match, return early
+    # Fallback: check against the full DATA_PROTECTED_BUNDLES list
+    for pattern in "${DATA_PROTECTED_BUNDLES[@]}"; do
+        if bundle_matches_pattern "$bundle_id" "$pattern"; then
+            return 0
+        fi
+    done
+
     return 1
 }
 
@@ -760,7 +782,8 @@ should_protect_path() {
     # Matches: .../Library/Group Containers/group.id/...
     if [[ "$path" =~ /Library/Containers/([^/]+) ]] || [[ "$path" =~ /Library/Group\ Containers/([^/]+) ]]; then
         local bundle_id="${BASH_REMATCH[1]}"
-        if should_protect_data "$bundle_id"; then
+        # In uninstall mode, only system components are protected; skip data protection
+        if [[ "${MOLE_UNINSTALL_MODE:-0}" != "1" ]] && should_protect_data "$bundle_id"; then
             return 0
         fi
     fi
@@ -978,6 +1001,14 @@ find_app_files() {
         )
     fi
 
+    # Issue #422: Zed channel builds can leave data under another channel bundle id.
+    # Example: uninstalling dev.zed.Zed-Nightly should also detect dev.zed.Zed-Preview leftovers.
+    if [[ "$bundle_id" =~ ^dev\.zed\.Zed- ]] && [[ -d "$HOME/Library/HTTPStorages" ]]; then
+        while IFS= read -r -d '' zed_http_storage; do
+            files_to_clean+=("$zed_http_storage")
+        done < <(command find "$HOME/Library/HTTPStorages" -maxdepth 1 -name "dev.zed.Zed-*" -print0 2> /dev/null)
+    fi
+
     # Process standard patterns
     for p in "${user_patterns[@]}"; do
         local expanded_path="${p/#\~/$HOME}"
@@ -1076,8 +1107,47 @@ find_app_files() {
     [[ "$app_name" =~ Godot|godot ]] && [[ -d ~/Library/Application\ Support/Godot ]] && files_to_clean+=("$HOME/Library/Application Support/Godot")
 
     # 6. Tools
-    [[ "$bundle_id" =~ microsoft.*vscode ]] && [[ -d ~/.vscode ]] && files_to_clean+=("$HOME/.vscode")
+    if [[ "$bundle_id" =~ microsoft.*[vV][sS][cC]ode ]]; then
+        [[ -d "$HOME/.vscode" ]] && files_to_clean+=("$HOME/.vscode")
+        [[ -d "$HOME/Library/Caches/com.microsoft.VSCode.ShipIt" ]] && files_to_clean+=("$HOME/Library/Caches/com.microsoft.VSCode.ShipIt")
+        [[ -d "$HOME/Library/Caches/com.microsoft.VSCodeInsiders.ShipIt" ]] && files_to_clean+=("$HOME/Library/Caches/com.microsoft.VSCodeInsiders.ShipIt")
+    fi
     [[ "$app_name" =~ Docker ]] && [[ -d ~/.docker ]] && files_to_clean+=("$HOME/.docker")
+
+    # 6.1 Maestro Studio
+    if [[ "$bundle_id" == "com.maestro.studio" ]] || [[ "$lowercase_name" =~ maestro[[:space:]]*studio ]]; then
+        [[ -d ~/.mobiledev ]] && files_to_clean+=("$HOME/.mobiledev")
+    fi
+
+    # 7. Raycast
+    if [[ "$bundle_id" == "com.raycast.macos" ]]; then
+        # Standard user directories
+        local raycast_dirs=(
+            "$HOME/Library/Application Support"
+            "$HOME/Library/Application Scripts"
+            "$HOME/Library/Containers"
+        )
+        for dir in "${raycast_dirs[@]}"; do
+            [[ -d "$dir" ]] && while IFS= read -r -d '' p; do
+                files_to_clean+=("$p")
+            done < <(command find "$dir" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
+        done
+
+        # Explicit Raycast container directories (hardcoded leftovers)
+        [[ -d "$HOME/Library/Containers/com.raycast.macos.BrowserExtension" ]] && files_to_clean+=("$HOME/Library/Containers/com.raycast.macos.BrowserExtension")
+        [[ -d "$HOME/Library/Containers/com.raycast.macos.RaycastAppIntents" ]] && files_to_clean+=("$HOME/Library/Containers/com.raycast.macos.RaycastAppIntents")
+
+        # Cache (deeper search)
+        [[ -d "$HOME/Library/Caches" ]] && while IFS= read -r -d '' p; do
+            files_to_clean+=("$p")
+        done < <(command find "$HOME/Library/Caches" -maxdepth 2 -type d -iname "*raycast*" -print0 2> /dev/null)
+
+        # VSCode extension storage
+        local vscode_global="$HOME/Library/Application Support/Code/User/globalStorage"
+        [[ -d "$vscode_global" ]] && while IFS= read -r -d '' p; do
+            files_to_clean+=("$p")
+        done < <(command find "$vscode_global" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
+    fi
 
     # Output results
     if [[ ${#files_to_clean[@]} -gt 0 ]]; then
@@ -1170,6 +1240,13 @@ find_app_system_files() {
         [[ -d /private/var/db/receipts ]] && while IFS= read -r -d '' receipt; do
             system_files+=("$receipt")
         done < <(command find /private/var/db/receipts -maxdepth 1 \( -name "*$bundle_id*" \) -print0 2> /dev/null)
+    fi
+
+    # Raycast system-level files
+    if [[ "$bundle_id" == "com.raycast.macos" ]]; then
+        [[ -d "/Library/Application Support" ]] && while IFS= read -r -d '' p; do
+            system_files+=("$p")
+        done < <(command find "/Library/Application Support" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
     fi
 
     local receipt_files=""

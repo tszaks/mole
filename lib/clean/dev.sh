@@ -178,15 +178,41 @@ clean_dev_mobile() {
 
     if command -v xcrun > /dev/null 2>&1; then
         debug_log "Checking for unavailable Xcode simulators"
+        local unavailable_before=0
+        local unavailable_after=0
+        local removed_unavailable=0
+
+        unavailable_before=$(xcrun simctl list devices unavailable 2> /dev/null | command awk '/\(unavailable/ { count++ } END { print count+0 }' || echo "0")
+        [[ "$unavailable_before" =~ ^[0-9]+$ ]] || unavailable_before=0
+
         if [[ "$DRY_RUN" == "true" ]]; then
-            clean_tool_cache "Xcode unavailable simulators" xcrun simctl delete unavailable
+            if ((unavailable_before > 0)); then
+                echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode unavailable simulators · would clean ${unavailable_before}"
+            else
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
+            fi
         else
             start_section_spinner "Checking unavailable simulators..."
             if xcrun simctl delete unavailable > /dev/null 2>&1; then
                 stop_section_spinner
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators"
+                unavailable_after=$(xcrun simctl list devices unavailable 2> /dev/null | command awk '/\(unavailable/ { count++ } END { print count+0 }' || echo "0")
+                [[ "$unavailable_after" =~ ^[0-9]+$ ]] || unavailable_after=0
+
+                removed_unavailable=$((unavailable_before - unavailable_after))
+                if ((removed_unavailable < 0)); then
+                    removed_unavailable=0
+                fi
+
+                if ((unavailable_before == 0)); then
+                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
+                elif ((removed_unavailable > 0)); then
+                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${removed_unavailable}"
+                else
+                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · cleanup completed"
+                fi
             else
                 stop_section_spinner
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators cleanup failed"
             fi
         fi
         note_activity
@@ -207,9 +233,8 @@ clean_dev_mobile() {
     safe_clean ~/.cache/swift-package-manager/* "Swift package manager cache"
 }
 # JVM ecosystem caches.
+# Gradle excluded (default whitelist, like Maven). Remove via: mo clean --whitelist
 clean_dev_jvm() {
-    safe_clean ~/.gradle/caches/* "Gradle caches"
-    safe_clean ~/.gradle/daemon/* "Gradle daemon logs"
     safe_clean ~/.sbt/* "SBT cache"
     safe_clean ~/.ivy2/cache/* "Ivy cache"
 }

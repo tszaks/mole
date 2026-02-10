@@ -63,8 +63,10 @@ type historyEntry struct {
 }
 
 type scanResultMsg struct {
+	path   string
 	result scanResult
 	err    error
+	stale  bool
 }
 
 type overviewSizeMsg struct {
@@ -369,9 +371,19 @@ func (m model) scanCmd(path string) tea.Cmd {
 				Entries:    cached.Entries,
 				LargeFiles: cached.LargeFiles,
 				TotalSize:  cached.TotalSize,
-				TotalFiles: 0, // Cache doesn't store file count currently, minor UI limitation
+				TotalFiles: cached.TotalFiles,
 			}
-			return scanResultMsg{result: result, err: nil}
+			return scanResultMsg{path: path, result: result, err: nil}
+		}
+
+		if stale, err := loadStaleCacheFromDisk(path); err == nil {
+			result := scanResult{
+				Entries:    stale.Entries,
+				LargeFiles: stale.LargeFiles,
+				TotalSize:  stale.TotalSize,
+				TotalFiles: stale.TotalFiles,
+			}
+			return scanResultMsg{path: path, result: result, err: nil, stale: true}
 		}
 
 		v, err, _ := scanGroup.Do(path, func() (any, error) {
@@ -379,7 +391,7 @@ func (m model) scanCmd(path string) tea.Cmd {
 		})
 
 		if err != nil {
-			return scanResultMsg{err: err}
+			return scanResultMsg{path: path, err: err}
 		}
 
 		result := v.(scanResult)
@@ -390,7 +402,28 @@ func (m model) scanCmd(path string) tea.Cmd {
 			}
 		}(path, result)
 
-		return scanResultMsg{result: result, err: nil}
+		return scanResultMsg{path: path, result: result, err: nil}
+	}
+}
+
+func (m model) scanFreshCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		v, err, _ := scanGroup.Do(path, func() (any, error) {
+			return scanPathConcurrent(path, m.filesScanned, m.dirsScanned, m.bytesScanned, m.currentPath)
+		})
+
+		if err != nil {
+			return scanResultMsg{path: path, err: err}
+		}
+
+		result := v.(scanResult)
+		go func(p string, r scanResult) {
+			if err := saveCacheToDisk(p, r); err != nil {
+				_ = err
+			}
+		}(path, result)
+
+		return scanResultMsg{path: path, result: result}
 	}
 }
 
@@ -442,6 +475,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case scanResultMsg:
+		if msg.path != "" && msg.path != m.path {
+			return m, nil
+		}
 		m.scanning = false
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Scan failed: %v", msg.err)
@@ -457,7 +493,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.largeFiles = msg.result.LargeFiles
 		m.totalSize = msg.result.TotalSize
 		m.totalFiles = msg.result.TotalFiles
-		m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
 		m.clampEntrySelection()
 		m.clampLargeSelection()
 		m.cache[m.path] = cacheSnapshot(m)
@@ -470,6 +505,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = storeOverviewSize(path, size)
 			}(m.path, m.totalSize)
 		}
+
+		if msg.stale {
+			m.status = fmt.Sprintf("Loaded cached data for %s, refreshing...", displayPath(m.path))
+			m.scanning = true
+			if m.totalFiles > 0 {
+				m.lastTotalFiles = m.totalFiles
+			}
+			atomic.StoreInt64(m.filesScanned, 0)
+			atomic.StoreInt64(m.dirsScanned, 0)
+			atomic.StoreInt64(m.bytesScanned, 0)
+			if m.currentPath != nil {
+				m.currentPath.Store("")
+			}
+			return m, tea.Batch(m.scanFreshCmd(m.path), tickCmd())
+		}
+
+		m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
 		return m, nil
 	case overviewSizeMsg:
 		delete(m.overviewScanningSet, msg.Path)

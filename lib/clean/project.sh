@@ -44,8 +44,8 @@ readonly PURGE_TARGETS=(
 # Minimum age in days before considering for cleanup.
 readonly MIN_AGE_DAYS=7
 # Scan depth defaults (relative to search root).
-readonly PURGE_MIN_DEPTH_DEFAULT=2
-readonly PURGE_MAX_DEPTH_DEFAULT=4
+readonly PURGE_MIN_DEPTH_DEFAULT=1
+readonly PURGE_MAX_DEPTH_DEFAULT=6
 # Search paths (default, can be overridden via config file).
 readonly DEFAULT_PURGE_SEARCH_PATHS=(
     "$HOME/www"
@@ -352,7 +352,36 @@ scan_purge_targets() {
     local stats_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mole"
     echo "$search_path" > "$stats_dir/purge_scanning" 2> /dev/null || true
 
-    if command -v fd > /dev/null 2>&1; then
+    # Helper to process raw results
+    process_scan_results() {
+        local input_file="$1"
+        if [[ -f "$input_file" ]]; then
+            while IFS= read -r item; do
+                # Check if we should abort (scanning file removed by Ctrl+C)
+                if [[ ! -f "$stats_dir/purge_scanning" ]]; then
+                    return
+                fi
+
+                if [[ -n "$item" ]] && is_safe_project_artifact "$item" "$search_path"; then
+                    echo "$item"
+                    # Update scanning path to show current project directory
+                    local project_dir=$(dirname "$item")
+                    echo "$project_dir" > "$stats_dir/purge_scanning" 2> /dev/null || true
+                fi
+            done < "$input_file" | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
+            rm -f "$input_file"
+        else
+            touch "$output_file"
+        fi
+    }
+
+    local use_find=true
+
+    # Allow forcing find via MO_USE_FIND environment variable
+    if [[ "${MO_USE_FIND:-0}" == "1" ]]; then
+        debug_log "MO_USE_FIND=1: Forcing find instead of fd"
+        use_find=true
+    elif command -v fd > /dev/null 2>&1; then
         # Escape regex special characters in target names for fd patterns
         local escaped_targets=()
         for target in "${PURGE_TARGETS[@]}"; do
@@ -375,65 +404,48 @@ scan_purge_targets() {
             "--exclude" ".Trash"
             "--exclude" "Applications"
         )
-        # Write to temp file first, then filter - more efficient than piping
-        fd "${fd_args[@]}" "$pattern" "$search_path" 2> /dev/null > "$output_file.raw" || true
 
-        # Single pass: safe + nested + protected
-        if [[ -f "$output_file.raw" ]]; then
-            while IFS= read -r item; do
-                # Check if we should abort (scanning file removed by Ctrl+C)
-                if [[ ! -f "$stats_dir/purge_scanning" ]]; then
-                    return
-                fi
-
-                if [[ -n "$item" ]] && is_safe_project_artifact "$item" "$search_path"; then
-                    echo "$item"
-                    # Update scanning path to show current project directory
-                    local project_dir=$(dirname "$item")
-                    echo "$project_dir" > "$stats_dir/purge_scanning" 2> /dev/null || true
-                fi
-            done < "$output_file.raw" | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
-            rm -f "$output_file.raw"
-        else
-            touch "$output_file"
-        fi
-    else
-        # Pruned find avoids descending into heavy directories.
-        local find_expr=()
-        local prune_dirs=(".git" "Library" ".Trash" "Applications")
-        for dir in "${prune_dirs[@]}"; do
-            find_expr+=("-name" "$dir" "-prune" "-o")
-        done
-        local i=0
-        for target in "${PURGE_TARGETS[@]}"; do
-            find_expr+=("-name" "$target" "-print" "-prune")
-            if [[ $i -lt $((${#PURGE_TARGETS[@]} - 1)) ]]; then
-                find_expr+=("-o")
+        # Try running fd. If it succeeds (exit code 0), use it.
+        # If it fails (e.g. bad flag, permissions, binary issue), fallback to find.
+        if fd "${fd_args[@]}" "$pattern" "$search_path" 2> /dev/null > "$output_file.raw"; then
+            # Check if fd actually found anything - if empty, fallback to find
+            if [[ -s "$output_file.raw" ]]; then
+                debug_log "Using fd for scanning (found results)"
+                use_find=false
+                process_scan_results "$output_file.raw"
+            else
+                debug_log "fd returned empty results, falling back to find"
+                rm -f "$output_file.raw"
             fi
-            ((i++))
-        done
-        command find "$search_path" -mindepth "$min_depth" -maxdepth "$max_depth" -type d \
-            \( "${find_expr[@]}" \) 2> /dev/null > "$output_file.raw" || true
-
-        # Single pass: safe + nested + protected
-        if [[ -f "$output_file.raw" ]]; then
-            while IFS= read -r item; do
-                # Check if we should abort (scanning file removed by Ctrl+C)
-                if [[ ! -f "$stats_dir/purge_scanning" ]]; then
-                    return
-                fi
-
-                if [[ -n "$item" ]] && is_safe_project_artifact "$item" "$search_path"; then
-                    echo "$item"
-                    # Update scanning path to show current project directory
-                    local project_dir=$(dirname "$item")
-                    echo "$project_dir" > "$stats_dir/purge_scanning" 2> /dev/null || true
-                fi
-            done < "$output_file.raw" | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
-            rm -f "$output_file.raw"
         else
-            touch "$output_file"
+            debug_log "fd command failed, falling back to find"
         fi
+    fi
+
+    if [[ "$use_find" == "true" ]]; then
+        debug_log "Using find for scanning"
+        # Pruned find avoids descending into heavy directories.
+        local prune_dirs=(".git" "Library" ".Trash" "Applications")
+        local purge_targets=("${PURGE_TARGETS[@]}")
+
+        local prune_expr=()
+        for i in "${!prune_dirs[@]}"; do
+            prune_expr+=(-name "${prune_dirs[$i]}")
+            [[ $i -lt $((${#prune_dirs[@]} - 1)) ]] && prune_expr+=(-o)
+        done
+
+        local target_expr=()
+        for i in "${!purge_targets[@]}"; do
+            target_expr+=(-name "${purge_targets[$i]}")
+            [[ $i -lt $((${#purge_targets[@]} - 1)) ]] && target_expr+=(-o)
+        done
+
+        command find "$search_path" -mindepth "$min_depth" -maxdepth "$max_depth" -type d \
+            \( "${prune_expr[@]}" \) -prune -o \
+            \( "${target_expr[@]}" \) -print -prune \
+            2> /dev/null > "$output_file.raw" || true
+
+        process_scan_results "$output_file.raw"
     fi
 }
 # Filter out nested artifacts (e.g. node_modules inside node_modules, .build inside build).
@@ -996,11 +1008,12 @@ clean_project_artifacts() {
         local size_str="$3"
         # Terminal width for alignment
         local terminal_width=$(tput cols 2> /dev/null || echo 80)
-        local fixed_width=28 # Reserve for size and artifact type (9 + 3 + 16)
+        local fixed_width=32 # Reserve for size and artifact type (9 + 3 + 20)
         local available_width=$((terminal_width - fixed_width))
-        # Bounds: 30-50 chars for project path (increased to accommodate full paths)
+        # Bounds: 30 chars min, but cap at 70% of terminal width to preserve aesthetics
+        local max_aesthetic_width=$((terminal_width * 70 / 100))
+        [[ $available_width -gt $max_aesthetic_width ]] && available_width=$max_aesthetic_width
         [[ $available_width -lt 30 ]] && available_width=30
-        [[ $available_width -gt 50 ]] && available_width=50
         # Truncate project path if needed
         local truncated_path=$(truncate_by_display_width "$project_path" "$available_width")
         local current_width=$(get_display_width "$truncated_path")
@@ -1008,7 +1021,7 @@ clean_project_artifacts() {
         local padding=$((available_width - current_width))
         local printf_width=$((char_count + padding))
         # Format: "project_path  size | artifact_type"
-        printf "%-*s %9s | %-13s" "$printf_width" "$truncated_path" "$size_str" "$artifact_type"
+        printf "%-*s %9s | %-17s" "$printf_width" "$truncated_path" "$size_str" "$artifact_type"
     }
     # Build menu options - one line per artifact
     for item in "${safe_to_clean[@]}"; do

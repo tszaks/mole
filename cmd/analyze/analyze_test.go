@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/gob"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -414,6 +415,221 @@ func TestLoadCacheExpiresWhenDirectoryChanges(t *testing.T) {
 	}
 }
 
+func TestLoadCacheReusesRecentEntryAfterDirectoryChanges(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "recent-change-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	result := scanResult{TotalSize: 5, TotalFiles: 1}
+	if err := saveCacheToDisk(target, result); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+
+	file, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache: %v", err)
+	}
+	var entry cacheEntry
+	if err := gob.NewDecoder(file).Decode(&entry); err != nil {
+		t.Fatalf("decode cache: %v", err)
+	}
+	_ = file.Close()
+
+	// Make cache entry look recently scanned, but older than mod time grace.
+	entry.ModTime = time.Now().Add(-2 * time.Hour)
+	entry.ScanTime = time.Now().Add(-1 * time.Hour)
+
+	tmp := cachePath + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		t.Fatalf("create tmp cache: %v", err)
+	}
+	if err := gob.NewEncoder(f).Encode(&entry); err != nil {
+		t.Fatalf("encode tmp cache: %v", err)
+	}
+	_ = f.Close()
+	if err := os.Rename(tmp, cachePath); err != nil {
+		t.Fatalf("rename tmp cache: %v", err)
+	}
+
+	if err := os.Chtimes(target, time.Now(), time.Now()); err != nil {
+		t.Fatalf("chtimes target: %v", err)
+	}
+
+	if _, err := loadCacheFromDisk(target); err != nil {
+		t.Fatalf("expected recent cache to be reused, got error: %v", err)
+	}
+}
+
+func TestLoadCacheExpiresWhenModifiedAndReuseWindowPassed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "reuse-window-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	result := scanResult{TotalSize: 5, TotalFiles: 1}
+	if err := saveCacheToDisk(target, result); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+
+	file, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache: %v", err)
+	}
+	var entry cacheEntry
+	if err := gob.NewDecoder(file).Decode(&entry); err != nil {
+		t.Fatalf("decode cache: %v", err)
+	}
+	_ = file.Close()
+
+	// Within overall 7-day TTL but beyond reuse window.
+	entry.ModTime = time.Now().Add(-48 * time.Hour)
+	entry.ScanTime = time.Now().Add(-(cacheReuseWindow + time.Hour))
+
+	tmp := cachePath + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		t.Fatalf("create tmp cache: %v", err)
+	}
+	if err := gob.NewEncoder(f).Encode(&entry); err != nil {
+		t.Fatalf("encode tmp cache: %v", err)
+	}
+	_ = f.Close()
+	if err := os.Rename(tmp, cachePath); err != nil {
+		t.Fatalf("rename tmp cache: %v", err)
+	}
+
+	if err := os.Chtimes(target, time.Now(), time.Now()); err != nil {
+		t.Fatalf("chtimes target: %v", err)
+	}
+
+	if _, err := loadCacheFromDisk(target); err == nil {
+		t.Fatalf("expected cache load to fail after reuse window passes")
+	}
+}
+
+func TestLoadStaleCacheFromDiskAllowsRecentExpiredCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "stale-cache-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	result := scanResult{TotalSize: 7, TotalFiles: 2}
+	if err := saveCacheToDisk(target, result); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+	file, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache: %v", err)
+	}
+	var entry cacheEntry
+	if err := gob.NewDecoder(file).Decode(&entry); err != nil {
+		t.Fatalf("decode cache: %v", err)
+	}
+	_ = file.Close()
+
+	// Expired for normal cache validation but still inside stale fallback window.
+	entry.ModTime = time.Now().Add(-48 * time.Hour)
+	entry.ScanTime = time.Now().Add(-48 * time.Hour)
+
+	tmp := cachePath + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		t.Fatalf("create tmp cache: %v", err)
+	}
+	if err := gob.NewEncoder(f).Encode(&entry); err != nil {
+		t.Fatalf("encode tmp cache: %v", err)
+	}
+	_ = f.Close()
+	if err := os.Rename(tmp, cachePath); err != nil {
+		t.Fatalf("rename tmp cache: %v", err)
+	}
+
+	if err := os.Chtimes(target, time.Now(), time.Now()); err != nil {
+		t.Fatalf("chtimes target: %v", err)
+	}
+
+	if _, err := loadCacheFromDisk(target); err == nil {
+		t.Fatalf("expected normal cache load to fail")
+	}
+	if _, err := loadStaleCacheFromDisk(target); err != nil {
+		t.Fatalf("expected stale cache load to succeed, got error: %v", err)
+	}
+}
+
+func TestLoadStaleCacheFromDiskExpiresByStaleTTL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "stale-cache-expired-target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	result := scanResult{TotalSize: 9, TotalFiles: 3}
+	if err := saveCacheToDisk(target, result); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+	file, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache: %v", err)
+	}
+	var entry cacheEntry
+	if err := gob.NewDecoder(file).Decode(&entry); err != nil {
+		t.Fatalf("decode cache: %v", err)
+	}
+	_ = file.Close()
+
+	entry.ScanTime = time.Now().Add(-(staleCacheTTL + time.Hour))
+
+	tmp := cachePath + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		t.Fatalf("create tmp cache: %v", err)
+	}
+	if err := gob.NewEncoder(f).Encode(&entry); err != nil {
+		t.Fatalf("encode tmp cache: %v", err)
+	}
+	_ = f.Close()
+	if err := os.Rename(tmp, cachePath); err != nil {
+		t.Fatalf("rename tmp cache: %v", err)
+	}
+
+	if _, err := loadStaleCacheFromDisk(target); err == nil {
+		t.Fatalf("expected stale cache load to fail after stale TTL")
+	}
+}
+
 func TestScanPathPermissionError(t *testing.T) {
 	root := t.TempDir()
 	lockedDir := filepath.Join(root, "locked")
@@ -446,5 +662,42 @@ func TestScanPathPermissionError(t *testing.T) {
 	}
 	if !os.IsPermission(err) {
 		t.Logf("unexpected error type: %v", err)
+	}
+}
+
+func TestCalculateDirSizeFastHighFanoutCompletes(t *testing.T) {
+	root := t.TempDir()
+
+	// Reproduce high fan-out nested directory pattern that previously risked semaphore deadlock.
+	const fanout = 256
+	for i := 0; i < fanout; i++ {
+		nested := filepath.Join(root, fmt.Sprintf("dir-%03d", i), "nested")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("create nested dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(nested, "data.bin"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write nested file: %v", err)
+		}
+	}
+
+	var files, dirs, bytes int64
+	current := &atomic.Value{}
+	current.Store("")
+
+	done := make(chan int64, 1)
+	go func() {
+		done <- calculateDirSizeFast(root, &files, &dirs, &bytes, current)
+	}()
+
+	select {
+	case total := <-done:
+		if total <= 0 {
+			t.Fatalf("expected positive total size, got %d", total)
+		}
+		if got := atomic.LoadInt64(&files); got < fanout {
+			t.Fatalf("expected at least %d files scanned, got %d", fanout, got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("calculateDirSizeFast did not complete under high fan-out")
 	}
 }

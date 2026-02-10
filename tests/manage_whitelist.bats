@@ -102,16 +102,17 @@ setup() {
 
     run bash --noprofile --norc -c "cd '$PROJECT_ROOT'; printf \$'\\n' | HOME='$HOME' ./mo clean --whitelist"
     [ "$status" -eq 0 ]
-    grep -q "\\.m2/repository" "$whitelist_file"
+    first_pattern=$(grep -v '^[[:space:]]*#' "$whitelist_file" | grep -v '^[[:space:]]*$' | head -n 1)
+    [ -n "$first_pattern" ]
 
     run bash --noprofile --norc -c "cd '$PROJECT_ROOT'; printf \$' \\n' | HOME='$HOME' ./mo clean --whitelist"
     [ "$status" -eq 0 ]
-    run grep -q "\\.m2/repository" "$whitelist_file"
+    run grep -Fxq "$first_pattern" "$whitelist_file"
     [ "$status" -eq 1 ]
 
     run bash --noprofile --norc -c "cd '$PROJECT_ROOT'; printf \$'\\n' | HOME='$HOME' ./mo clean --whitelist"
     [ "$status" -eq 0 ]
-    run grep -q "\\.m2/repository" "$whitelist_file"
+    run grep -Fxq "$first_pattern" "$whitelist_file"
     [ "$status" -eq 1 ]
 }
 

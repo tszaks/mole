@@ -16,6 +16,8 @@ const (
 	maxConcurrentOverview  = 8
 	batchUpdateSize        = 100
 	cacheModTimeGrace      = 30 * time.Minute
+	cacheReuseWindow       = 24 * time.Hour
+	staleCacheTTL          = 3 * 24 * time.Hour
 
 	// Worker pool limits.
 	minWorkers         = 16
@@ -187,6 +189,17 @@ var defaultSkipDirs = map[string]bool{
 	"nfs":         true,
 	"PHD":         true,
 	"Permissions": true,
+
+	// Virtualization/Container mounts (NFS, network filesystems).
+	"OrbStack":        true, // OrbStack NFS mounts
+	"Colima":          true, // Colima VM mounts
+	"Parallels":       true, // Parallels Desktop VMs
+	"VMware Fusion":   true, // VMware Fusion VMs
+	"VirtualBox VMs":  true, // VirtualBox VMs
+	"Rancher Desktop": true, // Rancher Desktop mounts
+	".lima":           true, // Lima VM mounts
+	".colima":         true, // Colima config/mounts
+	".orbstack":       true, // OrbStack config/mounts
 }
 
 var skipExtensions = map[string]bool{
