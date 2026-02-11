@@ -517,6 +517,24 @@ EOF
     [[ "$output" == *"App saved states optimized"* ]]
 }
 
+@test "opt_cache_refresh continues on permission denied (silent exit)" {
+    local cache_dir="$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
+    mkdir -p "$cache_dir"
+    touch "$cache_dir/test.db"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+qlmanage() { return 0; }
+safe_remove() { return 1; }
+opt_cache_refresh
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"QuickLook thumbnails refreshed"* ]]
+}
+
 @test "opt_cache_refresh cleans Quick Look cache" {
     mkdir -p "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
     touch "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache/test.db"

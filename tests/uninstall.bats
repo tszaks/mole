@@ -123,6 +123,63 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "batch_uninstall_applications preview shows full related file list" {
+    mkdir -p "$HOME/Applications/TestApp.app"
+    mkdir -p "$HOME/Library/Application Support/TestApp"
+    mkdir -p "$HOME/Library/Caches/TestApp"
+    mkdir -p "$HOME/Library/Logs/TestApp"
+    touch "$HOME/Library/Logs/TestApp/log1.log"
+    touch "$HOME/Library/Logs/TestApp/log2.log"
+    touch "$HOME/Library/Logs/TestApp/log3.log"
+    touch "$HOME/Library/Logs/TestApp/log4.log"
+    touch "$HOME/Library/Logs/TestApp/log5.log"
+    touch "$HOME/Library/Logs/TestApp/log6.log"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+sudo() { return 0; }
+has_sensitive_data() { return 1; }
+find_app_system_files() { return 0; }
+find_app_files() {
+    cat << LIST
+$HOME/Library/Application Support/TestApp
+$HOME/Library/Caches/TestApp
+$HOME/Library/Logs/TestApp/log1.log
+$HOME/Library/Logs/TestApp/log2.log
+$HOME/Library/Logs/TestApp/log3.log
+$HOME/Library/Logs/TestApp/log4.log
+$HOME/Library/Logs/TestApp/log5.log
+$HOME/Library/Logs/TestApp/log6.log
+LIST
+}
+
+selected_apps=()
+selected_apps+=("0|$HOME/Applications/TestApp.app|TestApp|com.example.TestApp|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf 'q' | batch_uninstall_applications
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"~/Library/Logs/TestApp/log6.log"* ]]
+    [[ "$output" != *"more files"* ]]
+}
+
 @test "safe_remove can remove a simple directory" {
     mkdir -p "$HOME/test_dir"
     touch "$HOME/test_dir/file.txt"

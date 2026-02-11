@@ -326,34 +326,19 @@ batch_uninstall_applications() {
 
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${app_path/$HOME/~}"
 
-        # Show related files (limit to 5).
-        local file_count=0
-        local max_files=5
+        # Show all related files so users can fully review before deletion.
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
-                if [[ $file_count -lt $max_files ]]; then
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${file/$HOME/~}"
-                fi
-                ((file_count++))
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${file/$HOME/~}"
             fi
         done <<< "$related_files"
 
-        # Show system files (limit to 5).
-        local sys_file_count=0
+        # Show all system files so users can fully review before deletion.
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
-                if [[ $sys_file_count -lt $max_files ]]; then
-                    echo -e "  ${BLUE}${ICON_WARNING}${NC} System: $file"
-                fi
-                ((sys_file_count++))
+                echo -e "  ${BLUE}${ICON_WARNING}${NC} System: $file"
             fi
         done <<< "$system_files"
-
-        local total_hidden=$((file_count > max_files ? file_count - max_files : 0))
-        ((total_hidden += sys_file_count > max_files ? sys_file_count - max_files : 0))
-        if [[ $total_hidden -gt 0 ]]; then
-            echo -e "  ${GRAY}  ... and ${total_hidden} more files${NC}"
-        fi
     done
 
     # Confirmation before requesting sudo.
