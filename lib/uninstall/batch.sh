@@ -258,20 +258,28 @@ batch_uninstall_applications() {
             needs_sudo=true
         fi
 
-        # Size estimate includes related and system files.
         local app_size_kb=$(get_path_size_kb "$app_path" || echo "0")
         local related_files=$(find_app_files "$bundle_id" "$app_name" || true)
+        local diag_user
+        diag_user=$(get_diagnostic_report_paths_for_app "$app_path" "$app_name" "$HOME/Library/Logs/DiagnosticReports" || true)
+        [[ -n "$diag_user" ]] && related_files=$(
+            [[ -n "$related_files" ]] && echo "$related_files"
+            echo "$diag_user"
+        )
         local related_size_kb=$(calculate_total_size "$related_files" || echo "0")
         # system_files is a newline-separated string, not an array.
         # shellcheck disable=SC2178,SC2128
         local system_files=$(find_app_system_files "$bundle_id" "$app_name" || true)
+        local diag_system
+        diag_system=$(get_diagnostic_report_paths_for_app "$app_path" "$app_name" "/Library/Logs/DiagnosticReports" || true)
         # shellcheck disable=SC2128
         local system_size_kb=$(calculate_total_size "$system_files" || echo "0")
-        local total_kb=$((app_size_kb + related_size_kb + system_size_kb))
+        local diag_system_size_kb=$(calculate_total_size "$diag_system" || echo "0")
+        local total_kb=$((app_size_kb + related_size_kb + system_size_kb + diag_system_size_kb))
         ((total_estimated_size += total_kb)) || true
 
         # shellcheck disable=SC2128
-        if [[ -n "$system_files" ]]; then
+        if [[ -n "$system_files" || -n "$diag_system" ]]; then
             needs_sudo=true
         fi
 
@@ -290,7 +298,9 @@ batch_uninstall_applications() {
         encoded_files=$(printf '%s' "$related_files" | base64 | tr -d '\n' || echo "")
         local encoded_system_files
         encoded_system_files=$(printf '%s' "$system_files" | base64 | tr -d '\n' || echo "")
-        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name")
+        local encoded_diag_system
+        encoded_diag_system=$(printf '%s' "$diag_system" | base64 | tr -d '\n' || echo "")
+        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system")
     done
     if [[ -t 1 ]]; then stop_inline_spinner; fi
 
@@ -313,7 +323,7 @@ batch_uninstall_applications() {
     fi
 
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system <<< "$detail"
         local app_size_display=$(bytes_to_human "$((total_kb * 1024))")
 
         local brew_tag=""
@@ -323,6 +333,12 @@ batch_uninstall_applications() {
         # Show detailed file list for ALL apps (brew casks leave user data behind)
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
+        local diag_system_display
+        diag_system_display=$(decode_file_list "$encoded_diag_system" "$app_name")
+        [[ -n "$diag_system_display" ]] && system_files=$(
+            [[ -n "$system_files" ]] && echo "$system_files"
+            echo "$diag_system_display"
+        )
 
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${app_path/$HOME/~}"
 
@@ -409,9 +425,10 @@ batch_uninstall_applications() {
     local current_index=0
     for detail in "${app_details[@]}"; do
         ((current_index++))
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system <<< "$detail"
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
+        local diag_system=$(decode_file_list "$encoded_diag_system" "$app_name")
         local reason=""
         local suggestion=""
 
@@ -511,11 +528,17 @@ batch_uninstall_applications() {
         if [[ -z "$reason" ]]; then
             remove_file_list "$related_files" "false" > /dev/null
 
-            # If brew successfully uninstalled the cask, avoid deleting
-            # system-level files Mole discovered. Brew manages its own
-            # receipts/symlinks and we don't want to fight it.
-            if [[ "$used_brew_successfully" != "true" ]]; then
-                remove_file_list "$system_files" "true" > /dev/null
+            if [[ "$used_brew_successfully" == "true" ]]; then
+                remove_file_list "$diag_system" "true" > /dev/null
+            else
+                local system_all="$system_files"
+                if [[ -n "$diag_system" ]]; then
+                    if [[ -n "$system_all" ]]; then
+                        system_all+=$'\n'
+                    fi
+                    system_all+="$diag_system"
+                fi
+                remove_file_list "$system_all" "true" > /dev/null
             fi
 
             # Clean up macOS defaults (preference domains).

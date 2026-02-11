@@ -1156,6 +1156,42 @@ find_app_files() {
     return 0
 }
 
+get_diagnostic_report_paths_for_app() {
+    local app_path="$1"
+    local app_name="$2"
+    local directory="$3"
+    local prefix=""
+    local exec_name=""
+    local nospace_name="${app_name// /}"
+
+    [[ -z "$app_path" || -z "$app_name" || -z "$directory" ]] && return 0
+    [[ ! -d "$directory" ]] && return 0
+
+    if [[ -f "$app_path/Contents/Info.plist" ]]; then
+        exec_name=$(defaults read "$app_path/Contents/Info.plist" CFBundleExecutable 2> /dev/null || echo "")
+        if [[ -z "$exec_name" ]]; then
+            exec_name=$(grep -A1 "CFBundleExecutable" "$app_path/Contents/Info.plist" 2> /dev/null | grep "<string>" | sed -n 's/.*<string>\([^<]*\)<\/string>.*/\1/p' | head -1)
+        fi
+    fi
+    prefix="${exec_name:-$nospace_name}"
+    [[ -z "$prefix" || ${#prefix} -lt 3 ]] && return 0
+
+    local dir_abs
+    dir_abs=$(cd "$directory" 2> /dev/null && pwd -P 2> /dev/null) || return 0
+    while IFS= read -r -d '' f; do
+        [[ -z "$f" ]] && continue
+        local base
+        base=$(basename "$f" 2> /dev/null)
+        [[ "$base" != "$prefix"* ]] && continue
+        case "$base" in
+            *.ips | *.crash | *.spin) ;;
+            *) continue ;;
+        esac
+        printf '%s\n' "$f"
+    done < <(find "$dir_abs" -maxdepth 1 -type f -name "${prefix}*" -print0 2> /dev/null || true)
+    return 0
+}
+
 # Locate system-level application files
 find_app_system_files() {
     local bundle_id="$1"
