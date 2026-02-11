@@ -500,6 +500,23 @@ EOF
     [[ "$output" == *"App saved states optimized"* ]]
 }
 
+@test "opt_saved_state_cleanup continues on permission denied (silent exit)" {
+    local state_dir="$HOME/Library/Saved Application State"
+    mkdir -p "$state_dir/com.example.old.savedState"
+    touch -t 202301010000 "$state_dir/com.example.old.savedState" 2>/dev/null || true
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+safe_remove() { return 1; }
+opt_saved_state_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"App saved states optimized"* ]]
+}
+
 @test "opt_cache_refresh cleans Quick Look cache" {
     mkdir -p "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
     touch "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache/test.db"

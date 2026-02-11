@@ -164,7 +164,7 @@ opt_cache_refresh() {
                 if [[ "$size_kb" =~ ^[0-9]+$ ]]; then
                     total_cache_size=$((total_cache_size + size_kb))
                 fi
-                safe_remove "$target_path" true > /dev/null 2>&1
+                safe_remove "$target_path" true > /dev/null 2>&1 || true
             fi
         fi
     done
@@ -195,7 +195,7 @@ opt_saved_state_cleanup() {
             if should_protect_path "$state_path"; then
                 continue
             fi
-            safe_remove "$state_path" true > /dev/null 2>&1
+            safe_remove "$state_path" true > /dev/null 2>&1 || true
         done < <(command find "$state_dir" -type d -name "*.savedState" -mtime "+$MOLE_SAVED_STATE_AGE_DAYS" -print0 2> /dev/null)
     fi
 
