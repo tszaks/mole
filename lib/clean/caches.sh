@@ -156,10 +156,12 @@ clean_project_caches() {
     nextjs_tmp_file=$(create_temp_file)
     local pycache_tmp_file
     pycache_tmp_file=$(create_temp_file)
-    local find_timeout=10
+    local flutter_tmp_file
+    flutter_tmp_file=$(create_temp_file)
+    local find_timeout=30
     # Parallel scans (Next.js and __pycache__).
     (
-        command find "$HOME" -P -mount -type d -name ".next" -maxdepth 3 \
+        command find -P "$HOME" -mount -type d -name ".next" -maxdepth 3 \
             -not -path "*/Library/*" \
             -not -path "*/.Trash/*" \
             -not -path "*/node_modules/*" \
@@ -168,7 +170,7 @@ clean_project_caches() {
     ) > "$nextjs_tmp_file" 2>&1 &
     local next_pid=$!
     (
-        command find "$HOME" -P -mount -type d -name "__pycache__" -maxdepth 3 \
+        command find -P "$HOME" -mount -type d -name "__pycache__" -maxdepth 3 \
             -not -path "*/Library/*" \
             -not -path "*/.Trash/*" \
             -not -path "*/node_modules/*" \
@@ -176,17 +178,27 @@ clean_project_caches() {
             2> /dev/null || true
     ) > "$pycache_tmp_file" 2>&1 &
     local py_pid=$!
+    (
+        command find -P "$HOME" -mount -type d -name ".dart_tool" -maxdepth 5 \
+            -not -path "*/Library/*" \
+            -not -path "*/.Trash/*" \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.*" \
+            -not -path "*/.fvm/*" \
+            2> /dev/null || true
+    ) > "$flutter_tmp_file" 2>&1 &
+    local flutter_pid=$!
     local elapsed=0
     local check_interval=0.2 # Check every 200ms instead of 1s for smoother experience
     while [[ $(echo "$elapsed < $find_timeout" | awk '{print ($1 < $2)}') -eq 1 ]]; do
-        if ! kill -0 $next_pid 2> /dev/null && ! kill -0 $py_pid 2> /dev/null; then
+        if ! kill -0 $next_pid 2> /dev/null && ! kill -0 $py_pid 2> /dev/null && ! kill -0 $flutter_pid 2> /dev/null; then
             break
         fi
         sleep $check_interval
         elapsed=$(echo "$elapsed + $check_interval" | awk '{print $1 + $2}')
     done
     # Kill stuck scans after timeout.
-    for pid in $next_pid $py_pid; do
+    for pid in $next_pid $py_pid $flutter_pid; do
         if kill -0 "$pid" 2> /dev/null; then
             kill -TERM "$pid" 2> /dev/null || true
             local grace_period=0
@@ -214,4 +226,13 @@ clean_project_caches() {
     while IFS= read -r pycache; do
         [[ -d "$pycache" ]] && safe_clean "$pycache"/* "Python bytecode cache" || true
     done < "$pycache_tmp_file"
+    while IFS= read -r flutter_tool; do
+        if [[ -d "$flutter_tool" ]]; then
+            safe_clean "$flutter_tool" "Flutter build cache (.dart_tool)" || true
+            local build_dir="$(dirname "$flutter_tool")/build"
+            if [[ -d "$build_dir" ]]; then
+                safe_clean "$build_dir" "Flutter build cache (build/)" || true
+            fi
+        fi
+    done < "$flutter_tmp_file"
 }
