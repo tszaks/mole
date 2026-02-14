@@ -1182,13 +1182,20 @@ get_diagnostic_report_paths_for_app() {
         [[ -z "$f" ]] && continue
         local base
         base=$(basename "$f" 2> /dev/null)
-        [[ "$base" != "$prefix"* ]] && continue
+        case "$base" in
+            "$prefix".* | "$prefix"_* | "$prefix"-*) ;;
+            *) continue ;;
+        esac
         case "$base" in
             *.ips | *.crash | *.spin) ;;
             *) continue ;;
         esac
         printf '%s\n' "$f"
-    done < <(find "$dir_abs" -maxdepth 1 -type f -name "${prefix}*" -print0 2> /dev/null || true)
+    done < <(
+        find "$dir_abs" -maxdepth 1 -type f \
+            \( -name "${prefix}.*" -o -name "${prefix}_*" -o -name "${prefix}-*" \) \
+            -print0 2> /dev/null || true
+    )
     return 0
 }
 

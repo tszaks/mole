@@ -60,6 +60,41 @@ EOF
     [[ "$result" == *"LaunchAgents/com.example.TestApp.plist"* ]]
 }
 
+@test "get_diagnostic_report_paths_for_app avoids executable prefix collisions" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+diag_dir="$HOME/Library/Logs/DiagnosticReports"
+app_dir="$HOME/Applications/Foo.app"
+mkdir -p "$diag_dir" "$app_dir/Contents"
+
+cat > "$app_dir/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>Foo</string>
+</dict>
+</plist>
+PLIST
+
+touch "$diag_dir/Foo.crash"
+touch "$diag_dir/Foo_2026-01-01-120000_host.ips"
+touch "$diag_dir/Foobar.crash"
+touch "$diag_dir/Foobar_2026-01-01-120001_host.ips"
+
+result=$(get_diagnostic_report_paths_for_app "$app_dir" "Foo" "$diag_dir")
+[[ "$result" == *"Foo.crash"* ]] || exit 1
+[[ "$result" == *"Foo_2026-01-01-120000_host.ips"* ]] || exit 1
+[[ "$result" != *"Foobar.crash"* ]] || exit 1
+[[ "$result" != *"Foobar_2026-01-01-120001_host.ips"* ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "calculate_total_size returns aggregate kilobytes" {
     mkdir -p "$HOME/sized"
     dd if=/dev/zero of="$HOME/sized/file1" bs=1024 count=1 > /dev/null 2>&1

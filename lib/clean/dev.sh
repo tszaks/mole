@@ -216,8 +216,49 @@ clean_xcode_documentation_cache() {
         ((idx++))
     done
 
-    if [[ ${#stale_entries[@]} -gt 0 ]]; then
+    if [[ ${#stale_entries[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
         safe_clean "${stale_entries[@]}" "Xcode documentation cache (old indexes)"
+        note_activity
+        return 0
+    fi
+
+    if ! has_sudo_session; then
+        if ! ensure_sudo_session "Cleaning Xcode documentation cache requires admin access"; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache cleanup skipped (sudo denied)"
+            note_activity
+            return 0
+        fi
+    fi
+
+    local removed_count=0
+    local skipped_count=0
+    local stale_entry
+    for stale_entry in "${stale_entries[@]}"; do
+        if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry"; then
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        if safe_sudo_remove "$stale_entry"; then
+            removed_count=$((removed_count + 1))
+        fi
+    done
+
+    if [[ $removed_count -gt 0 ]]; then
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode documentation cache · removed ${removed_count} old indexes"
+        if [[ $skipped_count -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${skipped_count} protected items"
+        fi
+        note_activity
+    elif [[ $skipped_count -gt 0 ]]; then
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode documentation cache · nothing to clean"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${skipped_count} protected items"
+        note_activity
+    else
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · no items removed"
         note_activity
     fi
 }

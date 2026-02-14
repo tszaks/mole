@@ -149,10 +149,12 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 note_activity() { :; }
-safe_clean() {
-    local description="${*: -1}"
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+safe_sudo_remove() {
     local target="$1"
-    echo "CLEAN:$target:$description"
+    echo "CLEAN:$target:Xcode documentation cache (old indexes)"
 }
 clean_xcode_documentation_cache
 EOF
@@ -174,13 +176,13 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 note_activity() { :; }
 pgrep() { return 0; }
-safe_clean() { echo "UNEXPECTED_SAFE_CLEAN"; }
+safe_sudo_remove() { echo "UNEXPECTED_SAFE_SUDO_REMOVE"; }
 clean_xcode_documentation_cache
 EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"skipping documentation cache cleanup"* ]]
-    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+    [[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
 }
 
 @test "check_rust_toolchains reports multiple toolchains" {
