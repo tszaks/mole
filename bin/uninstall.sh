@@ -342,9 +342,11 @@ scan_applications() {
     merged_file="${temp_file}.merged"
     refresh_file="${temp_file}.refresh"
     cache_snapshot_file="${temp_file}.cache"
+    local scan_status_file="${temp_file}.scan_status"
     : > "$scan_raw_file"
     : > "$refresh_file"
     : > "$cache_snapshot_file"
+    : > "$scan_status_file"
 
     ensure_user_dir "$MOLE_UNINSTALL_META_CACHE_DIR"
     ensure_user_file "$MOLE_UNINSTALL_META_CACHE_FILE"
@@ -411,10 +413,29 @@ scan_applications() {
         if [[ -f "$spinner_shown_file" ]]; then
             printf "\r\033[K" >&2
         fi
-        rm -f "$temp_file" "$scan_raw_file" "$merged_file" "$refresh_file" "$cache_snapshot_file" "${temp_file}.sorted" "${temp_file}.progress" "$spinner_shown_file" 2> /dev/null || true
+        rm -f "$temp_file" "$scan_raw_file" "$merged_file" "$refresh_file" "$cache_snapshot_file" "$scan_status_file" "${temp_file}.sorted" "$spinner_shown_file" 2> /dev/null || true
         exit 130
     }
     trap trap_scan_cleanup INT
+
+    update_scan_status() {
+        local message="$1"
+        local completed="${2:-0}"
+        local total="${3:-0}"
+        printf "%s|%s|%s\n" "$message" "$completed" "$total" > "$scan_status_file"
+    }
+
+    stop_scan_spinner() {
+        if [[ -n "$spinner_pid" ]]; then
+            kill -TERM "$spinner_pid" 2> /dev/null || true
+            wait "$spinner_pid" 2> /dev/null || true
+            spinner_pid=""
+        fi
+        if [[ -f "$spinner_shown_file" ]]; then
+            printf "\r\033[K" >&2
+        fi
+        rm -f "$spinner_shown_file" "$scan_status_file" 2> /dev/null || true
+    }
 
     # Pass 1: collect app paths and bundle IDs (no mdls).
     local -a app_data_tuples=()
@@ -489,7 +510,7 @@ scan_applications() {
     done
 
     if [[ ${#app_data_tuples[@]} -eq 0 ]]; then
-        rm -f "$temp_file" "$scan_raw_file" "$merged_file" "$refresh_file" "$cache_snapshot_file" "${temp_file}.sorted" "${temp_file}.progress" "$spinner_shown_file" 2> /dev/null || true
+        rm -f "$temp_file" "$scan_raw_file" "$merged_file" "$refresh_file" "$cache_snapshot_file" "$scan_status_file" "${temp_file}.sorted" "$spinner_shown_file" 2> /dev/null || true
         [[ $cache_source_is_temp == true ]] && rm -f "$cache_source" 2> /dev/null || true
         restore_scan_int_trap
         printf "\r\033[K" >&2
@@ -538,22 +559,28 @@ scan_applications() {
         echo "${app_path}|${display_name}|${bundle_id}|${app_mtime}" >> "$output_file"
     }
 
-    local progress_file="${temp_file}.progress"
-    echo "0" > "$progress_file"
+    update_scan_status "Scanning applications..." "0" "$total_apps"
 
     (
         # shellcheck disable=SC2329  # Function invoked indirectly via trap
         cleanup_spinner() { exit 0; }
         trap cleanup_spinner TERM INT EXIT
         sleep "$MOLE_UNINSTALL_SCAN_SPINNER_DELAY_SEC" 2> /dev/null || sleep 1
-        [[ -f "$progress_file" ]] || exit 0
+        [[ -f "$scan_status_file" ]] || exit 0
         local spinner_chars="|/-\\"
         local i=0
         : > "$spinner_shown_file"
         while true; do
-            local completed=$(cat "$progress_file" 2> /dev/null || echo 0)
+            local status_line status_message status_completed status_total
+            status_line=$(cat "$scan_status_file" 2> /dev/null || echo "")
+            IFS='|' read -r status_message status_completed status_total <<< "$status_line"
+            [[ -z "$status_message" ]] && status_message="Scanning applications..."
             local c="${spinner_chars:$((i % 4)):1}"
-            printf "\r\033[K%s Scanning applications... %d/%d" "$c" "$completed" "$total_apps" >&2
+            if [[ "$status_completed" =~ ^[0-9]+$ && "$status_total" =~ ^[0-9]+$ && $status_total -gt 0 ]]; then
+                printf "\r\033[K%s %s %d/%d" "$c" "$status_message" "$status_completed" "$status_total" >&2
+            else
+                printf "\r\033[K%s %s" "$c" "$status_message" >&2
+            fi
             ((i++))
             sleep 0.1 2> /dev/null || sleep 1
         done
@@ -564,7 +591,7 @@ scan_applications() {
         ((app_count++))
         process_app_metadata "$app_data_tuple" "$scan_raw_file" &
         pids+=($!)
-        echo "$app_count" > "$progress_file"
+        update_scan_status "Scanning applications..." "$app_count" "$total_apps"
 
         if ((${#pids[@]} >= max_parallel)); then
             wait "${pids[0]}" 2> /dev/null
@@ -576,27 +603,18 @@ scan_applications() {
         wait "$pid" 2> /dev/null
     done
 
-    if [[ -n "$spinner_pid" ]]; then
-        kill -TERM "$spinner_pid" 2> /dev/null || true
-        wait "$spinner_pid" 2> /dev/null || true
-    fi
-    if [[ -f "$spinner_shown_file" ]]; then
-        echo -ne "\r\033[K" >&2
-    fi
-    rm -f "$progress_file" "$spinner_shown_file"
+    update_scan_status "Building uninstall index..." "0" "0"
 
     if [[ ! -s "$scan_raw_file" ]]; then
+        stop_scan_spinner
         echo "No applications found to uninstall" >&2
-        rm -f "$temp_file" "$scan_raw_file" "$merged_file" "$refresh_file" "$cache_snapshot_file" "${temp_file}.sorted" "${temp_file}.progress" "$spinner_shown_file" 2> /dev/null || true
+        rm -f "$temp_file" "$scan_raw_file" "$merged_file" "$refresh_file" "$cache_snapshot_file" "${temp_file}.sorted" "$spinner_shown_file" 2> /dev/null || true
         [[ $cache_source_is_temp == true ]] && rm -f "$cache_source" 2> /dev/null || true
         restore_scan_int_trap
         return 1
     fi
 
-    if [[ $total_apps -gt 50 ]]; then
-        printf "\rProcessing %d applications...    " "$total_apps" >&2
-    fi
-
+    update_scan_status "Merging cache data..." "0" "0"
     awk -F'|' '
         NR == FNR {
             cache_mtime[$1] = $2
@@ -618,8 +636,18 @@ scan_applications() {
     local current_epoch
     current_epoch=$(get_epoch_seconds)
     local inline_metadata_count=0
+    local metadata_total=0
+    metadata_total=$(wc -l < "$merged_file" 2> /dev/null || echo "0")
+    [[ "$metadata_total" =~ ^[0-9]+$ ]] || metadata_total=0
+    local metadata_processed=0
+    update_scan_status "Collecting metadata..." "0" "$metadata_total"
 
     while IFS='|' read -r app_path display_name bundle_id app_mtime cached_mtime cached_size_kb cached_epoch cached_updated_epoch cached_bundle_id cached_display_name; do
+        ((metadata_processed++))
+        if ((metadata_processed % 5 == 0 || metadata_processed == metadata_total)); then
+            update_scan_status "Collecting metadata..." "$metadata_processed" "$metadata_total"
+        fi
+
         [[ -n "$app_path" && -e "$app_path" ]] || continue
 
         local cache_match=false
@@ -698,6 +726,7 @@ scan_applications() {
         echo "${final_epoch}|${app_path}|${display_name}|${bundle_id}|${final_size}|${final_last_used}|${final_size_kb}" >> "$temp_file"
     done < "$merged_file"
 
+    update_scan_status "Updating cache..." "0" "0"
     if [[ -s "$cache_snapshot_file" ]]; then
         if uninstall_acquire_metadata_lock "$MOLE_UNINSTALL_META_CACHE_LOCK"; then
             mv "$cache_snapshot_file" "$MOLE_UNINSTALL_META_CACHE_FILE" 2> /dev/null || {
@@ -708,7 +737,9 @@ scan_applications() {
         fi
     fi
 
+    update_scan_status "Sorting application list..." "0" "0"
     sort -t'|' -k1,1n "$temp_file" > "${temp_file}.sorted" || {
+        stop_scan_spinner
         rm -f "$temp_file" "$scan_raw_file" "$merged_file" "$refresh_file" "$cache_snapshot_file"
         [[ $cache_source_is_temp == true ]] && rm -f "$cache_source" 2> /dev/null || true
         restore_scan_int_trap
@@ -717,9 +748,9 @@ scan_applications() {
     rm -f "$temp_file" "$scan_raw_file" "$merged_file" "$cache_snapshot_file"
     [[ $cache_source_is_temp == true ]] && rm -f "$cache_source" 2> /dev/null || true
 
-    [[ $total_apps -gt 50 ]] && printf "\r\033[K" >&2
-
+    update_scan_status "Finalizing list..." "0" "0"
     start_uninstall_metadata_refresh "$refresh_file"
+    stop_scan_spinner
 
     if [[ -f "${temp_file}.sorted" ]]; then
         restore_scan_int_trap
