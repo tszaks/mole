@@ -112,3 +112,25 @@ EOF
     [[ "$output" == *"npm"* ]]
     [[ "$output" == *"brew"* ]]
 }
+
+@test "clean_project_caches cleans flutter .dart_tool and build directories" {
+    mkdir -p "$HOME/Code/flutter_app/.dart_tool" "$HOME/Code/flutter_app/build"
+    touch "$HOME/Code/flutter_app/.dart_tool/cache.bin"
+    touch "$HOME/Code/flutter_app/build/output.bin"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/caches.sh"
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+create_temp_file() { mktemp; }
+safe_clean() { echo "$2|$1"; }
+DRY_RUN=false
+clean_project_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Flutter build cache (.dart_tool)"* ]]
+    [[ "$output" == *"Flutter build cache (build/)"* ]]
+}
