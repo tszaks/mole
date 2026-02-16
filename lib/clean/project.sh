@@ -42,7 +42,7 @@ readonly PURGE_TARGETS=(
     "coverage"      # Code coverage reports
     "DerivedData"   # Xcode
     "Pods"          # CocoaPods
-    ".cxx"          # Android
+    ".cxx"          # React Native Android NDK build cache
     ".expo"         # Expo
 )
 # Minimum age in days before considering for cleanup.
@@ -327,6 +327,12 @@ is_protected_purge_artifact() {
         vendor)
             is_protected_vendor_dir "$path"
             return $?
+            ;;
+        DerivedData)
+            # Protect Xcode global DerivedData in ~/Library/Developer/Xcode/
+            # Only allow purging DerivedData within project directories
+            [[ "$path" == *"/Library/Developer/Xcode/DerivedData"* ]] && return 0
+            return 1
             ;;
     esac
 
