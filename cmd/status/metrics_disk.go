@@ -82,6 +82,11 @@ func collectDisks() ([]DiskStatus, error) {
 	annotateDiskTypes(disks)
 
 	sort.Slice(disks, func(i, j int) bool {
+		// First, prefer internal disks over external
+		if disks[i].External != disks[j].External {
+			return !disks[i].External
+		}
+		// Then sort by size (largest first)
 		return disks[i].Total > disks[j].Total
 	})
 
