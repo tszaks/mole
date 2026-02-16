@@ -580,6 +580,14 @@ clean_dev_mobile() {
     safe_clean ~/.android/cache/* "Android SDK cache"
     safe_clean ~/Library/Developer/Xcode/UserData/IB\ Support/* "Xcode Interface Builder cache"
     safe_clean ~/.cache/swift-package-manager/* "Swift package manager cache"
+    # Expo/React Native caches (preserve state.json which contains auth tokens).
+    safe_clean ~/.expo/expo-go/* "Expo Go cache"
+    safe_clean ~/.expo/android-apk-cache/* "Expo Android APK cache"
+    safe_clean ~/.expo/ios-simulator-app-cache/* "Expo iOS simulator app cache"
+    safe_clean ~/.expo/native-modules-cache/* "Expo native modules cache"
+    safe_clean ~/.expo/schema-cache/* "Expo schema cache"
+    safe_clean ~/.expo/template-cache/* "Expo template cache"
+    safe_clean ~/.expo/versions-cache/* "Expo versions cache"
 }
 # JVM ecosystem caches.
 # Gradle excluded (default whitelist, like Maven). Remove via: mo clean --whitelist
