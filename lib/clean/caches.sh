@@ -162,8 +162,9 @@ clean_project_caches() {
     flutter_tmp_file=$(create_temp_file)
     local find_timeout=30
     # Parallel scans (Next.js and __pycache__).
+    # Note: -maxdepth must come before -name for BSD find compatibility
     (
-        command find -P "$HOME" -mount -type d -name ".next" -maxdepth 3 \
+        command find -P "$HOME" -maxdepth 3 -mount -type d -name ".next" \
             -not -path "*/Library/*" \
             -not -path "*/.Trash/*" \
             -not -path "*/node_modules/*" \
@@ -172,7 +173,7 @@ clean_project_caches() {
     ) > "$nextjs_tmp_file" 2>&1 &
     local next_pid=$!
     (
-        command find -P "$HOME" -mount -type d -name "__pycache__" -maxdepth 3 \
+        command find -P "$HOME" -maxdepth 3 -mount -type d -name "__pycache__" \
             -not -path "*/Library/*" \
             -not -path "*/.Trash/*" \
             -not -path "*/node_modules/*" \
@@ -181,7 +182,7 @@ clean_project_caches() {
     ) > "$pycache_tmp_file" 2>&1 &
     local py_pid=$!
     (
-        command find -P "$HOME" -mount -type d -name ".dart_tool" -maxdepth 5 \
+        command find -P "$HOME" -maxdepth 5 -mount -type d -name ".dart_tool" \
             -not -path "*/Library/*" \
             -not -path "*/.Trash/*" \
             -not -path "*/node_modules/*" \
