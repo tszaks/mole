@@ -510,8 +510,42 @@ is_recently_modified() {
 # Get directory size in KB.
 get_dir_size_kb() {
     local path="$1"
-    if [[ -d "$path" ]]; then
-        du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0"
+    if [[ ! -d "$path" ]]; then
+        echo "0"
+        return
+    fi
+
+    local timeout_seconds="${MO_PURGE_SIZE_TIMEOUT_SEC:-15}"
+    if [[ ! "$timeout_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        timeout_seconds=15
+    fi
+
+    local du_output=""
+    local du_exit=0
+    local du_tmp
+    du_tmp=$(mktemp)
+    if run_with_timeout "$timeout_seconds" du -skP "$path" > "$du_tmp" 2> /dev/null; then
+        du_output=$(cat "$du_tmp")
+    else
+        du_exit=$?
+    fi
+    rm -f "$du_tmp"
+
+    if [[ $du_exit -eq 124 ]]; then
+        debug_log "Size calculation timed out (${timeout_seconds}s): $path"
+        echo "TIMEOUT"
+        return
+    fi
+
+    if [[ $du_exit -ne 0 ]]; then
+        echo "0"
+        return
+    fi
+
+    local size_kb
+    size_kb=$(printf '%s\n' "$du_output" | awk 'NR==1 {print $1; exit}')
+    if [[ "$size_kb" =~ ^[0-9]+$ ]]; then
+        echo "$size_kb"
     else
         echo "0"
     fi
@@ -855,6 +889,7 @@ clean_project_artifacts() {
     local -a menu_options=()
     local -a item_paths=()
     local -a item_sizes=()
+    local -a item_size_unknown_flags=()
     local -a item_recent_flags=()
     # Helper to get project name from path
     # For ~/www/pake/src-tauri/target -> returns "pake"
@@ -1054,14 +1089,26 @@ clean_project_artifacts() {
     for item in "${safe_to_clean[@]}"; do
         local project_path=$(get_project_path "$item")
         local artifact_type=$(get_artifact_display_name "$item")
-        local size_kb=$(get_dir_size_kb "$item")
+        local size_raw
+        size_raw=$(get_dir_size_kb "$item")
+        local size_kb=0
+        local size_human=""
+        local size_unknown=false
 
-        # Skip empty directories (0 bytes)
-        if [[ $size_kb -eq 0 ]]; then
+        if [[ "$size_raw" == "TIMEOUT" ]]; then
+            size_unknown=true
+            size_human="unknown"
+        elif [[ "$size_raw" =~ ^[0-9]+$ ]]; then
+            size_kb="$size_raw"
+            # Skip empty directories (0 bytes)
+            if [[ $size_kb -eq 0 ]]; then
+                continue
+            fi
+            size_human=$(bytes_to_human "$((size_kb * 1024))")
+        else
             continue
         fi
 
-        local size_human=$(bytes_to_human "$((size_kb * 1024))")
         # Check if recent
         local is_recent=false
         for recent_item in "${recently_modified[@]+"${recently_modified[@]}"}"; do
@@ -1073,6 +1120,7 @@ clean_project_artifacts() {
         menu_options+=("$(format_purge_display "$project_path" "$artifact_type" "$size_human")")
         item_paths+=("$item")
         item_sizes+=("$size_kb")
+        item_size_unknown_flags+=("$size_unknown")
         item_recent_flags+=("$is_recent")
     done
 
@@ -1097,12 +1145,14 @@ clean_project_artifacts() {
         local -a sorted_menu_options=()
         local -a sorted_item_paths=()
         local -a sorted_item_sizes=()
+        local -a sorted_item_size_unknown_flags=()
         local -a sorted_item_recent_flags=()
 
         for idx in "${sorted_indices[@]}"; do
             sorted_menu_options+=("${menu_options[idx]}")
             sorted_item_paths+=("${item_paths[idx]}")
             sorted_item_sizes+=("${item_sizes[idx]}")
+            sorted_item_size_unknown_flags+=("${item_size_unknown_flags[idx]}")
             sorted_item_recent_flags+=("${item_recent_flags[idx]}")
         done
 
@@ -1110,6 +1160,7 @@ clean_project_artifacts() {
         menu_options=("${sorted_menu_options[@]}")
         item_paths=("${sorted_item_paths[@]}")
         item_sizes=("${sorted_item_sizes[@]}")
+        item_size_unknown_flags=("${sorted_item_size_unknown_flags[@]}")
         item_recent_flags=("${sorted_item_recent_flags[@]}")
     fi
     if [[ -t 1 ]]; then
@@ -1157,7 +1208,13 @@ clean_project_artifacts() {
         local artifact_type=$(basename "$item_path")
         local project_path=$(get_project_path "$item_path")
         local size_kb="${item_sizes[idx]}"
-        local size_human=$(bytes_to_human "$((size_kb * 1024))")
+        local size_unknown="${item_size_unknown_flags[idx]:-false}"
+        local size_human
+        if [[ "$size_unknown" == "true" ]]; then
+            size_human="unknown"
+        else
+            size_human=$(bytes_to_human "$((size_kb * 1024))")
+        fi
         # Safety checks
         if [[ -z "$item_path" || "$item_path" == "/" || "$item_path" == "$HOME" || "$item_path" != "$HOME/"* ]]; then
             continue

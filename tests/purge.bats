@@ -492,6 +492,19 @@ EOF
     [[ "$result" == "0" ]]
 }
 
+@test "get_dir_size_kb: returns TIMEOUT when size calculation hangs" {
+    mkdir -p "$HOME/www/stuck-project/node_modules"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/core/common.sh'
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        run_with_timeout() { return 124; }
+        get_dir_size_kb '$HOME/www/stuck-project/node_modules'
+    ")
+
+    [[ "$result" == "TIMEOUT" ]]
+}
+
 @test "clean_project_artifacts: handles empty directory gracefully" {
     run bash -c "
         export HOME='$HOME'
