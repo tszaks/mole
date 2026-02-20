@@ -436,11 +436,14 @@ clean_sandboxed_app_caches() {
         ((total_items++))
         note_activity
     fi
+
+    clean_group_container_caches
 }
 # Process a single container cache directory.
 process_container_cache() {
     local container_dir="$1"
     [[ -d "$container_dir" ]] || return 0
+    [[ -L "$container_dir" ]] && return 0
     local bundle_id=$(basename "$container_dir")
     if is_critical_system_component "$bundle_id"; then
         return 0
@@ -450,6 +453,7 @@ process_container_cache() {
     fi
     local cache_dir="$container_dir/Data/Library/Caches"
     [[ -d "$cache_dir" ]] || return 0
+    [[ -L "$cache_dir" ]] && return 0
     # Fast non-empty check.
     if find "$cache_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
         local size=$(get_path_size_kb "$cache_dir")
@@ -470,6 +474,120 @@ process_container_cache() {
                 eval "$_ng_state"
             fi
         fi
+    fi
+}
+
+# Group Containers safe cleanup (logs for protected apps, caches/tmp for non-protected apps).
+clean_group_container_caches() {
+    local group_containers_dir="$HOME/Library/Group Containers"
+    [[ -d "$group_containers_dir" ]] || return 0
+    if ! ls "$group_containers_dir" > /dev/null 2>&1; then
+        return 0
+    fi
+
+    start_section_spinner "Scanning Group Containers..."
+    local total_size=0
+    local cleaned_count=0
+    local found_any=false
+    local _ng_state
+    _ng_state=$(shopt -p nullglob || true)
+    shopt -s nullglob
+
+    local container_dir
+    for container_dir in "$group_containers_dir"/*; do
+        [[ -d "$container_dir" ]] || continue
+        [[ -L "$container_dir" ]] && continue
+        local container_id
+        container_id=$(basename "$container_dir")
+
+        # Skip Apple-owned shared containers entirely.
+        case "$container_id" in
+            com.apple.* | group.com.apple.* | systemgroup.com.apple.*)
+                continue
+                ;;
+        esac
+
+        local normalized_id="$container_id"
+        [[ "$normalized_id" == group.* ]] && normalized_id="${normalized_id#group.}"
+
+        local protected_container=false
+        if should_protect_data "$container_id" || should_protect_data "$normalized_id"; then
+            protected_container=true
+        fi
+
+        local -a candidates=(
+            "$container_dir/Logs"
+            "$container_dir/Library/Logs"
+        )
+        if [[ "$protected_container" != "true" ]]; then
+            candidates+=(
+                "$container_dir/tmp"
+                "$container_dir/Library/tmp"
+                "$container_dir/Caches"
+                "$container_dir/Library/Caches"
+            )
+        fi
+
+        local candidate
+        for candidate in "${candidates[@]}"; do
+            [[ -d "$candidate" ]] || continue
+            [[ -L "$candidate" ]] && continue
+            if is_path_whitelisted "$candidate"; then
+                continue
+            fi
+            if ! find "$candidate" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
+                continue
+            fi
+
+            local candidate_size_kb=0
+            local candidate_changed=false
+            local item
+            while IFS= read -r -d '' item; do
+                [[ -e "$item" ]] || continue
+                [[ -L "$item" ]] && continue
+                if should_protect_path "$item" || is_path_whitelisted "$item"; then
+                    continue
+                fi
+
+                local item_size_kb
+                item_size_kb=$(get_path_size_kb "$item")
+                [[ "$item_size_kb" =~ ^[0-9]+$ ]] || item_size_kb=0
+
+                if [[ "$DRY_RUN" == "true" ]]; then
+                    candidate_changed=true
+                    ((candidate_size_kb += item_size_kb))
+                    continue
+                fi
+
+                if safe_remove "$item" true; then
+                    candidate_changed=true
+                    ((candidate_size_kb += item_size_kb))
+                fi
+            done < <(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+
+            if [[ "$candidate_changed" == "true" ]]; then
+                ((total_size += candidate_size_kb))
+                ((cleaned_count++))
+                found_any=true
+            fi
+        done
+    done
+
+    eval "$_ng_state"
+    stop_section_spinner
+
+    if [[ "$found_any" == "true" ]]; then
+        local size_human
+        size_human=$(bytes_to_human "$((total_size * 1024))")
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Group Containers logs/caches${NC}, ${YELLOW}$size_human dry${NC}"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Group Containers logs/caches${NC}, ${GREEN}$size_human${NC}"
+        fi
+        ((files_cleaned += cleaned_count))
+        ((total_size_cleaned += total_size))
+        ((total_items++))
+        note_activity
     fi
 }
 # Browser caches (Safari/Chrome/Edge/Firefox).
@@ -755,6 +873,7 @@ check_large_file_candidates() {
     note_activity
     return 0
 }
+
 # Apple Silicon specific caches (IS_M_SERIES).
 clean_apple_silicon_caches() {
     if [[ "${IS_M_SERIES:-false}" != "true" ]]; then

@@ -77,6 +77,144 @@ EOF
     [[ "$output" != *"Sandboxed app caches"* ]]
 }
 
+@test "clean_group_container_caches keeps protected caches and cleans non-protected caches" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Group Containers/group.com.microsoft.teams/Library/Logs"
+mkdir -p "$HOME/Library/Group Containers/group.com.microsoft.teams/Library/Caches"
+mkdir -p "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches"
+echo "log" > "$HOME/Library/Group Containers/group.com.microsoft.teams/Library/Logs/log.txt"
+echo "cache" > "$HOME/Library/Group Containers/group.com.microsoft.teams/Library/Caches/cache.db"
+echo "cache" > "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/cache.db"
+
+clean_group_container_caches
+
+if [[ ! -e "$HOME/Library/Group Containers/group.com.microsoft.teams/Library/Logs/log.txt" ]] \
+    && [[ -e "$HOME/Library/Group Containers/group.com.microsoft.teams/Library/Caches/cache.db" ]] \
+    && [[ ! -e "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/cache.db" ]]; then
+    echo "PASS"
+else
+    echo "FAIL"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Group Containers logs/caches"* ]]
+    [[ "$output" == *"PASS"* ]]
+}
+
+@test "clean_group_container_caches respects whitelist entries" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches"
+echo "protected" > "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/keep.db"
+echo "remove" > "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/drop.db"
+
+is_path_whitelisted() {
+    [[ "$1" == *"/group.com.example.tool/Library/Caches/keep.db" ]]
+}
+
+clean_group_container_caches
+
+if [[ -e "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/keep.db" ]] \
+    && [[ ! -e "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/drop.db" ]]; then
+    echo "PASS"
+else
+    echo "FAIL"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
+}
+
+@test "clean_group_container_caches skips systemgroup apple containers" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Group Containers/systemgroup.com.apple.example/Library/Caches"
+echo "system-data" > "$HOME/Library/Group Containers/systemgroup.com.apple.example/Library/Caches/cache.db"
+
+clean_group_container_caches
+
+if [[ -e "$HOME/Library/Group Containers/systemgroup.com.apple.example/Library/Caches/cache.db" ]]; then
+    echo "PASS"
+else
+    echo "FAIL"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
+}
+
+@test "clean_group_container_caches does not report when only whitelisted items exist" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Group Containers/group.com.example.onlywhite/Library/Caches"
+echo "whitelisted" > "$HOME/Library/Group Containers/group.com.example.onlywhite/Library/Caches/keep.db"
+
+is_path_whitelisted() {
+    [[ "$1" == *"/group.com.example.onlywhite/Library/Caches/keep.db" ]]
+}
+
+clean_group_container_caches
+
+if [[ -e "$HOME/Library/Group Containers/group.com.example.onlywhite/Library/Caches/keep.db" ]]; then
+    echo "PASS"
+else
+    echo "FAIL"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
+    [[ "$output" != *"Group Containers logs/caches"* ]]
+}
+
 @test "clean_finder_metadata respects protection flag" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PROTECT_FINDER_METADATA=true /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -104,11 +242,15 @@ EOF
 }
 
 @test "clean_browsers calls expected cache paths" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
 safe_clean() { echo "$2"; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
 clean_browsers
 EOF
 
