@@ -23,25 +23,27 @@ clean_deep_system() {
     [[ $cache_cleaned -eq 1 ]] && log_success "System caches"
     start_section_spinner "Cleaning system temporary files..."
     local tmp_cleaned=0
-    safe_sudo_find_delete "/private/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
-    safe_sudo_find_delete "/private/var/tmp" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" && tmp_cleaned=1 || true
+    local -a sys_temp_dirs=("/private/tmp" "/private/var/tmp")
+    for tmp_dir in "${sys_temp_dirs[@]}"; do
+        if sudo find "$tmp_dir" -maxdepth 1 -type f -mtime "+${MOLE_TEMP_FILE_AGE_DAYS}" -print -quit 2> /dev/null | grep -q .; then
+            if safe_sudo_find_delete "$tmp_dir" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f"; then
+                tmp_cleaned=1
+            fi
+        fi
+    done
     stop_section_spinner
     [[ $tmp_cleaned -eq 1 ]] && log_success "System temp files"
     start_section_spinner "Cleaning system crash reports..."
-    safe_sudo_find_delete "/Library/Logs/DiagnosticReports" "*" "$MOLE_CRASH_REPORT_AGE_DAYS" "f" || true
+    if sudo find "/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -mtime "+$MOLE_CRASH_REPORT_AGE_DAYS" -print -quit 2> /dev/null | grep -q .; then
+        safe_sudo_find_delete "/Library/Logs/DiagnosticReports" "*" "$MOLE_CRASH_REPORT_AGE_DAYS" "f" || true
+    fi
     stop_section_spinner
     log_success "System crash reports"
     start_section_spinner "Cleaning system logs..."
-    # Optimized: Single pass for /private/var/log (2 patterns in 1 scan)
-    if sudo test -d "/private/var/log" 2> /dev/null; then
-        while IFS= read -r -d '' file; do
-            if should_protect_path "$file"; then
-                continue
-            fi
-            safe_sudo_remove "$file" || true
-        done < <(sudo find "/private/var/log" -maxdepth 5 -type f \( \
-            -name "*.log" -o -name "*.gz" \
-            \) -mtime "+$MOLE_LOG_AGE_DAYS" -print0 2> /dev/null || true)
+    if sudo find "/private/var/log" -maxdepth 3 -type f \( -name "*.log" -o -name "*.gz" -o -name "*.asl" \) -mtime "+$MOLE_LOG_AGE_DAYS" -print -quit 2> /dev/null | grep -q .; then
+        safe_sudo_find_delete "/private/var/log" "*.log" "$MOLE_LOG_AGE_DAYS" "f" || true
+        safe_sudo_find_delete "/private/var/log" "*.gz" "$MOLE_LOG_AGE_DAYS" "f" || true
+        safe_sudo_find_delete "/private/var/log" "*.asl" "$MOLE_LOG_AGE_DAYS" "f" || true
     fi
     stop_section_spinner
     log_success "System logs"
@@ -69,13 +71,16 @@ clean_deep_system() {
     fi
     start_section_spinner "Scanning macOS installer files..."
     if [[ -d "/macOS Install Data" ]]; then
-        local mtime=$(get_file_mtime "/macOS Install Data")
+        local mtime
+        mtime=$(get_file_mtime "/macOS Install Data")
         local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
         debug_log "Found macOS Install Data, age ${age_days} days"
         if [[ $age_days -ge 14 ]]; then
-            local size_kb=$(get_path_size_kb "/macOS Install Data")
+            local size_kb
+            size_kb=$(get_path_size_kb "/macOS Install Data")
             if [[ -n "$size_kb" && "$size_kb" -gt 0 ]]; then
-                local size_human=$(bytes_to_human "$((size_kb * 1024))")
+                local size_human
+                size_human=$(bytes_to_human "$((size_kb * 1024))")
                 debug_log "Cleaning macOS Install Data: $size_human, ${age_days} days old"
                 if safe_sudo_remove "/macOS Install Data"; then
                     log_success "macOS Install Data, $size_human"
@@ -90,22 +95,26 @@ clean_deep_system() {
     local installer_cleaned=0
     for installer_app in /Applications/Install\ macOS*.app; do
         [[ -d "$installer_app" ]] || continue
-        local app_name=$(basename "$installer_app")
+        local app_name
+        app_name=$(basename "$installer_app")
         # Skip if installer is currently running
         if pgrep -f "$installer_app" > /dev/null 2>&1; then
             debug_log "Skipping $app_name: currently running"
             continue
         fi
         # Check age (same 14-day threshold as /macOS Install Data)
-        local mtime=$(get_file_mtime "$installer_app")
+        local mtime
+        mtime=$(get_file_mtime "$installer_app")
         local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
         if [[ $age_days -lt 14 ]]; then
             debug_log "Keeping $app_name: only ${age_days} days old, needs 14+"
             continue
         fi
-        local size_kb=$(get_path_size_kb "$installer_app")
+        local size_kb
+        size_kb=$(get_path_size_kb "$installer_app")
         if [[ -n "$size_kb" && "$size_kb" -gt 0 ]]; then
-            local size_human=$(bytes_to_human "$((size_kb * 1024))")
+            local size_human
+            size_human=$(bytes_to_human "$((size_kb * 1024))")
             debug_log "Cleaning macOS installer: $app_name, $size_human, ${age_days} days old"
             if safe_sudo_remove "$installer_app"; then
                 log_success "$app_name, $size_human"
@@ -117,43 +126,17 @@ clean_deep_system() {
     [[ $installer_cleaned -gt 0 ]] && debug_log "Cleaned $installer_cleaned macOS installer(s)"
     start_section_spinner "Scanning system caches..."
     local code_sign_cleaned=0
-    local found_count=0
-    local last_update_time
-    last_update_time=$(get_epoch_seconds)
-    local update_interval=2
     while IFS= read -r -d '' cache_dir; do
-        if safe_remove "$cache_dir" true; then
+        if safe_sudo_remove "$cache_dir"; then
             ((code_sign_cleaned++))
-        fi
-        ((found_count++))
-
-        # Optimize: only check time every 50 files
-        if ((found_count % 50 == 0)); then
-            local current_time
-            current_time=$(get_epoch_seconds)
-            if [[ $((current_time - last_update_time)) -ge $update_interval ]]; then
-                start_section_spinner "Scanning system caches... $found_count found"
-                last_update_time=$current_time
-            fi
         fi
     done < <(run_with_timeout 5 command find /private/var/folders -type d -name "*.code_sign_clone" -path "*/X/*" -print0 2> /dev/null || true)
     stop_section_spinner
     [[ $code_sign_cleaned -gt 0 ]] && log_success "Browser code signature caches, $code_sign_cleaned items"
 
-    # Optimized: Single pass for diagnostics directory (Special + Persist + tracev3)
-    # Replaces 4 separate find operations with 1 combined operation
     local diag_base="/private/var/db/diagnostics"
-    if sudo test -d "$diag_base" 2> /dev/null; then
-        while IFS= read -r -d '' file; do
-            if should_protect_path "$file"; then
-                continue
-            fi
-            safe_sudo_remove "$file" || true
-        done < <(sudo find "$diag_base" -maxdepth 5 -type f \( \
-            \( -mtime "+$MOLE_LOG_AGE_DAYS" \) -o \
-            \( -name "*.tracev3" -mtime +30 \) \
-            \) -print0 2> /dev/null || true)
-    fi
+    safe_sudo_find_delete "$diag_base" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
+    safe_sudo_find_delete "$diag_base" "*.tracev3" "30" "f" || true
     safe_sudo_find_delete "/private/var/db/DiagnosticPipeline" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
     log_success "System diagnostic logs"
     safe_sudo_find_delete "/private/var/db/powerlog" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
@@ -171,10 +154,9 @@ clean_deep_system() {
             ((total_size_kb += file_size / 1024))
         done < <(sudo find "$mem_reports_dir" -type f -mtime +30 -print0 2> /dev/null || true)
 
-        # For directories with many files, use find -delete for performance
         if [[ "$file_count" -gt 0 ]]; then
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                sudo find "$mem_reports_dir" -type f -mtime +30 -delete 2> /dev/null || true
+                safe_sudo_find_delete "$mem_reports_dir" "*" "30" "f" || true
                 # Log summary to operations.log
                 if oplog_enabled && [[ "$total_size_kb" -gt 0 ]]; then
                     local size_human
@@ -255,21 +237,25 @@ clean_time_machine_failed_backups() {
             while IFS= read -r inprogress_file; do
                 [[ -d "$inprogress_file" ]] || continue
                 # Only delete old incomplete backups (safety window).
-                local file_mtime=$(get_file_mtime "$inprogress_file")
+                local file_mtime
+                file_mtime=$(get_file_mtime "$inprogress_file")
                 local current_time
                 current_time=$(get_epoch_seconds)
                 local hours_old=$(((current_time - file_mtime) / 3600))
                 if [[ $hours_old -lt $MOLE_TM_BACKUP_SAFE_HOURS ]]; then
                     continue
                 fi
-                local size_kb=$(get_path_size_kb "$inprogress_file")
+                local size_kb
+                size_kb=$(get_path_size_kb "$inprogress_file")
                 [[ "$size_kb" -le 0 ]] && continue
                 if [[ "$spinner_active" == "true" ]]; then
                     stop_section_spinner
                     spinner_active=false
                 fi
-                local backup_name=$(basename "$inprogress_file")
-                local size_human=$(bytes_to_human "$((size_kb * 1024))")
+                local backup_name
+                backup_name=$(basename "$inprogress_file")
+                local size_human
+                size_human=$(bytes_to_human "$((size_kb * 1024))")
                 if [[ "$DRY_RUN" == "true" ]]; then
                     echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete backup: $backup_name${NC}, ${YELLOW}$size_human dry${NC}"
                     ((tm_cleaned++))
@@ -296,26 +282,32 @@ clean_time_machine_failed_backups() {
         for bundle in "$volume"/*.backupbundle "$volume"/*.sparsebundle; do
             [[ -e "$bundle" ]] || continue
             [[ -d "$bundle" ]] || continue
-            local bundle_name=$(basename "$bundle")
-            local mounted_path=$(hdiutil info 2> /dev/null | grep -A 5 "image-path.*$bundle_name" | grep "/Volumes/" | awk '{print $1}' | head -1 || echo "")
+            local bundle_name
+            bundle_name=$(basename "$bundle")
+            local mounted_path
+            mounted_path=$(hdiutil info 2> /dev/null | grep -A 5 "image-path.*$bundle_name" | grep "/Volumes/" | awk '{print $1}' | head -1 || echo "")
             if [[ -n "$mounted_path" && -d "$mounted_path" ]]; then
                 while IFS= read -r inprogress_file; do
                     [[ -d "$inprogress_file" ]] || continue
-                    local file_mtime=$(get_file_mtime "$inprogress_file")
+                    local file_mtime
+                    file_mtime=$(get_file_mtime "$inprogress_file")
                     local current_time
                     current_time=$(get_epoch_seconds)
                     local hours_old=$(((current_time - file_mtime) / 3600))
                     if [[ $hours_old -lt $MOLE_TM_BACKUP_SAFE_HOURS ]]; then
                         continue
                     fi
-                    local size_kb=$(get_path_size_kb "$inprogress_file")
+                    local size_kb
+                    size_kb=$(get_path_size_kb "$inprogress_file")
                     [[ "$size_kb" -le 0 ]] && continue
                     if [[ "$spinner_active" == "true" ]]; then
                         stop_section_spinner
                         spinner_active=false
                     fi
-                    local backup_name=$(basename "$inprogress_file")
-                    local size_human=$(bytes_to_human "$((size_kb * 1024))")
+                    local backup_name
+                    backup_name=$(basename "$inprogress_file")
+                    local size_human
+                    size_human=$(bytes_to_human "$((size_kb * 1024))")
                     if [[ "$DRY_RUN" == "true" ]]; then
                         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete APFS backup in $bundle_name: $backup_name${NC}, ${YELLOW}$size_human dry${NC}"
                         ((tm_cleaned++))

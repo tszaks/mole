@@ -72,7 +72,7 @@ EOF
     [[ "$output" == *"/private/var/log"* ]]
 }
 
-@test "clean_deep_system skips /Library/Updates when SIP enabled" {
+@test "clean_deep_system does not touch /Library/Updates when directory absent" {
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_skip.log"
@@ -89,7 +89,6 @@ safe_sudo_remove() {
 log_success() { :; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 0; } # SIP enabled -> skip removal
 find() { return 0; }
 run_with_timeout() { shift; "$@"; }
 
@@ -619,7 +618,7 @@ sudo() {
     fi
     if [[ "$1" == "find" ]]; then
         echo "sudo_find:$*" >> "$CALL_LOG"
-        if [[ "$2" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" && "$*" != *"-delete"* ]]; then
+        if [[ "$2" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" ]]; then
             printf '%s\0' "/private/var/db/reportmemoryexception/MemoryLimitViolations/report.bin"
         fi
         return 0
@@ -630,7 +629,10 @@ sudo() {
     fi
     return 0
 }
-safe_sudo_find_delete() { return 0; }
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 0
+}
 safe_sudo_remove() { return 0; }
 log_success() { :; }
 is_sip_enabled() { return 1; }
@@ -644,7 +646,7 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"reportmemoryexception/MemoryLimitViolations"* ]]
     [[ "$output" == *"-mtime +30"* ]]  # 30-day retention
-    [[ "$output" == *"-delete"* ]]
+    [[ "$output" == *"safe_sudo_find_delete"* ]]
 }
 
 @test "clean_deep_system cleans diagnostic trace logs" {
