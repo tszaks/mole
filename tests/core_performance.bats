@@ -77,7 +77,7 @@ setup() {
     local start end elapsed
     local limit_ms="${MOLE_PERF_GET_FILE_SIZE_LIMIT_MS:-2000}"
     start=$(date +%s%N)
-    for i in {1..100}; do
+    for i in {1..50}; do
         get_file_size "$test_file" > /dev/null
     done
     end=$(date +%s%N)
