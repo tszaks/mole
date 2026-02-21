@@ -800,6 +800,9 @@ clean_project_artifacts() {
     local -a all_found_items=()
     local -a safe_to_clean=()
     local -a recently_modified=()
+    local previous_int_trap=""
+    local previous_term_trap=""
+    local trap_installed_by_this_call=false
     # Set up cleanup on interrupt
     # Note: Declared without 'local' so cleanup_scan trap can access them
     scan_pids=()
@@ -820,12 +823,11 @@ clean_project_artifacts() {
         echo ""
         exit 130
     }
-    # Set up signal handling only if not already set by parent script
-    # This prevents trap conflicts between purge.sh and project.sh
-    if [[ -z "${_MO_PURGE_TRAP_SET:-}" ]]; then
-        trap cleanup_scan INT TERM
-        export _MO_PURGE_TRAP_SET=1
-    fi
+    # Save caller traps and install local cleanup trap for this function call.
+    previous_int_trap=$(trap -p INT || true)
+    previous_term_trap=$(trap -p TERM || true)
+    trap cleanup_scan INT TERM
+    trap_installed_by_this_call=true
     # Scanning is started from purge.sh with start_inline_spinner
     # Launch all scans in parallel
     for path in "${PURGE_SEARCH_PATHS[@]}"; do
@@ -866,8 +868,12 @@ clean_project_artifacts() {
             rm -f "$scan_output"
         fi
     done
-    # Clean up trap
-    trap - INT TERM
+    # Restore caller traps after this function completes.
+    if [[ "$trap_installed_by_this_call" == "true" ]]; then
+        trap - INT TERM
+        [[ -n "$previous_int_trap" ]] && eval "$previous_int_trap"
+        [[ -n "$previous_term_trap" ]] && eval "$previous_term_trap"
+    fi
     if [[ ${#all_found_items[@]} -eq 0 ]]; then
         echo ""
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Great! No old project artifacts to clean"

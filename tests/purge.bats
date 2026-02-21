@@ -505,6 +505,36 @@ EOF
     [[ "$result" == "TIMEOUT" ]]
 }
 
+@test "clean_project_artifacts: restores caller INT/TERM traps" {
+    result=$(bash -c "
+        set -euo pipefail
+        export HOME='$HOME'
+        source '$PROJECT_ROOT/lib/core/common.sh'
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        mkdir -p '$HOME/www'
+        PURGE_SEARCH_PATHS=('$HOME/www')
+        trap 'echo parent-int' INT
+        trap 'echo parent-term' TERM
+        before_int=\$(trap -p INT)
+        before_term=\$(trap -p TERM)
+        clean_project_artifacts > /dev/null 2>&1 || true
+        after_int=\$(trap -p INT)
+        after_term=\$(trap -p TERM)
+        if [[ \"\$before_int\" == \"\$after_int\" && \"\$before_term\" == \"\$after_term\" ]]; then
+            echo 'PASS'
+        else
+            echo 'FAIL'
+            echo \"before_int=\$before_int\"
+            echo \"after_int=\$after_int\"
+            echo \"before_term=\$before_term\"
+            echo \"after_term=\$after_term\"
+            exit 1
+        fi
+    ")
+
+    [[ "$result" == *"PASS"* ]]
+}
+
 @test "clean_project_artifacts: handles empty directory gracefully" {
     run bash -c "
         export HOME='$HOME'
