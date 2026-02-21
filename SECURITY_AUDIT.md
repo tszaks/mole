@@ -1,8 +1,18 @@
 # Mole Security Reference
 
-Version 1.23.2 | 2026-01-26
+Version 1.27.0 | 2026-02-21
 
 ## Recent Fixes
+
+**Cleanup hardening audit, Feb 2026:**
+
+- `clean_deep_system()` now uses `safe_sudo_find_delete()` and `safe_sudo_remove()` for temp/log/diagnostic/report paths in `lib/clean/system.sh`.
+- Removed direct `find ... -delete` from security-sensitive cleanup paths. Deletions now go through validated safe wrappers.
+- `process_container_cache()` in `lib/clean/user.sh` now removes entries item-by-item with `safe_remove()`, so every delete is validated.
+- `clean_application_support_logs()` now also performs item-by-item `safe_remove()` cleanup instead of direct bulk deletion.
+- Group Containers cleanup now builds an explicit candidate list first, then filters protected/whitelisted items before deletion.
+- `bin/clean.sh` dry-run export temp files rely on tracked temp lifecycle (`create_temp_file()` + trap cleanup) to avoid orphan temp artifacts.
+- Added/updated regression coverage in `tests/clean_system_maintenance.bats`, `tests/clean_core.bats`, and `tests/clean_user_core.bats` for the new safe-deletion flow.
 
 **Uninstall audit, Jan 2026:**
 
@@ -91,7 +101,7 @@ Code at `cmd/analyze/*.go`.
 
 Network volume checks timeout after 5s (NFS/SMB/AFP can hang forever). mdfind searches get 10s. SQLite vacuum gets 20s, skipped if Mail/Safari/Messages is open. dyld cache rebuild gets 180s, skipped if done in the last 24h.
 
-See `lib/core/base.sh:run_with_timeout()`.
+See `lib/core/timeout.sh:run_with_timeout()`.
 
 ## User Config
 
@@ -109,7 +119,19 @@ Run `mo clean --dry-run` or `mo optimize --dry-run` to preview what would happen
 
 ## Testing
 
-180+ test cases, roughly 88% coverage overall. Security stuff is 100% covered, file ops 95%, cleaning 87%, optimize 82%, system 90%.
+Security-sensitive cleanup paths are covered by BATS regression tests, including:
+
+- `tests/clean_core.bats`
+- `tests/clean_user_core.bats`
+- `tests/clean_dev_caches.bats`
+- `tests/clean_system_maintenance.bats`
+
+Latest local verification for this release branch:
+
+- `bats tests/clean_core.bats` passed (12/12)
+- `bats tests/clean_user_core.bats` passed (13/13)
+- `bats tests/clean_dev_caches.bats` passed (8/8)
+- `bats tests/clean_system_maintenance.bats` passed (40/40)
 
 Run tests:
 
