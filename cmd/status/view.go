@@ -181,7 +181,7 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 		if mole == "" {
 			return lipgloss.JoinVertical(lipgloss.Left, headerLine, "", dangerStyle.Render("ERROR: "+errMsg)), ""
 		}
-		return lipgloss.JoinVertical(lipgloss.Left, headerLine, "", mole, dangerStyle.Render("ERROR: "+errMsg)), mole
+		return lipgloss.JoinVertical(lipgloss.Left, headerLine, "", mole, dangerStyle.Render("ERROR: "+errMsg)), ""
 	}
 	if mole == "" {
 		return headerLine, ""

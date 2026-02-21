@@ -920,6 +920,37 @@ func TestSparkline(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderErrorReturnsMoleOnce(t *testing.T) {
+	header, mole := renderHeader(MetricsSnapshot{}, "boom", 0, 120, false)
+
+	if mole != "" {
+		t.Fatalf("renderHeader() mole return should be empty on error to avoid duplicate render, got %q", mole)
+	}
+	if !strings.Contains(header, "ERROR: boom") {
+		t.Fatalf("renderHeader() missing error text, got %q", header)
+	}
+	if strings.Count(header, "/\\_/\\") != 1 {
+		t.Fatalf("renderHeader() should contain one mole frame in error state, got %d", strings.Count(header, "/\\_/\\"))
+	}
+}
+
+func TestModelViewErrorRendersSingleMole(t *testing.T) {
+	m := model{
+		width:      120,
+		height:     40,
+		ready:      true,
+		metrics:    MetricsSnapshot{},
+		errMessage: "boom",
+		animFrame:  0,
+		catHidden:  false,
+	}
+
+	view := m.View()
+	if strings.Count(view, "/\\_/\\") != 1 {
+		t.Fatalf("model.View() should render one mole frame in error state, got %d", strings.Count(view, "/\\_/\\"))
+	}
+}
+
 func stripANSI(s string) string {
 	var result strings.Builder
 	i := 0
