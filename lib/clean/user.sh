@@ -481,7 +481,7 @@ process_container_cache() {
 clean_group_container_caches() {
     local group_containers_dir="$HOME/Library/Group Containers"
     [[ -d "$group_containers_dir" ]] || return 0
-    if ! ls "$group_containers_dir" > /dev/null 2>&1; then
+    if ! find "$group_containers_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
         return 0
     fi
 
