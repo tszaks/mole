@@ -517,7 +517,7 @@ clean_xcode_simulator_runtime_volumes() {
         if [[ $skipped_protected -gt 0 ]]; then
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode runtime volumes · skipped ${skipped_protected} protected, none removed"
         else
-            echo -e "  ${GRAY}${ICON_EMPTY}${NC} Xcode runtime volumes · nothing removed"
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode runtime volumes · already clean"
         fi
         note_activity
     fi
