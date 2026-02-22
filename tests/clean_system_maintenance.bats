@@ -21,7 +21,7 @@ teardown_file() {
 }
 
 @test "clean_deep_system issues safe sudo deletions" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls.log"
 > "$CALL_LOG"
@@ -73,7 +73,7 @@ EOF
 }
 
 @test "clean_deep_system does not touch /Library/Updates when directory absent" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_skip.log"
 > "$CALL_LOG"
@@ -100,8 +100,61 @@ EOF
     [[ "$output" != *"/Library/Updates"* ]]
 }
 
+@test "clean_deep_system cleans third-party adobe logs conservatively" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/system_calls_adobe.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "find" ]]; then
+        case "$2" in
+            /Library/Caches) printf '%s\0' "/Library/Caches/test.log" ;;
+            /private/var/log) printf '%s\0' "/private/var/log/system.log" ;;
+            /Library/Logs) echo "/Library/Logs/adobegc.log" ;;
+        esac
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "0"
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 0
+}
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+get_file_mtime() { echo 0; }
+get_path_size_kb() { echo 0; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]]
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]]
+    [[ "$output" == *"safe_sudo_remove:/Library/Logs/adobegc.log"* ]]
+}
+
 @test "clean_time_machine_failed_backups exits when tmutil has no destinations" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -124,7 +177,7 @@ EOF
 }
 
 @test "clean_local_snapshots reports snapshot count" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -148,7 +201,7 @@ EOF
 }
 
 @test "clean_local_snapshots is quiet when no snapshots" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -166,9 +219,8 @@ EOF
     [[ "$output" != *"Time Machine local snapshots"* ]]
 }
 
-
 @test "clean_homebrew skips when cleaned recently" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -186,7 +238,7 @@ EOF
 }
 
 @test "clean_homebrew runs cleanup with timeout stubs" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -231,7 +283,7 @@ EOF
 }
 
 @test "check_appstore_updates is skipped for performance" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
@@ -245,7 +297,7 @@ EOF
 }
 
 @test "check_macos_update avoids slow softwareupdate scans" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
@@ -285,7 +337,7 @@ EOF
 }
 
 @test "check_macos_update clears update flag when softwareupdate reports no updates" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
@@ -325,7 +377,7 @@ EOF
 }
 
 @test "check_macos_update keeps update flag when softwareupdate times out" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
@@ -359,7 +411,7 @@ EOF
 }
 
 @test "check_macos_update keeps update flag when softwareupdate returns empty output" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
@@ -393,7 +445,7 @@ EOF
 }
 
 @test "check_macos_update skips softwareupdate when defaults shows no updates" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
@@ -416,7 +468,7 @@ EOF
 }
 
 @test "check_macos_update outputs debug info when MO_DEBUG set" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
@@ -467,7 +519,6 @@ EOF
     [ "$status" -eq 124 ]
 }
 
-
 @test "opt_saved_state_cleanup removes old saved states" {
     local state_dir="$HOME/Library/Saved Application State"
     mkdir -p "$state_dir/com.example.app.savedState"
@@ -502,7 +553,7 @@ EOF
 @test "opt_saved_state_cleanup continues on permission denied (silent exit)" {
     local state_dir="$HOME/Library/Saved Application State"
     mkdir -p "$state_dir/com.example.old.savedState"
-    touch -t 202301010000 "$state_dir/com.example.old.savedState" 2>/dev/null || true
+    touch -t 202301010000 "$state_dir/com.example.old.savedState" 2> /dev/null || true
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -556,7 +607,6 @@ EOF
     [[ "$output" == *"QuickLook thumbnails refreshed"* ]]
 }
 
-
 @test "get_path_size_kb returns zero for missing directory" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=0 bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -571,7 +621,7 @@ EOF
 
 @test "get_path_size_kb calculates directory size" {
     mkdir -p "$HOME/test_size"
-    dd if=/dev/zero of="$HOME/test_size/file.dat" bs=1024 count=10 2>/dev/null
+    dd if=/dev/zero of="$HOME/test_size/file.dat" bs=1024 count=10 2> /dev/null
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=0 bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -584,9 +634,8 @@ EOF
     [ "$output" -ge 10 ]
 }
 
-
 @test "opt_fix_broken_configs reports fixes" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/maintenance.sh"
@@ -603,9 +652,8 @@ EOF
     [[ "$output" == *"Repaired 2 corrupted preference files"* ]]
 }
 
-
 @test "clean_deep_system cleans memory exception reports" {
-    run bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/memory_exception_calls.log"
 > "$CALL_LOG"
@@ -645,12 +693,97 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"reportmemoryexception/MemoryLimitViolations"* ]]
-    [[ "$output" == *"-mtime +30"* ]]  # 30-day retention
+    [[ "$output" == *"-mtime +30"* ]] # 30-day retention
     [[ "$output" == *"safe_sudo_find_delete"* ]]
 }
 
+@test "clean_deep_system memory exception respects DRY_RUN flag" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/memory_exception_dryrun_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        [[ "$2" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" ]] && return 0
+        return 1
+    fi
+    if [[ "$1" == "find" ]]; then
+        if [[ "$2" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" ]]; then
+            printf '%s\0' "/private/var/db/reportmemoryexception/MemoryLimitViolations/report.bin"
+        fi
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "1024"
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 0
+}
+safe_sudo_remove() { return 0; }
+log_success() { :; }
+log_info() { echo "$*"; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[DRY-RUN] Would remove"* ]]
+    [[ "$output" != *"safe_sudo_find_delete:/private/var/db/reportmemoryexception/MemoryLimitViolations"* ]]
+}
+
+@test "clean_deep_system does not log memory exception success when nothing cleaned" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/memory_exception_success_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        [[ "$2" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" ]] && return 0
+        return 1
+    fi
+    if [[ "$1" == "find" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "0"
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 0
+}
+safe_sudo_remove() { return 0; }
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"SUCCESS:Memory exception reports"* ]]
+}
+
 @test "clean_deep_system cleans diagnostic trace logs" {
-    run bash --noprofile --norc <<'EOF'
+    run bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/diag_calls.log"
 > "$CALL_LOG"
@@ -697,75 +830,97 @@ EOF
     [[ "$output" == *"tracev3"* ]]
 }
 
-@test "clean_deep_system validates symbolication cache size before cleaning" {
-    run bash --noprofile --norc <<'EOF'
+@test "clean_deep_system cleans code_sign_clone caches via safe_sudo_remove" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
+CALL_LOG="$HOME/code_sign_clone_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
 
-symbolication_size_mb="2048"  # 2GB
-
-if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
-    if [[ $symbolication_size_mb -gt 1024 ]]; then
-        echo "WOULD_CLEAN=yes"
-    else
-        echo "WOULD_CLEAN=no"
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 1
     fi
-else
-    echo "WOULD_CLEAN=no"
-fi
+    if [[ "$1" == "find" ]]; then
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() { return 0; }
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+run_with_timeout() {
+    local _timeout="$1"
+    shift
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+        printf '%s\0' "/private/var/folders/test/a/X/demo.code_sign_clone"
+        return 0
+    fi
+    "$@"
+}
+
+clean_deep_system
+cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"WOULD_CLEAN=yes"* ]]
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/X/demo.code_sign_clone"* ]]
+    [[ "$output" == *"SUCCESS:Browser code signature caches"* ]]
 }
 
-@test "clean_deep_system skips symbolication cache when small" {
-    run bash --noprofile --norc <<'EOF'
+@test "clean_deep_system skips code_sign_clone success when removal fails" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
+CALL_LOG="$HOME/code_sign_clone_fail_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
 
-symbolication_size_mb="500"  # 500MB < 1GB
-
-if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
-    if [[ $symbolication_size_mb -gt 1024 ]]; then
-        echo "WOULD_CLEAN=yes"
-    else
-        echo "WOULD_CLEAN=no"
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 1
     fi
-else
-    echo "WOULD_CLEAN=no"
-fi
+    if [[ "$1" == "find" ]]; then
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() { return 0; }
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 1
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+run_with_timeout() {
+    local _timeout="$1"
+    shift
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+        printf '%s\0' "/private/var/folders/test/a/X/demo.code_sign_clone"
+        return 0
+    fi
+    "$@"
+}
+
+clean_deep_system
+cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"WOULD_CLEAN=no"* ]]
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/X/demo.code_sign_clone"* ]]
+    [[ "$output" != *"SUCCESS:Browser code signature caches"* ]]
 }
-
-@test "clean_deep_system handles symbolication cache size check failure" {
-    run bash --noprofile --norc <<'EOF'
-set -euo pipefail
-
-symbolication_size_mb=""  # Empty - simulates failure
-
-if [[ -n "$symbolication_size_mb" && "$symbolication_size_mb" =~ ^[0-9]+$ ]]; then
-    if [[ $symbolication_size_mb -gt 1024 ]]; then
-        echo "WOULD_CLEAN=yes"
-    else
-        echo "WOULD_CLEAN=no"
-    fi
-else
-    echo "WOULD_CLEAN=no"
-fi
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"WOULD_CLEAN=no"* ]]
-}
-
-
-
-
-
-
-
 
 @test "opt_memory_pressure_relief skips when pressure is normal" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'

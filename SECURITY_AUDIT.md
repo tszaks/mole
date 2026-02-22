@@ -13,6 +13,25 @@ Version 1.27.0 | 2026-02-21
 - Group Containers cleanup now builds an explicit candidate list first, then filters protected/whitelisted items before deletion.
 - `bin/clean.sh` dry-run export temp files rely on tracked temp lifecycle (`create_temp_file()` + trap cleanup) to avoid orphan temp artifacts.
 - Added/updated regression coverage in `tests/clean_system_maintenance.bats`, `tests/clean_core.bats`, and `tests/clean_user_core.bats` for the new safe-deletion flow.
+- Added conservative support-cache cleanup in `lib/clean/user.sh`:
+  - `~/Library/Application Support/CrashReporter` files older than 30 days
+  - `~/Library/Application Support/com.apple.idleassetsd` files older than 30 days
+  - `~/Library/Messages/StickerCache` and `~/Library/Messages/Caches/Previews/*` caches only
+- Explicitly kept `~/Library/Messages/Attachments` and `~/Library/Metadata/CoreSpotlight` out of automatic cleanup to avoid user-data or indexing risk.
+- Added low-risk cache coverage in `lib/clean/app_caches.sh`:
+  - `~/Library/Logs/CoreSimulator/*`
+  - Adobe media cache (`~/Library/Application Support/Adobe/Common/Media Cache Files/*`)
+  - Steam app/depot/shader/log caches and Minecraft/Lunar Client log/cache directories
+  - Legacy Microsoft Teams cache/log/temp directories under `~/Library/Application Support/Microsoft/Teams/*`
+  - `~/.cacher/logs/*` and `~/.kite/logs/*`
+- Added conservative third-party system log cleanup in `lib/clean/system.sh`:
+  - `/Library/Logs/Adobe/*` and `/Library/Logs/CreativeCloud/*` older files only
+  - `/Library/Logs/adobegc.log` only when older than log retention
+- Explicitly did not add high-risk cleanup defaults for:
+  - `/private/var/folders/*` broad deletion
+  - `~/Library/Application Support/MobileSync/Backup/*`
+  - Browser history/cookie databases (e.g., Arc History/Cookies/Web Data)
+  - Destructive container/image pruning commands by default
 
 **Uninstall audit, Jan 2026:**
 

@@ -21,7 +21,7 @@ teardown_file() {
 }
 
 @test "clean_xcode_tools skips derived data when Xcode running" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
@@ -34,10 +34,28 @@ EOF
     [[ "$output" == *"Xcode is running"* ]]
     [[ "$output" != *"derived data"* ]]
     [[ "$output" != *"archives"* ]]
+    [[ "$output" != *"documentation cache"* ]]
+}
+
+@test "clean_xcode_tools cleans documentation caches when Xcode is not running" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+pgrep() { return 1; }
+safe_clean() { echo "$2"; }
+clean_xcode_tools
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Xcode derived data"* ]]
+    [[ "$output" == *"Xcode archives"* ]]
+    [[ "$output" == *"Xcode documentation cache"* ]]
+    [[ "$output" == *"Xcode documentation index"* ]]
 }
 
 @test "clean_media_players protects spotify offline cache" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
@@ -53,7 +71,7 @@ EOF
 }
 
 @test "clean_user_gui_applications calls all sections" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
@@ -72,7 +90,7 @@ EOF
 }
 
 @test "clean_ai_apps calls expected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
@@ -85,7 +103,7 @@ EOF
 }
 
 @test "clean_design_tools calls expected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
@@ -98,7 +116,7 @@ EOF
 }
 
 @test "clean_dingtalk calls expected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
@@ -111,7 +129,7 @@ EOF
 }
 
 @test "clean_download_managers calls expected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
@@ -124,7 +142,7 @@ EOF
 }
 
 @test "clean_productivity_apps calls expected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
@@ -137,7 +155,7 @@ EOF
 }
 
 @test "clean_screenshot_tools calls expected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
@@ -150,7 +168,7 @@ EOF
 }
 
 @test "clean_office_applications calls expected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/user.sh"
 stop_section_spinner() { :; }
@@ -161,4 +179,32 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Microsoft Word cache"* ]]
     [[ "$output" == *"Apple iWork cache"* ]]
+}
+
+@test "clean_communication_apps includes Microsoft Teams legacy caches" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "$2"; }
+clean_communication_apps
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Microsoft Teams legacy cache"* ]]
+    [[ "$output" == *"Microsoft Teams legacy logs"* ]]
+}
+
+@test "clean_gaming_platforms includes steam and minecraft related caches" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "$2"; }
+clean_gaming_platforms
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Steam app cache"* ]]
+    [[ "$output" == *"Steam shader cache"* ]]
+    [[ "$output" == *"Minecraft logs"* ]]
+    [[ "$output" == *"Lunar Client logs"* ]]
 }

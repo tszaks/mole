@@ -47,6 +47,25 @@ clean_deep_system() {
     fi
     stop_section_spinner
     log_success "System logs"
+    start_section_spinner "Cleaning third-party system logs..."
+    local -a third_party_log_dirs=(
+        "/Library/Logs/Adobe"
+        "/Library/Logs/CreativeCloud"
+    )
+    local third_party_logs_cleaned=0
+    local third_party_log_dir=""
+    for third_party_log_dir in "${third_party_log_dirs[@]}"; do
+        if sudo test -d "$third_party_log_dir" 2> /dev/null; then
+            safe_sudo_find_delete "$third_party_log_dir" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
+            third_party_logs_cleaned=1
+        fi
+    done
+    if sudo find "/Library/Logs" -maxdepth 1 -type f -name "adobegc.log" -mtime "+$MOLE_LOG_AGE_DAYS" -print -quit 2> /dev/null | grep -q .; then
+        safe_sudo_remove "/Library/Logs/adobegc.log" || true
+        third_party_logs_cleaned=1
+    fi
+    stop_section_spinner
+    [[ $third_party_logs_cleaned -eq 1 ]] && log_success "Third-party system logs"
     start_section_spinner "Scanning system library updates..."
     if [[ -d "/Library/Updates" && ! -L "/Library/Updates" ]]; then
         local updates_cleaned=0
@@ -143,6 +162,7 @@ clean_deep_system() {
     log_success "Power logs"
     start_section_spinner "Cleaning memory exception reports..."
     local mem_reports_dir="/private/var/db/reportmemoryexception/MemoryLimitViolations"
+    local mem_cleaned=0
     if sudo test -d "$mem_reports_dir" 2> /dev/null; then
         # Count and size old files before deletion
         local file_count=0
@@ -155,10 +175,12 @@ clean_deep_system() {
         done < <(sudo find "$mem_reports_dir" -type f -mtime +30 -print0 2> /dev/null || true)
 
         if [[ "$file_count" -gt 0 ]]; then
-            if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                safe_sudo_find_delete "$mem_reports_dir" "*" "30" "f" || true
+            if [[ "${DRY_RUN:-false}" != "true" ]]; then
+                if safe_sudo_find_delete "$mem_reports_dir" "*" "30" "f"; then
+                    mem_cleaned=1
+                fi
                 # Log summary to operations.log
-                if oplog_enabled && [[ "$total_size_kb" -gt 0 ]]; then
+                if [[ $mem_cleaned -eq 1 ]] && oplog_enabled && [[ "$total_size_kb" -gt 0 ]]; then
                     local size_human
                     size_human=$(bytes_to_human "$((total_size_kb * 1024))")
                     log_operation "clean" "REMOVED" "$mem_reports_dir" "$file_count files, $size_human"
@@ -169,7 +191,10 @@ clean_deep_system() {
         fi
     fi
     stop_section_spinner
-    log_success "Memory exception reports"
+    if [[ $mem_cleaned -eq 1 ]]; then
+        log_success "Memory exception reports"
+    fi
+    return 0
 }
 # Incomplete Time Machine backups.
 clean_time_machine_failed_backups() {

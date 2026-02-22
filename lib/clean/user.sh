@@ -394,6 +394,33 @@ clean_finder_metadata() {
     fi
     clean_ds_store_tree "$HOME" "Home directory, .DS_Store"
 }
+
+# Conservative cleanup for support caches not covered by generic rules.
+clean_support_app_data() {
+    local support_age_days="${MOLE_SUPPORT_CACHE_AGE_DAYS:-30}"
+    [[ "$support_age_days" =~ ^[0-9]+$ ]] || support_age_days=30
+
+    local crash_reporter_dir="$HOME/Library/Application Support/CrashReporter"
+    if [[ -d "$crash_reporter_dir" && ! -L "$crash_reporter_dir" ]]; then
+        safe_find_delete "$crash_reporter_dir" "*" "$support_age_days" "f" || true
+    fi
+
+    # Keep recent wallpaper assets to avoid large re-downloads.
+    local idle_assets_dir="$HOME/Library/Application Support/com.apple.idleassetsd"
+    if [[ -d "$idle_assets_dir" && ! -L "$idle_assets_dir" ]]; then
+        safe_find_delete "$idle_assets_dir" "*" "$support_age_days" "f" || true
+    fi
+
+    # Do not touch Messages attachments, only preview/sticker caches.
+    if pgrep -x "Messages" > /dev/null 2>&1; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Messages is running · preview cache cleanup skipped"
+        return 0
+    fi
+    safe_clean ~/Library/Messages/StickerCache/* "Messages sticker cache"
+    safe_clean ~/Library/Messages/Caches/Previews/Attachments/* "Messages preview attachment cache"
+    safe_clean ~/Library/Messages/Caches/Previews/StickerCache/* "Messages preview sticker cache"
+}
+
 # App caches (merged: macOS system caches + Sandboxed apps).
 clean_app_caches() {
     # macOS system caches (merged from clean_macos_system_caches)
@@ -413,6 +440,7 @@ clean_app_caches() {
     safe_clean ~/Library/Suggestions/* "Siri suggestions cache" || true
     safe_clean ~/Library/Calendars/Calendar\ Cache "Calendar cache" || true
     safe_clean ~/Library/Application\ Support/AddressBook/Sources/*/Photos.cache "Address Book photo cache" || true
+    clean_support_app_data
 
     # Sandboxed app caches
     stop_section_spinner

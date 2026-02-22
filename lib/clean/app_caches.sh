@@ -13,12 +13,15 @@ clean_xcode_tools() {
     safe_clean ~/Library/Caches/com.apple.dt.Xcode/* "Xcode cache"
     safe_clean ~/Library/Developer/Xcode/iOS\ Device\ Logs/* "iOS device logs"
     safe_clean ~/Library/Developer/Xcode/watchOS\ Device\ Logs/* "watchOS device logs"
+    safe_clean ~/Library/Logs/CoreSimulator/* "CoreSimulator logs"
     safe_clean ~/Library/Developer/Xcode/Products/* "Xcode build products"
     if [[ "$xcode_running" == "false" ]]; then
         safe_clean ~/Library/Developer/Xcode/DerivedData/* "Xcode derived data"
         safe_clean ~/Library/Developer/Xcode/Archives/* "Xcode archives"
+        safe_clean ~/Library/Developer/Xcode/DocumentationCache/* "Xcode documentation cache"
+        safe_clean ~/Library/Developer/Xcode/DocumentationIndex/* "Xcode documentation index"
     else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData and Archives cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData/Archives/Documentation cleanup"
     fi
 }
 # Code editors.
@@ -43,6 +46,12 @@ clean_communication_apps() {
     safe_clean ~/Library/Caches/com.tencent.meeting/* "Tencent Meeting cache"
     safe_clean ~/Library/Caches/com.tencent.WeWorkMac/* "WeCom cache"
     safe_clean ~/Library/Caches/com.feishu.*/* "Feishu cache"
+    safe_clean ~/Library/Application\ Support/Microsoft/Teams/Cache/* "Microsoft Teams legacy cache"
+    safe_clean ~/Library/Application\ Support/Microsoft/Teams/Application\ Cache/* "Microsoft Teams legacy application cache"
+    safe_clean ~/Library/Application\ Support/Microsoft/Teams/Code\ Cache/* "Microsoft Teams legacy code cache"
+    safe_clean ~/Library/Application\ Support/Microsoft/Teams/GPUCache/* "Microsoft Teams legacy GPU cache"
+    safe_clean ~/Library/Application\ Support/Microsoft/Teams/logs/* "Microsoft Teams legacy logs"
+    safe_clean ~/Library/Application\ Support/Microsoft/Teams/tmp/* "Microsoft Teams legacy temp files"
 }
 # DingTalk.
 clean_dingtalk() {
@@ -64,6 +73,7 @@ clean_design_tools() {
     safe_clean ~/Library/Caches/Adobe/* "Adobe cache"
     safe_clean ~/Library/Caches/com.adobe.*/* "Adobe app caches"
     safe_clean ~/Library/Caches/com.figma.Desktop/* "Figma cache"
+    safe_clean ~/Library/Application\ Support/Adobe/Common/Media\ Cache\ Files/* "Adobe media cache files"
     # Raycast cache is protected (clipboard history, images).
 }
 # Video editing tools.
@@ -150,12 +160,25 @@ clean_download_managers() {
 clean_gaming_platforms() {
     safe_clean ~/Library/Caches/com.valvesoftware.steam/* "Steam cache"
     safe_clean ~/Library/Application\ Support/Steam/htmlcache/* "Steam web cache"
+    safe_clean ~/Library/Application\ Support/Steam/appcache/* "Steam app cache"
+    safe_clean ~/Library/Application\ Support/Steam/depotcache/* "Steam depot cache"
+    safe_clean ~/Library/Application\ Support/Steam/steamapps/shadercache/* "Steam shader cache"
+    safe_clean ~/Library/Application\ Support/Steam/logs/* "Steam logs"
     safe_clean ~/Library/Caches/com.epicgames.EpicGamesLauncher/* "Epic Games cache"
     safe_clean ~/Library/Caches/com.blizzard.Battle.net/* "Battle.net cache"
     safe_clean ~/Library/Application\ Support/Battle.net/Cache/* "Battle.net app cache"
     safe_clean ~/Library/Caches/com.ea.*/* "EA Origin cache"
     safe_clean ~/Library/Caches/com.gog.galaxy/* "GOG Galaxy cache"
     safe_clean ~/Library/Caches/com.riotgames.*/* "Riot Games cache"
+    safe_clean ~/Library/Application\ Support/minecraft/logs/* "Minecraft logs"
+    safe_clean ~/Library/Application\ Support/minecraft/crash-reports/* "Minecraft crash reports"
+    safe_clean ~/Library/Application\ Support/minecraft/webcache/* "Minecraft web cache"
+    safe_clean ~/Library/Application\ Support/minecraft/webcache2/* "Minecraft web cache 2"
+    safe_clean ~/.lunarclient/game-cache/* "Lunar Client game cache"
+    safe_clean ~/.lunarclient/launcher-cache/* "Lunar Client launcher cache"
+    safe_clean ~/.lunarclient/logs/* "Lunar Client logs"
+    safe_clean ~/.lunarclient/offline/*/logs/* "Lunar Client offline logs"
+    safe_clean ~/.lunarclient/offline/files/*/logs/* "Lunar Client offline file logs"
 }
 # Translation/dictionary apps.
 clean_translation_apps() {
@@ -185,6 +208,8 @@ clean_shell_utils() {
     safe_clean ~/.lesshst "less history"
     safe_clean ~/.viminfo.tmp "Vim temporary files"
     safe_clean ~/.wget-hsts "wget HSTS cache"
+    safe_clean ~/.cacher/logs/* "Cacher logs"
+    safe_clean ~/.kite/logs/* "Kite logs"
 }
 # Input methods and system utilities.
 clean_system_utils() {

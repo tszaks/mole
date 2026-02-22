@@ -58,6 +58,56 @@ EOF
     [[ "$output" == *"Saved application states"* ]] || [[ "$output" == *"App caches"* ]]
 }
 
+@test "clean_support_app_data targets crash, wallpaper, and messages preview caches only" {
+    local support_home="$HOME/support-cache-home-1"
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+mkdir -p "$HOME"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { echo "$2"; }
+safe_find_delete() { echo "FIND:$1:$3:$4"; }
+pgrep() { return 1; }
+
+mkdir -p "$HOME/Library/Application Support/CrashReporter"
+mkdir -p "$HOME/Library/Application Support/com.apple.idleassetsd"
+
+clean_support_app_data
+
+rm -rf "$HOME/Library/Application Support/CrashReporter"
+rm -rf "$HOME/Library/Application Support/com.apple.idleassetsd"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"FIND:$support_home/Library/Application Support/CrashReporter:30:f"* ]]
+    [[ "$output" == *"FIND:$support_home/Library/Application Support/com.apple.idleassetsd:30:f"* ]]
+    [[ "$output" == *"Messages sticker cache"* ]]
+    [[ "$output" == *"Messages preview attachment cache"* ]]
+    [[ "$output" == *"Messages preview sticker cache"* ]]
+    [[ "$output" != *"Messages attachments"* ]]
+}
+
+@test "clean_support_app_data skips messages preview caches while Messages is running" {
+    local support_home="$HOME/support-cache-home-2"
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+mkdir -p "$HOME"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { echo "$2"; }
+safe_find_delete() { :; }
+pgrep() { return 0; }
+
+clean_support_app_data
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Messages is running"* ]]
+    [[ "$output" != *"Messages sticker cache"* ]]
+    [[ "$output" != *"Messages preview attachment cache"* ]]
+    [[ "$output" != *"Messages preview sticker cache"* ]]
+}
+
 @test "clean_app_caches skips protected containers" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
