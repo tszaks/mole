@@ -73,8 +73,8 @@ mo analyze /Volumes          # Analyze external drives only
 
 ## Tips
 
-- **Video Tutorial**: Watch the [Mole tutorial video](https://www.youtube.com/watch?v=UEe9-w4CcQ0). Thanks to **PAPAYA 電腦教室**.
-- **Terminal**: iTerm2 has known compatibility issues. We recommend Alacritty, kitty, WezTerm, Ghostty, or Warp.
+- Video tutorial: Watch the [Mole tutorial video](https://www.youtube.com/watch?v=UEe9-w4CcQ0), thanks to PAPAYA 電腦教室.
+- **Terminal**: iTerm2 has known compatibility issues. We highly recommend [Kaku](https://github.com/tw93/Kaku). Other good options are Alacritty, kitty, WezTerm, Ghostty, and Warp.
 - **Safety**: Mole uses strict protections, but deletions are permanent. Review carefully and preview with `mo clean --dry-run`. See [Security Audit](SECURITY_AUDIT.md).
 - **Debug Mode**: Use `--debug` for detailed logs. Combine with `--dry-run` for a full preview with risk levels and file details.
 - **Operation Log**: File operations are logged to `~/.config/mole/operations.log`. Disable with `MO_NO_OPLOG=1`.
