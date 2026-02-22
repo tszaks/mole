@@ -224,7 +224,8 @@ show_help() {
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --whitelist" "$NC" "Manage protected items"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --paths" "$NC" "Configure scan directories"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo analyze /Volumes" "$NC" "Analyze external drives only"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo update --force" "$NC" "Force reinstall latest version"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo update --force" "$NC" "Force reinstall latest stable version"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo update --nightly" "$NC" "Install latest unreleased main branch build"
     echo
     printf "%s%s%s\n" "$BLUE" "OPTIONS" "$NC"
     printf "  %s%-28s%s %s\n" "$GREEN" "--debug" "$NC" "Show detailed operation logs"
@@ -234,36 +235,54 @@ show_help() {
 # Update flow (Homebrew or installer).
 update_mole() {
     local force_update="${1:-false}"
+    local nightly_update="${2:-false}"
     local update_interrupted=false
     trap 'update_interrupted=true; echo ""; exit 130' INT TERM
 
     if is_homebrew_install; then
+        if [[ "$nightly_update" == "true" ]]; then
+            log_error "Nightly update is only available for script installations"
+            echo -e "${YELLOW}Tip:${NC} Homebrew installs follow stable releases."
+            echo -e "${YELLOW}Tip:${NC} Reinstall via script to use: ${GRAY}mo update --nightly${NC}"
+            exit 1
+        fi
         update_via_homebrew "$VERSION"
         exit 0
     fi
 
-    local latest
-    latest=$(get_latest_version_from_github)
-    [[ -z "$latest" ]] && latest=$(get_latest_version)
+    local latest=""
+    local download_label="Downloading latest version..."
+    local install_label="Installing update..."
+    local final_success_label="latest version"
 
-    if [[ -z "$latest" ]]; then
-        log_error "Unable to check for updates. Check network connection."
-        echo -e "${YELLOW}Tip:${NC} Check if you can access GitHub, https://github.com"
-        echo -e "${YELLOW}Tip:${NC} Try again with: ${GRAY}mo update${NC}"
-        exit 1
-    fi
+    if [[ "$nightly_update" == "true" ]]; then
+        latest="main"
+        download_label="Downloading nightly installer..."
+        install_label="Installing nightly update..."
+        final_success_label="nightly build (main)"
+    else
+        latest=$(get_latest_version_from_github)
+        [[ -z "$latest" ]] && latest=$(get_latest_version)
 
-    if [[ "$VERSION" == "$latest" && "$force_update" != "true" ]]; then
-        echo ""
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version, ${VERSION}"
-        echo ""
-        exit 0
+        if [[ -z "$latest" ]]; then
+            log_error "Unable to check for updates. Check network connection."
+            echo -e "${YELLOW}Tip:${NC} Check if you can access GitHub, https://github.com"
+            echo -e "${YELLOW}Tip:${NC} Try again with: ${GRAY}mo update${NC}"
+            exit 1
+        fi
+
+        if [[ "$VERSION" == "$latest" && "$force_update" != "true" ]]; then
+            echo ""
+            echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version, ${VERSION}"
+            echo ""
+            exit 0
+        fi
     fi
 
     if [[ -t 1 ]]; then
-        start_inline_spinner "Downloading latest version..."
+        start_inline_spinner "$download_label"
     else
-        echo "Downloading latest version..."
+        echo "${download_label%...}"
     fi
 
     local installer_url="https://raw.githubusercontent.com/tw93/mole/main/install.sh"
@@ -332,14 +351,15 @@ update_mole() {
     fi
 
     if [[ -t 1 ]]; then
-        start_inline_spinner "Installing update..."
+        start_inline_spinner "$install_label"
     else
-        echo "Installing update..."
+        echo "${install_label%...}"
     fi
 
     process_install_output() {
         local output="$1"
         local fallback_version="$2"
+        local success_label="$3"
         if [[ -t 1 ]]; then stop_inline_spinner; fi
 
         local filtered_output
@@ -360,7 +380,7 @@ update_mole() {
             if [[ -z "$new_version" ]]; then
                 new_version="$fallback_version"
             fi
-            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version, ${new_version:-unknown}"
+            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${new_version:-unknown}"
         else
             printf '\n'
         fi
@@ -373,9 +393,19 @@ update_mole() {
         config_dir="$HOME/.config/mole"
     fi
 
-    if [[ "$force_update" == "true" ]]; then
+    if [[ "$nightly_update" == "true" ]]; then
+        if install_output=$(MOLE_VERSION="main" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+            process_install_output "$install_output" "$latest" "$final_success_label"
+        else
+            if [[ -t 1 ]]; then stop_inline_spinner; fi
+            rm -f "$tmp_installer"
+            log_error "Nightly update failed"
+            echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+            exit 1
+        fi
+    elif [[ "$force_update" == "true" ]]; then
         if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
-            process_install_output "$install_output" "$latest"
+            process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
             rm -f "$tmp_installer"
@@ -385,10 +415,10 @@ update_mole() {
         fi
     else
         if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
-            process_install_output "$install_output" "$latest"
+            process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
-                process_install_output "$install_output" "$latest"
+                process_install_output "$install_output" "$latest" "$final_success_label"
             else
                 if [[ -t 1 ]]; then stop_inline_spinner; fi
                 rm -f "$tmp_installer"
@@ -786,13 +816,19 @@ main() {
             ;;
         "update")
             local force_update=false
+            local nightly_update=false
             for arg in "${args[@]:1}"; do
                 case "$arg" in
                     --force | -f) force_update=true ;;
-                    *) ;;
+                    --nightly) nightly_update=true ;;
+                    *)
+                        echo "Unknown update option: $arg"
+                        echo "Use 'mole update [--force] [--nightly]' for supported options."
+                        exit 1
+                        ;;
                 esac
             done
-            update_mole "$force_update"
+            update_mole "$force_update" "$nightly_update"
             exit 0
             ;;
         "remove")

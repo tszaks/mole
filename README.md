@@ -56,6 +56,7 @@ mo installer                 # Find and remove installer files
 mo touchid                   # Configure Touch ID for sudo
 mo completion                # Set up shell tab completion
 mo update                    # Update Mole
+mo update --nightly          # Update to latest unreleased main build, script install only
 mo remove                    # Remove Mole from system
 mo --help                    # Show help
 mo --version                 # Show installed version
