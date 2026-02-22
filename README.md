@@ -74,14 +74,9 @@ mo analyze /Volumes          # Analyze external drives only
 ## Tips
 
 - Video tutorial: Watch the [Mole tutorial video](https://www.youtube.com/watch?v=UEe9-w4CcQ0), thanks to PAPAYA 電腦教室.
-- **Terminal**: iTerm2 has known compatibility issues. We highly recommend [Kaku](https://github.com/tw93/Kaku). Other good options are Alacritty, kitty, WezTerm, Ghostty, and Warp.
-- **Safety**: Mole uses strict protections, but deletions are permanent. Review carefully and preview with `mo clean --dry-run`. See [Security Audit](SECURITY_AUDIT.md).
-- **Debug Mode**: Use `--debug` for detailed logs. Combine with `--dry-run` for a full preview with risk levels and file details.
-- **Operation Log**: File operations are logged to `~/.config/mole/operations.log`. Disable with `MO_NO_OPLOG=1`.
-- **Navigation**: Supports arrow keys and Vim bindings (`h/j/k/l`).
-- **Status Shortcuts**: In `mo status`, press `k` to toggle the cat and save the preference, `q` to quit.
-- **Configuration**: Use `mo touchid` for Touch ID sudo, `mo completion` for shell completion, and `mo clean --whitelist` to manage protected paths.
-- **Simulator Runtime Volumes**: In `mo clean` -> Developer tools, Mole removes unused CoreSimulator `Volumes/Cryptex` entries and skips `IN_USE` items.
+- Safety first: Deletions are permanent. Review carefully and preview with `mo clean --dry-run`. See [Security Audit](SECURITY_AUDIT.md).
+- Debug and logs: Use `--debug` for detailed logs. Combine with `--dry-run` for a full preview. File operations are logged to `~/.config/mole/operations.log`. Disable with `MO_NO_OPLOG=1`.
+- Navigation: Mole supports arrow keys and Vim bindings `h/j/k/l`.
 
 ## Features in Detail
 
@@ -103,6 +98,8 @@ Scanning cache directories...
 Space freed: 95.5GB | Free space now: 223.5GB
 ====================================================================
 ```
+
+Note: In `mo clean` -> Developer tools, Mole removes unused CoreSimulator `Volumes/Cryptex` entries and skips `IN_USE` items.
 
 ### Smart App Uninstaller
 
@@ -196,6 +193,8 @@ Proxy   HTTP · 192.168.1.100             Terminal   ▮▯▯▯▯  12.5%
 
 Health score is based on CPU, memory, disk, temperature, and I/O load, with color-coded ranges.
 
+Shortcuts: In `mo status`, press `k` to toggle the cat and save the preference, and `q` to quit.
+
 ### Project Artifact Purge
 
 Clean old build artifacts such as `node_modules`, `target`, `build`, and `dist` to free up disk space.
@@ -277,7 +276,7 @@ After running the script, complete these steps in Raycast:
 
 ### Terminal Detection
 
-Mole auto-detects your terminal app. To override, set `MO_LAUNCHER_APP=<name>`.
+Mole auto-detects your terminal app. iTerm2 has known compatibility issues. We highly recommend [Kaku](https://github.com/tw93/Kaku). Other good options are Alacritty, kitty, WezTerm, Ghostty, and Warp. To override, set `MO_LAUNCHER_APP=<name>`.
 
 ## Community Love
 
