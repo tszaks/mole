@@ -92,6 +92,23 @@ setup() {
     [[ "$result" == "ALLOWED" ]]
 }
 
+@test "is_safe_project_artifact: accepts physical path under symlinked search root" {
+    mkdir -p "$HOME/www/real/proj/node_modules"
+    touch "$HOME/www/real/proj/package.json"
+    ln -s "$HOME/www/real" "$HOME/www/link"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_safe_project_artifact '$HOME/www/real/proj/node_modules' '$HOME/www/link/proj'; then
+            echo 'ALLOWED'
+        else
+            echo 'BLOCKED'
+        fi
+    ")
+
+    [[ "$result" == "ALLOWED" ]]
+}
+
 @test "filter_nested_artifacts: removes nested node_modules" {
     mkdir -p "$HOME/www/project/node_modules/package/node_modules"
 
@@ -460,6 +477,28 @@ EOF
     result=$(bash -c "
         source '$PROJECT_ROOT/lib/clean/project.sh'
         MO_USE_FIND=1 scan_purge_targets '$HOME/single-project' '$scan_output'
+        if grep -q '$HOME/single-project/node_modules' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'MISSING'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "FOUND" ]]
+}
+
+@test "scan_purge_targets: supports trailing slash search path in find mode" {
+    mkdir -p "$HOME/single-project/node_modules"
+    touch "$HOME/single-project/package.json"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        MO_USE_FIND=1 scan_purge_targets '$HOME/single-project/' '$scan_output'
         if grep -q '$HOME/single-project/node_modules' '$scan_output'; then
             echo 'FOUND'
         else

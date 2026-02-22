@@ -254,12 +254,33 @@ is_purge_project_root() {
 is_safe_project_artifact() {
     local path="$1"
     local search_path="$2"
+
+    # Normalize search path to tolerate user config entries with trailing slash.
+    if [[ "$search_path" != "/" ]]; then
+        search_path="${search_path%/}"
+    fi
+
     if [[ "$path" != /* ]]; then
         return 1
     fi
 
     if [[ "$path" != "$search_path/"* ]]; then
-        return 1
+        # fd may emit physical/canonical paths (for example /private/var)
+        # while configured search roots use symlink aliases (for example /var).
+        # Compare physical paths as a fallback to avoid false negatives.
+        local physical_path=""
+        local physical_search_path=""
+        if [[ -d "$path" && -d "$search_path" ]]; then
+            physical_path=$(cd "$path" 2> /dev/null && pwd -P || echo "")
+            physical_search_path=$(cd "$search_path" 2> /dev/null && pwd -P || echo "")
+        fi
+
+        if [[ -z "$physical_path" || -z "$physical_search_path" || "$physical_path" != "$physical_search_path/"* ]]; then
+            return 1
+        fi
+
+        path="$physical_path"
+        search_path="$physical_search_path"
     fi
 
     # Must not be a direct child of the search root.
