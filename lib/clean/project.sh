@@ -226,6 +226,29 @@ load_purge_config() {
 # Initialize paths on script load.
 load_purge_config
 
+# Args: $1 - directory path
+# Determine whether a directory is a project root.
+# This is used to safely allow cleaning direct-child artifacts when
+# users configure a single project directory as a purge search path.
+is_purge_project_root() {
+    local dir="$1"
+    local indicator
+
+    for indicator in "${MONOREPO_INDICATORS[@]}"; do
+        if [[ -e "$dir/$indicator" ]]; then
+            return 0
+        fi
+    done
+
+    for indicator in "${PROJECT_INDICATORS[@]}"; do
+        if [[ -e "$dir/$indicator" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Args: $1 - path to check
 # Safe cleanup requires the path be inside a project directory.
 is_safe_project_artifact() {
@@ -234,10 +257,20 @@ is_safe_project_artifact() {
     if [[ "$path" != /* ]]; then
         return 1
     fi
+
+    if [[ "$path" != "$search_path/"* ]]; then
+        return 1
+    fi
+
     # Must not be a direct child of the search root.
     local relative_path="${path#"$search_path"/}"
     local depth=$(echo "$relative_path" | LC_ALL=C tr -cd '/' | wc -c)
     if [[ $depth -lt 1 ]]; then
+        # Allow direct-child artifacts only when the search path is itself
+        # a project root (single-project mode).
+        if is_purge_project_root "$search_path"; then
+            return 0
+        fi
         return 1
     fi
     return 0

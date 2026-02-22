@@ -76,6 +76,22 @@ setup() {
     [[ "$result" == "ALLOWED" ]]
 }
 
+@test "is_safe_project_artifact: allows direct child when search path is project root" {
+    mkdir -p "$HOME/single-project/node_modules"
+    touch "$HOME/single-project/package.json"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_safe_project_artifact '$HOME/single-project/node_modules' '$HOME/single-project'; then
+            echo 'ALLOWED'
+        else
+            echo 'BLOCKED'
+        fi
+    ")
+
+    [[ "$result" == "ALLOWED" ]]
+}
+
 @test "filter_nested_artifacts: removes nested node_modules" {
     mkdir -p "$HOME/www/project/node_modules/package/node_modules"
 
@@ -432,6 +448,28 @@ EOF
 
     # Unknown vendor should be protected (conservative approach)
     [[ "$result" == "SKIPPED" ]]
+}
+
+@test "scan_purge_targets: finds direct-child artifacts in project root with find mode" {
+    mkdir -p "$HOME/single-project/node_modules"
+    touch "$HOME/single-project/package.json"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        MO_USE_FIND=1 scan_purge_targets '$HOME/single-project' '$scan_output'
+        if grep -q '$HOME/single-project/node_modules' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'MISSING'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "FOUND" ]]
 }
 
 @test "is_recently_modified: detects recent projects" {
