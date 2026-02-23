@@ -887,7 +887,8 @@ check_large_file_candidates() {
         if [[ -n "$snapshot_list" ]]; then
             snapshot_count=$(echo "$snapshot_list" | { grep -Eo 'com\.apple\.TimeMachine\.[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' || true; } | wc -l | awk '{print $1}')
             if [[ "$snapshot_count" =~ ^[0-9]+$ && "$snapshot_count" -gt 0 ]]; then
-                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Time Machine local snapshots: ${GREEN}${snapshot_count}${NC}${GRAY}, Review: tmutil listlocalsnapshots /${NC}"
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Time Machine local snapshots: ${GREEN}${snapshot_count}${NC}"
+                echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Review: tmutil listlocalsnapshots /${NC}"
                 found_any=true
             fi
         fi
@@ -900,14 +901,14 @@ check_large_file_candidates() {
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Docker storage:"
             while IFS=$'\t' read -r dtype dsize dreclaim; do
                 [[ -z "$dtype" ]] && continue
-                echo -e "    ${GRAY}• $dtype: $dsize, Reclaimable: $dreclaim${NC}"
+                echo -e "    ${GRAY}${ICON_LIST} $dtype: $dsize, Reclaimable: $dreclaim${NC}"
             done <<< "$docker_output"
             found_any=true
         else
             docker_output=$(run_with_timeout 3 docker system df 2> /dev/null || true)
             if [[ -n "$docker_output" ]]; then
                 echo -e "  ${YELLOW}${ICON_WARNING}${NC} Docker storage:"
-                echo -e "    ${GRAY}• Run: docker system df${NC}"
+                echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Run: docker system df${NC}"
                 found_any=true
             fi
         fi
