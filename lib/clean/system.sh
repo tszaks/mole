@@ -56,13 +56,17 @@ clean_deep_system() {
     local third_party_log_dir=""
     for third_party_log_dir in "${third_party_log_dirs[@]}"; do
         if sudo test -d "$third_party_log_dir" 2> /dev/null; then
-            safe_sudo_find_delete "$third_party_log_dir" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
-            third_party_logs_cleaned=1
+            if sudo find "$third_party_log_dir" -maxdepth 5 -type f -mtime "+$MOLE_LOG_AGE_DAYS" -print -quit 2> /dev/null | grep -q .; then
+                if safe_sudo_find_delete "$third_party_log_dir" "*" "$MOLE_LOG_AGE_DAYS" "f"; then
+                    third_party_logs_cleaned=1
+                fi
+            fi
         fi
     done
     if sudo find "/Library/Logs" -maxdepth 1 -type f -name "adobegc.log" -mtime "+$MOLE_LOG_AGE_DAYS" -print -quit 2> /dev/null | grep -q .; then
-        safe_sudo_remove "/Library/Logs/adobegc.log" || true
-        third_party_logs_cleaned=1
+        if safe_sudo_remove "/Library/Logs/adobegc.log"; then
+            third_party_logs_cleaned=1
+        fi
     fi
     stop_section_spinner
     [[ $third_party_logs_cleaned -eq 1 ]] && log_success "Third-party system logs"

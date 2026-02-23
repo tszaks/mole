@@ -153,6 +153,121 @@ EOF
     [[ "$output" == *"safe_sudo_remove:/Library/Logs/adobegc.log"* ]]
 }
 
+@test "clean_deep_system does not report third-party adobe log success when no old files exist" {
+    run bash --noprofile --norc << 'EOF2'
+set -euo pipefail
+CALL_LOG="$HOME/system_calls_adobe_empty.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "find" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "0"
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 0
+}
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+get_file_mtime() { echo 0; }
+get_path_size_kb() { echo 0; }
+find() { return 0; }
+run_with_timeout() {
+    local _timeout="$1"
+    shift
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+        return 0
+    fi
+    "$@"
+}
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF2
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"SUCCESS:Third-party system logs"* ]]
+    [[ "$output" != *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]]
+    [[ "$output" != *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]]
+    [[ "$output" != *"safe_sudo_remove:/Library/Logs/adobegc.log"* ]]
+}
+
+@test "clean_deep_system does not report third-party adobe log success when deletion fails" {
+    run bash --noprofile --norc << 'EOF3'
+set -euo pipefail
+CALL_LOG="$HOME/system_calls_adobe_fail.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "find" ]]; then
+        case "$2" in
+            /Library/Logs/Adobe) echo "/Library/Logs/Adobe/old.log" ;;
+            /Library/Logs/CreativeCloud) return 0 ;;
+            /Library/Logs) return 0 ;;
+        esac
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "0"
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 1
+}
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+get_file_mtime() { echo 0; }
+get_path_size_kb() { echo 0; }
+find() { return 0; }
+run_with_timeout() {
+    local _timeout="$1"
+    shift
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+        return 0
+    fi
+    "$@"
+}
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF3
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]]
+    [[ "$output" != *"SUCCESS:Third-party system logs"* ]]
+}
+
 @test "clean_time_machine_failed_backups exits when tmutil has no destinations" {
     run bash --noprofile --norc << 'EOF'
 set -euo pipefail
