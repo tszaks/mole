@@ -9,58 +9,17 @@ if ! command -v ensure_user_dir > /dev/null 2>&1; then
     # shellcheck disable=SC1090
     source "$CORE_LIB_DIR/common.sh"
 fi
+# shellcheck disable=SC1090
+source "$PROJECT_LIB_DIR/purge_shared.sh"
 
-# Targets to look for (heavy build artifacts).
-readonly PURGE_TARGETS=(
-    "node_modules"
-    "target"        # Rust, Maven
-    "build"         # Gradle, various
-    "dist"          # JS builds
-    "venv"          # Python
-    ".venv"         # Python
-    ".pytest_cache" # Python (pytest)
-    ".mypy_cache"   # Python (mypy)
-    ".tox"          # Python (tox virtualenvs)
-    ".nox"          # Python (nox virtualenvs)
-    ".ruff_cache"   # Python (ruff)
-    ".gradle"       # Gradle local
-    "__pycache__"   # Python
-    ".next"         # Next.js
-    ".nuxt"         # Nuxt.js
-    ".output"       # Nuxt.js
-    "vendor"        # PHP Composer
-    "bin"           # .NET build output (guarded; see is_protected_purge_artifact)
-    "obj"           # C# / Unity
-    ".turbo"        # Turborepo cache
-    ".parcel-cache" # Parcel bundler
-    ".dart_tool"    # Flutter/Dart build cache
-    ".zig-cache"    # Zig
-    "zig-out"       # Zig
-    ".angular"      # Angular
-    ".svelte-kit"   # SvelteKit
-    ".astro"        # Astro
-    "coverage"      # Code coverage reports
-    "DerivedData"   # Xcode
-    "Pods"          # CocoaPods
-    ".cxx"          # React Native Android NDK build cache
-    ".expo"         # Expo
-)
+readonly PURGE_TARGETS=("${MOLE_PURGE_TARGETS[@]}")
 # Minimum age in days before considering for cleanup.
 readonly MIN_AGE_DAYS=7
 # Scan depth defaults (relative to search root).
 readonly PURGE_MIN_DEPTH_DEFAULT=1
 readonly PURGE_MAX_DEPTH_DEFAULT=6
 # Search paths (default, can be overridden via config file).
-readonly DEFAULT_PURGE_SEARCH_PATHS=(
-    "$HOME/www"
-    "$HOME/dev"
-    "$HOME/Projects"
-    "$HOME/GitHub"
-    "$HOME/Code"
-    "$HOME/Workspace"
-    "$HOME/Repos"
-    "$HOME/Development"
-)
+readonly DEFAULT_PURGE_SEARCH_PATHS=("${MOLE_PURGE_DEFAULT_SEARCH_PATHS[@]}")
 
 # Config file for custom purge paths.
 readonly PURGE_CONFIG_FILE="$HOME/.config/mole/purge_paths"
@@ -70,29 +29,8 @@ PURGE_SEARCH_PATHS=()
 
 # Project indicators for container detection.
 # Monorepo indicators (higher priority)
-readonly MONOREPO_INDICATORS=(
-    "lerna.json"
-    "pnpm-workspace.yaml"
-    "nx.json"
-    "rush.json"
-)
-
-readonly PROJECT_INDICATORS=(
-    "package.json"
-    "Cargo.toml"
-    "go.mod"
-    "pyproject.toml"
-    "requirements.txt"
-    "pom.xml"
-    "build.gradle"
-    "Gemfile"
-    "composer.json"
-    "pubspec.yaml"
-    "Makefile"
-    "build.zig"
-    "build.zig.zon"
-    ".git"
-)
+readonly MONOREPO_INDICATORS=("${MOLE_PURGE_MONOREPO_INDICATORS[@]}")
+readonly PROJECT_INDICATORS=("${MOLE_PURGE_PROJECT_INDICATORS[@]}")
 
 # Check if a directory contains projects (directly or in subdirectories).
 is_project_container() {
@@ -187,18 +125,9 @@ EOF
 load_purge_config() {
     PURGE_SEARCH_PATHS=()
 
-    if [[ -f "$PURGE_CONFIG_FILE" ]]; then
-        while IFS= read -r line; do
-            line="${line#"${line%%[![:space:]]*}"}"
-            line="${line%"${line##*[![:space:]]}"}"
-
-            [[ -z "$line" || "$line" =~ ^# ]] && continue
-
-            line="${line/#\~/$HOME}"
-
-            PURGE_SEARCH_PATHS+=("$line")
-        done < "$PURGE_CONFIG_FILE"
-    fi
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && PURGE_SEARCH_PATHS+=("$line")
+    done < <(mole_purge_read_paths_config "$PURGE_CONFIG_FILE")
 
     if [[ ${#PURGE_SEARCH_PATHS[@]} -eq 0 ]]; then
         if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
@@ -231,22 +160,7 @@ load_purge_config
 # This is used to safely allow cleaning direct-child artifacts when
 # users configure a single project directory as a purge search path.
 is_purge_project_root() {
-    local dir="$1"
-    local indicator
-
-    for indicator in "${MONOREPO_INDICATORS[@]}"; do
-        if [[ -e "$dir/$indicator" ]]; then
-            return 0
-        fi
-    done
-
-    for indicator in "${PROJECT_INDICATORS[@]}"; do
-        if [[ -e "$dir/$indicator" ]]; then
-            return 0
-        fi
-    done
-
-    return 1
+    mole_purge_is_project_root "$1"
 }
 
 # Args: $1 - path to check
