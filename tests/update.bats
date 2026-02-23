@@ -453,3 +453,84 @@ EOF
     [[ "$output" != *"Already on latest version"* ]]
     [[ "$output" == *"Downloading"* ]] || [[ "$output" == *"Installing"* ]] || [[ "$output" == *"Updated"* ]]
 }
+
+@test "update_mole with --nightly uses installer path and passes MOLE_VERSION=main" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" CURRENT_VERSION="$CURRENT_VERSION" PATH="$HOME/fake-bin:/usr/bin:/bin" TERM="dumb" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+curl() {
+  local out=""
+  local url=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o)
+        out="$2"
+        shift 2
+        ;;
+      http*://*)
+        url="$1"
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -n "$out" ]]; then
+    cat > "$out" << 'INSTALLER'
+#!/usr/bin/env bash
+echo "INSTALLER_MOLE_VERSION=${MOLE_VERSION:-}"
+echo "Mole installed successfully, version ${MOLE_VERSION:-unknown}"
+INSTALLER
+    return 0
+  fi
+
+  echo "UNEXPECTED_CURL_URL:$url" >&2
+  return 1
+}
+export -f curl
+
+brew() { return 1; }
+export -f brew
+
+"$PROJECT_ROOT/mole" update --nightly
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Downloading nightly installer"* ]]
+    [[ "$output" == *"Installing nightly update"* ]]
+    [[ "$output" == *"INSTALLER_MOLE_VERSION=main"* ]]
+    [[ "$output" == *"Updated to nightly build (main), main"* ]]
+}
+
+@test "update_mole with --nightly is rejected for Homebrew installs" {
+    local fake_brew_root="$HOME/fake-homebrew"
+    local fake_cellar_bin="$fake_brew_root/Cellar/mole/9.9.9/bin"
+    local fake_path_bin="$HOME/fake-brew-bin"
+    mkdir -p "$fake_cellar_bin" "$fake_path_bin"
+    touch "$fake_cellar_bin/mole"
+    ln -sf "$fake_cellar_bin/mole" "$fake_path_bin/mole"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_path_bin:/usr/bin:/bin" TERM="dumb" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+brew() {
+  if [[ "${1:-}" == "list" && "${2:-}" == "--formula" ]]; then
+    echo "mole"
+    return 0
+  fi
+  if [[ "${1:-}" == "--prefix" ]]; then
+    echo "/opt/homebrew"
+    return 0
+  fi
+  return 0
+}
+export -f brew
+
+"$PROJECT_ROOT/mole" update --nightly
+EOF
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Nightly update is only available for script installations"* ]]
+    [[ "$output" == *"Homebrew installs follow stable releases."* ]]
+    [[ "$output" == *"mo update --nightly"* ]]
+}
