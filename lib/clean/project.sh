@@ -504,7 +504,9 @@ scan_purge_targets() {
             [[ $i -lt $((${#purge_targets[@]} - 1)) ]] && target_expr+=(-o)
         done
 
-        command find "$search_path" -mindepth "$min_depth" -maxdepth "$max_depth" -type d \
+        # Use plain `find` here for compatibility with environments where
+        # `command find` behaves inconsistently in this complex expression.
+        find "$search_path" -mindepth "$min_depth" -maxdepth "$max_depth" -type d \
             \( "${prune_expr[@]}" \) -prune -o \
             \( "${target_expr[@]}" \) -print -prune \
             2> /dev/null > "$output_file.raw" || true
