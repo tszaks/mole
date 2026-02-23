@@ -562,9 +562,9 @@ batch_uninstall_applications() {
             # Show success
             if [[ -t 1 ]]; then
                 if [[ ${#app_details[@]} -gt 1 ]]; then
-                    echo -e "${GREEN}✓${NC} [$current_index/${#app_details[@]}] ${app_name}"
+                    echo -e "${GREEN}${ICON_SUCCESS}${NC} [$current_index/${#app_details[@]}] ${app_name}"
                 else
-                    echo -e "${GREEN}✓${NC} ${app_name}"
+                    echo -e "${GREEN}${ICON_SUCCESS}${NC} ${app_name}"
                 fi
             fi
 
@@ -582,7 +582,7 @@ batch_uninstall_applications() {
                     echo -e "${ICON_ERROR} ${app_name} failed: $reason"
                 fi
                 if [[ -n "${suggestion:-}" ]]; then
-                    echo -e "${GRAY}   → ${suggestion}${NC}"
+                    echo -e "${GRAY}   ${ICON_REVIEW} ${suggestion}${NC}"
                 fi
             fi
 
@@ -662,7 +662,7 @@ batch_uninstall_applications() {
             # If suggestion is same as reason, there was no suggestion part
             # Also check if suggestion is empty
             if [[ "$first_suggestion" != "$first_reason" && -n "$first_suggestion" ]]; then
-                suggestion_text="${GRAY}   → ${first_suggestion}${NC}"
+                suggestion_text="${GRAY}${ICON_REVIEW} ${first_suggestion}${NC}"
             fi
 
             case "$first_reason" in
@@ -673,7 +673,7 @@ batch_uninstall_applications() {
                 *) reason_summary="$first_reason" ;;
             esac
         fi
-        summary_details+=("Failed: ${RED}${failed_list}${NC} ${reason_summary}")
+        summary_details+=("${ICON_LIST} Failed: ${RED}${failed_list}${NC} ${reason_summary}")
         if [[ -n "$suggestion_text" ]]; then
             summary_details+=("$suggestion_text")
         fi

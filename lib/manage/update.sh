@@ -25,7 +25,7 @@ format_brew_update_label() {
             printf '%s' "${details[*]}"
         )"
     fi
-    printf "  • Homebrew%s" "$detail_str"
+    printf "  %s Homebrew%s" "$ICON_LIST" "$detail_str"
 }
 
 brew_has_outdated() {
@@ -54,17 +54,17 @@ ask_for_updates() {
 
     if [[ -n "${APPSTORE_UPDATE_COUNT:-}" && "${APPSTORE_UPDATE_COUNT:-0}" -gt 0 ]]; then
         has_updates=true
-        update_list+=("  • App Store, ${APPSTORE_UPDATE_COUNT} apps")
+        update_list+=("  ${ICON_LIST} App Store, ${APPSTORE_UPDATE_COUNT} apps")
     fi
 
     if [[ -n "${MACOS_UPDATE_AVAILABLE:-}" && "${MACOS_UPDATE_AVAILABLE}" == "true" ]]; then
         has_updates=true
-        update_list+=("  • macOS system")
+        update_list+=("  ${ICON_LIST} macOS system")
     fi
 
     if [[ -n "${MOLE_UPDATE_AVAILABLE:-}" && "${MOLE_UPDATE_AVAILABLE}" == "true" ]]; then
         has_updates=true
-        update_list+=("  • Mole")
+        update_list+=("  ${ICON_LIST} Mole")
     fi
 
     if [[ "$has_updates" == "false" ]]; then
@@ -96,7 +96,7 @@ ask_for_updates() {
     fi
 
     echo ""
-    echo -e "${YELLOW}💡 Run ${GREEN}brew upgrade${YELLOW} to update${NC}"
+    echo -e "${ICON_REVIEW} Run ${GREEN}brew upgrade${NC} to update"
 
     return 1
 }
@@ -115,7 +115,7 @@ perform_updates() {
 
         if [[ -x "$mole_bin" ]]; then
             if "$mole_bin" update 2>&1 | grep -qE "(Updated|latest version)"; then
-                echo -e "${GREEN}✓${NC} Mole updated"
+                echo -e "${GREEN}${ICON_SUCCESS}${NC} Mole updated"
                 reset_mole_cache
                 ((updated_count++))
             else

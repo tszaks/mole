@@ -231,7 +231,8 @@ cleanup_path() {
             echo -e "${GREEN}${ICON_SUCCESS}${NC} $label"
         fi
     else
-        echo -e "${GRAY}${ICON_WARNING}${NC} Skipped $label${GRAY}, grant Full Disk Access to your terminal and retry${NC}"
+        echo -e "${GRAY}${ICON_WARNING}${NC} Skipped $label${NC}"
+        echo -e "${GRAY}${ICON_REVIEW}${NC} ${GRAY}Grant Full Disk Access to your terminal, then retry${NC}"
     fi
 }
 
@@ -277,7 +278,7 @@ ask_for_security_fixes() {
     done
     echo ""
     export MOLE_SECURITY_FIXES_SHOWN=true
-    echo -ne "${YELLOW}Apply now?${NC} ${GRAY}Enter confirm / Space cancel${NC}: "
+    echo -ne "${GRAY}${ICON_REVIEW}${NC} ${YELLOW}Apply now?${NC} ${GRAY}Enter confirm / Space cancel${NC}: "
 
     local key
     if ! key=$(read_key); then
@@ -436,7 +437,7 @@ main() {
         fi
         echo ""
         log_error "Invalid system health data format"
-        echo -e "${YELLOW}Tip:${NC} Check if jq, awk, sysctl, and df commands are available"
+        echo -e "${GRAY}${ICON_REVIEW}${NC} Check if jq, awk, sysctl, and df commands are available"
         exit 1
     fi
 

@@ -56,9 +56,9 @@ manage_purge_paths() {
         for path in "${PURGE_SEARCH_PATHS[@]}"; do
             local display_path="${path/#$HOME/~}"
             if [[ -d "$path" ]]; then
-                echo -e "  ${GREEN}✓${NC} $display_path"
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $display_path"
             else
-                echo -e "  ${GRAY}○${NC} $display_path${GRAY}, not found${NC}"
+                echo -e "  ${GRAY}${ICON_EMPTY}${NC} $display_path${GRAY}, not found${NC}"
             fi
         done
     fi
