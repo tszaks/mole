@@ -248,7 +248,7 @@ opt_network_optimization() {
         opt_msg "DNS cache refreshed"
         opt_msg "mDNSResponder restarted"
     else
-        echo -e "  ${YELLOW}!${NC} Failed to refresh DNS cache"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to refresh DNS cache"
     fi
 }
 
@@ -277,7 +277,7 @@ opt_sqlite_vacuum() {
     done
 
     if [[ ${#busy_apps[@]} -gt 0 ]]; then
-        echo -e "  ${YELLOW}!${NC} Close these apps before database optimization: ${busy_apps[*]}"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Close these apps before database optimization: ${busy_apps[*]}"
         return 0
     fi
 
@@ -376,7 +376,7 @@ opt_sqlite_vacuum() {
     elif [[ $timed_out -eq 0 && $failed -eq 0 ]]; then
         opt_msg "All databases already optimized"
     else
-        echo -e "  ${YELLOW}!${NC} Database optimization incomplete"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Database optimization incomplete"
     fi
 
     if [[ $skipped -gt 0 ]]; then
@@ -384,11 +384,11 @@ opt_sqlite_vacuum() {
     fi
 
     if [[ $timed_out -gt 0 ]]; then
-        echo -e "  ${YELLOW}!${NC} Timed out on $timed_out databases"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Timed out on $timed_out databases"
     fi
 
     if [[ $failed -gt 0 ]]; then
-        echo -e "  ${YELLOW}!${NC} Failed on $failed databases"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed on $failed databases"
     fi
 }
 
@@ -432,13 +432,13 @@ opt_launch_services_rebuild() {
             opt_msg "LaunchServices repaired"
             opt_msg "File associations refreshed"
         else
-            echo -e "  ${YELLOW}!${NC} Failed to rebuild LaunchServices"
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to rebuild LaunchServices"
         fi
     else
         if [[ -t 1 ]]; then
             stop_inline_spinner
         fi
-        echo -e "  ${YELLOW}!${NC} lsregister not found"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} lsregister not found"
     fi
 }
 
@@ -447,6 +447,7 @@ opt_font_cache_rebuild() {
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
         debug_operation_start "Font Cache Rebuild" "Clear and rebuild font cache"
         debug_operation_detail "Method" "Run atsutil databases -remove"
+        debug_operation_detail "Safety checks" "Skip when browsers are running to avoid cache rebuild conflicts"
         debug_operation_detail "Expected outcome" "Fixed font display issues, removed corrupted font cache"
         debug_risk_level "LOW" "System automatically rebuilds font database"
     fi
@@ -454,6 +455,40 @@ opt_font_cache_rebuild() {
     local success=false
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+        # Some browsers (notably Firefox) can keep stale GPU/text caches in /var/folders if
+        # system font databases are reset while browser/helper processes are still running.
+        local -a running_browsers=()
+        if pgrep -if "Firefox|org\\.mozilla\\.firefox|firefox-gpu-helper" > /dev/null 2>&1; then
+            running_browsers+=("Firefox")
+        fi
+
+        local browser_name
+        local -a browser_checks=(
+            "Safari"
+            "Google Chrome"
+            "Chromium"
+            "Brave Browser"
+            "Microsoft Edge"
+            "Arc"
+            "Opera"
+            "Vivaldi"
+            "Zen Browser"
+        )
+        for browser_name in "${browser_checks[@]}"; do
+            if pgrep -ix "$browser_name" > /dev/null 2>&1; then
+                running_browsers+=("$browser_name")
+            fi
+        done
+
+        if [[ ${#running_browsers[@]} -gt 0 ]]; then
+            local running_list
+            running_list=$(printf "%s, " "${running_browsers[@]}")
+            running_list="${running_list%, }"
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Skipped font cache rebuild because browsers are running: ${running_list}"
+            echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Quit browsers completely, then rerun optimize if font issues persist${NC}"
+            return 0
+        fi
+
         if sudo atsutil databases -remove > /dev/null 2>&1; then
             success=true
         fi
@@ -465,7 +500,7 @@ opt_font_cache_rebuild() {
         opt_msg "Font cache cleared"
         opt_msg "System will rebuild font database automatically"
     else
-        echo -e "  ${YELLOW}!${NC} Failed to clear font cache"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to clear font cache"
     fi
 }
 
@@ -494,7 +529,7 @@ opt_memory_pressure_relief() {
             opt_msg "Inactive memory released"
             opt_msg "System responsiveness improved"
         else
-            echo -e "  ${YELLOW}!${NC} Failed to release memory pressure"
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to release memory pressure"
         fi
     else
         opt_msg "Inactive memory released"
@@ -544,7 +579,7 @@ opt_network_stack_optimize() {
         if [[ "$route_flushed" == "true" ]]; then
             return 0
         fi
-        echo -e "  ${YELLOW}!${NC} Failed to optimize network stack"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to optimize network stack"
     fi
 }
 
@@ -584,7 +619,7 @@ opt_disk_permissions_repair() {
             opt_msg "User directory permissions repaired"
             opt_msg "File access issues resolved"
         else
-            echo -e "  ${YELLOW}!${NC} Failed to repair permissions, may not be needed"
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to repair permissions, may not be needed"
         fi
     else
         opt_msg "User directory permissions repaired"
@@ -710,7 +745,7 @@ opt_spotlight_index_optimize() {
                     opt_msg "Spotlight index rebuild started"
                     echo -e "  ${GRAY}Indexing will continue in background${NC}"
                 else
-                    echo -e "  ${YELLOW}!${NC} Failed to rebuild Spotlight index"
+                    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to rebuild Spotlight index"
                 fi
             else
                 opt_msg "Spotlight index rebuild started"
