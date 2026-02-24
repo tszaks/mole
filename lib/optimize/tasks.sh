@@ -396,9 +396,9 @@ opt_sqlite_vacuum() {
 opt_launch_services_rebuild() {
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
         debug_operation_start "LaunchServices Rebuild" "Rebuild LaunchServices database"
-        debug_operation_detail "Method" "Run lsregister -r on system, user, and local domains"
-        debug_operation_detail "Purpose" "Fix \"Open with\" menu issues and file associations"
-        debug_operation_detail "Expected outcome" "Correct app associations, fixed duplicate entries"
+        debug_operation_detail "Method" "Run lsregister -gc then force rescan with -r -f on local, user, and system domains"
+        debug_operation_detail "Purpose" "Fix \"Open with\" menu issues, file associations, and stale app metadata"
+        debug_operation_detail "Expected outcome" "Correct app associations, fixed duplicate entries, fewer stale app listings"
         debug_risk_level "LOW" "Database is automatically rebuilt"
     fi
 
@@ -413,10 +413,11 @@ opt_launch_services_rebuild() {
 
         if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
             set +e
-            "$lsregister" -r -domain local -domain user -domain system > /dev/null 2>&1
+            "$lsregister" -gc > /dev/null 2>&1 || true
+            "$lsregister" -r -f -domain local -domain user -domain system > /dev/null 2>&1
             success=$?
             if [[ $success -ne 0 ]]; then
-                "$lsregister" -r -domain local -domain user > /dev/null 2>&1
+                "$lsregister" -r -f -domain local -domain user > /dev/null 2>&1
                 success=$?
             fi
             set -e

@@ -11,6 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Batch uninstall with a single confirmation.
 
+get_lsregister_path() {
+    echo "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+}
+
 # High-performance sensitive data detection (pure Bash, no subprocess)
 # Faster than grep for batch operations, especially when processing many apps
 has_sensitive_data() {
@@ -104,6 +108,47 @@ stop_launch_services() {
             done < <(find /Library/LaunchDaemons -maxdepth 1 -name "${bundle_id}*.plist" -print0 2> /dev/null)
         fi
     fi
+}
+
+# Unregister app bundle from LaunchServices before deleting files.
+# This helps remove stale app entries from Spotlight's app results list.
+unregister_app_bundle() {
+    local app_path="$1"
+
+    [[ -n "$app_path" && -e "$app_path" ]] || return 0
+    [[ "$app_path" == *.app ]] || return 0
+
+    local lsregister
+    lsregister=$(get_lsregister_path)
+    [[ -x "$lsregister" ]] || return 0
+
+    [[ "${MOLE_DRY_RUN:-0}" == "1" ]] && return 0
+
+    set +e
+    "$lsregister" -u "$app_path" > /dev/null 2>&1
+    set -e
+}
+
+# Compact and rebuild LaunchServices after uninstall batch to clear stale app metadata.
+refresh_launch_services_after_uninstall() {
+    local lsregister
+    lsregister=$(get_lsregister_path)
+    [[ -x "$lsregister" ]] || return 0
+
+    [[ "${MOLE_DRY_RUN:-0}" == "1" ]] && return 0
+
+    local success=0
+    set +e
+    "$lsregister" -gc > /dev/null 2>&1 || true
+    "$lsregister" -r -f -domain local -domain user -domain system > /dev/null 2>&1
+    success=$?
+    if [[ $success -ne 0 ]]; then
+        "$lsregister" -r -f -domain local -domain user > /dev/null 2>&1
+        success=$?
+    fi
+    set -e
+
+    [[ $success -eq 0 ]]
 }
 
 # Remove macOS Login Items for an app
@@ -448,6 +493,7 @@ batch_uninstall_applications() {
         [[ -n "$system_files" ]] && has_system_files="true"
 
         stop_launch_services "$bundle_id" "$has_system_files"
+        unregister_app_bundle "$app_path"
 
         # Remove from Login Items
         remove_login_item "$app_name" "$bundle_id"
@@ -718,6 +764,7 @@ batch_uninstall_applications() {
     # Clean up Dock entries for uninstalled apps.
     if [[ $success_count -gt 0 && ${#success_items[@]} -gt 0 ]]; then
         remove_apps_from_dock "${success_items[@]}" 2> /dev/null || true
+        refresh_launch_services_after_uninstall 2> /dev/null || true
     fi
 
     _cleanup_sudo_keepalive
