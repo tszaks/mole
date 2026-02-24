@@ -14,6 +14,14 @@ ICON_SUCCESS="✓"
 ICON_WARN="!"
 ICON_ERR="✗"
 
+LAUNCHER_COMMAND_SPECS=(
+    "clean|Mole Clean|Deep system cleanup with Mole|Run Mole clean"
+    "uninstall|Mole Uninstall|Uninstall applications with Mole|Uninstall apps via Mole"
+    "optimize|Mole Optimize|System health checks and optimization|System health and optimization"
+    "analyze|Mole Analyze|Disk space analysis with Mole|Disk space analysis"
+    "status|Mole Status|Live system status dashboard|Live system dashboard"
+)
+
 log_step() { echo -e "${BLUE}${ICON_STEP}${NC} $1"; }
 log_success() { echo -e "${GREEN}${ICON_SUCCESS}${NC} $1"; }
 log_warn() { echo -e "${YELLOW}${ICON_WARN}${NC} $1"; }
@@ -239,14 +247,18 @@ create_raycast_commands() {
     local mo_bin="$1"
     local default_dir="$HOME/Library/Application Support/Raycast/script-commands"
     local dir="$default_dir"
+    local entry
+    local subcommand
+    local title
+    local description
+    local alfred_subtitle
 
     log_step "Installing Raycast commands..."
     mkdir -p "$dir"
-    write_raycast_script "$dir/mole-clean.sh" "Mole Clean" "Deep system cleanup with Mole" "$mo_bin" "clean"
-    write_raycast_script "$dir/mole-uninstall.sh" "Mole Uninstall" "Uninstall applications with Mole" "$mo_bin" "uninstall"
-    write_raycast_script "$dir/mole-optimize.sh" "Mole Optimize" "System health checks and optimization" "$mo_bin" "optimize"
-    write_raycast_script "$dir/mole-analyze.sh" "Mole Analyze" "Disk space analysis with Mole" "$mo_bin" "analyze"
-    write_raycast_script "$dir/mole-status.sh" "Mole Status" "Live system status dashboard" "$mo_bin" "status"
+    for entry in "${LAUNCHER_COMMAND_SPECS[@]}"; do
+        IFS="|" read -r subcommand title description alfred_subtitle <<< "$entry"
+        write_raycast_script "$dir/mole-${subcommand}.sh" "$title" "$description" "$mo_bin" "$subcommand"
+    done
     log_success "Scripts ready in: $dir"
 
     log_header "Raycast Configuration"
@@ -279,22 +291,24 @@ create_alfred_workflow() {
     local mo_bin="$1"
     local prefs_dir="${ALFRED_PREFS_DIR:-$HOME/Library/Application Support/Alfred/Alfred.alfredpreferences}"
     local workflows_dir="$prefs_dir/workflows"
+    local entry
+    local subcommand
+    local title
+    local subtitle
+    local bundle
+    local keyword
+    local command
 
     if [[ ! -d "$workflows_dir" ]]; then
         return
     fi
 
     log_step "Installing Alfred workflows..."
-    local workflows=(
-        "fun.tw93.mole.clean|Mole clean|clean|Run Mole clean|\"${mo_bin}\" clean"
-        "fun.tw93.mole.uninstall|Mole uninstall|uninstall|Uninstall apps via Mole|\"${mo_bin}\" uninstall"
-        "fun.tw93.mole.optimize|Mole optimize|optimize|System health & optimization|\"${mo_bin}\" optimize"
-        "fun.tw93.mole.analyze|Mole analyze|analyze|Disk space analysis|\"${mo_bin}\" analyze"
-        "fun.tw93.mole.status|Mole status|status|Live system dashboard|\"${mo_bin}\" status"
-    )
-
-    for entry in "${workflows[@]}"; do
-        IFS="|" read -r bundle name keyword subtitle command <<< "$entry"
+    for entry in "${LAUNCHER_COMMAND_SPECS[@]}"; do
+        IFS="|" read -r subcommand title _ subtitle <<< "$entry"
+        bundle="fun.tw93.mole.${subcommand}"
+        keyword="${subcommand}"
+        command="\"${mo_bin}\" ${subcommand}"
         local workflow_uid="user.workflow.$(uuid | LC_ALL=C tr '[:upper:]' '[:lower:]')"
         local input_uid
         local action_uid
@@ -313,7 +327,7 @@ create_alfred_workflow() {
     <key>createdby</key>
     <string>Mole</string>
     <key>name</key>
-    <string>${name}</string>
+    <string>${title}</string>
     <key>objects</key>
     <array>
         <dict>
@@ -326,7 +340,7 @@ create_alfred_workflow() {
                 <key>subtext</key>
                 <string>${subtitle}</string>
                 <key>text</key>
-                <string>${name}</string>
+                <string>${title}</string>
                 <key>withspace</key>
                 <true/>
             </dict>
@@ -385,7 +399,7 @@ ${command}
 </dict>
 </plist>
 EOF
-        log_success "Workflow ready: ${name}, keyword: ${keyword}"
+        log_success "Workflow ready: ${title}, keyword: ${keyword}"
     done
 
     log_step "Open Alfred preferences → Workflows if you need to adjust keywords."
@@ -406,11 +420,13 @@ main() {
 
     echo ""
     log_success "Done! Raycast and Alfred are ready with 5 commands:"
-    echo "  • Mole Clean, Deep system cleanup"
-    echo "  • Mole Uninstall, Remove applications"
-    echo "  • Mole Optimize, System health & tuning"
-    echo "  • Mole Analyze, Disk space explorer"
-    echo "  • Mole Status, Live system monitor"
+    local entry
+    local subcommand
+    local title
+    for entry in "${LAUNCHER_COMMAND_SPECS[@]}"; do
+        IFS="|" read -r subcommand title _ _ <<< "$entry"
+        echo "  • Raycast: ${title} | Alfred keyword: ${subcommand}"
+    done
     echo ""
 }
 

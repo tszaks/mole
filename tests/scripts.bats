@@ -84,6 +84,8 @@ EOF
     run env HOME="$HOME" TERM="dumb" PATH="$fake_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
         "$PROJECT_ROOT/scripts/setup-quick-launchers.sh"
     [ "$status" -eq 0 ]
+    [[ "$output" == *"Raycast: Mole Clean | Alfred keyword: clean"* ]]
+    [[ "$output" == *"Raycast: Mole Status | Alfred keyword: status"* ]]
 
     local raycast_dir="$HOME/Library/Application Support/Raycast/script-commands"
     [ -d "$raycast_dir" ]

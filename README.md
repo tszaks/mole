@@ -271,7 +271,7 @@ After running the script, complete these steps in Raycast:
 3. Click **"Add Script Directory"** (or **"+"**)
 4. Add path: `~/Library/Application Support/Raycast/script-commands`
 5. Search in Raycast for: **"Reload Script Directories"** and run it
-6. Done! Search for `mole clean`, `mole optimize`, or `mole status` to use the commands
+6. Done! Search for `Mole Clean` or `clean`, `Mole Optimize`, or `Mole Status` to use the commands
 
 > **Note**: The script creates the commands, but Raycast still requires a one-time manual script directory setup.
 
