@@ -622,23 +622,9 @@ select_purge_categories() {
             fi
         done
 
-        # Dynamic size formatting (KB → MB → GB) with 2 decimal places
+        # Format selected size (stored in KB) using shared display rules.
         local selected_size_human
-        local selected_value
-        local selected_unit
-
-        if (( selected_size < 1024 )); then
-            selected_value="$selected_size"
-            selected_unit="KB"
-        elif (( selected_size < 1024 * 1024 )); then
-            selected_value=$(printf "%.2f" "$(echo "scale=4; $selected_size/1024" | bc)")
-            selected_unit="MB"
-        else
-            selected_value=$(printf "%.2f" "$(echo "scale=4; $selected_size/1024/1024" | bc)")
-            selected_unit="GB"
-        fi
-
-        selected_size_human="${selected_value}${selected_unit}"
+        selected_size_human=$(bytes_to_human_kb "$selected_size")
 
         # Show position indicator if scrolling is needed
         local scroll_indicator=""
