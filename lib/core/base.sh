@@ -44,6 +44,27 @@ readonly ICON_NAV_DOWN="↓"
 readonly ICON_INFO="ℹ"
 
 # ============================================================================
+# LaunchServices Utility
+# ============================================================================
+
+# Locate the lsregister binary (path varies across macOS versions).
+get_lsregister_path() {
+    local -a candidates=(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        "/System/Library/CoreServices/Frameworks/LaunchServices.framework/Support/lsregister"
+    )
+    local candidate=""
+    for candidate in "${candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    echo ""
+    return 0
+}
+
+# ============================================================================
 # Global Configuration Constants
 # ============================================================================
 readonly MOLE_TEMP_FILE_AGE_DAYS=7       # Temp file retention (days)
