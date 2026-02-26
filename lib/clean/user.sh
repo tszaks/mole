@@ -816,7 +816,7 @@ clean_application_support_logs() {
                     [[ -e "$item" ]] || continue
                     item_found=true
                     ((candidate_item_count++))
-                    if [[ ! -L "$item" && ( -f "$item" || -d "$item" ) ]]; then
+                    if [[ ! -L "$item" && (-f "$item" || -d "$item") ]]; then
                         local item_size_bytes=""
                         if item_size_bytes=$(app_support_item_size_bytes "$item" "$size_timeout_seconds"); then
                             if [[ "$item_size_bytes" =~ ^[0-9]+$ ]]; then
@@ -867,7 +867,7 @@ clean_application_support_logs() {
                     [[ -e "$item" ]] || continue
                     item_found=true
                     ((candidate_item_count++))
-                    if [[ ! -L "$item" && ( -f "$item" || -d "$item" ) ]]; then
+                    if [[ ! -L "$item" && (-f "$item" || -d "$item") ]]; then
                         local item_size_bytes=""
                         if item_size_bytes=$(app_support_item_size_bytes "$item" "$size_timeout_seconds"); then
                             if [[ "$item_size_bytes" =~ ^[0-9]+$ ]]; then
