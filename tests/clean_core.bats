@@ -25,13 +25,66 @@ setup() {
     rm -rf "${HOME:?}"/*
     rm -rf "$HOME/Library" "$HOME/.config"
     mkdir -p "$HOME/Library/Caches" "$HOME/.config/mole"
+    unset TEST_MOCK_BIN
+}
+
+set_mock_sudo_cached() {
+    TEST_MOCK_BIN="$HOME/bin"
+    mkdir -p "$TEST_MOCK_BIN"
+    cat > "$TEST_MOCK_BIN/sudo" << 'MOCK'
+#!/bin/bash
+# Shim: sudo -n true succeeds, all other sudo calls are no-ops.
+if [[ "$1" == "-n" && "$2" == "true" ]]; then exit 0; fi
+if [[ "$1" == "test" ]]; then exit 1; fi
+if [[ "$1" == "find" ]]; then exit 0; fi
+exit 0
+MOCK
+    chmod +x "$TEST_MOCK_BIN/sudo"
+}
+
+set_mock_sudo_uncached() {
+    TEST_MOCK_BIN="$HOME/bin"
+    mkdir -p "$TEST_MOCK_BIN"
+    cat > "$TEST_MOCK_BIN/sudo" << 'MOCK'
+#!/bin/bash
+# Shim: sudo -n always fails (no cached credentials).
+exit 1
+MOCK
+    chmod +x "$TEST_MOCK_BIN/sudo"
+}
+
+run_clean_dry_run() {
+    local test_path="$PATH"
+    if [[ -n "${TEST_MOCK_BIN:-}" ]]; then
+        test_path="$TEST_MOCK_BIN:$PATH"
+    fi
+
+    run env HOME="$HOME" MOLE_TEST_MODE=1 PATH="$test_path" \
+        "$PROJECT_ROOT/mole" clean --dry-run
 }
 
 @test "mo clean --dry-run skips system cleanup in non-interactive mode" {
-    run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean --dry-run
+    set_mock_sudo_uncached
+    run_clean_dry_run
     [ "$status" -eq 0 ]
     [[ "$output" == *"Dry Run Mode"* ]]
-    [[ "$output" != *"Deep system-level cleanup"* ]]
+    [[ "$output" == *"sudo -v && mo clean --dry-run"* ]]
+    [[ "$output" != *"system preview included"* ]]
+}
+
+@test "mo clean --dry-run includes system preview when sudo is cached" {
+    set_mock_sudo_cached
+    run_clean_dry_run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"system preview included"* ]]
+}
+
+@test "mo clean --dry-run shows hint when sudo is not cached" {
+    set_mock_sudo_uncached
+    run_clean_dry_run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"sudo -v"* ]]
+    [[ "$output" == *"full preview"* ]]
 }
 
 @test "mo clean --dry-run reports user cache without deleting it" {
@@ -263,5 +316,4 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Time Machine backup in progress, skipping cleanup"* ]]
 }
-
 
