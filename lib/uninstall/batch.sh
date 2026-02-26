@@ -12,7 +12,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Batch uninstall with a single confirmation.
 
 get_lsregister_path() {
-    echo "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    local -a candidates=(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        "/System/Library/CoreServices/Frameworks/LaunchServices.framework/Support/lsregister"
+    )
+    local candidate=""
+    for candidate in "${candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    echo ""
+    return 0
 }
 
 # High-performance sensitive data detection (pure Bash, no subprocess)
