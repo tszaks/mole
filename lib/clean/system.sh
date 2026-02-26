@@ -179,7 +179,7 @@ clean_deep_system() {
         done < <(sudo find "$mem_reports_dir" -type f -mtime +30 -print0 2> /dev/null || true)
 
         if [[ "$file_count" -gt 0 ]]; then
-            if [[ "${DRY_RUN:-false}" != "true" ]]; then
+            if [[ "$DRY_RUN" != "true" ]]; then
                 if safe_sudo_find_delete "$mem_reports_dir" "*" "30" "f"; then
                     mem_cleaned=1
                 fi
