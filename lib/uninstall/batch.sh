@@ -735,32 +735,26 @@ batch_uninstall_applications() {
     print_summary_block "$title" "${summary_details[@]}"
     printf '\n'
 
-    # Auto-run brew autoremove if Homebrew casks were uninstalled
-    if [[ $brew_apps_removed -gt 0 ]]; then
-        # Show spinner while checking for orphaned dependencies
-        if [[ -t 1 ]]; then
-            start_inline_spinner "Checking brew dependencies..."
-        fi
-
-        local autoremove_output removed_count
-        autoremove_output=$(HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2> /dev/null) || true
-        removed_count=$(printf '%s\n' "$autoremove_output" | grep -c "^Uninstalling" || true)
-        removed_count=${removed_count:-0}
+    # Run non-critical post-cleanup tasks asynchronously so the next prompt appears immediately.
+    # These tasks are best-effort and should not block interactive flow.
+    if [[ $brew_apps_removed -gt 0 || ($success_count -gt 0 && ${#success_items[@]} -gt 0) ]]; then
+        local -a post_success_items=("${success_items[@]}")
+        local post_brew_apps_removed="$brew_apps_removed"
 
         if [[ -t 1 ]]; then
-            stop_inline_spinner
+            echo -e "${GRAY}${ICON_LIST}${NC} Finalizing uninstall cleanup in background..."
         fi
 
-        if [[ $removed_count -gt 0 ]]; then
-            echo -e "${GREEN}${ICON_SUCCESS}${NC} Cleaned $removed_count orphaned brew dependencies"
-            echo ""
-        fi
-    fi
+        (
+            if [[ "$post_brew_apps_removed" -gt 0 ]]; then
+                HOMEBREW_NO_ENV_HINTS=1 brew autoremove > /dev/null 2>&1 || true
+            fi
 
-    # Clean up Dock entries for uninstalled apps.
-    if [[ $success_count -gt 0 && ${#success_items[@]} -gt 0 ]]; then
-        remove_apps_from_dock "${success_items[@]}" 2> /dev/null || true
-        refresh_launch_services_after_uninstall 2> /dev/null || true
+            if [[ ${#post_success_items[@]} -gt 0 ]]; then
+                remove_apps_from_dock "${post_success_items[@]}" 2> /dev/null || true
+                refresh_launch_services_after_uninstall 2> /dev/null || true
+            fi
+        ) > /dev/null 2>&1 &
     fi
 
     _cleanup_sudo_keepalive
