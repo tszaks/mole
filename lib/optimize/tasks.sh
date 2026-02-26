@@ -14,7 +14,7 @@ opt_msg() {
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $message"
     else
-        echo -e "  ${GREEN}✓${NC} $message"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $message"
     fi
 }
 
@@ -406,9 +406,20 @@ opt_launch_services_rebuild() {
         start_inline_spinner ""
     fi
 
-    local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    local lsregister=""
+    local -a lsregister_candidates=(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        "/System/Library/CoreServices/Frameworks/LaunchServices.framework/Support/lsregister"
+    )
+    local lsregister_candidate=""
+    for lsregister_candidate in "${lsregister_candidates[@]}"; do
+        if [[ -x "$lsregister_candidate" ]]; then
+            lsregister="$lsregister_candidate"
+            break
+        fi
+    done
 
-    if [[ -f "$lsregister" ]]; then
+    if [[ -n "$lsregister" ]]; then
         local success=0
 
         if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
@@ -741,7 +752,7 @@ opt_spotlight_index_optimize() {
             fi
 
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                echo -e "  ${BLUE}ℹ${NC} Spotlight search is slow, rebuilding index, may take 1-2 hours"
+                echo -e "  ${BLUE}${ICON_INFO}${NC} Spotlight search is slow, rebuilding index, may take 1-2 hours"
                 if sudo mdutil -E / > /dev/null 2>&1; then
                     opt_msg "Spotlight index rebuild started"
                     echo -e "  ${GRAY}Indexing will continue in background${NC}"
