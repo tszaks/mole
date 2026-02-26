@@ -633,7 +633,6 @@ select_purge_categories() {
             scroll_indicator=" ${GRAY}[${current_pos}/${total_items}]${NC}"
         fi
 
-        printf "%s\n" "$clear_line"
         printf "%s${PURPLE_BOLD}Select Categories to Clean${NC}%s${GRAY}, ${selected_size_human}, ${selected_count} selected${NC}\n" "$clear_line" "$scroll_indicator"
         printf "%s\n" "$clear_line"
 
@@ -656,15 +655,42 @@ select_purge_categories() {
             fi
         done
 
-        # Fill empty slots to clear previous content
-        local items_shown=$visible_count
-        for ((i = items_shown; i < items_per_page; i++)); do
-            printf "%s\n" "$clear_line"
-        done
-
+        # Keep one blank line between the list and footer tips.
         printf "%s\n" "$clear_line"
 
-        printf "%s${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}/J/K  |  Space Select  |  Enter Confirm  |  A All  |  I Invert  |  Q Quit${NC}\n" "$clear_line"
+        # Adaptive footer hints — mirrors menu_paginated.sh pattern
+        local _term_w
+        _term_w=$(tput cols 2> /dev/null || echo 80)
+        [[ "$_term_w" =~ ^[0-9]+$ ]] || _term_w=80
+
+        local _sep=" ${GRAY}|${NC} "
+        local _nav="${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
+        local _space="${GRAY}Space Select${NC}"
+        local _enter="${GRAY}Enter Confirm${NC}"
+        local _all="${GRAY}A All${NC}"
+        local _invert="${GRAY}I Invert${NC}"
+        local _quit="${GRAY}Q Quit${NC}"
+
+        # Strip ANSI to measure real length
+        _ph_len() { printf "%s" "$1" | LC_ALL=C awk '{gsub(/\033\[[0-9;]*[A-Za-z]/,""); printf "%d", length}'; }
+
+        # Level 0 (full): ↑↓ | Space Select | Enter Confirm | A All | I Invert | Q Quit
+        local _full="${_nav}${_sep}${_space}${_sep}${_enter}${_sep}${_all}${_sep}${_invert}${_sep}${_quit}"
+        if (($(_ph_len "$_full") <= _term_w)); then
+            printf "%s${_full}${NC}\n" "$clear_line"
+        else
+            # Level 1: ↑↓ | Enter Confirm | A All | I Invert | Q Quit
+            local _l1="${_nav}${_sep}${_enter}${_sep}${_all}${_sep}${_invert}${_sep}${_quit}"
+            if (($(_ph_len "$_l1") <= _term_w)); then
+                printf "%s${_l1}${NC}\n" "$clear_line"
+            else
+                # Level 2 (minimal): ↑↓ | Enter | Q Quit
+                printf "%s${_nav}${_sep}${_enter}${_sep}${_quit}${NC}\n" "$clear_line"
+            fi
+        fi
+
+        # Clear stale content below the footer when list height shrinks.
+        printf '\033[J'
     }
     move_cursor_up() {
         if [[ $cursor_pos -gt 0 ]]; then
@@ -767,6 +793,48 @@ select_purge_categories() {
         esac
     done
 }
+
+# Final confirmation before deleting selected purge artifacts.
+confirm_purge_cleanup() {
+    local item_count="${1:-0}"
+    local total_size_kb="${2:-0}"
+    local unknown_count="${3:-0}"
+
+    [[ "$item_count" =~ ^[0-9]+$ ]] || item_count=0
+    [[ "$total_size_kb" =~ ^[0-9]+$ ]] || total_size_kb=0
+    [[ "$unknown_count" =~ ^[0-9]+$ ]] || unknown_count=0
+
+    local item_text="artifact"
+    [[ $item_count -ne 1 ]] && item_text="artifacts"
+
+    local size_display
+    size_display=$(bytes_to_human "$((total_size_kb * 1024))")
+
+    local unknown_hint=""
+    if [[ $unknown_count -gt 0 ]]; then
+        local unknown_text="unknown size"
+        [[ $unknown_count -gt 1 ]] && unknown_text="unknown sizes"
+        unknown_hint=", ${unknown_count} ${unknown_text}"
+    fi
+
+    echo -ne "${PURPLE}${ICON_ARROW}${NC} Remove ${item_count} ${item_text}, ${size_display}${unknown_hint}  ${GREEN}Enter${NC} confirm, ${GRAY}ESC${NC} cancel: "
+    drain_pending_input
+    local key=""
+    IFS= read -r -s -n1 key || key=""
+    drain_pending_input
+
+    case "$key" in
+        "" | $'\n' | $'\r' | y | Y)
+            echo ""
+            return 0
+            ;;
+        *)
+            echo ""
+            return 1
+            ;;
+    esac
+}
+
 # Main cleanup function - scans and prompts user to select artifacts to clean
 clean_project_artifacts() {
     local -a all_found_items=()
@@ -825,8 +893,6 @@ clean_project_artifacts() {
     # Give monitor process time to exit and clear its output
     if [[ -t 1 ]]; then
         sleep 0.2
-        # Clear the scanning line but preserve the title
-        printf '\n\033[K'
     fi
 
     # Collect all results
@@ -1041,32 +1107,57 @@ clean_project_artifacts() {
             echo "$artifact_name"
         fi
     }
-    # Format display with alignment (like app_selector)
+    # Format display with alignment (mirrors app_selector.sh approach)
+    # Args: $1=project_path $2=artifact_type $3=size_str $4=terminal_width $5=max_path_width $6=artifact_col_width
     format_purge_display() {
         local project_path="$1"
         local artifact_type="$2"
         local size_str="$3"
-        # Terminal width for alignment
-        local terminal_width=$(tput cols 2> /dev/null || echo 80)
-        local fixed_width=32 # Reserve for size and artifact type (9 + 3 + 20)
-        local available_width=$((terminal_width - fixed_width))
-        # Bounds: 30 chars min, but cap at 70% of terminal width to preserve aesthetics
-        local max_aesthetic_width=$((terminal_width * 70 / 100))
-        [[ $available_width -gt $max_aesthetic_width ]] && available_width=$max_aesthetic_width
-        [[ $available_width -lt 30 ]] && available_width=30
+        local terminal_width="${4:-$(tput cols 2> /dev/null || echo 80)}"
+        local max_path_width="${5:-}"
+        local artifact_col="${6:-12}"
+        local available_width
+
+        if [[ -n "$max_path_width" ]]; then
+            available_width="$max_path_width"
+        else
+            # Standalone fallback: overhead = prefix(4)+space(1)+size(9)+sep(3)+artifact_col+recent(9) = artifact_col+26
+            local fixed_width=$((artifact_col + 26))
+            available_width=$((terminal_width - fixed_width))
+
+            local min_width=10
+            if [[ $terminal_width -ge 120 ]]; then
+                min_width=48
+            elif [[ $terminal_width -ge 100 ]]; then
+                min_width=38
+            elif [[ $terminal_width -ge 80 ]]; then
+                min_width=25
+            fi
+
+            [[ $available_width -lt $min_width ]] && available_width=$min_width
+            [[ $available_width -gt 60 ]] && available_width=60
+        fi
+
         # Truncate project path if needed
-        local truncated_path=$(truncate_by_display_width "$project_path" "$available_width")
-        local current_width=$(get_display_width "$truncated_path")
+        local truncated_path
+        truncated_path=$(truncate_by_display_width "$project_path" "$available_width")
+        local current_width
+        current_width=$(get_display_width "$truncated_path")
         local char_count=${#truncated_path}
         local padding=$((available_width - current_width))
         local printf_width=$((char_count + padding))
         # Format: "project_path  size | artifact_type"
-        printf "%-*s %9s | %-17s" "$printf_width" "$truncated_path" "$size_str" "$artifact_type"
+        printf "%-*s %9s | %-*s" "$printf_width" "$truncated_path" "$size_str" "$artifact_col" "$artifact_type"
     }
     # Build menu options - one line per artifact
+    # Pass 1: collect data into parallel arrays (needed for pre-scan of widths)
+    local -a raw_project_paths=()
+    local -a raw_artifact_types=()
     for item in "${safe_to_clean[@]}"; do
-        local project_path=$(get_project_path "$item")
-        local artifact_type=$(get_artifact_display_name "$item")
+        local project_path
+        project_path=$(get_project_path "$item")
+        local artifact_type
+        artifact_type=$(get_artifact_display_name "$item")
         local size_raw
         size_raw=$(get_dir_size_kb "$item")
         local size_kb=0
@@ -1095,11 +1186,64 @@ clean_project_artifacts() {
                 break
             fi
         done
-        menu_options+=("$(format_purge_display "$project_path" "$artifact_type" "$size_human")")
+        raw_project_paths+=("$project_path")
+        raw_artifact_types+=("$artifact_type")
         item_paths+=("$item")
         item_sizes+=("$size_kb")
         item_size_unknown_flags+=("$size_unknown")
         item_recent_flags+=("$is_recent")
+    done
+
+    # Pre-scan: find max path and artifact display widths (mirrors app_selector.sh approach)
+    local terminal_width
+    terminal_width=$(tput cols 2> /dev/null || echo 80)
+    [[ "$terminal_width" =~ ^[0-9]+$ ]] || terminal_width=80
+
+    local max_path_display_width=0
+    local max_artifact_width=0
+    for pp in "${raw_project_paths[@]+"${raw_project_paths[@]}"}"; do
+        local w
+        w=$(get_display_width "$pp")
+        [[ $w -gt $max_path_display_width ]] && max_path_display_width=$w
+    done
+    for at in "${raw_artifact_types[@]+"${raw_artifact_types[@]}"}"; do
+        [[ ${#at} -gt $max_artifact_width ]] && max_artifact_width=${#at}
+    done
+
+    # Artifact column: cap at 17, floor at 6 (shortest typical names like "dist")
+    [[ $max_artifact_width -lt 6 ]] && max_artifact_width=6
+    [[ $max_artifact_width -gt 17 ]] && max_artifact_width=17
+
+    # Exact overhead: prefix(4) + space(1) + size(9) + " | "(3) + artifact_col + " | Recent"(9) = artifact_col + 26
+    local fixed_overhead=$((max_artifact_width + 26))
+    local available_for_path=$((terminal_width - fixed_overhead))
+
+    local min_path_width=10
+    if [[ $terminal_width -ge 120 ]]; then
+        min_path_width=48
+    elif [[ $terminal_width -ge 100 ]]; then
+        min_path_width=38
+    elif [[ $terminal_width -ge 80 ]]; then
+        min_path_width=25
+    fi
+
+    [[ $max_path_display_width -lt $min_path_width ]] && max_path_display_width=$min_path_width
+    [[ $available_for_path -lt $max_path_display_width ]] && max_path_display_width=$available_for_path
+    [[ $max_path_display_width -gt 60 ]] && max_path_display_width=60
+    # Ensure path width is at least 5 on very narrow terminals
+    [[ $max_path_display_width -lt 5 ]] && max_path_display_width=5
+
+    # Pass 2: build menu_options using pre-computed widths
+    for ((idx = 0; idx < ${#raw_project_paths[@]}; idx++)); do
+        local size_kb_val="${item_sizes[idx]}"
+        local size_unknown_val="${item_size_unknown_flags[idx]}"
+        local size_human_val=""
+        if [[ "$size_unknown_val" == "true" ]]; then
+            size_human_val="unknown"
+        else
+            size_human_val=$(bytes_to_human "$((size_kb_val * 1024))")
+        fi
+        menu_options+=("$(format_purge_display "${raw_project_paths[idx]}" "${raw_artifact_types[idx]}" "$size_human_val" "$terminal_width" "$max_path_display_width" "$max_artifact_width")")
     done
 
     # Sort by size descending (largest first) - requested in issue #311
@@ -1147,11 +1291,11 @@ clean_project_artifacts() {
     # Set global vars for selector
     export PURGE_CATEGORY_SIZES=$(
         IFS=,
-        echo "${item_sizes[*]}"
+        echo "${item_sizes[*]-}"
     )
     export PURGE_RECENT_CATEGORIES=$(
         IFS=,
-        echo "${item_recent_flags[*]}"
+        echo "${item_recent_flags[*]-}"
     )
     # Interactive selection (only if terminal is available)
     PURGE_SELECTION_RESULT=""
@@ -1176,9 +1320,29 @@ clean_project_artifacts() {
         unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_SELECTION_RESULT
         return 0
     fi
+    IFS=',' read -r -a selected_indices <<< "$PURGE_SELECTION_RESULT"
+    local selected_total_kb=0
+    local selected_unknown_count=0
+    for idx in "${selected_indices[@]}"; do
+        local selected_size_kb="${item_sizes[idx]:-0}"
+        [[ "$selected_size_kb" =~ ^[0-9]+$ ]] || selected_size_kb=0
+        selected_total_kb=$((selected_total_kb + selected_size_kb))
+        if [[ "${item_size_unknown_flags[idx]:-false}" == "true" ]]; then
+            ((selected_unknown_count++))
+        fi
+    done
+
+    if [[ -t 0 ]]; then
+        if ! confirm_purge_cleanup "${#selected_indices[@]}" "$selected_total_kb" "$selected_unknown_count"; then
+            echo -e "${GRAY}Purge cancelled${NC}"
+            printf '\n'
+            unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_SELECTION_RESULT
+            return 1
+        fi
+    fi
+
     # Clean selected items
     echo ""
-    IFS=',' read -r -a selected_indices <<< "$PURGE_SELECTION_RESULT"
     local stats_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mole"
     local cleaned_count=0
     for idx in "${selected_indices[@]}"; do

@@ -308,6 +308,28 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "confirm_purge_cleanup accepts Enter" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+drain_pending_input() { :; }
+confirm_purge_cleanup 2 1024 0 <<< ''
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "confirm_purge_cleanup cancels on ESC" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+drain_pending_input() { :; }
+confirm_purge_cleanup 2 1024 0 <<< $'\033'
+EOF
+
+    [ "$status" -eq 1 ]
+}
+
 @test "is_protected_vendor_dir: protects Go vendor" {
     mkdir -p "$HOME/www/go-app/vendor"
     touch "$HOME/www/go-app/go.mod"
