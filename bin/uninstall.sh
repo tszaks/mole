@@ -950,12 +950,22 @@ main() {
 
         rm -f "$apps_file"
 
-        echo -e "${GRAY}Press Enter to return to application list, any other key to exit...${NC}"
+        local prompt_timeout="${MOLE_UNINSTALL_RETURN_PROMPT_TIMEOUT_SEC:-3}"
+        if [[ ! "$prompt_timeout" =~ ^[0-9]+$ ]] || [[ "$prompt_timeout" -lt 1 ]]; then
+            prompt_timeout=3
+        fi
+
+        echo -e "${GRAY}Press Enter to return to the app list, press any other key or wait ${prompt_timeout}s to exit.${NC}"
         local key
-        IFS= read -r -s -n1 key || key=""
+        local read_ok=false
+        if IFS= read -r -s -n1 -t "$prompt_timeout" key; then
+            read_ok=true
+        else
+            key=""
+        fi
         drain_pending_input
 
-        if [[ -z "$key" ]]; then
+        if [[ "$read_ok" == "true" && -z "$key" ]]; then
             :
         else
             show_cursor
