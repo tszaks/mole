@@ -137,11 +137,6 @@ note_activity() {
     fi
 }
 
-# shellcheck disable=SC2329
-has_cached_sudo() {
-    sudo -n true 2> /dev/null
-}
-
 CLEANUP_DONE=false
 # shellcheck disable=SC2329
 cleanup() {
@@ -626,7 +621,8 @@ safe_clean() {
         # Stop spinner before output
         stop_section_spinner
 
-        local size_human=$(bytes_to_human "$((total_size_kb * 1024))")
+        local size_human
+        size_human=$(bytes_to_human "$((total_size_kb * 1024))")
 
         local label="$description"
         if [[ ${#targets[@]} -gt 1 ]]; then
@@ -636,7 +632,8 @@ safe_clean() {
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label${NC}, ${YELLOW}$size_human dry${NC}"
 
-            local paths_temp=$(create_temp_file)
+            local paths_temp
+            paths_temp=$(create_temp_file)
 
             idx=0
             if [[ ${#existing_paths[@]} -gt 0 ]]; then
@@ -683,7 +680,8 @@ safe_clean() {
                     }
                 }
                 ' | while IFS='|' read -r display_path total_size child_count; do
-                    local size_human=$(bytes_to_human "$((total_size * 1024))")
+                    local size_human
+                    size_human=$(bytes_to_human "$((total_size * 1024))")
                     if [[ $child_count -gt 1 ]]; then
                         echo "$display_path  # $size_human, $child_count items" >> "$EXPORT_LIST_FILE"
                     else
@@ -738,7 +736,7 @@ start_cleanup() {
 EOF
 
         # Preview system section when sudo is already cached (no password prompt).
-        if has_cached_sudo; then
+        if has_sudo_session; then
             SYSTEM_CLEAN=true
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access available, system preview included"
             echo ""
@@ -751,7 +749,7 @@ EOF
     fi
 
     if [[ -t 0 ]]; then
-        if has_cached_sudo; then
+        if has_sudo_session; then
             SYSTEM_CLEAN=true
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access already available"
             echo ""
@@ -791,7 +789,7 @@ EOF
     else
         echo ""
         echo "Running in non-interactive mode"
-        if has_cached_sudo; then
+        if has_sudo_session; then
             SYSTEM_CLEAN=true
             echo "  ${ICON_LIST} System-level cleanup enabled, sudo session active"
         else
@@ -1069,7 +1067,8 @@ perform_cleanup() {
                 fi
             fi
 
-            local final_free_space=$(get_free_space)
+            local final_free_space
+            final_free_space=$(get_free_space)
             summary_details+=("Free space now: $final_free_space")
         fi
     else

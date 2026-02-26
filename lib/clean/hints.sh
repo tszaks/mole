@@ -3,9 +3,9 @@
 
 set -euo pipefail
 
-_MOLE_HINTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mole_hints_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1090
-source "$_MOLE_HINTS_DIR/purge_shared.sh"
+source "$mole_hints_dir/purge_shared.sh"
 
 # Quick reminder probe for project build artifacts handled by `mo purge`.
 # Designed to be very fast: shallow directory checks only, no deep find scans.

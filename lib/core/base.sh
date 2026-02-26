@@ -41,6 +41,7 @@ readonly ICON_DRY_RUN="→"
 readonly ICON_REVIEW="☞"
 readonly ICON_NAV_UP="↑"
 readonly ICON_NAV_DOWN="↓"
+readonly ICON_INFO="ℹ"
 
 # ============================================================================
 # Global Configuration Constants
