@@ -191,12 +191,24 @@ opt_saved_state_cleanup() {
     local state_dir="$HOME/Library/Saved Application State"
 
     if [[ -d "$state_dir" ]]; then
+        # Temporarily disable pipefail to prevent process substitution failures from interrupting
+        local pipefail_was_set=false
+        if [[ -o pipefail ]]; then
+            pipefail_was_set=true
+            set +o pipefail
+        fi
+
         while IFS= read -r -d '' state_path; do
             if should_protect_path "$state_path"; then
                 continue
             fi
             safe_remove "$state_path" true > /dev/null 2>&1 || true
         done < <(command find "$state_dir" -type d -name "*.savedState" -mtime "+$MOLE_SAVED_STATE_AGE_DAYS" -print0 2> /dev/null)
+
+        # Restore pipefail if it was previously set
+        if [[ "$pipefail_was_set" == "true" ]]; then
+            set -o pipefail
+        fi
     fi
 
     opt_msg "App saved states optimized"

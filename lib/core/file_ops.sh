@@ -434,6 +434,13 @@ safe_find_delete() {
         find_args+=("-mtime" "+$age_days")
     fi
 
+    # Temporarily disable pipefail to prevent process substitution failures from interrupting
+    local pipefail_was_set=false
+    if [[ -o pipefail ]]; then
+        pipefail_was_set=true
+        set +o pipefail
+    fi
+
     # Iterate results to respect should_protect_path
     while IFS= read -r -d '' match; do
         if should_protect_path "$match"; then
@@ -441,6 +448,11 @@ safe_find_delete() {
         fi
         safe_remove "$match" true || true
     done < <(command find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
+
+    # Restore pipefail if it was previously set
+    if [[ "$pipefail_was_set" == "true" ]]; then
+        set -o pipefail
+    fi
 
     return 0
 }
@@ -481,6 +493,13 @@ safe_sudo_find_delete() {
         find_args+=("-mtime" "+$age_days")
     fi
 
+    # Temporarily disable pipefail to prevent process substitution failures from interrupting
+    local pipefail_was_set=false
+    if [[ -o pipefail ]]; then
+        pipefail_was_set=true
+        set +o pipefail
+    fi
+
     # Iterate results to respect should_protect_path
     while IFS= read -r -d '' match; do
         if should_protect_path "$match"; then
@@ -488,6 +507,11 @@ safe_sudo_find_delete() {
         fi
         safe_sudo_remove "$match" || true
     done < <(sudo find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
+
+    # Restore pipefail if it was previously set
+    if [[ "$pipefail_was_set" == "true" ]]; then
+        set -o pipefail
+    fi
 
     return 0
 }

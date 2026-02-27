@@ -793,6 +793,12 @@ clean_application_support_logs() {
     [[ "$total_apps" =~ ^[0-9]+$ ]] || total_apps=0
     local last_progress_update
     last_progress_update=$(get_epoch_seconds)
+    # Temporarily disable pipefail to prevent process substitution failures from interrupting the scan
+    local pipefail_was_set=false
+    if [[ -o pipefail ]]; then
+        pipefail_was_set=true
+        set +o pipefail
+    fi
     for app_dir in ~/Library/Application\ Support/*; do
         [[ -d "$app_dir" ]] || continue
         local app_name
@@ -917,6 +923,10 @@ clean_application_support_logs() {
             fi
         done
     done
+    # Restore pipefail if it was previously set
+    if [[ "$pipefail_was_set" == "true" ]]; then
+        set -o pipefail
+    fi
     eval "$_ng_state"
     stop_section_spinner
     if [[ "$found_any" == "true" ]]; then
