@@ -420,6 +420,12 @@ clean_support_app_data() {
         safe_find_delete "$idle_assets_dir" "*" "$support_age_days" "f" || true
     fi
 
+    # Clean old aerial wallpaper videos (can be large, safe to remove).
+    local wallpaper_videos_dir="$HOME/Library/Application Support/com.apple.wallpaper/aerials/videos"
+    if [[ -d "$wallpaper_videos_dir" && ! -L "$wallpaper_videos_dir" ]]; then
+        safe_find_delete "$wallpaper_videos_dir" "*" "$support_age_days" "f" || true
+    fi
+
     # Do not touch Messages attachments, only preview/sticker caches.
     if pgrep -x "Messages" > /dev/null 2>&1; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Messages is running · preview cache cleanup skipped"
