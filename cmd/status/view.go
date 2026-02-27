@@ -134,6 +134,7 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 	if termWidth <= 0 {
 		termWidth = 80
 	}
+	compactHeader := termWidth <= 80
 
 	title := titleStyle.Render("Status")
 
@@ -166,10 +167,10 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 	if m.Hardware.RefreshRate != "" {
 		infoParts = append(infoParts, m.Hardware.RefreshRate)
 	}
-	if m.Hardware.OSVersion != "" {
+	if !compactHeader && m.Hardware.OSVersion != "" {
 		infoParts = append(infoParts, m.Hardware.OSVersion)
 	}
-	if m.Uptime != "" {
+	if !compactHeader && m.Uptime != "" {
 		infoParts = append(infoParts, subtleStyle.Render("up "+m.Uptime))
 	}
 

@@ -958,6 +958,30 @@ func TestRenderHeaderWrapsOnNarrowWidth(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderHidesOSAndUptimeOnNarrowWidth(t *testing.T) {
+	m := MetricsSnapshot{
+		HealthScore: 91,
+		Hardware: HardwareInfo{
+			Model:       "MacBook Pro",
+			CPUModel:    "Apple M3 Max",
+			TotalRAM:    "128GB",
+			DiskSize:    "4TB",
+			RefreshRate: "120Hz",
+			OSVersion:   "macOS 15.0",
+		},
+		Uptime: "10d 3h",
+	}
+
+	header, _ := renderHeader(m, "", 0, 80, true)
+	plain := stripANSI(header)
+	if strings.Contains(plain, "macOS 15.0") {
+		t.Fatalf("renderHeader() narrow width should hide os version, got %q", plain)
+	}
+	if strings.Contains(plain, "up 10d 3h") {
+		t.Fatalf("renderHeader() narrow width should hide uptime, got %q", plain)
+	}
+}
+
 func TestRenderCardWrapsOnNarrowWidth(t *testing.T) {
 	card := cardData{
 		icon:  iconCPU,
