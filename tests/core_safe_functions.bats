@@ -110,6 +110,19 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
+@test "safe_remove preserves interrupt exit codes" {
+    local test_file="$TEST_DIR/interrupt_file"
+    echo "test" > "$test_file"
+
+    run bash -c "
+        source '$PROJECT_ROOT/lib/core/common.sh'
+        rm() { return 130; }
+        safe_remove '$test_file' true
+    "
+    [ "$status" -eq 130 ]
+    [ -f "$test_file" ]
+}
+
 @test "safe_remove in silent mode suppresses error output" {
     run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '/System/test' true 2>&1"
     [ "$status" -eq 1 ]

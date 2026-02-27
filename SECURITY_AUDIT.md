@@ -121,6 +121,8 @@ Security-sensitive cleanup paths are covered by BATS regression tests, including
 - `tests/clean_user_core.bats`
 - `tests/clean_dev_caches.bats`
 - `tests/clean_system_maintenance.bats`
+- `tests/purge.bats`
+- `tests/core_safe_functions.bats`
 
 **System Memory Reports** computation uses bulk `find -exec stat` to avoid bash loop child-process limits on corrupted systems.
 `bin/clean.sh` dry-run export temp files rely on tracked temp lifecycle (`create_temp_file()` + trap cleanup) to avoid orphan temp artifacts.
@@ -132,6 +134,7 @@ Latest local verification for this release branch:
 - `bats tests/clean_user_core.bats` passed (13/13)
 - `bats tests/clean_dev_caches.bats` passed (8/8)
 - `bats tests/clean_system_maintenance.bats` passed (40/40)
+- `bats tests/purge.bats tests/core_safe_functions.bats` passed (67/67)
 
 Run tests:
 

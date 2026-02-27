@@ -249,6 +249,11 @@ safe_remove() {
     local rm_exit=0
     error_msg=$(rm -rf "$path" 2>&1) || rm_exit=$? # safe_remove
 
+    # Preserve interrupt semantics so callers can abort long-running deletions.
+    if [[ $rm_exit -ge 128 ]]; then
+        return "$rm_exit"
+    fi
+
     if [[ $rm_exit -eq 0 ]]; then
         # Log successful removal
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "REMOVED" "$path" "$size_human"

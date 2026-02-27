@@ -569,15 +569,37 @@ select_purge_categories() {
         fi
     done
     local original_stty=""
+    local previous_exit_trap=""
+    local previous_int_trap=""
+    local previous_term_trap=""
+    local terminal_restored=false
     if [[ -t 0 ]] && command -v stty > /dev/null 2>&1; then
         original_stty=$(stty -g 2> /dev/null || echo "")
     fi
+    previous_exit_trap=$(trap -p EXIT || true)
+    previous_int_trap=$(trap -p INT || true)
+    previous_term_trap=$(trap -p TERM || true)
     # Terminal control functions
     restore_terminal() {
+        # Avoid trap churn when restore is called repeatedly via RETURN/EXIT paths.
+        if [[ "${terminal_restored:-false}" == "true" ]]; then
+            return
+        fi
+        terminal_restored=true
+
         trap - EXIT INT TERM
         show_cursor
         if [[ -n "${original_stty:-}" ]]; then
             stty "${original_stty}" 2> /dev/null || stty sane 2> /dev/null || true
+        fi
+        if [[ -n "$previous_exit_trap" ]]; then
+            eval "$previous_exit_trap"
+        fi
+        if [[ -n "$previous_int_trap" ]]; then
+            eval "$previous_int_trap"
+        fi
+        if [[ -n "$previous_term_trap" ]]; then
+            eval "$previous_term_trap"
         fi
     }
     # shellcheck disable=SC2329

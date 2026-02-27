@@ -308,6 +308,44 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "select_purge_categories restores caller EXIT/INT/TERM traps" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+trap 'echo parent-exit' EXIT
+trap 'echo parent-int' INT
+trap 'echo parent-term' TERM
+
+before_exit=$(trap -p EXIT)
+before_int=$(trap -p INT)
+before_term=$(trap -p TERM)
+
+PURGE_CATEGORY_SIZES="1"
+PURGE_RECENT_CATEGORIES="false"
+select_purge_categories "demo" <<< $'\n' > /dev/null 2>&1 || true
+
+after_exit=$(trap -p EXIT)
+after_int=$(trap -p INT)
+after_term=$(trap -p TERM)
+
+if [[ "$before_exit" == "$after_exit" && "$before_int" == "$after_int" && "$before_term" == "$after_term" ]]; then
+    echo "PASS"
+else
+    echo "FAIL"
+    echo "before_exit=$before_exit"
+    echo "after_exit=$after_exit"
+    echo "before_int=$before_int"
+    echo "after_int=$after_int"
+    echo "before_term=$before_term"
+    echo "after_term=$after_term"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
+}
+
 @test "confirm_purge_cleanup accepts Enter" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
