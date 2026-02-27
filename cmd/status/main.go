@@ -139,14 +139,20 @@ func (m model) View() string {
 		return "Loading..."
 	}
 
-	header, mole := renderHeader(m.metrics, m.errMessage, m.animFrame, m.width, m.catHidden)
-	cardWidth := 0
-	if m.width > 80 {
-		cardWidth = max(24, m.width/2-4)
+	termWidth := m.width
+	if termWidth <= 0 {
+		termWidth = 80
 	}
-	cards := buildCards(m.metrics, cardWidth)
 
-	if m.width <= 80 {
+	header, mole := renderHeader(m.metrics, m.errMessage, m.animFrame, termWidth, m.catHidden)
+
+	if termWidth <= 80 {
+		cardWidth := termWidth
+		if cardWidth > 2 {
+			cardWidth -= 2
+		}
+		cards := buildCards(m.metrics, cardWidth)
+
 		var rendered []string
 		for i, c := range cards {
 			if i > 0 {
@@ -164,7 +170,9 @@ func (m model) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, content...)
 	}
 
-	twoCol := renderTwoColumns(cards, m.width)
+	cardWidth := max(24, termWidth/2-4)
+	cards := buildCards(m.metrics, cardWidth)
+	twoCol := renderTwoColumns(cards, termWidth)
 	// Combine header, mole, and cards with consistent spacing
 	var content []string
 	content = append(content, header)
