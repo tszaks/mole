@@ -11,13 +11,6 @@ fix_broken_preferences() {
 
     local broken_count=0
 
-    # Temporarily disable pipefail to prevent process substitution failures from interrupting
-    local pipefail_was_set=false
-    if [[ -o pipefail ]]; then
-        pipefail_was_set=true
-        set +o pipefail
-    fi
-
     while IFS= read -r plist_file; do
         [[ -f "$plist_file" ]] || continue
 
@@ -32,7 +25,7 @@ fix_broken_preferences() {
         plutil -lint "$plist_file" > /dev/null 2>&1 && continue
 
         safe_remove "$plist_file" true > /dev/null 2>&1 || true
-        ((broken_count++))
+        ((broken_count++)) || true
     done < <(command find "$prefs_dir" -maxdepth 1 -name "*.plist" -type f 2> /dev/null || true)
 
     # Check ByHost preferences.
@@ -52,13 +45,8 @@ fix_broken_preferences() {
             plutil -lint "$plist_file" > /dev/null 2>&1 && continue
 
             safe_remove "$plist_file" true > /dev/null 2>&1 || true
-            ((broken_count++))
+            ((broken_count++)) || true
         done < <(command find "$byhost_dir" -name "*.plist" -type f 2> /dev/null || true)
-    fi
-
-    # Restore pipefail if it was previously set
-    if [[ "$pipefail_was_set" == "true" ]]; then
-        set -o pipefail
     fi
 
     echo "$broken_count"
