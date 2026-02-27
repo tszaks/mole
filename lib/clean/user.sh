@@ -789,21 +789,23 @@ clean_application_support_logs() {
     shopt -s nullglob
     local app_count=0
     local total_apps
-    total_apps=$(command find "$HOME/Library/Application Support" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l | tr -d ' ')
-    [[ "$total_apps" =~ ^[0-9]+$ ]] || total_apps=0
-    local last_progress_update
-    last_progress_update=$(get_epoch_seconds)
-    # Temporarily disable pipefail to prevent process substitution failures from interrupting the scan
+    # Temporarily disable pipefail here so that a partial find failure (e.g. TCC
+    # restrictions on macOS 26+) does not propagate through the pipeline and abort
+    # the whole scan via set -e.
     local pipefail_was_set=false
     if [[ -o pipefail ]]; then
         pipefail_was_set=true
         set +o pipefail
     fi
+    total_apps=$(command find "$HOME/Library/Application Support" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l | tr -d ' ')
+    [[ "$total_apps" =~ ^[0-9]+$ ]] || total_apps=0
+    local last_progress_update
+    last_progress_update=$(get_epoch_seconds)
     for app_dir in ~/Library/Application\ Support/*; do
         [[ -d "$app_dir" ]] || continue
         local app_name
         app_name=$(basename "$app_dir")
-        ((app_count++))
+        ((app_count++)) || true
         update_progress_if_needed "$app_count" "$total_apps" last_progress_update 1 || true
         local app_name_lower
         app_name_lower=$(echo "$app_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
@@ -829,12 +831,12 @@ clean_application_support_logs() {
                 while IFS= read -r -d '' item; do
                     [[ -e "$item" ]] || continue
                     item_found=true
-                    ((candidate_item_count++))
+                    ((candidate_item_count++)) || true
                     if [[ ! -L "$item" && (-f "$item" || -d "$item") ]]; then
                         local item_size_bytes=""
                         if item_size_bytes=$(app_support_item_size_bytes "$item" "$size_timeout_seconds"); then
                             if [[ "$item_size_bytes" =~ ^[0-9]+$ ]]; then
-                                ((candidate_size_bytes += item_size_bytes))
+                                ((candidate_size_bytes += item_size_bytes)) || true
                             else
                                 candidate_size_partial=true
                             fi
@@ -860,9 +862,9 @@ clean_application_support_logs() {
                     fi
                 done < <(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
                 if [[ "$item_found" == "true" ]]; then
-                    ((total_size_bytes += candidate_size_bytes))
+                    ((total_size_bytes += candidate_size_bytes)) || true
                     [[ "$candidate_size_partial" == "true" ]] && total_size_partial=true
-                    ((cleaned_count++))
+                    ((cleaned_count++)) || true
                     found_any=true
                 fi
             fi
@@ -884,12 +886,12 @@ clean_application_support_logs() {
                 while IFS= read -r -d '' item; do
                     [[ -e "$item" ]] || continue
                     item_found=true
-                    ((candidate_item_count++))
+                    ((candidate_item_count++)) || true
                     if [[ ! -L "$item" && (-f "$item" || -d "$item") ]]; then
                         local item_size_bytes=""
                         if item_size_bytes=$(app_support_item_size_bytes "$item" "$size_timeout_seconds"); then
                             if [[ "$item_size_bytes" =~ ^[0-9]+$ ]]; then
-                                ((candidate_size_bytes += item_size_bytes))
+                                ((candidate_size_bytes += item_size_bytes)) || true
                             else
                                 candidate_size_partial=true
                             fi
@@ -915,9 +917,9 @@ clean_application_support_logs() {
                     fi
                 done < <(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
                 if [[ "$item_found" == "true" ]]; then
-                    ((total_size_bytes += candidate_size_bytes))
+                    ((total_size_bytes += candidate_size_bytes)) || true
                     [[ "$candidate_size_partial" == "true" ]] && total_size_partial=true
-                    ((cleaned_count++))
+                    ((cleaned_count++)) || true
                     found_any=true
                 fi
             fi
