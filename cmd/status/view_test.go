@@ -982,6 +982,34 @@ func TestRenderHeaderHidesOSAndUptimeOnNarrowWidth(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderDropsLowPriorityInfoToStaySingleLine(t *testing.T) {
+	m := MetricsSnapshot{
+		HealthScore: 90,
+		Hardware: HardwareInfo{
+			Model:       "MacBook Pro",
+			CPUModel:    "Apple M2 Pro",
+			TotalRAM:    "32.0 GB",
+			DiskSize:    "460.4 GB",
+			RefreshRate: "60Hz",
+			OSVersion:   "macOS 26.3",
+		},
+		GPU:    []GPUStatus{{CoreCount: 19}},
+		Uptime: "9d 13h",
+	}
+
+	header, _ := renderHeader(m, "", 0, 100, true)
+	plain := stripANSI(header)
+	if strings.Contains(plain, "\n") {
+		t.Fatalf("renderHeader() should stay single line when trimming low-priority fields, got %q", plain)
+	}
+	if strings.Contains(plain, "macOS 26.3") {
+		t.Fatalf("renderHeader() should drop os version when width is tight, got %q", plain)
+	}
+	if strings.Contains(plain, "up 9d 13h") {
+		t.Fatalf("renderHeader() should drop uptime when width is tight, got %q", plain)
+	}
+}
+
 func TestRenderCardWrapsOnNarrowWidth(t *testing.T) {
 	card := cardData{
 		icon:  iconCPU,

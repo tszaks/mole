@@ -167,27 +167,39 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 	if m.Hardware.RefreshRate != "" {
 		infoParts = append(infoParts, m.Hardware.RefreshRate)
 	}
+	optionalInfoParts := []string{}
 	if !compactHeader && m.Hardware.OSVersion != "" {
-		infoParts = append(infoParts, m.Hardware.OSVersion)
+		optionalInfoParts = append(optionalInfoParts, m.Hardware.OSVersion)
 	}
 	if !compactHeader && m.Uptime != "" {
-		infoParts = append(infoParts, subtleStyle.Render("up "+m.Uptime))
+		optionalInfoParts = append(optionalInfoParts, subtleStyle.Render("up "+m.Uptime))
 	}
 
 	headLeft := title + "  " + scoreText
-	baseLines := wrapToWidth(headLeft, termWidth)
-	headerLines := append([]string{}, baseLines...)
-	if len(infoParts) > 0 {
-		headRight := strings.Join(infoParts, " · ")
-		combined := headLeft + "  " + headRight
-		if lipgloss.Width(combined) <= termWidth {
-			headerLines = wrapToWidth(combined, termWidth)
-		} else {
-			wrappedRight := wrapToWidth(headRight, termWidth)
-			headerLines = append(baseLines, wrappedRight...)
+	headerLine := headLeft
+	if termWidth > 0 && lipgloss.Width(headerLine) > termWidth {
+		headerLine = wrapToWidth(headLeft, termWidth)[0]
+	}
+	if termWidth > 0 {
+		allParts := append(append([]string{}, infoParts...), optionalInfoParts...)
+		if len(allParts) > 0 {
+			combined := headLeft + "  " + strings.Join(allParts, " · ")
+			if lipgloss.Width(combined) <= termWidth {
+				headerLine = combined
+			} else {
+				// When width is tight, drop lower-priority tail (OS and uptime) as a group.
+				fitParts := append([]string{}, infoParts...)
+				for len(fitParts) > 0 {
+					candidate := headLeft + "  " + strings.Join(fitParts, " · ")
+					if lipgloss.Width(candidate) <= termWidth {
+						headerLine = candidate
+						break
+					}
+					fitParts = fitParts[:len(fitParts)-1]
+				}
+			}
 		}
 	}
-	headerLine := lipgloss.JoinVertical(lipgloss.Left, headerLines...)
 
 	// Show cat unless hidden - render mole centered below header
 	var mole string
