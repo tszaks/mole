@@ -334,8 +334,8 @@ readonly DATA_PROTECTED_BUNDLES=(
     "*privateinternetaccess*"
 
     # Screensaver & Wallpaper
-    "*Aerial*"
-    "*aerial*"
+    "*Aerial.saver*"
+    "com.JohnCoates.Aerial*"
     "*Fliqlo*"
     "*fliqlo*"
 
