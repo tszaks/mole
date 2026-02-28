@@ -421,10 +421,7 @@ clean_support_app_data() {
     fi
 
     # Clean old aerial wallpaper videos (can be large, safe to remove).
-    local wallpaper_videos_dir="$HOME/Library/Application Support/com.apple.wallpaper/aerials/videos"
-    if [[ -d "$wallpaper_videos_dir" && ! -L "$wallpaper_videos_dir" ]]; then
-        safe_find_delete "$wallpaper_videos_dir" "*" "$support_age_days" "f" || true
-    fi
+    safe_clean ~/Library/Application\ Support/com.apple.wallpaper/aerials/videos/* "Aerial wallpaper videos"
 
     # Do not touch Messages attachments, only preview/sticker caches.
     if pgrep -x "Messages" > /dev/null 2>&1; then
@@ -1034,7 +1031,8 @@ check_large_file_candidates() {
         fi
     fi
 
-    if [[ "${SYSTEM_CLEAN:-false}" != "true" ]] && command -v tmutil > /dev/null 2>&1; then
+    if [[ "${SYSTEM_CLEAN:-false}" != "true" ]] && command -v tmutil > /dev/null 2>&1 \
+        && defaults read /Library/Preferences/com.apple.TimeMachine AutoBackup 2> /dev/null | grep -qE '^[01]$'; then
         local snapshot_list snapshot_count
         snapshot_list=$(run_with_timeout 3 tmutil listlocalsnapshots / 2> /dev/null || true)
         if [[ -n "$snapshot_list" ]]; then

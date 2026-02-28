@@ -215,6 +215,11 @@ clean_time_machine_failed_backups() {
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
         return 0
     fi
+    # Fast pre-check: skip entirely if Time Machine is not configured (no tmutil needed)
+    if ! defaults read /Library/Preferences/com.apple.TimeMachine AutoBackup 2> /dev/null | grep -qE '^[01]$'; then
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        return 0
+    fi
     start_section_spinner "Checking Time Machine configuration..."
     local spinner_active=true
     local tm_info
@@ -394,6 +399,10 @@ tm_is_running() {
 # Local APFS snapshots (report only).
 clean_local_snapshots() {
     if ! command -v tmutil > /dev/null 2>&1; then
+        return 0
+    fi
+    # Fast pre-check: skip entirely if Time Machine is not configured (no tmutil needed)
+    if ! defaults read /Library/Preferences/com.apple.TimeMachine AutoBackup 2> /dev/null | grep -qE '^[01]$'; then
         return 0
     fi
 
