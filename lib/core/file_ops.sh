@@ -503,6 +503,19 @@ get_path_size_kb() {
         echo "0"
         return
     }
+    
+    # For .app bundles, prefer mdls logical size as it matches Finder
+    # (APFS clone/sparse files make 'du' severely underreport apps like Xcode)
+    if [[ "$path" == *.app || "$path" == *.app/ ]]; then
+        local mdls_size
+        mdls_size=$(mdls -name kMDItemLogicalSize -raw "$path" 2> /dev/null || true)
+        if [[ "$mdls_size" =~ ^[0-9]+$ && "$mdls_size" -gt 0 ]]; then
+            # Return in KB
+            echo "$((mdls_size / 1024))"
+            return
+        fi
+    fi
+
     local size
     size=$(command du -skP "$path" 2> /dev/null | awk 'NR==1 {print $1; exit}' || true)
 

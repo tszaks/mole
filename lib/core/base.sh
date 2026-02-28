@@ -451,6 +451,7 @@ ensure_user_file() {
 # ============================================================================
 
 # Convert bytes to human-readable format (e.g., 1.5GB)
+# macOS (since Snow Leopard) uses Base-10 calculation (1 KB = 1000 bytes)
 bytes_to_human() {
     local bytes="$1"
     [[ "$bytes" =~ ^[0-9]+$ ]] || {
@@ -458,15 +459,17 @@ bytes_to_human() {
         return 1
     }
 
-    # GB: >= 1073741824 bytes
-    if ((bytes >= 1073741824)); then
-        printf "%d.%02dGB\n" $((bytes / 1073741824)) $(((bytes % 1073741824) * 100 / 1073741824))
-    # MB: >= 1048576 bytes
-    elif ((bytes >= 1048576)); then
-        printf "%d.%01dMB\n" $((bytes / 1048576)) $(((bytes % 1048576) * 10 / 1048576))
-    # KB: >= 1024 bytes (round up)
-    elif ((bytes >= 1024)); then
-        printf "%dKB\n" $(((bytes + 512) / 1024))
+    # GB: >= 1,000,000,000 bytes
+    if ((bytes >= 1000000000)); then
+        local scaled=$(( (bytes * 100 + 500000000) / 1000000000 ))
+        printf "%d.%02dGB\n" $((scaled / 100)) $((scaled % 100))
+    # MB: >= 1,000,000 bytes
+    elif ((bytes >= 1000000)); then
+        local scaled=$(( (bytes * 10 + 500000) / 1000000 ))
+        printf "%d.%01dMB\n" $((scaled / 10)) $((scaled % 10))
+    # KB: >= 1,000 bytes (round up to nearest KB instead of decimal)
+    elif ((bytes >= 1000)); then
+        printf "%dKB\n" $(((bytes + 500) / 1000))
     else
         printf "%dB\n" "$bytes"
     fi
