@@ -368,7 +368,7 @@ safe_clean() {
 
         if should_protect_path "$path"; then
             skip=true
-            ((skipped_count++))
+            skipped_count=$((skipped_count + 1))
             log_operation "clean" "SKIPPED" "$path" "protected"
         fi
 
@@ -376,7 +376,7 @@ safe_clean() {
 
         if is_path_whitelisted "$path"; then
             skip=true
-            ((skipped_count++))
+            skipped_count=$((skipped_count + 1))
             log_operation "clean" "SKIPPED" "$path" "whitelist"
         fi
         [[ "$skip" == "true" ]] && continue
@@ -410,7 +410,7 @@ safe_clean() {
     fi
 
     if [[ $skipped_count -gt 0 ]]; then
-        ((whitelist_skipped_count += skipped_count))
+        whitelist_skipped_count=$((whitelist_skipped_count + skipped_count))
     fi
 
     if [[ ${#existing_paths[@]} -eq 0 ]]; then
@@ -474,7 +474,7 @@ safe_clean() {
                     echo "0 0" > "$temp_dir/result_${idx}"
                 fi
 
-                ((idx++))
+                idx=$((idx + 1))
                 if [[ $((idx % 20)) -eq 0 && "$show_spinner" == "true" && -t 1 ]]; then
                     update_progress_if_needed "$idx" "${#existing_paths[@]}" last_progress_update 1 || true
                     last_progress_update=$(get_epoch_seconds)
@@ -503,12 +503,12 @@ safe_clean() {
                         mv "$tmp_file" "$temp_dir/result_${idx}" 2> /dev/null || true
                     ) &
                     pids+=($!)
-                    ((idx++))
+                    idx=$((idx + 1))
 
                     if ((${#pids[@]} >= MOLE_MAX_PARALLEL_JOBS)); then
                         wait "${pids[0]}" 2> /dev/null || true
                         pids=("${pids[@]:1}")
-                        ((completed++))
+                        completed=$((completed + 1))
 
                         if [[ "$show_spinner" == "true" && -t 1 ]]; then
                             update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
@@ -520,7 +520,7 @@ safe_clean() {
             if [[ ${#pids[@]} -gt 0 ]]; then
                 for pid in "${pids[@]}"; do
                     wait "$pid" 2> /dev/null || true
-                    ((completed++))
+                    completed=$((completed + 1))
 
                     if [[ "$show_spinner" == "true" && -t 1 ]]; then
                         update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
@@ -552,17 +552,17 @@ safe_clean() {
 
                     if [[ $removed -eq 1 ]]; then
                         if [[ "$size" -gt 0 ]]; then
-                            ((total_size_kb += size))
+                            total_size_kb=$((total_size_kb + size))
                         fi
-                        ((total_count += 1))
+                        total_count=$((total_count + 1))
                         removed_any=1
                     else
                         if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
-                            ((removal_failed_count++))
+                            removal_failed_count=$((removal_failed_count + 1))
                         fi
                     fi
                 fi
-                ((idx++))
+                idx=$((idx + 1))
             done
         fi
 
@@ -590,16 +590,16 @@ safe_clean() {
 
                 if [[ $removed -eq 1 ]]; then
                     if [[ "$size_kb" -gt 0 ]]; then
-                        ((total_size_kb += size_kb))
+                        total_size_kb=$((total_size_kb + size_kb))
                     fi
-                    ((total_count += 1))
+                    total_count=$((total_count + 1))
                     removed_any=1
                 else
                     if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
-                        ((removal_failed_count++))
+                        removal_failed_count=$((removal_failed_count + 1))
                     fi
                 fi
-                ((idx++))
+                idx=$((idx + 1))
             done
         fi
     fi
@@ -647,12 +647,12 @@ safe_clean() {
                     fi
 
                     [[ "$size" == "0" || -z "$size" ]] && {
-                        ((idx++))
+                        idx=$((idx + 1))
                         continue
                     }
 
                     echo "$(dirname "$path")|$size|$path" >> "$paths_temp"
-                    ((idx++))
+                    idx=$((idx + 1))
                 done
             fi
 
@@ -692,9 +692,9 @@ safe_clean() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $label${NC}, ${GREEN}$size_human${NC}"
         fi
-        ((files_cleaned += total_count))
-        ((total_size_cleaned += total_size_kb))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + total_count))
+        total_size_cleaned=$((total_size_cleaned + total_size_kb))
+        total_items=$((total_items + 1))
         note_activity
     fi
 
@@ -870,9 +870,9 @@ perform_cleanup() {
             done
 
             if [[ "$is_predefined" == "true" ]]; then
-                ((predefined_count++))
+                predefined_count=$((predefined_count + 1))
             else
-                ((custom_count++))
+                custom_count=$((custom_count + 1))
             fi
         done
 
