@@ -95,7 +95,8 @@ clean_dev_npm() {
 }
 # Python/pip ecosystem caches.
 clean_dev_python() {
-    if command -v pip3 > /dev/null 2>&1; then
+    # Check pip3 is functional (not just macOS stub that triggers CLT install dialog)
+    if command -v pip3 > /dev/null 2>&1 && pip3 --version > /dev/null 2>&1; then
         clean_tool_cache "pip cache" bash -c 'pip3 cache purge > /dev/null 2>&1 || true'
         note_activity
     fi
