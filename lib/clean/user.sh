@@ -23,7 +23,7 @@ clean_user_essentials() {
                 local cleaned_count=0
                 while IFS= read -r -d '' item; do
                     if safe_remove "$item" true; then
-                        ((cleaned_count++))
+                        ((cleaned_count++)) || true
                     fi
                 done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
                 if [[ $cleaned_count -gt 0 ]]; then
@@ -100,8 +100,8 @@ _clean_mail_downloads() {
                     local file_size_kb
                     file_size_kb=$(get_path_size_kb "$file_path")
                     if safe_remove "$file_path" true; then
-                        ((count++))
-                        ((cleaned_kb += file_size_kb))
+                        ((count++)) || true
+                        ((cleaned_kb += file_size_kb)) || true
                     fi
                 fi
             done < <(command find "$target_path" -type f -mtime +"$mail_age_days" -print0 2> /dev/null || true)
@@ -171,7 +171,7 @@ clean_chrome_old_versions() {
             size_kb=$(get_path_size_kb "$dir" || echo 0)
             size_kb="${size_kb:-0}"
             total_size=$((total_size + size_kb))
-            ((cleaned_count++))
+            ((cleaned_count++)) || true
             cleaned_any=true
             if [[ "$DRY_RUN" != "true" ]]; then
                 if has_sudo_session; then
@@ -191,9 +191,9 @@ clean_chrome_old_versions() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Chrome old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        ((files_cleaned += cleaned_count)) || true
+        ((total_size_cleaned += total_size)) || true
+        ((total_items++)) || true
         note_activity
     fi
 }
@@ -257,7 +257,7 @@ clean_edge_old_versions() {
             size_kb=$(get_path_size_kb "$dir" || echo 0)
             size_kb="${size_kb:-0}"
             total_size=$((total_size + size_kb))
-            ((cleaned_count++))
+            ((cleaned_count++)) || true
             cleaned_any=true
             if [[ "$DRY_RUN" != "true" ]]; then
                 if has_sudo_session; then
@@ -277,9 +277,9 @@ clean_edge_old_versions() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Edge old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        ((files_cleaned += cleaned_count)) || true
+        ((total_size_cleaned += total_size)) || true
+        ((total_items++)) || true
         note_activity
     fi
 }
@@ -324,7 +324,7 @@ clean_edge_updater_old_versions() {
         size_kb=$(get_path_size_kb "$dir" || echo 0)
         size_kb="${size_kb:-0}"
         total_size=$((total_size + size_kb))
-        ((cleaned_count++))
+        ((cleaned_count++)) || true
         cleaned_any=true
         if [[ "$DRY_RUN" != "true" ]]; then
             safe_remove "$dir" true > /dev/null 2>&1 || true
@@ -339,9 +339,9 @@ clean_edge_updater_old_versions() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Edge updater old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        ((files_cleaned += cleaned_count)) || true
+        ((total_size_cleaned += total_size)) || true
+        ((total_items++)) || true
         note_activity
     fi
 }
@@ -484,9 +484,9 @@ clean_app_caches() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Sandboxed app caches${NC}, ${GREEN}$size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        ((files_cleaned += cleaned_count)) || true
+        ((total_size_cleaned += total_size)) || true
+        ((total_items++)) || true
         note_activity
     fi
 
@@ -513,9 +513,9 @@ process_container_cache() {
     if find "$cache_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
         local size
         size=$(get_path_size_kb "$cache_dir")
-        ((total_size += size))
+        ((total_size += size)) || true
         found_any=true
-        ((cleaned_count++))
+        ((cleaned_count++)) || true
         if [[ "$DRY_RUN" != "true" ]]; then
             local item
             while IFS= read -r -d '' item; do
@@ -613,7 +613,7 @@ clean_group_container_caches() {
                     item_size=$(get_path_size_kb "$item" 2> /dev/null) || item_size=0
                     [[ "$item_size" =~ ^[0-9]+$ ]] || item_size=0
                     candidate_changed=true
-                    ((candidate_size_kb += item_size))
+                    ((candidate_size_kb += item_size)) || true
                 done
             else
                 for item in "${items_to_clean[@]}"; do
@@ -622,14 +622,14 @@ clean_group_container_caches() {
                     [[ "$item_size" =~ ^[0-9]+$ ]] || item_size=0
                     if safe_remove "$item" true 2> /dev/null; then
                         candidate_changed=true
-                        ((candidate_size_kb += item_size))
+                        ((candidate_size_kb += item_size)) || true
                     fi
                 done
             fi
 
             if [[ "$candidate_changed" == "true" ]]; then
-                ((total_size += candidate_size_kb))
-                ((cleaned_count++))
+                ((total_size += candidate_size_kb)) || true
+                ((cleaned_count++)) || true
                 found_any=true
             fi
         done
@@ -645,9 +645,9 @@ clean_group_container_caches() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Group Containers logs/caches${NC}, ${GREEN}$size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        ((files_cleaned += cleaned_count)) || true
+        ((total_size_cleaned += total_size)) || true
+        ((total_items++)) || true
         note_activity
     fi
 }
@@ -951,9 +951,9 @@ clean_application_support_logs() {
                 echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Application Support logs/caches${NC}, ${GREEN}$size_human${NC}"
             fi
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size_kb))
-        ((total_items++))
+        ((files_cleaned += cleaned_count)) || true
+        ((total_size_cleaned += total_size_kb)) || true
+        ((total_items++)) || true
         note_activity
     fi
 }

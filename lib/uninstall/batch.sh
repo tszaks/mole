@@ -465,7 +465,7 @@ batch_uninstall_applications() {
     local -a success_items=()
     local current_index=0
     for detail in "${app_details[@]}"; do
-        ((current_index++))
+        ((current_index++)) || true
         IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system <<< "$detail"
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
@@ -610,11 +610,11 @@ batch_uninstall_applications() {
                 fi
             fi
 
-            ((total_size_freed += total_kb))
-            ((success_count++))
-            [[ "$used_brew_successfully" == "true" ]] && ((brew_apps_removed++))
-            ((files_cleaned++))
-            ((total_items++))
+            ((total_size_freed += total_kb)) || true
+            ((success_count++)) || true
+            [[ "$used_brew_successfully" == "true" ]] && ((brew_apps_removed++)) || true
+            ((files_cleaned++)) || true
+            ((total_items++)) || true
             success_items+=("$app_path")
         else
             if [[ -t 1 ]]; then
@@ -628,7 +628,7 @@ batch_uninstall_applications() {
                 fi
             fi
 
-            ((failed_count++))
+            ((failed_count++)) || true
             failed_items+=("$app_name:$reason:${suggestion:-}")
         fi
     done
@@ -672,7 +672,7 @@ batch_uninstall_applications() {
                 else
                     current_line="$current_line, $display_item"
                 fi
-                ((idx++))
+                ((idx++)) || true
             done
             if [[ -n "$current_line" ]]; then
                 summary_details+=("$current_line")
@@ -765,6 +765,6 @@ batch_uninstall_applications() {
     _restore_uninstall_traps
     unset -f _restore_uninstall_traps
 
-    ((total_size_cleaned += total_size_freed))
+    ((total_size_cleaned += total_size_freed)) || true
     unset failed_items
 }

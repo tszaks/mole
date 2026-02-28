@@ -878,18 +878,18 @@ validate_terminal_environment() {
     # Check if TERM is set
     if [[ -z "${TERM:-}" ]]; then
         log_warning "TERM environment variable not set"
-        ((warnings++))
+        ((warnings++)) || true
     fi
 
     # Check if running in a known problematic terminal
     case "${TERM:-}" in
         dumb)
             log_warning "Running in 'dumb' terminal, limited functionality"
-            ((warnings++))
+            ((warnings++)) || true
             ;;
         unknown)
             log_warning "Terminal type unknown, may have display issues"
-            ((warnings++))
+            ((warnings++)) || true
             ;;
     esac
 
@@ -898,7 +898,7 @@ validate_terminal_environment() {
         local cols=$(tput cols 2> /dev/null || echo "80")
         if [[ "$cols" -lt 60 ]]; then
             log_warning "Terminal width, $cols cols, is narrow, output may wrap"
-            ((warnings++))
+            ((warnings++)) || true
         fi
     fi
 

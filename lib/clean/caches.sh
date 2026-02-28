@@ -208,7 +208,7 @@ clean_project_caches() {
                     break
                 fi
                 sleep 0.1
-                ((grace_period++))
+                ((grace_period++)) || true
             done
             if kill -0 "$pid" 2> /dev/null; then
                 kill -KILL "$pid" 2> /dev/null || true

@@ -640,7 +640,7 @@ select_purge_categories() {
         for ((i = 0; i < total_items; i++)); do
             if [[ ${selected[i]} == true ]]; then
                 selected_size=$((selected_size + ${sizes[i]:-0}))
-                ((selected_count++))
+                ((selected_count++)) || true
             fi
         done
 
@@ -728,9 +728,9 @@ select_purge_categories() {
             local visible_count=$((total_items - top_index))
             [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
             if [[ $cursor_pos -lt $((visible_count - 1)) ]]; then
-                ((cursor_pos++))
+                ((cursor_pos++)) || true
             elif [[ $((top_index + visible_count)) -lt $total_items ]]; then
-                ((top_index++))
+                ((top_index++)) || true
             fi
         fi
     }
@@ -1350,7 +1350,7 @@ clean_project_artifacts() {
         [[ "$selected_size_kb" =~ ^[0-9]+$ ]] || selected_size_kb=0
         selected_total_kb=$((selected_total_kb + selected_size_kb))
         if [[ "${item_size_unknown_flags[idx]:-false}" == "true" ]]; then
-            ((selected_unknown_count++))
+            ((selected_unknown_count++)) || true
         fi
     done
 
@@ -1391,7 +1391,7 @@ clean_project_artifacts() {
             if [[ ! -e "$item_path" ]]; then
                 local current_total=$(cat "$stats_dir/purge_stats" 2> /dev/null || echo "0")
                 echo "$((current_total + size_kb))" > "$stats_dir/purge_stats"
-                ((cleaned_count++))
+                ((cleaned_count++)) || true
             fi
         fi
         if [[ -t 1 ]]; then
