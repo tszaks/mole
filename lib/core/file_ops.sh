@@ -503,7 +503,7 @@ get_path_size_kb() {
         echo "0"
         return
     }
-    
+
     # For .app bundles, prefer mdls logical size as it matches Finder
     # (APFS clone/sparse files make 'du' severely underreport apps like Xcode)
     if [[ "$path" == *.app || "$path" == *.app/ ]]; then
