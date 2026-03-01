@@ -249,7 +249,13 @@ update_mole() {
     local force_update="${1:-false}"
     local nightly_update="${2:-false}"
     local update_interrupted=false
-    trap 'update_interrupted=true; echo ""; exit 130' INT TERM
+    local sudo_keepalive_pid=""
+
+    # Cleanup function for sudo keepalive
+    _update_cleanup() {
+        [[ -n "$sudo_keepalive_pid" ]] && _stop_sudo_keepalive "$sudo_keepalive_pid" || true
+    }
+    trap '_update_cleanup; update_interrupted=true; echo ""; exit 130' INT TERM
 
     if is_homebrew_install; then
         if [[ "$nightly_update" == "true" ]]; then
@@ -360,6 +366,8 @@ update_mole() {
             rm -f "$tmp_installer"
             exit 1
         fi
+        # Start sudo keepalive to prevent cache expiration during install
+        sudo_keepalive_pid=$(_start_sudo_keepalive)
     fi
 
     if [[ -t 1 ]]; then
@@ -411,6 +419,7 @@ update_mole() {
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
             rm -f "$tmp_installer"
+            _update_cleanup
             log_error "Nightly update failed"
             echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
             exit 1
@@ -421,6 +430,7 @@ update_mole() {
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
             rm -f "$tmp_installer"
+            _update_cleanup
             log_error "Update failed"
             echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
             exit 1
@@ -434,6 +444,7 @@ update_mole() {
             else
                 if [[ -t 1 ]]; then stop_inline_spinner; fi
                 rm -f "$tmp_installer"
+                _update_cleanup
                 log_error "Update failed"
                 echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
                 exit 1
@@ -443,6 +454,10 @@ update_mole() {
 
     rm -f "$tmp_installer"
     rm -f "$HOME/.cache/mole/update_message"
+
+    # Cleanup and reset trap
+    _update_cleanup
+    trap - INT TERM
 }
 
 # Remove flow (Homebrew + manual + config/cache).
