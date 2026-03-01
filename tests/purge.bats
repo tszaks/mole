@@ -683,6 +683,37 @@ EOF
 	[[ "$status" -eq 0 ]] || [[ "$status" -eq 2 ]]
 }
 
+@test "clean_project_artifacts: dry-run does not count failed removals" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+mkdir -p "$HOME/.cache/mole"
+echo "0" > "$HOME/.cache/mole/purge_stats"
+
+mkdir -p "$HOME/www/test-project/node_modules"
+echo "test data" > "$HOME/www/test-project/node_modules/file.js"
+touch "$HOME/www/test-project/package.json"
+touch -t 202001010101 "$HOME/www/test-project/node_modules" "$HOME/www/test-project/package.json" "$HOME/www/test-project"
+
+PURGE_SEARCH_PATHS=("$HOME/www")
+safe_remove() { return 1; }
+
+export MOLE_DRY_RUN=1
+clean_project_artifacts
+
+stats_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mole"
+echo "COUNT=$(cat "$stats_dir/purge_count" 2> /dev/null || echo missing)"
+echo "SIZE=$(cat "$stats_dir/purge_stats" 2> /dev/null || echo missing)"
+[[ -d "$HOME/www/test-project/node_modules" ]]
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"COUNT=0"* ]]
+	[[ "$output" == *"SIZE=0"* ]]
+}
+
 @test "clean_project_artifacts: scans and finds artifacts" {
 	if ! command -v gtimeout >/dev/null 2>&1 && ! command -v timeout >/dev/null 2>&1; then
 		skip "gtimeout/timeout not available"
