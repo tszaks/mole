@@ -32,13 +32,12 @@ emit_fish_completions() {
     printf 'complete -c %s -n "not __fish_mole_no_subcommand" -a fish -d "generate fish completion" -n "__fish_see_subcommand_path completion"\n' "$cmd"
 }
 
-DRY_RUN_MODE=false
 if [[ $# -gt 0 ]]; then
     normalized_args=()
     for arg in "$@"; do
         case "$arg" in
             "--dry-run" | "-n")
-                DRY_RUN_MODE=true
+                export MOLE_DRY_RUN=1
                 ;;
             *)
                 normalized_args+=("$arg")
@@ -54,7 +53,7 @@ fi
 
 # Auto-install mode when run without arguments
 if [[ $# -eq 0 ]]; then
-    if [[ "$DRY_RUN_MODE" == "true" ]]; then
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}${ICON_DRY_RUN} DRY RUN MODE${NC}, shell config files will not be modified"
         echo ""
     fi
@@ -98,7 +97,7 @@ if [[ $# -eq 0 ]]; then
 
     if [[ -z "$completion_name" ]]; then
         if [[ -f "$config_file" ]] && grep -Eq "(^# Mole shell completion$|(mole|mo)[[:space:]]+completion)" "$config_file" 2> /dev/null; then
-            if [[ "$DRY_RUN_MODE" == "true" ]]; then
+            if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
                 echo -e "${GRAY}${ICON_REVIEW} [DRY RUN] Would remove stale completion entries from $config_file${NC}"
                 echo ""
             else
@@ -120,7 +119,7 @@ if [[ $# -eq 0 ]]; then
 
     # Check if already installed and normalize to latest line
     if [[ -f "$config_file" ]] && grep -Eq "(mole|mo)[[:space:]]+completion" "$config_file" 2> /dev/null; then
-        if [[ "$DRY_RUN_MODE" == "true" ]]; then
+        if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
             echo -e "${GRAY}${ICON_REVIEW} [DRY RUN] Would normalize completion entry in $config_file${NC}"
             echo ""
             exit 0
@@ -150,7 +149,7 @@ if [[ $# -eq 0 ]]; then
     echo -e "${GRAY}Will add to ${config_file}:${NC}"
     echo "  $completion_line"
     echo ""
-    if [[ "$DRY_RUN_MODE" == "true" ]]; then
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Dry run complete, no changes made"
         exit 0
     fi

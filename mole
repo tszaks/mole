@@ -553,6 +553,31 @@ remove_mole() {
         exit 0
     fi
 
+    # Dry-run mode: show preview and exit without confirmation
+    if [[ "$dry_run_mode" == "true" ]]; then
+        echo -e "${YELLOW}${ICON_DRY_RUN} DRY RUN MODE${NC}, no files will be removed"
+        echo ""
+        echo -e "${YELLOW}Remove Mole${NC}, would delete the following:"
+        if [[ "$is_homebrew" == "true" ]]; then
+            echo -e "  ${GRAY}${ICON_LIST} Would run: brew uninstall --force mole${NC}"
+        fi
+        if [[ ${manual_count:-0} -gt 0 ]]; then
+            for install in "${manual_installs[@]}"; do
+                [[ -f "$install" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: ${install}${NC}"
+            done
+        fi
+        if [[ ${alias_count:-0} -gt 0 ]]; then
+            for alias in "${alias_installs[@]}"; do
+                [[ -f "$alias" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: ${alias}${NC}"
+            done
+        fi
+        [[ -d "$HOME/.cache/mole" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: $HOME/.cache/mole${NC}"
+        [[ -d "$HOME/.config/mole" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: $HOME/.config/mole${NC}"
+
+        printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Dry run complete, no changes made"
+        exit 0
+    fi
+
     echo -e "${YELLOW}Remove Mole${NC}, will delete the following:"
     if [[ "$is_homebrew" == "true" ]]; then
         echo "  ${ICON_LIST} Mole via Homebrew"
@@ -579,31 +604,6 @@ remove_mole() {
     esac
 
     local has_error=false
-    if [[ "$dry_run_mode" == "true" ]]; then
-        echo ""
-        echo -e "${YELLOW}${ICON_DRY_RUN} DRY RUN MODE${NC}, no files will be removed"
-
-        if [[ "$is_homebrew" == "true" ]]; then
-            echo -e "  ${GRAY}${ICON_LIST} Would run: brew uninstall --force mole${NC}"
-        fi
-
-        if [[ ${manual_count:-0} -gt 0 ]]; then
-            for install in "${manual_installs[@]}"; do
-                [[ -f "$install" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: ${install}${NC}"
-            done
-        fi
-        if [[ ${alias_count:-0} -gt 0 ]]; then
-            for alias in "${alias_installs[@]}"; do
-                [[ -f "$alias" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: ${alias}${NC}"
-            done
-        fi
-        [[ -d "$HOME/.cache/mole" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: $HOME/.cache/mole${NC}"
-        [[ -d "$HOME/.config/mole" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: $HOME/.config/mole${NC}"
-
-        printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Dry run complete, no changes made"
-        exit 0
-    fi
-
     if [[ "$is_homebrew" == "true" ]]; then
         if [[ -z "$brew_cmd" ]]; then
             log_error "Homebrew command not found. Please ensure Homebrew is installed and in your PATH."
