@@ -234,10 +234,16 @@ show_help() {
 
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --dry-run" "$NC" "Preview optimization"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize --whitelist" "$NC" "Manage protected items"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo uninstall --dry-run" "$NC" "Preview app uninstall"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --dry-run" "$NC" "Preview project purge"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo installer --dry-run" "$NC" "Preview installer cleanup"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo touchid enable --dry-run" "$NC" "Preview Touch ID setup"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo completion --dry-run" "$NC" "Preview shell completion edits"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo purge --paths" "$NC" "Configure scan directories"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo analyze /Volumes" "$NC" "Analyze external drives only"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo update --force" "$NC" "Force reinstall latest stable version"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo update --nightly" "$NC" "Install latest unreleased main branch build"
+    printf "  %s%-28s%s %s\n" "$GREEN" "mo remove --dry-run" "$NC" "Preview Mole removal"
     echo
     printf "%s%s%s\n" "$BLUE" "OPTIONS" "$NC"
     printf "  %s%-28s%s %s\n" "$GREEN" "--debug" "$NC" "Show detailed operation logs"
@@ -462,6 +468,8 @@ update_mole() {
 
 # Remove flow (Homebrew + manual + config/cache).
 remove_mole() {
+    local dry_run_mode="${1:-false}"
+
     if [[ -t 1 ]]; then
         start_inline_spinner "Detecting Mole installations..."
     else
@@ -571,6 +579,31 @@ remove_mole() {
     esac
 
     local has_error=false
+    if [[ "$dry_run_mode" == "true" ]]; then
+        echo ""
+        echo -e "${YELLOW}${ICON_DRY_RUN} DRY RUN MODE${NC}, no files will be removed"
+
+        if [[ "$is_homebrew" == "true" ]]; then
+            echo -e "  ${GRAY}${ICON_LIST} Would run: brew uninstall --force mole${NC}"
+        fi
+
+        if [[ ${manual_count:-0} -gt 0 ]]; then
+            for install in "${manual_installs[@]}"; do
+                [[ -f "$install" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: ${install}${NC}"
+            done
+        fi
+        if [[ ${alias_count:-0} -gt 0 ]]; then
+            for alias in "${alias_installs[@]}"; do
+                [[ -f "$alias" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: ${alias}${NC}"
+            done
+        fi
+        [[ -d "$HOME/.cache/mole" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: $HOME/.cache/mole${NC}"
+        [[ -d "$HOME/.config/mole" ]] && echo -e "  ${GRAY}${ICON_LIST} Would remove: $HOME/.config/mole${NC}"
+
+        printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Dry run complete, no changes made"
+        exit 0
+    fi
+
     if [[ "$is_homebrew" == "true" ]]; then
         if [[ -z "$brew_cmd" ]]; then
             log_error "Homebrew command not found. Please ensure Homebrew is installed and in your PATH."
@@ -859,7 +892,18 @@ main() {
             exit 0
             ;;
         "remove")
-            remove_mole
+            local dry_run_remove=false
+            for arg in "${args[@]:1}"; do
+                case "$arg" in
+                    "--dry-run" | "-n") dry_run_remove=true ;;
+                    *)
+                        echo "Unknown remove option: $arg"
+                        echo "Use 'mole remove [--dry-run]' for supported options."
+                        exit 1
+                        ;;
+                esac
+            done
+            remove_mole "$dry_run_remove"
             ;;
         "help" | "--help" | "-h")
             show_help

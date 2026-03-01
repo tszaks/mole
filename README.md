@@ -68,6 +68,12 @@ mo clean --dry-run --debug   # Detailed preview with risk levels and file info
 mo optimize --dry-run        # Preview optimization actions
 mo optimize --debug          # Run with detailed operation logs
 mo optimize --whitelist      # Manage protected optimization rules
+mo uninstall --dry-run       # Preview app uninstall actions
+mo purge --dry-run           # Preview project artifact purge
+mo installer --dry-run       # Preview installer cleanup actions
+mo touchid enable --dry-run  # Preview Touch ID sudo config changes
+mo completion --dry-run      # Preview shell completion file updates
+mo remove --dry-run          # Preview Mole self-removal
 mo purge --paths             # Configure project scan directories
 mo analyze /Volumes          # Analyze external drives only
 ```
@@ -75,7 +81,7 @@ mo analyze /Volumes          # Analyze external drives only
 ## Tips
 
 - Video tutorial: Watch the [Mole tutorial video](https://www.youtube.com/watch?v=UEe9-w4CcQ0), thanks to PAPAYA 電腦教室.
-- Safety first: Deletions are permanent. Review carefully and preview with `mo clean --dry-run`. See [Security Audit](SECURITY_AUDIT.md).
+- Safety first: Deletions are permanent. Review carefully with dry-run before applying changes. See [Security Audit](SECURITY_AUDIT.md).
 - Debug and logs: Use `--debug` for detailed logs. Combine with `--dry-run` for a full preview. File operations are logged to `~/.config/mole/operations.log`. Disable with `MO_NO_OPLOG=1`.
 - Navigation: Mole supports arrow keys and Vim bindings `h/j/k/l`.
 
