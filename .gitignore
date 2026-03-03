@@ -76,3 +76,6 @@ coverage.html
 
 session.json
 run_tests.ps1
+AGENTS.md
+mole_guidelines.md
+CLAUDE.md

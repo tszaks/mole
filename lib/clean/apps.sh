@@ -33,7 +33,7 @@ clean_ds_store_tree() {
         local size
         size=$(get_file_size "$ds_file")
         total_bytes=$((total_bytes + size))
-        ((file_count++))
+        file_count=$((file_count + 1))
         if [[ "$DRY_RUN" != "true" ]]; then
             rm -f "$ds_file" 2> /dev/null || true
         fi
@@ -53,9 +53,9 @@ clean_ds_store_tree() {
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $label${NC}, ${GREEN}$file_count files, $size_human${NC}"
         fi
         local size_kb=$(((total_bytes + 1023) / 1024))
-        ((files_cleaned += file_count))
-        ((total_size_cleaned += size_kb))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + file_count))
+        total_size_cleaned=$((total_size_cleaned + size_kb))
+        total_items=$((total_items + 1))
         note_activity
     fi
 }
@@ -113,12 +113,12 @@ scan_installed_apps() {
                 local bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist_path" 2> /dev/null || echo "")
                 if [[ -n "$bundle_id" ]]; then
                     echo "$bundle_id"
-                    ((count++))
+                    count=$((count + 1))
                 fi
             done
         ) > "$scan_tmp_dir/apps_${dir_idx}.txt" &
         pids+=($!)
-        ((dir_idx++))
+        dir_idx=$((dir_idx + 1))
     done
     # Collect running apps and LaunchAgents to avoid false orphan cleanup.
     (
@@ -300,7 +300,7 @@ clean_orphaned_app_data() {
                 fi
                 for match in "${matches[@]}"; do
                     [[ -e "$match" ]] || continue
-                    ((iteration_count++))
+                    iteration_count=$((iteration_count + 1))
                     if [[ $iteration_count -gt $MOLE_MAX_ORPHAN_ITERATIONS ]]; then
                         break
                     fi
@@ -314,8 +314,8 @@ clean_orphaned_app_data() {
                             continue
                         fi
                         if safe_clean "$match" "Orphaned $label: $bundle_id"; then
-                            ((orphaned_count++))
-                            ((total_orphaned_kb += size_kb))
+                            orphaned_count=$((orphaned_count + 1))
+                            total_orphaned_kb=$((total_orphaned_kb + size_kb))
                         fi
                     fi
                 done
@@ -326,7 +326,7 @@ clean_orphaned_app_data() {
     stop_section_spinner
     if [[ $orphaned_count -gt 0 ]]; then
         local orphaned_mb=$(echo "$total_orphaned_kb" | awk '{printf "%.1f", $1/1024}')
-        echo "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $orphaned_count items, about ${orphaned_mb}MB"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $orphaned_count items, about ${orphaned_mb}MB"
         note_activity
     fi
     rm -f "$installed_bundles"
@@ -430,8 +430,8 @@ clean_orphaned_system_services() {
                     orphaned_files+=("$plist")
                     local size_kb
                     size_kb=$(sudo du -skP "$plist" 2> /dev/null | awk '{print $1}' || echo "0")
-                    ((total_orphaned_kb += size_kb))
-                    ((orphaned_count++))
+                    total_orphaned_kb=$((total_orphaned_kb + size_kb))
+                    orphaned_count=$((orphaned_count + 1))
                     break
                 fi
             done
@@ -461,8 +461,8 @@ clean_orphaned_system_services() {
                     orphaned_files+=("$plist")
                     local size_kb
                     size_kb=$(sudo du -skP "$plist" 2> /dev/null | awk '{print $1}' || echo "0")
-                    ((total_orphaned_kb += size_kb))
-                    ((orphaned_count++))
+                    total_orphaned_kb=$((total_orphaned_kb + size_kb))
+                    orphaned_count=$((orphaned_count + 1))
                     break
                 fi
             done
@@ -491,8 +491,8 @@ clean_orphaned_system_services() {
                     orphaned_files+=("$helper")
                     local size_kb
                     size_kb=$(sudo du -skP "$helper" 2> /dev/null | awk '{print $1}' || echo "0")
-                    ((total_orphaned_kb += size_kb))
-                    ((orphaned_count++))
+                    total_orphaned_kb=$((total_orphaned_kb + size_kb))
+                    orphaned_count=$((orphaned_count + 1))
                     break
                 fi
             done
@@ -673,7 +673,7 @@ clean_orphaned_launch_agents() {
         if is_launch_item_orphaned "$plist"; then
             local size_kb=$(get_path_size_kb "$plist")
             orphaned_items+=("$bundle_id|$plist")
-            ((total_orphaned_kb += size_kb))
+            total_orphaned_kb=$((total_orphaned_kb + size_kb))
         fi
     done < <(find "$launch_agents_dir" -maxdepth 1 -name "*.plist" -print0 2> /dev/null)
 
@@ -696,7 +696,7 @@ clean_orphaned_launch_agents() {
         IFS='|' read -r bundle_id plist_path <<< "$item"
 
         if [[ "$is_dry_run" == "true" ]]; then
-            ((dry_run_count++))
+            dry_run_count=$((dry_run_count + 1))
             log_operation "clean" "DRY_RUN" "$plist_path" "orphaned launch agent"
             continue
         fi
@@ -706,7 +706,7 @@ clean_orphaned_launch_agents() {
 
         # Remove the plist file
         if safe_remove "$plist_path" false; then
-            ((removed_count++))
+            removed_count=$((removed_count + 1))
             log_operation "clean" "REMOVED" "$plist_path" "orphaned launch agent"
         else
             log_operation "clean" "FAILED" "$plist_path" "permission denied"

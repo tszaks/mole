@@ -138,8 +138,8 @@ truncate_by_display_width() {
         fi
 
         truncated+="$char"
-        ((width += char_width))
-        ((i++))
+        width=$((width + char_width))
+        i=$((i + 1))
     done
 
     # Restore locale
@@ -265,7 +265,7 @@ read_key() {
 drain_pending_input() {
     local drained=0
     while IFS= read -r -s -n 1 -t 0.01 _ 2> /dev/null; do
-        ((drained++))
+        drained=$((drained + 1))
         [[ $drained -gt 100 ]] && break
     done
 }
@@ -287,9 +287,40 @@ show_menu_option() {
 INLINE_SPINNER_PID=""
 INLINE_SPINNER_STOP_FILE=""
 
+# Keep spinner message on one line and avoid wrapping/noisy output on narrow terminals.
+format_spinner_message() {
+    local message="$1"
+    message="${message//$'\r'/ }"
+    message="${message//$'\n'/ }"
+
+    local cols=80
+    if command -v tput > /dev/null 2>&1; then
+        cols=$(tput cols 2> /dev/null || echo "80")
+    fi
+    [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+
+    # Reserve space for prefix + spinner char + spacing.
+    local available=$((cols - 8))
+    if [[ $available -lt 20 ]]; then
+        available=20
+    fi
+
+    if [[ ${#message} -gt $available ]]; then
+        if [[ $available -gt 3 ]]; then
+            message="${message:0:$((available - 3))}..."
+        else
+            message="${message:0:$available}"
+        fi
+    fi
+
+    printf "%s" "$message"
+}
+
 start_inline_spinner() {
     stop_inline_spinner 2> /dev/null || true
     local message="$1"
+    local display_message
+    display_message=$(format_spinner_message "$message")
 
     if [[ -t 1 ]]; then
         # Create unique stop flag file for this spinner instance
@@ -309,8 +340,8 @@ start_inline_spinner() {
             while [[ ! -f "$stop_file" ]]; do
                 local c="${chars:$((i % ${#chars})):1}"
                 # Output to stderr to avoid interfering with stdout
-                printf "\r${MOLE_SPINNER_PREFIX:-}${BLUE}%s${NC} %s" "$c" "$message" >&2 || break
-                ((i++))
+                printf "\r${MOLE_SPINNER_PREFIX:-}${BLUE}%s${NC} %s" "$c" "$display_message" >&2 || break
+                i=$((i + 1))
                 sleep 0.05
             done
 
@@ -321,7 +352,7 @@ start_inline_spinner() {
         INLINE_SPINNER_PID=$!
         disown "$INLINE_SPINNER_PID" 2> /dev/null || true
     else
-        echo -n "  ${BLUE}|${NC} $message" >&2 || true
+        echo -n "  ${BLUE}|${NC} $display_message" >&2 || true
     fi
 }
 
@@ -336,7 +367,7 @@ stop_inline_spinner() {
         local wait_count=0
         while kill -0 "$INLINE_SPINNER_PID" 2> /dev/null && [[ $wait_count -lt 5 ]]; do
             sleep 0.05 2> /dev/null || true
-            ((wait_count++))
+            wait_count=$((wait_count + 1))
         done
 
         # Only use SIGKILL as last resort if process is stuck
@@ -354,20 +385,6 @@ stop_inline_spinner() {
         # Clear the line - use \033[2K to clear entire line, not just to end
         [[ -t 1 ]] && printf "\r\033[2K" >&2 || true
     fi
-}
-
-# Run command with a terminal spinner
-with_spinner() {
-    local msg="$1"
-    shift || true
-    local timeout=180
-    start_inline_spinner "$msg"
-    local exit_code=0
-    if [[ -n "${MOLE_TIMEOUT_BIN:-}" ]]; then
-        "$MOLE_TIMEOUT_BIN" "$timeout" "$@" > /dev/null 2>&1 || exit_code=$?
-    else "$@" > /dev/null 2>&1 || exit_code=$?; fi
-    stop_inline_spinner "$msg"
-    return $exit_code
 }
 
 # Get spinner characters

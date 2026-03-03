@@ -131,6 +131,11 @@ type cardData struct {
 }
 
 func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int, catHidden bool) (string, string) {
+	if termWidth <= 0 {
+		termWidth = 80
+	}
+	compactHeader := termWidth <= 80
+
 	title := titleStyle.Render("Status")
 
 	scoreStyle := getScoreStyle(m.HealthScore)
@@ -162,14 +167,39 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 	if m.Hardware.RefreshRate != "" {
 		infoParts = append(infoParts, m.Hardware.RefreshRate)
 	}
-	if m.Hardware.OSVersion != "" {
-		infoParts = append(infoParts, m.Hardware.OSVersion)
+	optionalInfoParts := []string{}
+	if !compactHeader && m.Hardware.OSVersion != "" {
+		optionalInfoParts = append(optionalInfoParts, m.Hardware.OSVersion)
 	}
-	if m.Uptime != "" {
-		infoParts = append(infoParts, subtleStyle.Render("up "+m.Uptime))
+	if !compactHeader && m.Uptime != "" {
+		optionalInfoParts = append(optionalInfoParts, subtleStyle.Render("up "+m.Uptime))
 	}
 
-	headerLine := title + "  " + scoreText + "  " + strings.Join(infoParts, " · ")
+	headLeft := title + "  " + scoreText
+	headerLine := headLeft
+	if termWidth > 0 && lipgloss.Width(headerLine) > termWidth {
+		headerLine = wrapToWidth(headLeft, termWidth)[0]
+	}
+	if termWidth > 0 {
+		allParts := append(append([]string{}, infoParts...), optionalInfoParts...)
+		if len(allParts) > 0 {
+			combined := headLeft + "  " + strings.Join(allParts, " · ")
+			if lipgloss.Width(combined) <= termWidth {
+				headerLine = combined
+			} else {
+				// When width is tight, drop lower-priority tail (OS and uptime) as a group.
+				fitParts := append([]string{}, infoParts...)
+				for len(fitParts) > 0 {
+					candidate := headLeft + "  " + strings.Join(fitParts, " · ")
+					if lipgloss.Width(candidate) <= termWidth {
+						headerLine = candidate
+						break
+					}
+					fitParts = fitParts[:len(fitParts)-1]
+				}
+			}
+		}
+	}
 
 	// Show cat unless hidden - render mole centered below header
 	var mole string
@@ -249,7 +279,7 @@ func renderCPUCard(cpu CPUStatus, thermal ThermalStatus) cardData {
 	return cardData{icon: iconCPU, title: "CPU", lines: lines}
 }
 
-func renderMemoryCard(mem MemoryStatus) cardData {
+func renderMemoryCard(mem MemoryStatus, cardWidth int) cardData {
 	// Check if swap is being used (or at least allocated).
 	hasSwap := mem.SwapTotal > 0 || mem.SwapUsed > 0
 
@@ -270,8 +300,16 @@ func renderMemoryCard(mem MemoryStatus) cardData {
 		if mem.SwapTotal > 0 {
 			swapPercent = (float64(mem.SwapUsed) / float64(mem.SwapTotal)) * 100.0
 		}
+		swapLine := fmt.Sprintf("Swap   %s  %5.1f%%", progressBar(swapPercent), swapPercent)
 		swapText := fmt.Sprintf("%s/%s", humanBytesCompact(mem.SwapUsed), humanBytesCompact(mem.SwapTotal))
-		lines = append(lines, fmt.Sprintf("Swap   %s  %5.1f%% %s", progressBar(swapPercent), swapPercent, swapText))
+		swapLineWithText := swapLine + " " + swapText
+		if cardWidth > 0 && lipgloss.Width(swapLineWithText) <= cardWidth {
+			lines = append(lines, swapLineWithText)
+		} else if cardWidth <= 0 {
+			lines = append(lines, swapLineWithText)
+		} else {
+			lines = append(lines, swapLine)
+		}
 
 		lines = append(lines, fmt.Sprintf("Total  %s / %s", humanBytes(mem.Used), humanBytes(mem.Total)))
 		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(mem.Total-mem.Used))) // Simplified avail logic for consistency
@@ -399,7 +437,7 @@ func renderProcessCard(procs []ProcessInfo) cardData {
 func buildCards(m MetricsSnapshot, width int) []cardData {
 	cards := []cardData{
 		renderCPUCard(m.CPU, m.Thermal),
-		renderMemoryCard(m.Memory),
+		renderMemoryCard(m.Memory, width),
 		renderDiskCard(m.Disks, m.DiskIO),
 		renderBatteryCard(m.Batteries, m.Thermal),
 		renderProcessCard(m.TopProcesses),
@@ -596,16 +634,38 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 }
 
 func renderCard(data cardData, width int, height int) string {
-	titleText := data.icon + " " + data.title
-	lineLen := max(width-lipgloss.Width(titleText)-2, 4)
-	header := titleStyle.Render(titleText) + "  " + lineStyle.Render(strings.Repeat("╌", lineLen))
-	content := header + "\n" + strings.Join(data.lines, "\n")
+	if width <= 0 {
+		width = colWidth
+	}
 
-	lines := strings.Split(content, "\n")
+	titleText := data.icon + " " + data.title
+	lineLen := width - lipgloss.Width(titleText) - 2
+	if lineLen < 0 {
+		lineLen = 0
+	}
+
+	header := titleStyle.Render(titleText)
+	if lineLen > 0 {
+		header += "  " + lineStyle.Render(strings.Repeat("╌", lineLen))
+	}
+
+	lines := wrapToWidth(header, width)
+	for _, line := range data.lines {
+		lines = append(lines, wrapToWidth(line, width)...)
+	}
+
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func wrapToWidth(text string, width int) []string {
+	if width <= 0 {
+		return []string{text}
+	}
+	wrapped := lipgloss.NewStyle().MaxWidth(width).Render(text)
+	return strings.Split(wrapped, "\n")
 }
 
 func progressBar(percent float64) string {

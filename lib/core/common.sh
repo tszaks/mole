@@ -163,7 +163,7 @@ remove_apps_from_dock() {
             local url
             url=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-data:_CFURLString" "$plist" 2> /dev/null || echo "")
             [[ -z "$url" ]] && {
-                ((i++))
+                i=$((i + 1))
                 continue
             }
 
@@ -175,7 +175,7 @@ remove_apps_from_dock() {
                     continue
                 fi
             fi
-            ((i++))
+            i=$((i + 1))
         done
     done
 

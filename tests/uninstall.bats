@@ -1,67 +1,67 @@
 #!/usr/bin/env bats
 
 setup_file() {
-    PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
-    export PROJECT_ROOT
+	PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+	export PROJECT_ROOT
 
-    ORIGINAL_HOME="${BATS_TMPDIR:-}" # Use BATS_TMPDIR as original HOME if set by bats
-    if [[ -z "$ORIGINAL_HOME" ]]; then
-        ORIGINAL_HOME="${HOME:-}"
-    fi
-    export ORIGINAL_HOME
+	ORIGINAL_HOME="${BATS_TMPDIR:-}" # Use BATS_TMPDIR as original HOME if set by bats
+	if [[ -z "$ORIGINAL_HOME" ]]; then
+		ORIGINAL_HOME="${HOME:-}"
+	fi
+	export ORIGINAL_HOME
 
-    HOME="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-uninstall-home.XXXXXX")"
-    export HOME
+	HOME="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-uninstall-home.XXXXXX")"
+	export HOME
 }
 
 teardown_file() {
-    rm -rf "$HOME"
-    if [[ -n "${ORIGINAL_HOME:-}" ]]; then
-        export HOME="$ORIGINAL_HOME"
-    fi
+	rm -rf "$HOME"
+	if [[ -n "${ORIGINAL_HOME:-}" ]]; then
+		export HOME="$ORIGINAL_HOME"
+	fi
 }
 
 setup() {
-    export TERM="dumb"
-    rm -rf "${HOME:?}"/*
-    mkdir -p "$HOME"
+	export TERM="dumb"
+	rm -rf "${HOME:?}"/*
+	mkdir -p "$HOME"
 }
 
 create_app_artifacts() {
-    mkdir -p "$HOME/Applications/TestApp.app"
-    mkdir -p "$HOME/Library/Application Support/TestApp"
-    mkdir -p "$HOME/Library/Caches/TestApp"
-    mkdir -p "$HOME/Library/Containers/com.example.TestApp"
-    mkdir -p "$HOME/Library/Preferences"
-    touch "$HOME/Library/Preferences/com.example.TestApp.plist"
-    mkdir -p "$HOME/Library/Preferences/ByHost"
-    touch "$HOME/Library/Preferences/ByHost/com.example.TestApp.ABC123.plist"
-    mkdir -p "$HOME/Library/Saved Application State/com.example.TestApp.savedState"
-    mkdir -p "$HOME/Library/LaunchAgents"
-    touch "$HOME/Library/LaunchAgents/com.example.TestApp.plist"
+	mkdir -p "$HOME/Applications/TestApp.app"
+	mkdir -p "$HOME/Library/Application Support/TestApp"
+	mkdir -p "$HOME/Library/Caches/TestApp"
+	mkdir -p "$HOME/Library/Containers/com.example.TestApp"
+	mkdir -p "$HOME/Library/Preferences"
+	touch "$HOME/Library/Preferences/com.example.TestApp.plist"
+	mkdir -p "$HOME/Library/Preferences/ByHost"
+	touch "$HOME/Library/Preferences/ByHost/com.example.TestApp.ABC123.plist"
+	mkdir -p "$HOME/Library/Saved Application State/com.example.TestApp.savedState"
+	mkdir -p "$HOME/Library/LaunchAgents"
+	touch "$HOME/Library/LaunchAgents/com.example.TestApp.plist"
 }
 
 @test "find_app_files discovers user-level leftovers" {
-    create_app_artifacts
+	create_app_artifacts
 
-    result="$(
-        HOME="$HOME" bash --noprofile --norc << 'EOF'
+	result="$(
+		HOME="$HOME" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 find_app_files "com.example.TestApp" "TestApp"
 EOF
-    )"
+	)"
 
-    [[ "$result" == *"Application Support/TestApp"* ]]
-    [[ "$result" == *"Caches/TestApp"* ]]
-    [[ "$result" == *"Preferences/com.example.TestApp.plist"* ]]
-    [[ "$result" == *"Saved Application State/com.example.TestApp.savedState"* ]]
-    [[ "$result" == *"Containers/com.example.TestApp"* ]]
-    [[ "$result" == *"LaunchAgents/com.example.TestApp.plist"* ]]
+	[[ "$result" == *"Application Support/TestApp"* ]]
+	[[ "$result" == *"Caches/TestApp"* ]]
+	[[ "$result" == *"Preferences/com.example.TestApp.plist"* ]]
+	[[ "$result" == *"Saved Application State/com.example.TestApp.savedState"* ]]
+	[[ "$result" == *"Containers/com.example.TestApp"* ]]
+	[[ "$result" == *"LaunchAgents/com.example.TestApp.plist"* ]]
 }
 
 @test "get_diagnostic_report_paths_for_app avoids executable prefix collisions" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -92,16 +92,16 @@ result=$(get_diagnostic_report_paths_for_app "$app_dir" "Foo" "$diag_dir")
 [[ "$result" != *"Foobar_2026-01-01-120001_host.ips"* ]] || exit 1
 EOF
 
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
 @test "calculate_total_size returns aggregate kilobytes" {
-    mkdir -p "$HOME/sized"
-    dd if=/dev/zero of="$HOME/sized/file1" bs=1024 count=1 > /dev/null 2>&1
-    dd if=/dev/zero of="$HOME/sized/file2" bs=1024 count=2 > /dev/null 2>&1
+	mkdir -p "$HOME/sized"
+	dd if=/dev/zero of="$HOME/sized/file1" bs=1024 count=1 >/dev/null 2>&1
+	dd if=/dev/zero of="$HOME/sized/file2" bs=1024 count=2 >/dev/null 2>&1
 
-    result="$(
-        HOME="$HOME" bash --noprofile --norc << 'EOF'
+	result="$(
+		HOME="$HOME" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 files="$(printf '%s
@@ -109,15 +109,15 @@ files="$(printf '%s
 ' "$HOME/sized/file1" "$HOME/sized/file2")"
 calculate_total_size "$files"
 EOF
-    )"
+	)"
 
-    [ "$result" -ge 3 ]
+	[ "$result" -ge 3 ]
 }
 
 @test "batch_uninstall_applications removes selected app data" {
-    create_app_artifacts
+	create_app_artifacts
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -155,22 +155,22 @@ batch_uninstall_applications
 [[ ! -f "$HOME/Library/LaunchAgents/com.example.TestApp.plist" ]] || exit 1
 EOF
 
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
 @test "batch_uninstall_applications preview shows full related file list" {
-    mkdir -p "$HOME/Applications/TestApp.app"
-    mkdir -p "$HOME/Library/Application Support/TestApp"
-    mkdir -p "$HOME/Library/Caches/TestApp"
-    mkdir -p "$HOME/Library/Logs/TestApp"
-    touch "$HOME/Library/Logs/TestApp/log1.log"
-    touch "$HOME/Library/Logs/TestApp/log2.log"
-    touch "$HOME/Library/Logs/TestApp/log3.log"
-    touch "$HOME/Library/Logs/TestApp/log4.log"
-    touch "$HOME/Library/Logs/TestApp/log5.log"
-    touch "$HOME/Library/Logs/TestApp/log6.log"
+	mkdir -p "$HOME/Applications/TestApp.app"
+	mkdir -p "$HOME/Library/Application Support/TestApp"
+	mkdir -p "$HOME/Library/Caches/TestApp"
+	mkdir -p "$HOME/Library/Logs/TestApp"
+	touch "$HOME/Library/Logs/TestApp/log1.log"
+	touch "$HOME/Library/Logs/TestApp/log2.log"
+	touch "$HOME/Library/Logs/TestApp/log3.log"
+	touch "$HOME/Library/Logs/TestApp/log4.log"
+	touch "$HOME/Library/Logs/TestApp/log5.log"
+	touch "$HOME/Library/Logs/TestApp/log6.log"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -210,28 +210,27 @@ total_size_cleaned=0
 printf 'q' | batch_uninstall_applications
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"~/Library/Logs/TestApp/log6.log"* ]]
-    [[ "$output" != *"more files"* ]]
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"~/Library/Logs/TestApp/log6.log"* ]]
+	[[ "$output" != *"more files"* ]]
 }
 
 @test "safe_remove can remove a simple directory" {
-    mkdir -p "$HOME/test_dir"
-    touch "$HOME/test_dir/file.txt"
+	mkdir -p "$HOME/test_dir"
+	touch "$HOME/test_dir/file.txt"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
 safe_remove "$HOME/test_dir"
 [[ ! -d "$HOME/test_dir" ]] || exit 1
 EOF
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
-
 @test "decode_file_list validates base64 encoding" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -242,11 +241,11 @@ result=$(decode_file_list "$valid_data" "TestApp")
 [[ -n "$result" ]] || exit 1
 EOF
 
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
 @test "decode_file_list rejects invalid base64" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -258,11 +257,11 @@ else
 fi
 EOF
 
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
 @test "decode_file_list handles empty input" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -272,11 +271,11 @@ result=$(decode_file_list "$empty_data" "TestApp" 2>/dev/null) || true
 [[ -z "$result" ]]
 EOF
 
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
 @test "decode_file_list rejects non-absolute paths" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -289,11 +288,11 @@ else
 fi
 EOF
 
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
 @test "decode_file_list handles both BSD and GNU base64 formats" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -311,16 +310,16 @@ result=$(decode_file_list "$encoded_data" "TestApp")
 [[ -n "$result" ]] || exit 1
 EOF
 
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
 }
 
 @test "remove_mole deletes manual binaries and caches" {
-    mkdir -p "$HOME/.local/bin"
-    touch "$HOME/.local/bin/mole"
-    touch "$HOME/.local/bin/mo"
-    mkdir -p "$HOME/.config/mole" "$HOME/.cache/mole"
+	mkdir -p "$HOME/.local/bin"
+	touch "$HOME/.local/bin/mole"
+	touch "$HOME/.local/bin/mo"
+	mkdir -p "$HOME/.config/mole" "$HOME/.cache/mole"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" bash --noprofile --norc << 'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }
@@ -355,9 +354,31 @@ export -f start_inline_spinner stop_inline_spinner rm sudo
 printf '\n' | "$PROJECT_ROOT/mole" remove
 EOF
 
-    [ "$status" -eq 0 ]
-    [ ! -f "$HOME/.local/bin/mole" ]
-    [ ! -f "$HOME/.local/bin/mo" ]
-    [ ! -d "$HOME/.config/mole" ]
-    [ ! -d "$HOME/.cache/mole" ]
+	[ "$status" -eq 0 ]
+	[ ! -f "$HOME/.local/bin/mole" ]
+	[ ! -f "$HOME/.local/bin/mo" ]
+	[ ! -d "$HOME/.config/mole" ]
+	[ ! -d "$HOME/.cache/mole" ]
+}
+
+@test "remove_mole dry-run keeps manual binaries and caches" {
+	mkdir -p "$HOME/.local/bin"
+	touch "$HOME/.local/bin/mole"
+	touch "$HOME/.local/bin/mo"
+	mkdir -p "$HOME/.config/mole" "$HOME/.cache/mole"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+export -f start_inline_spinner stop_inline_spinner
+printf '\n' | "$PROJECT_ROOT/mole" remove --dry-run
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"DRY RUN MODE"* ]]
+	[ -f "$HOME/.local/bin/mole" ]
+	[ -f "$HOME/.local/bin/mo" ]
+	[ -d "$HOME/.config/mole" ]
+	[ -d "$HOME/.cache/mole" ]
 }

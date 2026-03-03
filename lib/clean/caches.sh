@@ -146,6 +146,8 @@ clean_project_caches() {
         done
         if [[ "$spinner_active" == "true" ]]; then
             stop_inline_spinner 2> /dev/null || true
+            # Extra clear to prevent spinner character remnants in terminal
+            [[ -t 1 ]] && printf "\r\033[2K" >&2 || true
         fi
         [[ "$has_dev_projects" == "false" ]] && return 0
     fi
@@ -208,7 +210,7 @@ clean_project_caches() {
                     break
                 fi
                 sleep 0.1
-                ((grace_period++))
+                grace_period=$((grace_period + 1))
             done
             if kill -0 "$pid" 2> /dev/null; then
                 kill -KILL "$pid" 2> /dev/null || true

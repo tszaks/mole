@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestFormatRate(t *testing.T) {
@@ -931,6 +933,136 @@ func TestRenderHeaderErrorReturnsMoleOnce(t *testing.T) {
 	}
 	if strings.Count(header, "/\\_/\\") != 1 {
 		t.Fatalf("renderHeader() should contain one mole frame in error state, got %d", strings.Count(header, "/\\_/\\"))
+	}
+}
+
+func TestRenderHeaderWrapsOnNarrowWidth(t *testing.T) {
+	m := MetricsSnapshot{
+		HealthScore: 91,
+		Hardware: HardwareInfo{
+			Model:       "MacBook Pro",
+			CPUModel:    "Apple M3 Max",
+			TotalRAM:    "128GB",
+			DiskSize:    "4TB",
+			RefreshRate: "120Hz",
+			OSVersion:   "macOS 15.0",
+		},
+		Uptime: "10d 3h",
+	}
+
+	header, _ := renderHeader(m, "", 0, 38, true)
+	for _, line := range strings.Split(header, "\n") {
+		if lipgloss.Width(stripANSI(line)) > 38 {
+			t.Fatalf("renderHeader() line exceeds width: %q", line)
+		}
+	}
+}
+
+func TestRenderHeaderHidesOSAndUptimeOnNarrowWidth(t *testing.T) {
+	m := MetricsSnapshot{
+		HealthScore: 91,
+		Hardware: HardwareInfo{
+			Model:       "MacBook Pro",
+			CPUModel:    "Apple M3 Max",
+			TotalRAM:    "128GB",
+			DiskSize:    "4TB",
+			RefreshRate: "120Hz",
+			OSVersion:   "macOS 15.0",
+		},
+		Uptime: "10d 3h",
+	}
+
+	header, _ := renderHeader(m, "", 0, 80, true)
+	plain := stripANSI(header)
+	if strings.Contains(plain, "macOS 15.0") {
+		t.Fatalf("renderHeader() narrow width should hide os version, got %q", plain)
+	}
+	if strings.Contains(plain, "up 10d 3h") {
+		t.Fatalf("renderHeader() narrow width should hide uptime, got %q", plain)
+	}
+}
+
+func TestRenderHeaderDropsLowPriorityInfoToStaySingleLine(t *testing.T) {
+	m := MetricsSnapshot{
+		HealthScore: 90,
+		Hardware: HardwareInfo{
+			Model:       "MacBook Pro",
+			CPUModel:    "Apple M2 Pro",
+			TotalRAM:    "32.0 GB",
+			DiskSize:    "460.4 GB",
+			RefreshRate: "60Hz",
+			OSVersion:   "macOS 26.3",
+		},
+		GPU:    []GPUStatus{{CoreCount: 19}},
+		Uptime: "9d 13h",
+	}
+
+	header, _ := renderHeader(m, "", 0, 100, true)
+	plain := stripANSI(header)
+	if strings.Contains(plain, "\n") {
+		t.Fatalf("renderHeader() should stay single line when trimming low-priority fields, got %q", plain)
+	}
+	if strings.Contains(plain, "macOS 26.3") {
+		t.Fatalf("renderHeader() should drop os version when width is tight, got %q", plain)
+	}
+	if strings.Contains(plain, "up 9d 13h") {
+		t.Fatalf("renderHeader() should drop uptime when width is tight, got %q", plain)
+	}
+}
+
+func TestRenderCardWrapsOnNarrowWidth(t *testing.T) {
+	card := cardData{
+		icon:  iconCPU,
+		title: "CPU",
+		lines: []string{
+			"Total  ████████████████  100.0% @ 85.0°C",
+			"Load   12.34 / 8.90 / 7.65, 4P+4E",
+		},
+	}
+
+	rendered := renderCard(card, 26, 0)
+	for _, line := range strings.Split(rendered, "\n") {
+		if lipgloss.Width(stripANSI(line)) > 26 {
+			t.Fatalf("renderCard() line exceeds width: %q", line)
+		}
+	}
+}
+
+func TestRenderMemoryCardHidesSwapSizeOnNarrowWidth(t *testing.T) {
+	card := renderMemoryCard(MemoryStatus{
+		Used:        8 << 30,
+		Total:       16 << 30,
+		UsedPercent: 50.0,
+		SwapUsed:    482,
+		SwapTotal:   1000,
+	}, 38)
+
+	if len(card.lines) < 3 {
+		t.Fatalf("renderMemoryCard() expected at least 3 lines, got %d", len(card.lines))
+	}
+
+	swapLine := stripANSI(card.lines[2])
+	if strings.Contains(swapLine, "/") {
+		t.Fatalf("renderMemoryCard() narrow width should hide swap size, got %q", swapLine)
+	}
+}
+
+func TestRenderMemoryCardShowsSwapSizeOnWideWidth(t *testing.T) {
+	card := renderMemoryCard(MemoryStatus{
+		Used:        8 << 30,
+		Total:       16 << 30,
+		UsedPercent: 50.0,
+		SwapUsed:    482,
+		SwapTotal:   1000,
+	}, 60)
+
+	if len(card.lines) < 3 {
+		t.Fatalf("renderMemoryCard() expected at least 3 lines, got %d", len(card.lines))
+	}
+
+	swapLine := stripANSI(card.lines[2])
+	if !strings.Contains(swapLine, "/") {
+		t.Fatalf("renderMemoryCard() wide width should include swap size, got %q", swapLine)
 	}
 }
 

@@ -14,7 +14,7 @@ opt_msg() {
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $message"
     else
-        echo -e "  ${GREEN}✓${NC} $message"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $message"
     fi
 }
 
@@ -314,7 +314,7 @@ opt_sqlite_vacuum() {
             local file_size
             file_size=$(get_file_size "$db_file")
             if [[ "$file_size" -gt "$MOLE_SQLITE_MAX_SIZE" ]]; then
-                ((skipped++))
+                skipped=$((skipped + 1))
                 continue
             fi
 
@@ -327,7 +327,7 @@ opt_sqlite_vacuum() {
             freelist_count=$(echo "$page_info" | awk 'NR==2 {print $1}' 2> /dev/null || echo "")
             if [[ "$page_count" =~ ^[0-9]+$ && "$freelist_count" =~ ^[0-9]+$ && "$page_count" -gt 0 ]]; then
                 if ((freelist_count * 100 < page_count * 5)); then
-                    ((skipped++))
+                    skipped=$((skipped + 1))
                     continue
                 fi
             fi
@@ -341,7 +341,7 @@ opt_sqlite_vacuum() {
                 set -e
 
                 if [[ $integrity_status -ne 0 ]] || ! echo "$integrity_check" | grep -q "ok"; then
-                    ((skipped++))
+                    skipped=$((skipped + 1))
                     continue
                 fi
             fi
@@ -354,14 +354,14 @@ opt_sqlite_vacuum() {
                 set -e
 
                 if [[ $exit_code -eq 0 ]]; then
-                    ((vacuumed++))
+                    vacuumed=$((vacuumed + 1))
                 elif [[ $exit_code -eq 124 ]]; then
-                    ((timed_out++))
+                    timed_out=$((timed_out + 1))
                 else
-                    ((failed++))
+                    failed=$((failed + 1))
                 fi
             else
-                ((vacuumed++))
+                vacuumed=$((vacuumed + 1))
             fi
         done < <(compgen -G "$pattern" || true)
     done
@@ -406,9 +406,10 @@ opt_launch_services_rebuild() {
         start_inline_spinner ""
     fi
 
-    local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    local lsregister
+    lsregister=$(get_lsregister_path)
 
-    if [[ -f "$lsregister" ]]; then
+    if [[ -n "$lsregister" ]]; then
         local success=0
 
         if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
@@ -729,7 +730,7 @@ opt_spotlight_index_optimize() {
             test_end=$(get_epoch_seconds)
             test_duration=$((test_end - test_start))
             if [[ $test_duration -gt 3 ]]; then
-                ((slow_count++))
+                slow_count=$((slow_count + 1))
             fi
             sleep 1
         done
@@ -741,7 +742,7 @@ opt_spotlight_index_optimize() {
             fi
 
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                echo -e "  ${BLUE}ℹ${NC} Spotlight search is slow, rebuilding index, may take 1-2 hours"
+                echo -e "  ${BLUE}${ICON_INFO}${NC} Spotlight search is slow, rebuilding index, may take 1-2 hours"
                 if sudo mdutil -E / > /dev/null 2>&1; then
                     opt_msg "Spotlight index rebuild started"
                     echo -e "  ${GRAY}Indexing will continue in background${NC}"

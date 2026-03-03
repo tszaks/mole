@@ -822,10 +822,17 @@ main() {
             "--debug")
                 export MO_DEBUG=1
                 ;;
+            "--dry-run" | "-n")
+                export MOLE_DRY_RUN=1
+                ;;
         esac
     done
 
     hide_cursor
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}${ICON_DRY_RUN} DRY RUN MODE${NC}, No app files or settings will be modified"
+        printf '\n'
+    fi
 
     local first_scan=true
     while true; do
@@ -950,12 +957,22 @@ main() {
 
         rm -f "$apps_file"
 
-        echo -e "${GRAY}Press Enter to return to application list, any other key to exit...${NC}"
+        local prompt_timeout="${MOLE_UNINSTALL_RETURN_PROMPT_TIMEOUT_SEC:-3}"
+        if [[ ! "$prompt_timeout" =~ ^[0-9]+$ ]] || [[ "$prompt_timeout" -lt 1 ]]; then
+            prompt_timeout=3
+        fi
+
+        echo -e "${GRAY}Press Enter to return to the app list, press any other key or wait ${prompt_timeout}s to exit.${NC}"
         local key
-        IFS= read -r -s -n1 key || key=""
+        local read_ok=false
+        if IFS= read -r -s -n1 -t "$prompt_timeout" key; then
+            read_ok=true
+        else
+            key=""
+        fi
         drain_pending_input
 
-        if [[ -z "$key" ]]; then
+        if [[ "$read_ok" == "true" && -z "$key" ]]; then
             :
         else
             show_cursor

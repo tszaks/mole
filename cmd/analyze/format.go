@@ -80,7 +80,7 @@ func humanizeBytes(size int64) string {
 	if size < 0 {
 		return "0 B"
 	}
-	const unit = 1024
+	const unit = 1000
 	if size < unit {
 		return fmt.Sprintf("%d B", size)
 	}
@@ -90,7 +90,7 @@ func humanizeBytes(size int64) string {
 		exp++
 	}
 	value := float64(size) / float64(div)
-	return fmt.Sprintf("%.1f %cB", value, "KMGTPE"[exp])
+	return fmt.Sprintf("%.1f %cB", value, "kMGTPE"[exp])
 }
 
 func coloredProgressBar(value, maxValue int64, percent float64) string {

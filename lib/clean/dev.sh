@@ -7,7 +7,17 @@ clean_tool_cache() {
     local description="$1"
     shift
     if [[ "$DRY_RUN" != "true" ]]; then
+        local command_succeeded=false
+        if [[ -t 1 ]]; then
+            start_section_spinner "Cleaning $description..."
+        fi
         if "$@" > /dev/null 2>&1; then
+            command_succeeded=true
+        fi
+        if [[ -t 1 ]]; then
+            stop_section_spinner
+        fi
+        if [[ "$command_succeeded" == "true" ]]; then
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $description"
         fi
     else
@@ -85,7 +95,8 @@ clean_dev_npm() {
 }
 # Python/pip ecosystem caches.
 clean_dev_python() {
-    if command -v pip3 > /dev/null 2>&1; then
+    # Check pip3 is functional (not just macOS stub that triggers CLT install dialog)
+    if command -v pip3 > /dev/null 2>&1 && pip3 --version > /dev/null 2>&1; then
         clean_tool_cache "pip cache" bash -c 'pip3 cache purge > /dev/null 2>&1 || true'
         note_activity
     fi
@@ -249,11 +260,11 @@ clean_xcode_documentation_cache() {
     local entry
     for entry in "${sorted_entries[@]}"; do
         if [[ $idx -eq 0 ]]; then
-            ((idx++))
+            idx=$((idx + 1))
             continue
         fi
         stale_entries+=("$entry")
-        ((idx++))
+        idx=$((idx + 1))
     done
 
     if [[ ${#stale_entries[@]} -eq 0 ]]; then
@@ -380,7 +391,7 @@ clean_xcode_simulator_runtime_volumes() {
     local unused_count=0
     for candidate in "${sorted_candidates[@]}"; do
         local status="UNUSED"
-        if _sim_runtime_is_path_in_use "$candidate" "${mount_points[@]}"; then
+        if [[ ${#mount_points[@]} -gt 0 ]] && _sim_runtime_is_path_in_use "$candidate" "${mount_points[@]}"; then
             status="IN_USE"
             in_use_count=$((in_use_count + 1))
         else
@@ -791,12 +802,12 @@ clean_dev_jetbrains_toolbox() {
             local dir_path
             for dir_path in "${sorted_dirs[@]}"; do
                 if [[ $idx -lt $keep_previous ]]; then
-                    ((idx++))
+                    idx=$((idx + 1))
                     continue
                 fi
                 safe_clean "$dir_path" "JetBrains Toolbox old IDE version"
                 note_activity
-                ((idx++))
+                idx=$((idx + 1))
             done
         done < <(command find "$product_dir" -mindepth 1 -maxdepth 1 -type d -name "ch-*" -print0 2> /dev/null)
     done

@@ -132,6 +132,38 @@ EOF
     [[ "$output" != *"App caches"* ]] || [[ "$output" == *"already clean"* ]]
 }
 
+@test "clean_application_support_logs counts nested directory contents in dry-run size summary" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+safe_remove() { :; }
+update_progress_if_needed() { return 1; }
+should_protect_data() { return 1; }
+is_critical_system_component() { return 1; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Application Support/TestApp/logs/nested"
+dd if=/dev/zero of="$HOME/Library/Application Support/TestApp/logs/nested/data.bin" bs=1024 count=2 2> /dev/null
+
+clean_application_support_logs
+echo "TOTAL_KB=$total_size_cleaned"
+rm -rf "$HOME/Library/Application Support"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Application Support logs/caches"* ]]
+    local total_kb
+    total_kb=$(printf '%s\n' "$output" | sed -n 's/.*TOTAL_KB=\([0-9][0-9]*\).*/\1/p' | tail -1)
+    [[ -n "$total_kb" ]]
+    [[ "$total_kb" -ge 2 ]]
+}
+
 @test "clean_group_container_caches keeps protected caches and cleans non-protected caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

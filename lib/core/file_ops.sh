@@ -249,6 +249,11 @@ safe_remove() {
     local rm_exit=0
     error_msg=$(rm -rf "$path" 2>&1) || rm_exit=$? # safe_remove
 
+    # Preserve interrupt semantics so callers can abort long-running deletions.
+    if [[ $rm_exit -ge 128 ]]; then
+        return "$rm_exit"
+    fi
+
     if [[ $rm_exit -eq 0 ]]; then
         # Log successful removal
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "REMOVED" "$path" "$size_human"
@@ -498,6 +503,19 @@ get_path_size_kb() {
         echo "0"
         return
     }
+
+    # For .app bundles, prefer mdls logical size as it matches Finder
+    # (APFS clone/sparse files make 'du' severely underreport apps like Xcode)
+    if [[ "$path" == *.app || "$path" == *.app/ ]]; then
+        local mdls_size
+        mdls_size=$(mdls -name kMDItemLogicalSize -raw "$path" 2> /dev/null || true)
+        if [[ "$mdls_size" =~ ^[0-9]+$ && "$mdls_size" -gt 0 ]]; then
+            # Return in KB
+            echo "$((mdls_size / 1024))"
+            return
+        fi
+    fi
+
     local size
     size=$(command du -skP "$path" 2> /dev/null | awk 'NR==1 {print $1; exit}' || true)
 
@@ -518,7 +536,7 @@ calculate_total_size() {
         if [[ -n "$file" && -e "$file" ]]; then
             local size_kb
             size_kb=$(get_path_size_kb "$file")
-            ((total_kb += size_kb))
+            total_kb=$((total_kb + size_kb))
         fi
     done <<< "$files"
 

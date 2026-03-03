@@ -137,11 +137,6 @@ note_activity() {
     fi
 }
 
-# shellcheck disable=SC2329
-has_cached_sudo() {
-    sudo -n true 2> /dev/null
-}
-
 CLEANUP_DONE=false
 # shellcheck disable=SC2329
 cleanup() {
@@ -373,7 +368,7 @@ safe_clean() {
 
         if should_protect_path "$path"; then
             skip=true
-            ((skipped_count++))
+            skipped_count=$((skipped_count + 1))
             log_operation "clean" "SKIPPED" "$path" "protected"
         fi
 
@@ -381,7 +376,7 @@ safe_clean() {
 
         if is_path_whitelisted "$path"; then
             skip=true
-            ((skipped_count++))
+            skipped_count=$((skipped_count + 1))
             log_operation "clean" "SKIPPED" "$path" "whitelist"
         fi
         [[ "$skip" == "true" ]] && continue
@@ -415,7 +410,7 @@ safe_clean() {
     fi
 
     if [[ $skipped_count -gt 0 ]]; then
-        ((whitelist_skipped_count += skipped_count))
+        whitelist_skipped_count=$((whitelist_skipped_count + skipped_count))
     fi
 
     if [[ ${#existing_paths[@]} -eq 0 ]]; then
@@ -479,7 +474,7 @@ safe_clean() {
                     echo "0 0" > "$temp_dir/result_${idx}"
                 fi
 
-                ((idx++))
+                idx=$((idx + 1))
                 if [[ $((idx % 20)) -eq 0 && "$show_spinner" == "true" && -t 1 ]]; then
                     update_progress_if_needed "$idx" "${#existing_paths[@]}" last_progress_update 1 || true
                     last_progress_update=$(get_epoch_seconds)
@@ -508,12 +503,12 @@ safe_clean() {
                         mv "$tmp_file" "$temp_dir/result_${idx}" 2> /dev/null || true
                     ) &
                     pids+=($!)
-                    ((idx++))
+                    idx=$((idx + 1))
 
                     if ((${#pids[@]} >= MOLE_MAX_PARALLEL_JOBS)); then
                         wait "${pids[0]}" 2> /dev/null || true
                         pids=("${pids[@]:1}")
-                        ((completed++))
+                        completed=$((completed + 1))
 
                         if [[ "$show_spinner" == "true" && -t 1 ]]; then
                             update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
@@ -525,7 +520,7 @@ safe_clean() {
             if [[ ${#pids[@]} -gt 0 ]]; then
                 for pid in "${pids[@]}"; do
                     wait "$pid" 2> /dev/null || true
-                    ((completed++))
+                    completed=$((completed + 1))
 
                     if [[ "$show_spinner" == "true" && -t 1 ]]; then
                         update_progress_if_needed "$completed" "$total_paths" last_progress_update 2 || true
@@ -557,17 +552,17 @@ safe_clean() {
 
                     if [[ $removed -eq 1 ]]; then
                         if [[ "$size" -gt 0 ]]; then
-                            ((total_size_kb += size))
+                            total_size_kb=$((total_size_kb + size))
                         fi
-                        ((total_count += 1))
+                        total_count=$((total_count + 1))
                         removed_any=1
                     else
                         if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
-                            ((removal_failed_count++))
+                            removal_failed_count=$((removal_failed_count + 1))
                         fi
                     fi
                 fi
-                ((idx++))
+                idx=$((idx + 1))
             done
         fi
 
@@ -595,16 +590,16 @@ safe_clean() {
 
                 if [[ $removed -eq 1 ]]; then
                     if [[ "$size_kb" -gt 0 ]]; then
-                        ((total_size_kb += size_kb))
+                        total_size_kb=$((total_size_kb + size_kb))
                     fi
-                    ((total_count += 1))
+                    total_count=$((total_count + 1))
                     removed_any=1
                 else
                     if [[ -e "$path" && "$DRY_RUN" != "true" ]]; then
-                        ((removal_failed_count++))
+                        removal_failed_count=$((removal_failed_count + 1))
                     fi
                 fi
-                ((idx++))
+                idx=$((idx + 1))
             done
         fi
     fi
@@ -626,7 +621,8 @@ safe_clean() {
         # Stop spinner before output
         stop_section_spinner
 
-        local size_human=$(bytes_to_human "$((total_size_kb * 1024))")
+        local size_human
+        size_human=$(bytes_to_human "$((total_size_kb * 1024))")
 
         local label="$description"
         if [[ ${#targets[@]} -gt 1 ]]; then
@@ -636,7 +632,8 @@ safe_clean() {
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label${NC}, ${YELLOW}$size_human dry${NC}"
 
-            local paths_temp=$(create_temp_file)
+            local paths_temp
+            paths_temp=$(create_temp_file)
 
             idx=0
             if [[ ${#existing_paths[@]} -gt 0 ]]; then
@@ -650,12 +647,12 @@ safe_clean() {
                     fi
 
                     [[ "$size" == "0" || -z "$size" ]] && {
-                        ((idx++))
+                        idx=$((idx + 1))
                         continue
                     }
 
                     echo "$(dirname "$path")|$size|$path" >> "$paths_temp"
-                    ((idx++))
+                    idx=$((idx + 1))
                 done
             fi
 
@@ -683,7 +680,8 @@ safe_clean() {
                     }
                 }
                 ' | while IFS='|' read -r display_path total_size child_count; do
-                    local size_human=$(bytes_to_human "$((total_size * 1024))")
+                    local size_human
+                    size_human=$(bytes_to_human "$((total_size * 1024))")
                     if [[ $child_count -gt 1 ]]; then
                         echo "$display_path  # $size_human, $child_count items" >> "$EXPORT_LIST_FILE"
                     else
@@ -694,9 +692,9 @@ safe_clean() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $label${NC}, ${GREEN}$size_human${NC}"
         fi
-        ((files_cleaned += total_count))
-        ((total_size_cleaned += total_size_kb))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + total_count))
+        total_size_cleaned=$((total_size_cleaned + total_size_kb))
+        total_items=$((total_items + 1))
         note_activity
     fi
 
@@ -738,7 +736,7 @@ start_cleanup() {
 EOF
 
         # Preview system section when sudo is already cached (no password prompt).
-        if has_cached_sudo; then
+        if has_sudo_session; then
             SYSTEM_CLEAN=true
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access available, system preview included"
             echo ""
@@ -751,7 +749,7 @@ EOF
     fi
 
     if [[ -t 0 ]]; then
-        if has_cached_sudo; then
+        if has_sudo_session; then
             SYSTEM_CLEAN=true
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access already available"
             echo ""
@@ -791,7 +789,7 @@ EOF
     else
         echo ""
         echo "Running in non-interactive mode"
-        if has_cached_sudo; then
+        if has_sudo_session; then
             SYSTEM_CLEAN=true
             echo "  ${ICON_LIST} System-level cleanup enabled, sudo session active"
         else
@@ -872,9 +870,9 @@ perform_cleanup() {
             done
 
             if [[ "$is_predefined" == "true" ]]; then
-                ((predefined_count++))
+                predefined_count=$((predefined_count + 1))
             else
-                ((custom_count++))
+                custom_count=$((custom_count + 1))
             fi
         done
 
@@ -1069,7 +1067,8 @@ perform_cleanup() {
                 fi
             fi
 
-            local final_free_space=$(get_free_space)
+            local final_free_space
+            final_free_space=$(get_free_space)
             summary_details+=("Free space now: $final_free_space")
         fi
     else

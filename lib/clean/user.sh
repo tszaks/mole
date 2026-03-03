@@ -23,7 +23,7 @@ clean_user_essentials() {
                 local cleaned_count=0
                 while IFS= read -r -d '' item; do
                     if safe_remove "$item" true; then
-                        ((cleaned_count++))
+                        cleaned_count=$((cleaned_count + 1))
                     fi
                 done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
                 if [[ $cleaned_count -gt 0 ]]; then
@@ -76,8 +76,13 @@ _clean_mail_downloads() {
     )
     local count=0
     local cleaned_kb=0
+    local spinner_active=false
     for target_path in "${mail_dirs[@]}"; do
         if [[ -d "$target_path" ]]; then
+            if [[ "$spinner_active" == "false" && -t 1 ]]; then
+                start_section_spinner "Cleaning old Mail attachments..."
+                spinner_active=true
+            fi
             local dir_size_kb=0
             dir_size_kb=$(get_path_size_kb "$target_path")
             if ! [[ "$dir_size_kb" =~ ^[0-9]+$ ]]; then
@@ -95,13 +100,16 @@ _clean_mail_downloads() {
                     local file_size_kb
                     file_size_kb=$(get_path_size_kb "$file_path")
                     if safe_remove "$file_path" true; then
-                        ((count++))
-                        ((cleaned_kb += file_size_kb))
+                        count=$((count + 1))
+                        cleaned_kb=$((cleaned_kb + file_size_kb))
                     fi
                 fi
             done < <(command find "$target_path" -type f -mtime +"$mail_age_days" -print0 2> /dev/null || true)
         fi
     done
+    if [[ "$spinner_active" == "true" ]]; then
+        stop_section_spinner
+    fi
     if [[ $count -gt 0 ]]; then
         local cleaned_mb
         cleaned_mb=$(echo "$cleaned_kb" | awk '{printf "%.1f", $1/1024}' || echo "0.0")
@@ -163,7 +171,7 @@ clean_chrome_old_versions() {
             size_kb=$(get_path_size_kb "$dir" || echo 0)
             size_kb="${size_kb:-0}"
             total_size=$((total_size + size_kb))
-            ((cleaned_count++))
+            cleaned_count=$((cleaned_count + 1))
             cleaned_any=true
             if [[ "$DRY_RUN" != "true" ]]; then
                 if has_sudo_session; then
@@ -183,9 +191,9 @@ clean_chrome_old_versions() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Chrome old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + cleaned_count))
+        total_size_cleaned=$((total_size_cleaned + total_size))
+        total_items=$((total_items + 1))
         note_activity
     fi
 }
@@ -249,7 +257,7 @@ clean_edge_old_versions() {
             size_kb=$(get_path_size_kb "$dir" || echo 0)
             size_kb="${size_kb:-0}"
             total_size=$((total_size + size_kb))
-            ((cleaned_count++))
+            cleaned_count=$((cleaned_count + 1))
             cleaned_any=true
             if [[ "$DRY_RUN" != "true" ]]; then
                 if has_sudo_session; then
@@ -269,9 +277,9 @@ clean_edge_old_versions() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Edge old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + cleaned_count))
+        total_size_cleaned=$((total_size_cleaned + total_size))
+        total_items=$((total_items + 1))
         note_activity
     fi
 }
@@ -316,7 +324,7 @@ clean_edge_updater_old_versions() {
         size_kb=$(get_path_size_kb "$dir" || echo 0)
         size_kb="${size_kb:-0}"
         total_size=$((total_size + size_kb))
-        ((cleaned_count++))
+        cleaned_count=$((cleaned_count + 1))
         cleaned_any=true
         if [[ "$DRY_RUN" != "true" ]]; then
             safe_remove "$dir" true > /dev/null 2>&1 || true
@@ -331,9 +339,9 @@ clean_edge_updater_old_versions() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Edge updater old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + cleaned_count))
+        total_size_cleaned=$((total_size_cleaned + total_size))
+        total_items=$((total_items + 1))
         note_activity
     fi
 }
@@ -387,6 +395,7 @@ scan_external_volumes() {
     done
     stop_section_spinner
 }
+
 # Finder metadata (.DS_Store).
 clean_finder_metadata() {
     if [[ "$PROTECT_FINDER_METADATA" == "true" ]]; then
@@ -411,14 +420,17 @@ clean_support_app_data() {
         safe_find_delete "$idle_assets_dir" "*" "$support_age_days" "f" || true
     fi
 
+    # Clean old aerial wallpaper videos (can be large, safe to remove).
+    safe_clean ~/Library/Application\ Support/com.apple.wallpaper/aerials/videos/* "Aerial wallpaper videos"
+
     # Do not touch Messages attachments, only preview/sticker caches.
     if pgrep -x "Messages" > /dev/null 2>&1; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Messages is running · preview cache cleanup skipped"
-        return 0
+    else
+        safe_clean ~/Library/Messages/StickerCache/* "Messages sticker cache"
+        safe_clean ~/Library/Messages/Caches/Previews/Attachments/* "Messages preview attachment cache"
+        safe_clean ~/Library/Messages/Caches/Previews/StickerCache/* "Messages preview sticker cache"
     fi
-    safe_clean ~/Library/Messages/StickerCache/* "Messages sticker cache"
-    safe_clean ~/Library/Messages/Caches/Previews/Attachments/* "Messages preview attachment cache"
-    safe_clean ~/Library/Messages/Caches/Previews/StickerCache/* "Messages preview sticker cache"
 }
 
 # App caches (merged: macOS system caches + Sandboxed apps).
@@ -472,14 +484,15 @@ clean_app_caches() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Sandboxed app caches${NC}, ${GREEN}$size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + cleaned_count))
+        total_size_cleaned=$((total_size_cleaned + total_size))
+        total_items=$((total_items + 1))
         note_activity
     fi
 
     clean_group_container_caches
 }
+
 # Process a single container cache directory.
 process_container_cache() {
     local container_dir="$1"
@@ -500,9 +513,9 @@ process_container_cache() {
     if find "$cache_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
         local size
         size=$(get_path_size_kb "$cache_dir")
-        ((total_size += size))
+        total_size=$((total_size + size))
         found_any=true
-        ((cleaned_count++))
+        cleaned_count=$((cleaned_count + 1))
         if [[ "$DRY_RUN" != "true" ]]; then
             local item
             while IFS= read -r -d '' item; do
@@ -600,7 +613,7 @@ clean_group_container_caches() {
                     item_size=$(get_path_size_kb "$item" 2> /dev/null) || item_size=0
                     [[ "$item_size" =~ ^[0-9]+$ ]] || item_size=0
                     candidate_changed=true
-                    ((candidate_size_kb += item_size))
+                    candidate_size_kb=$((candidate_size_kb + item_size))
                 done
             else
                 for item in "${items_to_clean[@]}"; do
@@ -609,14 +622,14 @@ clean_group_container_caches() {
                     [[ "$item_size" =~ ^[0-9]+$ ]] || item_size=0
                     if safe_remove "$item" true 2> /dev/null; then
                         candidate_changed=true
-                        ((candidate_size_kb += item_size))
+                        candidate_size_kb=$((candidate_size_kb + item_size))
                     fi
                 done
             fi
 
             if [[ "$candidate_changed" == "true" ]]; then
-                ((total_size += candidate_size_kb))
-                ((cleaned_count++))
+                total_size=$((total_size + candidate_size_kb))
+                cleaned_count=$((cleaned_count + 1))
                 found_any=true
             fi
         done
@@ -632,12 +645,13 @@ clean_group_container_caches() {
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Group Containers logs/caches${NC}, ${GREEN}$size_human${NC}"
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + cleaned_count))
+        total_size_cleaned=$((total_size_cleaned + total_size))
+        total_items=$((total_items + 1))
         note_activity
     fi
 }
+
 # Browser caches (Safari/Chrome/Edge/Firefox).
 clean_browsers() {
     safe_clean ~/Library/Caches/com.apple.Safari/* "Safari cache"
@@ -683,6 +697,7 @@ clean_browsers() {
     clean_edge_old_versions
     clean_edge_updater_old_versions
 }
+
 # Cloud storage caches.
 clean_cloud_storage() {
     safe_clean ~/Library/Caches/com.dropbox.* "Dropbox cache"
@@ -693,6 +708,7 @@ clean_cloud_storage() {
     safe_clean ~/Library/Caches/com.box.desktop "Box cache"
     safe_clean ~/Library/Caches/com.microsoft.OneDrive "OneDrive cache"
 }
+
 # Office app caches.
 clean_office_applications() {
     safe_clean ~/Library/Caches/com.microsoft.Word "Microsoft Word cache"
@@ -704,6 +720,7 @@ clean_office_applications() {
     safe_clean ~/Library/Caches/org.mozilla.thunderbird/* "Thunderbird cache"
     safe_clean ~/Library/Caches/com.apple.mail/* "Apple Mail cache"
 }
+
 # Virtualization caches.
 clean_virtualization_tools() {
     stop_section_spinner
@@ -712,6 +729,47 @@ clean_virtualization_tools() {
     safe_clean ~/VirtualBox\ VMs/.cache "VirtualBox cache"
     safe_clean ~/.vagrant.d/tmp/* "Vagrant temporary files"
 }
+
+# Estimate item size for Application Support cleanup.
+# Files use stat; directories use du with timeout to avoid long blocking scans.
+app_support_item_size_bytes() {
+    local item="$1"
+    local timeout_seconds="${2:-0.4}"
+
+    if [[ -f "$item" && ! -L "$item" ]]; then
+        local file_bytes
+        file_bytes=$(stat -f%z "$item" 2> /dev/null || echo "0")
+        [[ "$file_bytes" =~ ^[0-9]+$ ]] || return 1
+        printf '%s\n' "$file_bytes"
+        return 0
+    fi
+
+    if [[ -d "$item" && ! -L "$item" ]]; then
+        local du_tmp
+        du_tmp=$(mktemp)
+        local du_status=0
+        if run_with_timeout "$timeout_seconds" du -skP "$item" > "$du_tmp" 2> /dev/null; then
+            du_status=0
+        else
+            du_status=$?
+        fi
+
+        if [[ $du_status -ne 0 ]]; then
+            rm -f "$du_tmp"
+            return 1
+        fi
+
+        local size_kb
+        size_kb=$(awk 'NR==1 {print $1; exit}' "$du_tmp")
+        rm -f "$du_tmp"
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || return 1
+        printf '%s\n' "$((size_kb * 1024))"
+        return 0
+    fi
+
+    return 1
+}
+
 # Application Support logs/caches.
 clean_application_support_logs() {
     if [[ ! -d "$HOME/Library/Application Support" ]] || ! ls "$HOME/Library/Application Support" > /dev/null 2>&1; then
@@ -721,14 +779,27 @@ clean_application_support_logs() {
     fi
     start_section_spinner "Scanning Application Support..."
     local total_size_bytes=0
+    local total_size_partial=false
     local cleaned_count=0
     local found_any=false
+    local size_timeout_seconds="${MOLE_APP_SUPPORT_ITEM_SIZE_TIMEOUT_SEC:-0.4}"
+    if [[ ! "$size_timeout_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        size_timeout_seconds=0.4
+    fi
     # Enable nullglob for safe globbing.
     local _ng_state
     _ng_state=$(shopt -p nullglob || true)
     shopt -s nullglob
     local app_count=0
     local total_apps
+    # Temporarily disable pipefail here so that a partial find failure (e.g. TCC
+    # restrictions on macOS 26+) does not propagate through the pipeline and abort
+    # the whole scan via set -e.
+    local pipefail_was_set=false
+    if [[ -o pipefail ]]; then
+        pipefail_was_set=true
+        set +o pipefail
+    fi
     total_apps=$(command find "$HOME/Library/Application Support" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l | tr -d ' ')
     [[ "$total_apps" =~ ^[0-9]+$ ]] || total_apps=0
     local last_progress_update
@@ -737,7 +808,7 @@ clean_application_support_logs() {
         [[ -d "$app_dir" ]] || continue
         local app_name
         app_name=$(basename "$app_dir")
-        ((app_count++))
+        app_count=$((app_count + 1))
         update_progress_if_needed "$app_count" "$total_apps" last_progress_update 1 || true
         local app_name_lower
         app_name_lower=$(echo "$app_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
@@ -758,22 +829,34 @@ clean_application_support_logs() {
             if [[ -d "$candidate" ]]; then
                 local item_found=false
                 local candidate_size_bytes=0
+                local candidate_size_partial=false
                 local candidate_item_count=0
                 while IFS= read -r -d '' item; do
                     [[ -e "$item" ]] || continue
                     item_found=true
-                    ((candidate_item_count++))
-                    if [[ -f "$item" && ! -L "$item" ]]; then
-                        local bytes
-                        bytes=$(stat -f%z "$item" 2> /dev/null || echo "0")
-                        [[ "$bytes" =~ ^[0-9]+$ ]] && ((candidate_size_bytes += bytes)) || true
+                    candidate_item_count=$((candidate_item_count + 1))
+                    if [[ ! -L "$item" && (-f "$item" || -d "$item") ]]; then
+                        local item_size_bytes=""
+                        if item_size_bytes=$(app_support_item_size_bytes "$item" "$size_timeout_seconds"); then
+                            if [[ "$item_size_bytes" =~ ^[0-9]+$ ]]; then
+                                candidate_size_bytes=$((candidate_size_bytes + item_size_bytes))
+                            else
+                                candidate_size_partial=true
+                            fi
+                        else
+                            candidate_size_partial=true
+                        fi
                     fi
                     if ((candidate_item_count % 250 == 0)); then
                         local current_time
                         current_time=$(get_epoch_seconds)
                         if [[ "$current_time" =~ ^[0-9]+$ ]] && ((current_time - last_progress_update >= 1)); then
+                            local app_label="$app_name"
+                            if [[ ${#app_label} -gt 24 ]]; then
+                                app_label="${app_label:0:21}..."
+                            fi
                             stop_section_spinner
-                            start_section_spinner "Scanning Application Support... $app_count/$total_apps ($app_name: $candidate_item_count items)"
+                            start_section_spinner "Scanning Application Support... $app_count/$total_apps [$app_label, $candidate_item_count items]"
                             last_progress_update=$current_time
                         fi
                     fi
@@ -782,8 +865,9 @@ clean_application_support_logs() {
                     fi
                 done < <(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
                 if [[ "$item_found" == "true" ]]; then
-                    ((total_size_bytes += candidate_size_bytes))
-                    ((cleaned_count++))
+                    total_size_bytes=$((total_size_bytes + candidate_size_bytes))
+                    [[ "$candidate_size_partial" == "true" ]] && total_size_partial=true
+                    cleaned_count=$((cleaned_count + 1))
                     found_any=true
                 fi
             fi
@@ -800,22 +884,34 @@ clean_application_support_logs() {
             if [[ -d "$candidate" ]]; then
                 local item_found=false
                 local candidate_size_bytes=0
+                local candidate_size_partial=false
                 local candidate_item_count=0
                 while IFS= read -r -d '' item; do
                     [[ -e "$item" ]] || continue
                     item_found=true
-                    ((candidate_item_count++))
-                    if [[ -f "$item" && ! -L "$item" ]]; then
-                        local bytes
-                        bytes=$(stat -f%z "$item" 2> /dev/null || echo "0")
-                        [[ "$bytes" =~ ^[0-9]+$ ]] && ((candidate_size_bytes += bytes)) || true
+                    candidate_item_count=$((candidate_item_count + 1))
+                    if [[ ! -L "$item" && (-f "$item" || -d "$item") ]]; then
+                        local item_size_bytes=""
+                        if item_size_bytes=$(app_support_item_size_bytes "$item" "$size_timeout_seconds"); then
+                            if [[ "$item_size_bytes" =~ ^[0-9]+$ ]]; then
+                                candidate_size_bytes=$((candidate_size_bytes + item_size_bytes))
+                            else
+                                candidate_size_partial=true
+                            fi
+                        else
+                            candidate_size_partial=true
+                        fi
                     fi
                     if ((candidate_item_count % 250 == 0)); then
                         local current_time
                         current_time=$(get_epoch_seconds)
                         if [[ "$current_time" =~ ^[0-9]+$ ]] && ((current_time - last_progress_update >= 1)); then
+                            local container_label="$container"
+                            if [[ ${#container_label} -gt 24 ]]; then
+                                container_label="${container_label:0:21}..."
+                            fi
                             stop_section_spinner
-                            start_section_spinner "Scanning Application Support... group container ($container: $candidate_item_count items)"
+                            start_section_spinner "Scanning Application Support... group [$container_label, $candidate_item_count items]"
                             last_progress_update=$current_time
                         fi
                     fi
@@ -824,13 +920,18 @@ clean_application_support_logs() {
                     fi
                 done < <(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
                 if [[ "$item_found" == "true" ]]; then
-                    ((total_size_bytes += candidate_size_bytes))
-                    ((cleaned_count++))
+                    total_size_bytes=$((total_size_bytes + candidate_size_bytes))
+                    [[ "$candidate_size_partial" == "true" ]] && total_size_partial=true
+                    cleaned_count=$((cleaned_count + 1))
                     found_any=true
                 fi
             fi
         done
     done
+    # Restore pipefail if it was previously set
+    if [[ "$pipefail_was_set" == "true" ]]; then
+        set -o pipefail
+    fi
     eval "$_ng_state"
     stop_section_spinner
     if [[ "$found_any" == "true" ]]; then
@@ -838,13 +939,21 @@ clean_application_support_logs() {
         size_human=$(bytes_to_human "$total_size_bytes")
         local total_size_kb=$(((total_size_bytes + 1023) / 1024))
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Application Support logs/caches${NC}, ${YELLOW}$size_human dry${NC}"
+            if [[ "$total_size_partial" == "true" ]]; then
+                echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Application Support logs/caches${NC}, ${YELLOW}at least $size_human dry${NC}"
+            else
+                echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Application Support logs/caches${NC}, ${YELLOW}$size_human dry${NC}"
+            fi
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Application Support logs/caches${NC}, ${GREEN}$size_human${NC}"
+            if [[ "$total_size_partial" == "true" ]]; then
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Application Support logs/caches${NC}, ${GREEN}at least $size_human${NC}"
+            else
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Application Support logs/caches${NC}, ${GREEN}$size_human${NC}"
+            fi
         fi
-        ((files_cleaned += cleaned_count))
-        ((total_size_cleaned += total_size_kb))
-        ((total_items++))
+        files_cleaned=$((files_cleaned + cleaned_count))
+        total_size_cleaned=$((total_size_cleaned + total_size_kb))
+        total_items=$((total_items + 1))
         note_activity
     fi
 }
@@ -922,7 +1031,8 @@ check_large_file_candidates() {
         fi
     fi
 
-    if [[ "${SYSTEM_CLEAN:-false}" != "true" ]] && command -v tmutil > /dev/null 2>&1; then
+    if [[ "${SYSTEM_CLEAN:-false}" != "true" ]] && command -v tmutil > /dev/null 2>&1 &&
+        defaults read /Library/Preferences/com.apple.TimeMachine AutoBackup 2> /dev/null | grep -qE '^[01]$'; then
         local snapshot_list snapshot_count
         snapshot_list=$(run_with_timeout 3 tmutil listlocalsnapshots / 2> /dev/null || true)
         if [[ -n "$snapshot_list" ]]; then
