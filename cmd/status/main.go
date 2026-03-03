@@ -212,6 +212,14 @@ func animTickWithSpeed(cpuUsage float64) tea.Cmd {
 // runJSONMode collects metrics once and outputs as JSON.
 func runJSONMode() {
 	collector := NewCollector()
+
+	// First collection initializes network state (returns nil for network)
+	_, _ = collector.Collect()
+
+	// Wait 1 second for network rate calculation
+	time.Sleep(1 * time.Second)
+
+	// Second collection has actual network data
 	data, err := collector.Collect()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error collecting metrics: %v\n", err)
