@@ -1028,10 +1028,10 @@ perform_cleanup() {
         # ============================================
         # Dynamic size formatting (KB → MB → GB)
         # ============================================
-        if (( total_size_cleaned < 1024 )); then
+        if ((total_size_cleaned < 1024)); then
             freed_value="$total_size_cleaned"
             freed_unit="KB"
-        elif (( total_size_cleaned < 1024 * 1024 )); then
+        elif ((total_size_cleaned < 1024 * 1024)); then
             freed_value=$(printf "%.2f" "$(echo "scale=4; $total_size_cleaned/1024" | bc)")
             freed_unit="MB"
         else
@@ -1073,8 +1073,8 @@ perform_cleanup() {
             summary_details+=("$summary_line")
 
             # Movie comparison only if unit is GB and >= 1GB
-            if [[ "$freed_unit" == "GB" ]] && \
-            [[ $(echo "$freed_value >= 1" | bc) -eq 1 ]]; then
+            if [[ "$freed_unit" == "GB" ]] &&
+                [[ $(echo "$freed_value >= 1" | bc) -eq 1 ]]; then
 
                 local movies
                 movies=$(printf "%.0f" "$(echo "scale=2; $freed_value/4.5" | bc)")
