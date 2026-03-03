@@ -541,7 +541,7 @@ clean_dev_mobile() {
         # Check if simctl is accessible and working
         if ! xcrun simctl list devices > /dev/null 2>&1; then
             debug_log "simctl not accessible or CoreSimulator service not running"
-            echo -e "  ${GRAY}${ICON_SKIP}${NC} Xcode unavailable simulators · simctl not available"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl not available"
             note_activity
             return 0
         fi
