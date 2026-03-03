@@ -99,6 +99,13 @@ get_install_channel() {
     esac
 }
 
+get_install_commit() {
+    local channel_file="$SCRIPT_DIR/install_channel"
+    if [[ -f "$channel_file" ]]; then
+        sed -n 's/^COMMIT_HASH=\(.*\)$/\1/p' "$channel_file" | head -1
+    fi
+}
+
 # Background update notice
 check_for_updates() {
     local msg_cache="$HOME/.cache/mole/update_message"
@@ -222,7 +229,13 @@ show_version() {
 
     printf '\nMole version %s\n' "$VERSION"
     if [[ "$channel" == "nightly" ]]; then
-        printf 'Channel: Nightly\n'
+        local commit
+        commit=$(get_install_commit)
+        if [[ -n "$commit" ]]; then
+            printf 'Channel: Nightly (%s)\n' "$commit"
+        else
+            printf 'Channel: Nightly\n'
+        fi
     fi
     printf 'macOS: %s\n' "$os_ver"
     printf 'Architecture: %s\n' "$arch"

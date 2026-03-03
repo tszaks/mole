@@ -217,6 +217,17 @@ get_source_version() {
     fi
 }
 
+get_source_commit_hash() {
+    # Try to get from local git repo first
+    if [[ -d "$SOURCE_DIR/.git" ]]; then
+        git -C "$SOURCE_DIR" rev-parse --short HEAD 2> /dev/null && return
+    fi
+    # Fallback to GitHub API
+    curl -fsSL --connect-timeout 3 \
+        "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null |
+        sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([a-f0-9]\{7\}\).*/\1/p' | head -1
+}
+
 get_latest_release_tag() {
     local tag
     if ! command -v curl > /dev/null 2>&1; then
@@ -288,12 +299,14 @@ resolve_install_channel() {
 
 write_install_channel_metadata() {
     local channel="$1"
+    local commit_hash="${2:-}"
     local metadata_file="$CONFIG_DIR/install_channel"
 
     local tmp_file
     tmp_file=$(mktemp "${CONFIG_DIR}/install_channel.XXXXXX") || return 1
     {
         printf 'CHANNEL=%s\n' "$channel"
+        [[ -n "$commit_hash" ]] && printf 'COMMIT_HASH=%s\n' "$commit_hash"
     } > "$tmp_file" || {
         rm -f "$tmp_file" 2> /dev/null || true
         return 1
@@ -751,9 +764,12 @@ perform_install() {
         installed_version="$source_version"
     fi
 
-    local install_channel
+    local install_channel commit_hash=""
     install_channel="$(resolve_install_channel)"
-    if ! write_install_channel_metadata "$install_channel"; then
+    if [[ "$install_channel" == "nightly" ]]; then
+        commit_hash=$(get_source_commit_hash)
+    fi
+    if ! write_install_channel_metadata "$install_channel" "$commit_hash"; then
         log_warning "Could not write install channel metadata"
     fi
 
@@ -840,9 +856,12 @@ perform_update() {
         updated_version="$target_version"
     fi
 
-    local install_channel
+    local install_channel commit_hash=""
     install_channel="$(resolve_install_channel)"
-    if ! write_install_channel_metadata "$install_channel"; then
+    if [[ "$install_channel" == "nightly" ]]; then
+        commit_hash=$(get_source_commit_hash)
+    fi
+    if ! write_install_channel_metadata "$install_channel" "$commit_hash"; then
         log_warning "Could not write install channel metadata"
     fi
 
