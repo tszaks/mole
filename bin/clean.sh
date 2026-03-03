@@ -1022,24 +1022,7 @@ perform_cleanup() {
 
     if [[ $total_size_cleaned -gt 0 ]]; then
         local freed_size_human
-        local freed_value
-        local freed_unit
-
-        # ============================================
-        # Dynamic size formatting (KB → MB → GB)
-        # ============================================
-        if ((total_size_cleaned < 1024)); then
-            freed_value="$total_size_cleaned"
-            freed_unit="KB"
-        elif ((total_size_cleaned < 1024 * 1024)); then
-            freed_value=$(printf "%.2f" "$(echo "scale=4; $total_size_cleaned/1024" | bc)")
-            freed_unit="MB"
-        else
-            freed_value=$(printf "%.2f" "$(echo "scale=4; $total_size_cleaned/1024/1024" | bc)")
-            freed_unit="GB"
-        fi
-
-        freed_size_human="${freed_value}${freed_unit}"
+        freed_size_human=$(bytes_to_human_kb "$total_size_cleaned")
 
         if [[ "$DRY_RUN" == "true" ]]; then
             local stats="Potential space: ${GREEN}${freed_size_human}${NC}"
@@ -1072,12 +1055,10 @@ perform_cleanup() {
 
             summary_details+=("$summary_line")
 
-            # Movie comparison only if unit is GB and >= 1GB
-            if [[ "$freed_unit" == "GB" ]] &&
-                [[ $(echo "$freed_value >= 1" | bc) -eq 1 ]]; then
-
-                local movies
-                movies=$(printf "%.0f" "$(echo "scale=2; $freed_value/4.5" | bc)")
+            # Movie comparison only if >= 1GB (1048576 KB)
+            if ((total_size_cleaned >= 1048576)); then
+                local freed_gb=$((total_size_cleaned / 1048576))
+                local movies=$((freed_gb * 10 / 45))
 
                 if [[ $movies -gt 0 ]]; then
                     if [[ $movies -eq 1 ]]; then

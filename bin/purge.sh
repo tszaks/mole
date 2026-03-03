@@ -210,12 +210,12 @@ perform_purge() {
     fi
 
     if [[ $total_size_cleaned -gt 0 ]]; then
-        local freed_gb
-        freed_gb=$(echo "$total_size_cleaned" | awk '{printf "%.2f", $1/1024/1024}')
+        local freed_size_human
+        freed_size_human=$(bytes_to_human_kb "$total_size_cleaned")
 
-        local summary_line="Space freed: ${GREEN}${freed_gb}GB${NC}"
+        local summary_line="Space freed: ${GREEN}${freed_size_human}${NC}"
         if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
-            summary_line="Would free: ${GREEN}${freed_gb}GB${NC}"
+            summary_line="Would free: ${GREEN}${freed_size_human}${NC}"
         fi
         [[ $total_items_cleaned -gt 0 ]] && summary_line+=" | Items: $total_items_cleaned"
         summary_line+=" | Free: $(get_free_space)"
