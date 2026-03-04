@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	gopsutilnet "github.com/shirou/gopsutil/v4/net"
+)
 
 func TestCollectProxyFromEnvSupportsAllProxy(t *testing.T) {
 	env := map[string]string{
@@ -56,5 +61,43 @@ func TestCollectProxyFromScutilOutputHTTPHostPort(t *testing.T) {
 	}
 	if got.Host != "127.0.0.1:7890" {
 		t.Fatalf("unexpected host: %s", got.Host)
+	}
+}
+
+func TestCollectIOCountersSafelyRecoversPanic(t *testing.T) {
+	original := ioCountersFunc
+	ioCountersFunc = func(bool) ([]gopsutilnet.IOCountersStat, error) {
+		panic("boom")
+	}
+	t.Cleanup(func() { ioCountersFunc = original })
+
+	stats, err := collectIOCountersSafely(true)
+	if err == nil {
+		t.Fatalf("expected error from panic recovery")
+	}
+	if !strings.Contains(err.Error(), "panic collecting network counters") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stats) != 0 {
+		t.Fatalf("expected empty stats when panic recovered")
+	}
+}
+
+func TestCollectIOCountersSafelyReturnsData(t *testing.T) {
+	original := ioCountersFunc
+	want := []gopsutilnet.IOCountersStat{
+		{Name: "en0", BytesRecv: 1, BytesSent: 2},
+	}
+	ioCountersFunc = func(bool) ([]gopsutilnet.IOCountersStat, error) {
+		return want, nil
+	}
+	t.Cleanup(func() { ioCountersFunc = original })
+
+	got, err := collectIOCountersSafely(true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "en0" {
+		t.Fatalf("unexpected stats: %+v", got)
 	}
 }

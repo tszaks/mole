@@ -17,6 +17,9 @@ func collectMemory() (MemoryStatus, error) {
 	}
 
 	swap, _ := mem.SwapMemory()
+	if swap == nil {
+		swap = &mem.SwapMemoryStat{}
+	}
 	pressure := getMemoryPressure()
 
 	// On macOS, vm.Cached is 0, so we calculate from file-backed pages.

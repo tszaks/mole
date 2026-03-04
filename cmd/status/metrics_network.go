@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"runtime"
@@ -13,10 +14,25 @@ import (
 	"github.com/shirou/gopsutil/v4/net"
 )
 
+var ioCountersFunc = net.IOCounters
+
+func collectIOCountersSafely(pernic bool) (stats []net.IOCountersStat, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic collecting network counters: %v", r)
+		}
+	}()
+	return ioCountersFunc(pernic)
+}
+
 func (c *Collector) collectNetwork(now time.Time) ([]NetworkStatus, error) {
-	stats, err := net.IOCounters(true)
+	stats, err := collectIOCountersSafely(true)
 	if err != nil {
-		return nil, err
+		// Some restricted environments can break netstat-backed collectors.
+		// Degrade gracefully to keep status output available.
+		c.rxHistoryBuf.Add(0)
+		c.txHistoryBuf.Add(0)
+		return nil, nil
 	}
 
 	// Map interface IPs.

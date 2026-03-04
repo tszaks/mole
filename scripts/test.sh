@@ -150,7 +150,11 @@ echo ""
 
 echo "3. Running Go tests..."
 if command -v go > /dev/null 2>&1; then
-    if go build ./... > /dev/null 2>&1 && go vet ./cmd/... > /dev/null 2>&1 && go test ./cmd/... > /dev/null 2>&1; then
+    GO_TEST_CACHE="${MOLE_GO_TEST_CACHE:-/tmp/mole-go-build-cache}"
+    mkdir -p "$GO_TEST_CACHE"
+    if GOCACHE="$GO_TEST_CACHE" go build ./... > /dev/null 2>&1 &&
+        GOCACHE="$GO_TEST_CACHE" go vet ./cmd/... > /dev/null 2>&1 &&
+        GOCACHE="$GO_TEST_CACHE" go test ./cmd/... > /dev/null 2>&1; then
         printf "${GREEN}${ICON_SUCCESS} Go tests passed${NC}\n"
     else
         printf "${RED}${ICON_ERROR} Go tests failed${NC}\n"
@@ -182,9 +186,23 @@ echo ""
 
 echo "6. Testing installation..."
 # Skip if Homebrew mole is installed (install.sh will refuse to overwrite)
-if brew list mole &> /dev/null; then
+install_test_home=""
+if command -v brew > /dev/null 2>&1 && brew list mole &> /dev/null; then
     printf "${GREEN}${ICON_SUCCESS} Installation test skipped, Homebrew${NC}\n"
-elif ./install.sh --prefix /tmp/mole-test > /dev/null 2>&1; then
+else
+    install_test_home="$(mktemp -d /tmp/mole-test-home.XXXXXX 2> /dev/null || true)"
+    if [[ -z "$install_test_home" ]]; then
+        install_test_home="/tmp/mole-test-home"
+        mkdir -p "$install_test_home"
+    fi
+fi
+if [[ -z "$install_test_home" ]]; then
+    :
+elif HOME="$install_test_home" \
+    XDG_CONFIG_HOME="$install_test_home/.config" \
+    XDG_CACHE_HOME="$install_test_home/.cache" \
+    MO_NO_OPLOG=1 \
+    ./install.sh --prefix /tmp/mole-test > /dev/null 2>&1; then
     if [ -f /tmp/mole-test/mole ]; then
         printf "${GREEN}${ICON_SUCCESS} Installation test passed${NC}\n"
     else
@@ -195,7 +213,10 @@ else
     printf "${RED}${ICON_ERROR} Installation test failed${NC}\n"
     ((FAILED++))
 fi
-safe_remove "/tmp/mole-test" true || true
+MO_NO_OPLOG=1 safe_remove "/tmp/mole-test" true || true
+if [[ -n "$install_test_home" ]]; then
+    MO_NO_OPLOG=1 safe_remove "$install_test_home" true || true
+fi
 echo ""
 
 echo "==============================="

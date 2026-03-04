@@ -43,6 +43,7 @@ tests/tmp-*
 
 # AI Assistant Instructions
 .claude/
+.agents/
 .gemini/
 .kiro/
 CLAUDE.md
