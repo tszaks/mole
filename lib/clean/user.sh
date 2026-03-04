@@ -668,6 +668,15 @@ clean_browsers() {
     safe_clean ~/Library/Caches/company.thebrowser.Browser/* "Arc cache"
     safe_clean ~/Library/Caches/company.thebrowser.dia/* "Dia cache"
     safe_clean ~/Library/Caches/BraveSoftware/Brave-Browser/* "Brave cache"
+    # Helium Browser.
+    safe_clean ~/Library/Caches/net.imput.helium/* "Helium cache"
+    safe_clean ~/Library/Application\ Support/net.imput.helium/*/GPUCache/* "Helium GPU cache"
+    safe_clean ~/Library/Application\ Support/net.imput.helium/component_crx_cache/* "Helium component cache"
+    safe_clean ~/Library/Application\ Support/net.imput.helium/extensions_crx_cache/* "Helium extensions cache"
+    safe_clean ~/Library/Application\ Support/net.imput.helium/GrShaderCache/* "Helium shader cache"
+    safe_clean ~/Library/Application\ Support/net.imput.helium/GraphiteDawnCache/* "Helium Dawn cache"
+    safe_clean ~/Library/Application\ Support/net.imput.helium/ShaderCache/* "Helium shader cache"
+    safe_clean ~/Library/Application\ Support/net.imput.helium/*/Application\ Cache/* "Helium app cache"
     # Yandex Browser.
     safe_clean ~/Library/Caches/Yandex/YandexBrowser/* "Yandex cache"
     safe_clean ~/Library/Application\ Support/Yandex/YandexBrowser/ShaderCache/* "Yandex shader cache"
@@ -745,9 +754,19 @@ app_support_item_size_bytes() {
     fi
 
     if [[ -d "$item" && ! -L "$item" ]]; then
+        # Fast path: if directory has too many items, skip detailed size calculation
+        # to avoid hanging on deep directories (e.g., node_modules, .git)
+        local item_count
+        item_count=$(command find "$item" -maxdepth 2 -print0 2> /dev/null | tr -d '\0' | wc -c)
+        if [[ "$item_count" -gt 10000 ]]; then
+            # Return 1 to signal "too many items, size unknown"
+            return 1
+        fi
+
         local du_tmp
         du_tmp=$(mktemp)
         local du_status=0
+        # Use stricter timeout for directories
         if run_with_timeout "$timeout_seconds" du -skP "$item" > "$du_tmp" 2> /dev/null; then
             du_status=0
         else
@@ -827,6 +846,27 @@ clean_application_support_logs() {
         local -a start_candidates=("$app_dir/log" "$app_dir/logs" "$app_dir/activitylog" "$app_dir/Cache/Cache_Data" "$app_dir/Crashpad/completed")
         for candidate in "${start_candidates[@]}"; do
             if [[ -d "$candidate" ]]; then
+                # Quick count check - skip if too many items to avoid hanging
+                local quick_count
+                quick_count=$(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null | tr -d '\0' | wc -c)
+                if [[ "$quick_count" -gt 5000 ]]; then
+                    # Too many items - use bulk removal instead of item-by-item
+                    local app_label="$app_name"
+                    if [[ ${#app_label} -gt 24 ]]; then
+                        app_label="${app_label:0:21}..."
+                    fi
+                    stop_section_spinner
+                    start_section_spinner "Scanning Application Support... $app_count/$total_apps [$app_label, bulk clean]"
+                    if [[ "$DRY_RUN" != "true" ]]; then
+                        # Remove entire candidate directory in one go
+                        safe_remove "$candidate" true > /dev/null 2>&1 || true
+                    fi
+                    found_any=true
+                    cleaned_count=$((cleaned_count + 1))
+                    total_size_partial=true
+                    continue
+                fi
+
                 local item_found=false
                 local candidate_size_bytes=0
                 local candidate_size_partial=false
@@ -882,6 +922,25 @@ clean_application_support_logs() {
         local -a gc_candidates=("$container_path/Logs" "$container_path/Library/Logs")
         for candidate in "${gc_candidates[@]}"; do
             if [[ -d "$candidate" ]]; then
+                # Quick count check - skip if too many items
+                local quick_count
+                quick_count=$(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null | tr -d '\0' | wc -c)
+                if [[ "$quick_count" -gt 5000 ]]; then
+                    local container_label="$container"
+                    if [[ ${#container_label} -gt 24 ]]; then
+                        container_label="${container_label:0:21}..."
+                    fi
+                    stop_section_spinner
+                    start_section_spinner "Scanning Application Support... group [$container_label, bulk clean]"
+                    if [[ "$DRY_RUN" != "true" ]]; then
+                        safe_remove "$candidate" true > /dev/null 2>&1 || true
+                    fi
+                    found_any=true
+                    cleaned_count=$((cleaned_count + 1))
+                    total_size_partial=true
+                    continue
+                fi
+
                 local item_found=false
                 local candidate_size_bytes=0
                 local candidate_size_partial=false
