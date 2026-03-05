@@ -37,7 +37,6 @@ get_latest_version_from_github() {
     echo "$version"
 }
 
-
 # Install detection (Homebrew vs manual).
 # Uses variable capture + string matching to avoid SIGPIPE under pipefail.
 is_homebrew_install() {
