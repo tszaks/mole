@@ -14,7 +14,7 @@ setup_file() {
 }
 
 teardown_file() {
-	rm -f "$PROJECT_ROOT/install_channel"
+	rm -rf "$HOME/.config/mole"
 	rm -rf "$HOME"
 	if [[ -n "${ORIGINAL_HOME:-}" ]]; then
 		export HOME="$ORIGINAL_HOME"
@@ -46,9 +46,8 @@ SCRIPT
 }
 
 setup() {
-	rm -rf "$HOME/.config"
-	mkdir -p "$HOME"
-	rm -f "$PROJECT_ROOT/install_channel"
+	rm -rf "$HOME/.config/mole"
+	mkdir -p "$HOME/.config/mole"
 }
 
 @test "mole --help prints command overview" {
@@ -67,7 +66,8 @@ setup() {
 
 @test "mole --version shows nightly channel metadata" {
 	expected_version="$(grep '^VERSION=' "$PROJECT_ROOT/mole" | head -1 | sed 's/VERSION=\"\(.*\)\"/\1/')"
-	cat > "$PROJECT_ROOT/install_channel" <<'EOF'
+	mkdir -p "$HOME/.config/mole"
+	cat > "$HOME/.config/mole/install_channel" <<'EOF'
 CHANNEL=nightly
 EOF
 
@@ -81,6 +81,12 @@ EOF
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" unknown-command
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"Unknown command: unknown-command"* ]]
+}
+
+@test "mole uninstall --whitelist returns unsupported option error" {
+	run env HOME="$HOME" "$PROJECT_ROOT/mole" uninstall --whitelist
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Unknown uninstall option: --whitelist"* ]]
 }
 
 @test "touchid status reports current configuration" {

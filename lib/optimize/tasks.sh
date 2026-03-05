@@ -403,7 +403,7 @@ opt_launch_services_rebuild() {
     fi
 
     if [[ -t 1 ]]; then
-        start_inline_spinner ""
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Repairing LaunchServices..."
     fi
 
     local lsregister

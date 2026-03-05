@@ -10,16 +10,23 @@ clean_user_essentials() {
 
     if ! is_path_whitelisted "$HOME/.Trash"; then
         local trash_count
-        trash_count=$(osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null || echo "0")
+        local trash_count_status=0
+        trash_count=$(run_with_timeout 3 osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null) || trash_count_status=$?
+        if [[ $trash_count_status -eq 124 ]]; then
+            debug_log "Finder trash count timed out, using direct .Trash scan"
+            trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -exec printf '.' ';' 2> /dev/null |
+                wc -c | awk '{print $1}' || echo "0")
+        fi
         [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count="0"
 
         if [[ "$DRY_RUN" == "true" ]]; then
             [[ $trash_count -gt 0 ]] && echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $trash_count items" || echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
         elif [[ $trash_count -gt 0 ]]; then
-            if osascript -e 'tell application "Finder" to empty trash' > /dev/null 2>&1; then
+            if run_with_timeout 5 osascript -e 'tell application "Finder" to empty trash' > /dev/null 2>&1; then
                 echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $trash_count items"
                 note_activity
             else
+                debug_log "Finder trash empty failed or timed out, falling back to direct deletion"
                 local cleaned_count=0
                 while IFS= read -r -d '' item; do
                     if safe_remove "$item" true; then
@@ -435,6 +442,8 @@ clean_support_app_data() {
 
 # App caches (merged: macOS system caches + Sandboxed apps).
 clean_app_caches() {
+    start_section_spinner "Scanning app caches..."
+
     # macOS system caches (merged from clean_macos_system_caches)
     safe_clean ~/Library/Saved\ Application\ State/* "Saved application states" || true
     safe_clean ~/Library/Caches/com.apple.photoanalysisd "Photo analysis cache" || true
@@ -454,8 +463,10 @@ clean_app_caches() {
     safe_clean ~/Library/Application\ Support/AddressBook/Sources/*/Photos.cache "Address Book photo cache" || true
     clean_support_app_data
 
-    # Sandboxed app caches
+    # Stop initial scan indicator before entering per-group scans.
     stop_section_spinner
+
+    # Sandboxed app caches
     safe_clean ~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/* "Wallpaper agent cache"
     safe_clean ~/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/* "Media analysis cache"
     safe_clean ~/Library/Containers/com.apple.AppStore/Data/Library/Caches/* "App Store cache"

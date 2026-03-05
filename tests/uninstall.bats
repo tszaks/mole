@@ -313,6 +313,49 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "refresh_launch_services_after_uninstall falls back after timeout" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+log_file="$HOME/lsregister-timeout.log"
+: > "$log_file"
+call_index=0
+
+get_lsregister_path() { echo "/bin/echo"; }
+debug_log() { echo "DEBUG:$*" >> "$log_file"; }
+run_with_timeout() {
+    local duration="$1"
+    shift
+    call_index=$((call_index + 1))
+    echo "CALL${call_index}:$duration:$*" >> "$log_file"
+
+    if [[ "$call_index" -eq 2 ]]; then
+        return 124
+    fi
+    if [[ "$call_index" -eq 3 ]]; then
+        return 124
+    fi
+    return 0
+}
+
+if refresh_launch_services_after_uninstall; then
+    echo "RESULT:ok"
+else
+    echo "RESULT:fail"
+fi
+
+cat "$log_file"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"RESULT:ok"* ]]
+	[[ "$output" == *"CALL2:15:/bin/echo -r -f -domain local -domain user -domain system"* ]]
+	[[ "$output" == *"CALL3:10:/bin/echo -r -f -domain local -domain user"* ]]
+	[[ "$output" == *"DEBUG:LaunchServices rebuild timed out, trying lighter version"* ]]
+}
+
 @test "remove_mole deletes manual binaries and caches" {
 	mkdir -p "$HOME/.local/bin"
 	touch "$HOME/.local/bin/mole"

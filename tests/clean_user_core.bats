@@ -38,6 +38,44 @@ EOF
     [[ "$output" != *"Trash"* ]]
 }
 
+@test "clean_user_essentials falls back when Finder trash operations time out" {
+    mkdir -p "$HOME/.Trash"
+    touch "$HOME/.Trash/one.tmp" "$HOME/.Trash/two.tmp"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+DRY_RUN=false
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+safe_clean() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+debug_log() { :; }
+run_with_timeout() {
+    local _duration="$1"
+    shift
+    if [[ "$1" == "osascript" ]]; then
+        return 124
+    fi
+    "$@"
+}
+safe_remove() {
+    local target="$1"
+    /bin/rm -rf "$target"
+    return 0
+}
+
+clean_user_essentials
+[[ ! -e "$HOME/.Trash/one.tmp" ]] || exit 1
+[[ ! -e "$HOME/.Trash/two.tmp" ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Trash · emptied, 2 items"* ]]
+}
+
 @test "clean_app_caches includes macOS system caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -56,6 +94,24 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Saved application states"* ]] || [[ "$output" == *"App caches"* ]]
+}
+
+@test "clean_app_caches shows spinner during initial app cache scan" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { echo "SPIN_START:$1"; }
+stop_section_spinner() { echo "SPIN_STOP"; }
+safe_clean() { :; }
+clean_support_app_data() { :; }
+clean_group_container_caches() { :; }
+
+clean_app_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SPIN_START:Scanning app caches..."* ]]
 }
 
 @test "clean_support_app_data targets crash, wallpaper, and messages preview caches only" {

@@ -88,7 +88,11 @@ is_homebrew_install() {
 }
 
 get_install_channel() {
-    local channel_file="$SCRIPT_DIR/install_channel"
+    # Try user config dir first (matches install.sh behavior), fallback to SCRIPT_DIR
+    local channel_file="${MOLE_CONFIG_DIR:-$HOME/.config/mole}/install_channel"
+    if [[ ! -f "$channel_file" ]]; then
+        channel_file="$SCRIPT_DIR/install_channel"
+    fi
     local channel="stable"
     if [[ -f "$channel_file" ]]; then
         channel=$(sed -n 's/^CHANNEL=\(.*\)$/\1/p' "$channel_file" | head -1)
@@ -100,7 +104,11 @@ get_install_channel() {
 }
 
 get_install_commit() {
-    local channel_file="$SCRIPT_DIR/install_channel"
+    # Try user config dir first (matches install.sh behavior), fallback to SCRIPT_DIR
+    local channel_file="${MOLE_CONFIG_DIR:-$HOME/.config/mole}/install_channel"
+    if [[ ! -f "$channel_file" ]]; then
+        channel_file="$SCRIPT_DIR/install_channel"
+    fi
     if [[ -f "$channel_file" ]]; then
         sed -n 's/^COMMIT_HASH=\(.*\)$/\1/p' "$channel_file" | head -1
     fi

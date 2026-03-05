@@ -59,6 +59,7 @@ show_uninstall_help() {
     echo ""
     echo "Options:"
     echo "  --dry-run         Preview app uninstallation without making changes"
+    echo "  --whitelist       Not supported for uninstall (use clean/optimize)"
     echo "  --debug           Show detailed operation logs"
     echo "  -h, --help        Show this help message"
 }

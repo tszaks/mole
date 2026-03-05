@@ -78,10 +78,32 @@ ask_for_updates
 EOF
 
     [ "$status" -eq 1 ]  # ESC cancels
-    [[ "$output" == *"Homebrew, 3 formula, 2 cask"* ]]
-    [[ "$output" == *"App Store, 1 apps"* ]]
-    [[ "$output" == *"macOS system"* ]]
-    [[ "$output" == *"Mole"* ]]
+    [[ "$output" == *"Update Mole now?"* ]]
+    [[ "$output" == *"Run "* ]]
+    [[ "$output" == *"brew upgrade"* ]]
+    [[ "$output" == *"Software Update"* ]]
+    [[ "$output" == *"App Store"* ]]
+    [[ "$output" != *"AVAILABLE UPDATES"* ]]
+}
+
+@test "ask_for_updates with only macOS update shows settings hint without brew hint" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+BREW_OUTDATED_COUNT=0
+BREW_FORMULA_OUTDATED_COUNT=0
+BREW_CASK_OUTDATED_COUNT=0
+APPSTORE_UPDATE_COUNT=0
+MACOS_UPDATE_AVAILABLE=true
+MOLE_UPDATE_AVAILABLE=false
+ask_for_updates
+EOF
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Software Update"* ]]
+    [[ "$output" != *"brew upgrade"* ]]
+    [[ "$output" != *"AVAILABLE UPDATES"* ]]
 }
 
 @test "ask_for_updates accepts Enter when updates exist" {
@@ -97,8 +119,48 @@ ask_for_updates
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"AVAILABLE UPDATES"* ]]
+    [[ "$output" == *"Update Mole now?"* ]]
     [[ "$output" == *"yes"* ]]
+}
+
+@test "ask_for_updates auto-detects brew updates when counts are unset" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+cat > "$MOCK_BIN_DIR/brew" <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "$1" == "outdated" && "$2" == "--formula" && "$3" == "--quiet" ]]; then
+    printf "wget\njq\n"
+    exit 0
+fi
+if [[ "$1" == "outdated" && "$2" == "--cask" && "$3" == "--quiet" ]]; then
+    printf "iterm2\n"
+    exit 0
+fi
+exit 0
+SCRIPT
+chmod +x "$MOCK_BIN_DIR/brew"
+
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+unset BREW_OUTDATED_COUNT BREW_FORMULA_OUTDATED_COUNT BREW_CASK_OUTDATED_COUNT
+APPSTORE_UPDATE_COUNT=0
+MACOS_UPDATE_AVAILABLE=false
+MOLE_UPDATE_AVAILABLE=false
+
+set +e
+ask_for_updates
+ask_status=$?
+set -e
+
+echo "COUNTS:${BREW_OUTDATED_COUNT}:${BREW_FORMULA_OUTDATED_COUNT}:${BREW_CASK_OUTDATED_COUNT}"
+exit "$ask_status"
+EOF
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"brew upgrade"* ]]
+    [[ "$output" == *"COUNTS:3:2:1"* ]]
+    [[ "$output" != *"AVAILABLE UPDATES"* ]]
 }
 
 @test "format_brew_update_label lists formula and cask counts" {

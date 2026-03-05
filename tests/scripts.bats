@@ -56,7 +56,7 @@ setup() {
 }
 
 @test "Makefile has build target for Go binaries" {
-    run bash -c "grep -q 'go build' '$PROJECT_ROOT/Makefile'"
+    run bash -c "grep -Eq '(^|[[:space:]])(go|\\$\\(GO\\))[[:space:]]+build' '$PROJECT_ROOT/Makefile'"
     [ "$status" -eq 0 ]
 }
 

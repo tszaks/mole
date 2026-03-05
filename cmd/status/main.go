@@ -24,6 +24,20 @@ var (
 	jsonOutput = flag.Bool("json", false, "output metrics as JSON instead of TUI")
 )
 
+func shouldUseJSONOutput(forceJSON bool, stdout *os.File) bool {
+	if forceJSON {
+		return true
+	}
+	if stdout == nil {
+		return false
+	}
+	info, err := stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) == 0
+}
+
 type tickMsg struct{}
 type animTickMsg struct{}
 
@@ -246,7 +260,7 @@ func runTUIMode() {
 func main() {
 	flag.Parse()
 
-	if *jsonOutput {
+	if shouldUseJSONOutput(*jsonOutput, os.Stdout) {
 		runJSONMode()
 	} else {
 		runTUIMode()

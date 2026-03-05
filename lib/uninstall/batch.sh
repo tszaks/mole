@@ -148,16 +148,24 @@ refresh_launch_services_after_uninstall() {
 
     local success=0
     set +e
-    "$lsregister" -gc > /dev/null 2>&1 || true
-    "$lsregister" -r -f -domain local -domain user -domain system > /dev/null 2>&1
+    # Add 10s timeout to prevent hanging (gc is usually fast)
+    # run_with_timeout falls back to shell implementation if timeout command unavailable
+    run_with_timeout 10 "$lsregister" -gc > /dev/null 2>&1 || true
+    # Add 15s timeout for rebuild (can be slow on some systems)
+    run_with_timeout 15 "$lsregister" -r -f -domain local -domain user -domain system > /dev/null 2>&1
     success=$?
-    if [[ $success -ne 0 ]]; then
-        "$lsregister" -r -f -domain local -domain user > /dev/null 2>&1
+    # 124 = timeout exit code (from run_with_timeout or timeout command)
+    if [[ $success -eq 124 ]]; then
+        debug_log "LaunchServices rebuild timed out, trying lighter version"
+        run_with_timeout 10 "$lsregister" -r -f -domain local -domain user > /dev/null 2>&1
+        success=$?
+    elif [[ $success -ne 0 ]]; then
+        run_with_timeout 10 "$lsregister" -r -f -domain local -domain user > /dev/null 2>&1
         success=$?
     fi
     set -e
 
-    [[ $success -eq 0 ]]
+    [[ $success -eq 0 || $success -eq 124 ]]
 }
 
 # Remove macOS Login Items for an app
@@ -789,7 +797,9 @@ batch_uninstall_applications() {
             fi
 
             local autoremove_output removed_count
-            autoremove_output=$(HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2> /dev/null) || true
+            # Add 30s timeout to prevent hanging on slow brew operations
+            # Use run_with_timeout for consistent cross-platform behavior (has shell fallback)
+            autoremove_output=$(run_with_timeout 30 bash -c 'HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2>/dev/null' || true)
             removed_count=$(printf '%s\n' "$autoremove_output" | grep -c "^Uninstalling" || true)
             removed_count=${removed_count:-0}
 

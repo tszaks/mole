@@ -420,6 +420,80 @@ EOF
     [[ "$output" == *"COUNT=0"* ]]
 }
 
+@test "check_homebrew_updates reports counts and exports update variables" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+run_with_timeout() {
+    local timeout="${1:-}"
+    shift
+    "$@"
+}
+
+brew() {
+    if [[ "$1" == "outdated" && "$2" == "--formula" && "$3" == "--quiet" ]]; then
+        printf "wget\njq\n"
+        return 0
+    fi
+    if [[ "$1" == "outdated" && "$2" == "--cask" && "$3" == "--quiet" ]]; then
+        printf "iterm2\n"
+        return 0
+    fi
+    return 0
+}
+
+check_homebrew_updates
+echo "COUNTS=${BREW_OUTDATED_COUNT}:${BREW_FORMULA_OUTDATED_COUNT}:${BREW_CASK_OUTDATED_COUNT}"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Homebrew"* ]]
+    [[ "$output" == *"2 formula, 1 cask available"* ]]
+    [[ "$output" == *"COUNTS=3:2:1"* ]]
+}
+
+@test "check_homebrew_updates shows timeout warning when brew query times out" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+run_with_timeout() { return 124; }
+brew() { return 0; }
+rm -f "$HOME/.cache/mole/brew_updates"
+
+check_homebrew_updates
+echo "COUNTS=${BREW_OUTDATED_COUNT}:${BREW_FORMULA_OUTDATED_COUNT}:${BREW_CASK_OUTDATED_COUNT}"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Homebrew"* ]]
+    [[ "$output" == *"Check timed out"* ]]
+    [[ "$output" == *"COUNTS=0:0:0"* ]]
+}
+
+@test "check_homebrew_updates shows failure warning when brew query fails" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+run_with_timeout() { return 1; }
+brew() { return 0; }
+rm -f "$HOME/.cache/mole/brew_updates"
+
+check_homebrew_updates
+echo "COUNTS=${BREW_OUTDATED_COUNT}:${BREW_FORMULA_OUTDATED_COUNT}:${BREW_CASK_OUTDATED_COUNT}"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Homebrew"* ]]
+    [[ "$output" == *"Check failed"* ]]
+    [[ "$output" == *"COUNTS=0:0:0"* ]]
+}
+
 @test "check_macos_update avoids slow softwareupdate scans" {
     run bash --noprofile --norc << 'EOF'
 set -euo pipefail

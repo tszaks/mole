@@ -122,3 +122,52 @@ EOF
 
     [ "$status" -eq 0 ]
 }
+
+@test "batch_uninstall_applications tolerates brew autoremove timeout" {
+    local app_bundle="$HOME/Applications/BrewTimeout.app"
+    mkdir -p "$app_bundle"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+get_file_owner() { whoami; }
+get_path_size_kb() { echo "100"; }
+bytes_to_human() { echo "$1"; }
+drain_pending_input() { :; }
+print_summary_block() { :; }
+force_kill_app() { return 0; }
+remove_apps_from_dock() { :; }
+refresh_launch_services_after_uninstall() { echo "LS_REFRESH"; }
+
+get_brew_cask_name() { echo "brew-timeout-cask"; return 0; }
+brew_uninstall_cask() { return 0; }
+
+run_with_timeout() {
+    local duration="$1"
+    shift
+    echo "TIMEOUT_CALL:$duration:$*" >> "$HOME/timeout_calls.log"
+    if [[ "$duration" == "30" ]]; then
+        return 124
+    fi
+    "$@"
+}
+
+selected_apps=("0|$HOME/Applications/BrewTimeout.app|BrewTimeout|com.example.brewtimeout|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications
+
+cat "$HOME/timeout_calls.log"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TIMEOUT_CALL:30:bash -c HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2>/dev/null"* ]]
+    [[ "$output" == *"LS_REFRESH"* ]]
+}
