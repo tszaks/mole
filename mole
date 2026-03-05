@@ -37,6 +37,31 @@ get_latest_version_from_github() {
     echo "$version"
 }
 
+get_homebrew_latest_version() {
+    command -v brew > /dev/null 2>&1 || return 1
+
+    local line candidate=""
+
+    # Prefer local tap outdated info to avoid notifying before formula is available.
+    line=$(HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --formula --verbose mole 2> /dev/null | head -1 || true)
+    if [[ "$line" == *"< "* ]]; then
+        candidate="${line##*< }"
+        candidate="${candidate%% *}"
+    fi
+
+    # Fallback for environments where outdated output is unavailable.
+    if [[ -z "$candidate" ]]; then
+        line=$(HOMEBREW_NO_AUTO_UPDATE=1 brew info mole 2> /dev/null | awk 'NR==1 { print; exit }' || true)
+        line="${line#==> }"
+        line="${line#*: }"
+        if [[ "$line" == stable* ]]; then
+            candidate=$(printf '%s\n' "$line" | awk '{print $2}')
+        fi
+    fi
+
+    [[ -n "$candidate" ]] && printf '%s\n' "$candidate"
+}
+
 
 # Install detection (Homebrew vs manual).
 # Uses variable capture + string matching to avoid SIGPIPE under pipefail.
@@ -127,9 +152,16 @@ check_for_updates() {
 
             if [[ -n "$latest" && "$VERSION" != "$latest" && "$(printf '%s\n' "$VERSION" "$latest" | sort -V | head -1)" == "$VERSION" ]]; then
                 if is_homebrew_install; then
-                    printf "\nUpdate %s available on GitHub (Homebrew sync may be pending)\nRun %sbrew upgrade mole%s or wait for the tap to sync\n\n" "$latest" "$GREEN" "$NC" > "$msg_cache"
+                    # For Homebrew, only notify if the brew tap has the new version available locally
+                    local brew_latest
+                    brew_latest=$(get_homebrew_latest_version || true)
+                    if [[ -n "$brew_latest" && "$brew_latest" != "$VERSION" && "$(printf '%s\n' "$VERSION" "$brew_latest" | sort -V | head -1)" == "$VERSION" ]]; then
+                        printf "\nUpdate %s available, run %smo update%s\n\n" "$brew_latest" "$GREEN" "$NC" > "$msg_cache"
+                    else
+                        echo -n > "$msg_cache"
+                    fi
                 else
-                    printf "\nUpdate available: %s → %s, run %smo update%s\n\n" "$VERSION" "$latest" "$GREEN" "$NC" > "$msg_cache"
+                    printf "\nUpdate %s available, run %smo update%s\n\n" "$latest" "$GREEN" "$NC" > "$msg_cache"
                 fi
             else
                 echo -n > "$msg_cache"
@@ -968,4 +1000,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${MOLE_SKIP_MAIN:-0}" != "1" ]]; then
+    main "$@"
+fi

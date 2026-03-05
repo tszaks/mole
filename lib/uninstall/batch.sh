@@ -257,10 +257,8 @@ batch_uninstall_applications() {
     old_trap_term=$(trap -p TERM)
 
     _cleanup_sudo_keepalive() {
-        if [[ -n "${sudo_keepalive_pid:-}" ]]; then
-            kill "$sudo_keepalive_pid" 2> /dev/null || true
-            wait "$sudo_keepalive_pid" 2> /dev/null || true
-            sudo_keepalive_pid=""
+        if command -v stop_sudo_session >/dev/null 2>&1; then
+            stop_sudo_session
         fi
     }
 
@@ -378,9 +376,7 @@ batch_uninstall_applications() {
 
     local size_display=$(bytes_to_human "$((total_estimated_size * 1024))")
 
-    echo ""
-    echo -e "${PURPLE_BOLD}Files to be removed:${NC}"
-    echo ""
+    echo -e "\n${PURPLE_BOLD}Files to be removed:${NC}"
 
     # Warn if brew cask apps are present.
     local has_brew_cask=false
@@ -390,9 +386,10 @@ batch_uninstall_applications() {
     done
 
     if [[ "$has_brew_cask" == "true" ]]; then
-        echo -e "${GRAY}${ICON_WARNING}${NC} ${YELLOW}Homebrew apps will be fully cleaned (--zap: removes configs & data)${NC}"
-        echo ""
+        echo -e "${GRAY}${ICON_WARNING} Homebrew apps will be fully cleaned, --zap removes configs and data${NC}"
     fi
+
+    echo ""
 
     for detail in "${app_details[@]}"; do
         IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system <<< "$detail"
@@ -467,31 +464,21 @@ batch_uninstall_applications() {
     # that user explicitly chose to uninstall. System-critical components remain protected.
     export MOLE_UNINSTALL_MODE=1
 
-    # Request sudo if needed.
+    # Request sudo if needed for non-Homebrew removal operations.
+    # Note: Homebrew resets sudo timestamp at process startup, so pre-auth would
+    # cause duplicate password prompts in cask-only flows.
     if [[ ${#sudo_apps[@]} -gt 0 && "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        if ! sudo -n true 2> /dev/null; then
-            if ! request_sudo_access "Admin required for system apps: ${sudo_apps[*]}"; then
-                echo ""
-                log_error "Admin access denied"
-                _restore_uninstall_traps
-                return 1
-            fi
+        if ! ensure_sudo_session "Admin required for system apps: ${sudo_apps[*]}"; then
+            echo ""
+            log_error "Admin access denied"
+            _restore_uninstall_traps
+            return 1
         fi
-        # Keep sudo alive during uninstall.
-        parent_pid=$$
-        (while true; do
-            if ! kill -0 "$parent_pid" 2> /dev/null; then
-                exit 0
-            fi
-            sudo -n true
-            sleep 60
-        done 2> /dev/null) &
-        sudo_keepalive_pid=$!
     fi
 
     # Perform uninstallations with per-app progress feedback
     local success_count=0 failed_count=0
-    local brew_apps_removed=0 # Track successful brew uninstalls for autoremove tip
+    local brew_apps_removed=0 # Track successful brew uninstalls for silent autoremove
     local -a failed_items=()
     local -a success_items=()
     local current_index=0
@@ -786,32 +773,13 @@ batch_uninstall_applications() {
     print_summary_block "$title" "${summary_details[@]}"
     printf '\n'
 
-    # Auto-run brew autoremove if Homebrew casks were uninstalled
-    if [[ $brew_apps_removed -gt 0 ]]; then
-        if is_uninstall_dry_run; then
-            log_info "[DRY RUN] Would run brew autoremove"
-        else
-            # Show spinner while checking for orphaned dependencies
-            if [[ -t 1 ]]; then
-                start_inline_spinner "Checking brew dependencies..."
-            fi
-
-            local autoremove_output removed_count
-            # Add 30s timeout to prevent hanging on slow brew operations
-            # Use run_with_timeout for consistent cross-platform behavior (has shell fallback)
-            autoremove_output=$(run_with_timeout 30 bash -c 'HOMEBREW_NO_ENV_HINTS=1 brew autoremove 2>/dev/null' || true)
-            removed_count=$(printf '%s\n' "$autoremove_output" | grep -c "^Uninstalling" || true)
-            removed_count=${removed_count:-0}
-
-            if [[ -t 1 ]]; then
-                stop_inline_spinner
-            fi
-
-            if [[ $removed_count -gt 0 ]]; then
-                echo -e "${GREEN}${ICON_SUCCESS}${NC} Cleaned $removed_count orphaned brew dependencies"
-                echo ""
-            fi
-        fi
+    # Run brew autoremove silently in background to avoid interrupting UX.
+    if [[ $brew_apps_removed -gt 0 && "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+        (
+            HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
+                run_with_timeout 30 brew autoremove > /dev/null 2>&1 || true
+        ) &
+        disown $! 2> /dev/null || true
     fi
 
     # Clean up Dock entries for uninstalled apps.
@@ -819,8 +787,11 @@ batch_uninstall_applications() {
         if is_uninstall_dry_run; then
             log_info "[DRY RUN] Would refresh LaunchServices and update Dock entries"
         else
-            remove_apps_from_dock "${success_items[@]}" 2> /dev/null || true
-            refresh_launch_services_after_uninstall 2> /dev/null || true
+            (
+                remove_apps_from_dock "${success_items[@]}" > /dev/null 2>&1 || true
+                refresh_launch_services_after_uninstall > /dev/null 2>&1 || true
+            ) &
+            disown $! 2> /dev/null || true
         fi
     fi
 

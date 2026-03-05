@@ -596,3 +596,52 @@ EOF
     [[ "$output" == *"Homebrew installs follow stable releases."* ]]
     [[ "$output" == *"mo update --nightly"* ]]
 }
+
+@test "get_homebrew_latest_version prefers brew outdated verbose target version" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+MOLE_SKIP_MAIN=1 source "$PROJECT_ROOT/mole"
+
+brew() {
+  if [[ "${1:-}" == "outdated" ]]; then
+    echo "tw93/tap/mole (1.29.0) < 1.30.0"
+    return 0
+  fi
+  if [[ "${1:-}" == "info" ]]; then
+    echo "==> tw93/tap/mole: stable 9.9.9 (bottled)"
+    return 0
+  fi
+  return 0
+}
+export -f brew
+
+get_homebrew_latest_version
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == "1.30.0" ]]
+}
+
+@test "get_homebrew_latest_version parses brew info fallback with heading prefix" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+MOLE_SKIP_MAIN=1 source "$PROJECT_ROOT/mole"
+
+brew() {
+  if [[ "${1:-}" == "outdated" ]]; then
+    return 0
+  fi
+  if [[ "${1:-}" == "info" ]]; then
+    echo "==> tw93/tap/mole: stable 1.31.1 (bottled), HEAD"
+    return 0
+  fi
+  return 0
+}
+export -f brew
+
+get_homebrew_latest_version
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == "1.31.1" ]]
+}
