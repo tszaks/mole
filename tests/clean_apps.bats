@@ -210,6 +210,88 @@ EOF
     [[ "$output" == *"PASS: Successful deletion removed"* ]]
 }
 
+@test "clean_orphaned_app_data removes orphaned Claude VM bundle" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+scan_installed_apps() {
+    : > "$1"
+}
+
+mdfind() {
+    return 0
+}
+
+pgrep() {
+    return 1
+}
+
+run_with_timeout() { shift; "$@"; }
+
+safe_clean() {
+    echo "$2"
+    rm -rf "$1"
+}
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+
+mkdir -p "$HOME/Library/Caches"
+mkdir -p "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle"
+echo "vm data" > "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle/rootfs.img"
+
+clean_orphaned_app_data
+
+if [[ ! -d "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle" ]]; then
+    echo "PASS: Claude VM removed"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Orphaned Claude workspace VM"* ]]
+    [[ "$output" == *"PASS: Claude VM removed"* ]]
+}
+
+@test "clean_orphaned_app_data keeps Claude VM bundle when Claude is installed" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+scan_installed_apps() {
+    echo "com.anthropic.claudefordesktop" > "$1"
+}
+
+pgrep() {
+    return 1
+}
+
+safe_clean() {
+    echo "UNEXPECTED:$2"
+    return 1
+}
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+
+mkdir -p "$HOME/Library/Caches"
+mkdir -p "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle"
+echo "vm data" > "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle/rootfs.img"
+
+clean_orphaned_app_data
+
+if [[ -d "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle" ]]; then
+    echo "PASS: Claude VM kept"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"UNEXPECTED:Orphaned Claude workspace VM"* ]]
+    [[ "$output" == *"PASS: Claude VM kept"* ]]
+}
+
 
 @test "is_critical_system_component matches known system services" {
     run bash --noprofile --norc <<'EOF'
