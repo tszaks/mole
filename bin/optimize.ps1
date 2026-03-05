@@ -34,6 +34,7 @@ $libDir = Join-Path (Split-Path -Parent $scriptDir) "lib"
 $script:OptimizationsApplied = 0
 $script:IssuesFound = 0
 $script:IssuesFixed = 0
+$script:RepairsApplied = 0
 
 # ============================================================================
 # Help
@@ -520,6 +521,7 @@ function Repair-FontCache {
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Font cache rebuilt successfully"
         Write-Host "  $esc[90mNote: Some apps may need restart to see changes$esc[0m"
         $script:OptimizationsApplied++
+        $script:RepairsApplied++
     }
     catch {
         Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Could not rebuild font cache: $_"
@@ -583,6 +585,7 @@ function Repair-IconCache {
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Icon cache rebuilt ($deletedCount files cleared)"
         Write-Host "  $esc[90mNote: Icons will rebuild gradually as you browse$esc[0m"
         $script:OptimizationsApplied++
+        $script:RepairsApplied++
     }
     catch {
         Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Could not rebuild icon cache: $_"
@@ -635,6 +638,7 @@ function Repair-SearchIndex {
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Search index reset successfully"
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Indexing will rebuild in the background (may take hours)"
         $script:OptimizationsApplied++
+        $script:RepairsApplied++
     }
     catch {
         Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Could not reset search index: $_"
@@ -669,6 +673,7 @@ function Repair-StoreCache {
 
         if ($wsreset.ExitCode -eq 0) {
             Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Windows Store cache reset successfully"
+            $script:RepairsApplied++
         }
         else {
             Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m wsreset completed with code $($wsreset.ExitCode)"
