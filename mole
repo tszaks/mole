@@ -61,8 +61,6 @@ get_homebrew_latest_version() {
 
     [[ -n "$candidate" ]] && printf '%s\n' "$candidate"
 }
-
-
 # Install detection (Homebrew vs manual).
 # Uses variable capture + string matching to avoid SIGPIPE under pipefail.
 is_homebrew_install() {
