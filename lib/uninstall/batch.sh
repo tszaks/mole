@@ -257,7 +257,7 @@ batch_uninstall_applications() {
     old_trap_term=$(trap -p TERM)
 
     _cleanup_sudo_keepalive() {
-        if command -v stop_sudo_session >/dev/null 2>&1; then
+        if command -v stop_sudo_session > /dev/null 2>&1; then
             stop_sudo_session
         fi
     }
