@@ -113,6 +113,7 @@ run_with_timeout() {
         if [[ "${MO_DEBUG:-0}" == "1" ]]; then
             echo "[TIMEOUT] Perl fallback, ${duration}s: $*" >&2
         fi
+        # shellcheck disable=SC2016  # Embedded Perl uses Perl variables inside single quotes.
         "$MO_TIMEOUT_PERL_BIN" -e '
             use strict;
             use warnings;
