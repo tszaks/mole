@@ -252,6 +252,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
 MO_TIMEOUT_BIN=""
+MO_TIMEOUT_PERL_BIN="${MO_TIMEOUT_PERL_BIN:-$(command -v perl)}"
 export MOLE_PROJECT_CACHE_DISCOVERY_TIMEOUT=0.5
 export MOLE_PROJECT_CACHE_SCAN_TIMEOUT=0.5
 SECONDS=0
