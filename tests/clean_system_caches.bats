@@ -177,7 +177,8 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Next.js build cache"* ]]
     grep -q -- "-P $HOME/CustomProjects " "$find_log"
-    ! grep -q -- "-P $HOME " "$find_log"
+    run grep -q -- "-P $HOME " "$find_log"
+    [ "$status" -eq 1 ]
 
     rm -rf "$HOME/CustomProjects" "$HOME/.config/mole" "$fake_bin" "$find_log"
 }
