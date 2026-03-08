@@ -1,6 +1,6 @@
 # Mole Security Reference
 
-Version 1.29.0 | 2026-03-08
+Version 1.30.0 | 2026-03-08
 
 This document describes the security-relevant behavior of the current codebase on `main`.
 
