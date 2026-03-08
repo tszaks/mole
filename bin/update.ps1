@@ -32,6 +32,44 @@ function Show-UpdateHelp {
     Write-Host ""
 }
 
+function Invoke-GitCommand {
+    param(
+        [string]$WorkingDirectory,
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
+    )
+
+    $previousNativeErrorPreference = $null
+    $hasNativeErrorPreference = $false
+
+    if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+        $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+        $hasNativeErrorPreference = $true
+    }
+
+    try {
+        $gitArguments = @()
+        if ($WorkingDirectory) {
+            $gitArguments += @("-C", $WorkingDirectory)
+        }
+        $gitArguments += $Arguments
+
+        $output = & git @gitArguments 2>&1
+        $exitCode = $LASTEXITCODE
+
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Text = ((@($output) | ForEach-Object { "$_" }) -join [Environment]::NewLine).Trim()
+        }
+    }
+    finally {
+        if ($hasNativeErrorPreference) {
+            $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+        }
+    }
+}
+
 function Test-InstallDirOnUserPath {
     param([string]$Path)
 
@@ -64,45 +102,49 @@ if (-not (Test-Path $gitDir)) {
     exit 1
 }
 
-$dirtyOutput = & git -C $windowsDir status --porcelain --untracked-files=no 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Failed to inspect git status: $dirtyOutput" -ForegroundColor Red
+$dirtyStatus = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("status", "--porcelain", "--untracked-files=no")
+if ($dirtyStatus.ExitCode -ne 0) {
+    Write-Host "Failed to inspect git status: $($dirtyStatus.Text)" -ForegroundColor Red
     exit 1
 }
 
-if ($dirtyOutput) {
+if ($dirtyStatus.Text) {
     Write-Host "Local tracked changes detected in the installation directory." -ForegroundColor Red
     Write-Host "Commit or discard them before running 'mo update'." -ForegroundColor Yellow
     exit 1
 }
 
-$remote = (& git -C $windowsDir remote get-url origin 2>&1).Trim()
-if ($LASTEXITCODE -ne 0 -or -not $remote) {
+$remoteResult = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("remote", "get-url", "origin")
+$remote = $remoteResult.Text
+if ($remoteResult.ExitCode -ne 0 -or -not $remote) {
     Write-Host "Git remote 'origin' is not configured for this install." -ForegroundColor Red
     exit 1
 }
 
-$branch = (& git -C $windowsDir branch --show-current 2>&1).Trim()
-if ($LASTEXITCODE -ne 0 -or -not $branch) {
+$branchResult = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("branch", "--show-current")
+$branch = $branchResult.Text
+if ($branchResult.ExitCode -ne 0 -or -not $branch) {
     $branch = "windows"
 }
 
-$before = (& git -C $windowsDir rev-parse --short HEAD 2>&1).Trim()
-if ($LASTEXITCODE -ne 0 -or -not $before) {
+$beforeResult = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("rev-parse", "--short", "HEAD")
+$before = $beforeResult.Text
+if ($beforeResult.ExitCode -ne 0 -or -not $before) {
     Write-Host "Failed to read current revision." -ForegroundColor Red
     exit 1
 }
 
 Write-Host "Updating source from $remote ($branch)..." -ForegroundColor Cyan
 
-$pullOutput = & git -C $windowsDir pull --ff-only origin $branch 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Failed to update source: $pullOutput" -ForegroundColor Red
+$pullResult = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("pull", "--ff-only", "origin", $branch)
+if ($pullResult.ExitCode -ne 0) {
+    Write-Host "Failed to update source: $($pullResult.Text)" -ForegroundColor Red
     exit 1
 }
 
-$after = (& git -C $windowsDir rev-parse --short HEAD 2>&1).Trim()
-if ($LASTEXITCODE -ne 0 -or -not $after) {
+$afterResult = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("rev-parse", "--short", "HEAD")
+$after = $afterResult.Text
+if ($afterResult.ExitCode -ne 0 -or -not $after) {
     Write-Host "Updated source, but failed to read the new revision." -ForegroundColor Red
     exit 1
 }

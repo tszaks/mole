@@ -120,10 +120,23 @@ function Show-SystemHealth {
 # Optimization Tasks
 # ============================================================================
 
+function Get-SystemDriveLetter {
+    if (-not $env:SystemDrive) {
+        throw "SystemDrive environment variable is not set."
+    }
+
+    $match = [regex]::Match($env:SystemDrive, '^[A-Za-z]')
+    if (-not $match.Success) {
+        throw "Could not determine the system drive letter from '$env:SystemDrive'."
+    }
+
+    return $match.Value.ToUpperInvariant()
+}
+
 function Optimize-DiskDrive {
     <#
     .SYNOPSIS
-        Optimize disk (defrag for HDD, TRIM for SSD)
+        Optimize the system drive using Windows defaults
     #>
 
     $esc = [char]27
@@ -143,20 +156,10 @@ function Optimize-DiskDrive {
     }
 
     try {
-        # Check if SSD or HDD
-        $diskNumber = (Get-Partition -DriveLetter $env:SystemDrive[0]).DiskNumber
-        $mediaType = (Get-PhysicalDisk | Where-Object { $_.DeviceId -eq $diskNumber }).MediaType
-
-        if ($mediaType -eq "SSD") {
-            Write-Host "  Running TRIM on SSD..."
-            $null = Optimize-Volume -DriveLetter $env:SystemDrive[0] -ReTrim -ErrorAction Stop
-            Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m SSD TRIM completed"
-        }
-        else {
-            Write-Host "  Running defragmentation on HDD..."
-            $null = Optimize-Volume -DriveLetter $env:SystemDrive[0] -Defrag -ErrorAction Stop
-            Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Defragmentation completed"
-        }
+        $systemDriveLetter = Get-SystemDriveLetter
+        Write-Host "  Running Windows default optimization on drive ${systemDriveLetter}:..."
+        $null = Optimize-Volume -DriveLetter $systemDriveLetter -ErrorAction Stop
+        Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Drive optimization completed"
         $script:OptimizationsApplied++
     }
     catch {
@@ -623,9 +626,82 @@ function Repair-SearchIndex {
     }
 
     try {
+        function Wait-ForServiceStatus {
+            param(
+                [Parameter(Mandatory)]
+                [string]$Name,
+                [Parameter(Mandatory)]
+                [System.ServiceProcess.ServiceControllerStatus]$ExpectedStatus,
+                [int]$TimeoutSeconds = 15
+            )
+
+            $service = Get-Service -Name $Name -ErrorAction Stop
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+
+            do {
+                $service.Refresh()
+                if ($service.Status -eq $ExpectedStatus) {
+                    return $true
+                }
+                Start-Sleep -Milliseconds 500
+            } while ((Get-Date) -lt $deadline)
+
+            $service.Refresh()
+            return $service.Status -eq $ExpectedStatus
+        }
+
+        function Stop-ServiceSafely {
+            param(
+                [Parameter(Mandatory)]
+                [string]$Name,
+                [int]$TimeoutSeconds = 20
+            )
+
+            $service = Get-Service -Name $Name -ErrorAction Stop
+            if ($service.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+                return
+            }
+
+            if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::StopPending) {
+                try {
+                    Stop-Service -Name $Name -Force -ErrorAction Stop
+                }
+                catch {
+                    $service.Refresh()
+                    if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::StopPending) {
+                        throw
+                    }
+                }
+            }
+
+            if (-not (Wait-ForServiceStatus -Name $Name -ExpectedStatus ([System.ServiceProcess.ServiceControllerStatus]::Stopped) -TimeoutSeconds $TimeoutSeconds)) {
+                throw "Windows Search service did not stop within $TimeoutSeconds seconds."
+            }
+        }
+
+        function Start-ServiceSafely {
+            param(
+                [Parameter(Mandatory)]
+                [string]$Name,
+                [int]$TimeoutSeconds = 20
+            )
+
+            $service = Get-Service -Name $Name -ErrorAction Stop
+            if ($service.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
+                return
+            }
+
+            if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::StartPending) {
+                Start-Service -Name $Name -ErrorAction Stop
+            }
+
+            if (-not (Wait-ForServiceStatus -Name $Name -ExpectedStatus ([System.ServiceProcess.ServiceControllerStatus]::Running) -TimeoutSeconds $TimeoutSeconds)) {
+                throw "Windows Search service did not start within $TimeoutSeconds seconds."
+            }
+        }
+
         Write-Host "  $esc[90mStopping Windows Search service...$esc[0m"
-        Stop-Service -Name "WSearch" -Force -ErrorAction Stop
-        Start-Sleep -Seconds 3
+        Stop-ServiceSafely -Name "WSearch"
 
         if (Test-Path $searchIndexPath) {
             Write-Host "  $esc[90mDeleting search index...$esc[0m"
@@ -633,7 +709,7 @@ function Repair-SearchIndex {
         }
 
         Write-Host "  $esc[90mRestarting Windows Search service...$esc[0m"
-        Start-Service -Name "WSearch" -ErrorAction Stop
+        Start-ServiceSafely -Name "WSearch"
 
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Search index reset successfully"
         Write-Host "  $esc[33m$($script:Icons.Warning)$esc[0m Indexing will rebuild in the background (may take hours)"

@@ -42,6 +42,44 @@ function Test-SourceInstall {
     return (Test-Path (Join-Path $Path ".git"))
 }
 
+function Invoke-GitCommand {
+    param(
+        [string]$WorkingDirectory,
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
+    )
+
+    $previousNativeErrorPreference = $null
+    $hasNativeErrorPreference = $false
+
+    if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+        $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+        $hasNativeErrorPreference = $true
+    }
+
+    try {
+        $gitArguments = @()
+        if ($WorkingDirectory) {
+            $gitArguments += @("-C", $WorkingDirectory)
+        }
+        $gitArguments += $Arguments
+
+        $output = & git @gitArguments 2>&1
+        $exitCode = $LASTEXITCODE
+
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Text = ((@($output) | ForEach-Object { "$_" }) -join [Environment]::NewLine).Trim()
+        }
+    }
+    finally {
+        if ($hasNativeErrorPreference) {
+            $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+        }
+    }
+}
+
 # Main installation
 try {
     Write-Host ""
@@ -64,22 +102,22 @@ try {
         if (Test-SourceInstall -Path $InstallDir) {
             Write-Step "Existing source install found, refreshing..."
 
-            Push-Location $InstallDir
-            try {
-                git fetch --quiet origin windows 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) {
-                    Write-ErrorMsg "Failed to fetch latest source"
-                    exit 1
+            $fetchResult = Invoke-GitCommand -WorkingDirectory $InstallDir -Arguments @("fetch", "--quiet", "origin", "windows")
+            if ($fetchResult.ExitCode -ne 0) {
+                Write-ErrorMsg "Failed to fetch latest source"
+                if ($fetchResult.Text) {
+                    Write-Host "    $($fetchResult.Text)"
                 }
-
-                git pull --ff-only origin windows 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) {
-                    Write-ErrorMsg "Failed to fast-forward source install"
-                    exit 1
-                }
+                exit 1
             }
-            finally {
-                Pop-Location
+
+            $pullResult = Invoke-GitCommand -WorkingDirectory $InstallDir -Arguments @("pull", "--ff-only", "origin", "windows")
+            if ($pullResult.ExitCode -ne 0) {
+                Write-ErrorMsg "Failed to fast-forward source install"
+                if ($pullResult.Text) {
+                    Write-Host "    $($pullResult.Text)"
+                }
+                exit 1
             }
         }
         else {
@@ -91,7 +129,14 @@ try {
     else {
         Write-Step "Cloning Mole source..."
 
-        git clone --quiet --depth 1 --branch windows https://github.com/tw93/Mole.git $InstallDir 2>&1 | Out-Null
+        $cloneResult = Invoke-GitCommand -Arguments @("clone", "--quiet", "--depth", "1", "--branch", "windows", "https://github.com/tw93/Mole.git", $InstallDir)
+        if ($cloneResult.ExitCode -ne 0) {
+            Write-ErrorMsg "Failed to clone source installer"
+            if ($cloneResult.Text) {
+                Write-Host "    $($cloneResult.Text)"
+            }
+            exit 1
+        }
 
         if (-not (Test-Path (Join-Path $InstallDir "install.ps1"))) {
             Write-ErrorMsg "Failed to clone source installer"
