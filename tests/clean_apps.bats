@@ -60,7 +60,7 @@ EOF
 }
 
 @test "is_bundle_orphaned returns true for old uninstalled bundle" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORPHAN_AGE_THRESHOLD=60 bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORPHAN_AGE_THRESHOLD=30 bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
@@ -116,12 +116,12 @@ safe_clean() {
 # Create required Library structure for permission check
 mkdir -p "$HOME/Library/Caches"
 
-# Create test structure with spaces in path (old modification time: 61 days ago)
+# Create test structure with spaces in path (old modification time: 31 days ago)
 mkdir -p "$HOME/Library/Saved Application State/com.test.orphan.savedState"
 # Create a file with some content so directory size > 0
 echo "test data" > "$HOME/Library/Saved Application State/com.test.orphan.savedState/data.plist"
-# Set modification time to 61 days ago (older than 60-day threshold)
-touch -t "$(date -v-61d +%Y%m%d%H%M.%S 2>/dev/null || date -d '61 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Saved Application State/com.test.orphan.savedState" 2>/dev/null || true
+# Set modification time to 31 days ago (older than 30-day threshold)
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S 2>/dev/null || date -d '31 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Saved Application State/com.test.orphan.savedState" 2>/dev/null || true
 
 # Disable spinner for test
 start_section_spinner() { :; }
@@ -165,15 +165,15 @@ run_with_timeout() { shift; "$@"; }
 # Create required Library structure for permission check
 mkdir -p "$HOME/Library/Caches"
 
-# Create test files (old modification time: 61 days ago)
+# Create test files (old modification time: 31 days ago)
 mkdir -p "$HOME/Library/Caches/com.test.orphan1"
 mkdir -p "$HOME/Library/Caches/com.test.orphan2"
 # Create files with content so size > 0
 echo "data1" > "$HOME/Library/Caches/com.test.orphan1/data"
 echo "data2" > "$HOME/Library/Caches/com.test.orphan2/data"
-# Set modification time to 61 days ago
-touch -t "$(date -v-61d +%Y%m%d%H%M.%S 2>/dev/null || date -d '61 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.test.orphan1" 2>/dev/null || true
-touch -t "$(date -v-61d +%Y%m%d%H%M.%S 2>/dev/null || date -d '61 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.test.orphan2" 2>/dev/null || true
+# Set modification time to 31 days ago
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S 2>/dev/null || date -d '31 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.test.orphan1" 2>/dev/null || true
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S 2>/dev/null || date -d '31 days ago' +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.test.orphan2" 2>/dev/null || true
 
 # Mock safe_clean to fail on first item, succeed on second
 safe_clean() {
