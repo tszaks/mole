@@ -229,6 +229,8 @@ pgrep() {
 }
 
 run_with_timeout() { shift; "$@"; }
+get_file_mtime() { echo 0; }
+get_path_size_kb() { echo 4; }
 
 safe_clean() {
     echo "$2"
@@ -252,6 +254,51 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Orphaned Claude workspace VM"* ]]
     [[ "$output" == *"PASS: Claude VM removed"* ]]
+}
+
+@test "clean_orphaned_app_data keeps recent Claude VM bundle when Claude lookup misses" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+scan_installed_apps() {
+    : > "$1"
+}
+
+mdfind() {
+    return 0
+}
+
+pgrep() {
+    return 1
+}
+
+run_with_timeout() { shift; "$@"; }
+get_file_mtime() { date +%s; }
+
+safe_clean() {
+    echo "UNEXPECTED:$2"
+    return 1
+}
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+
+mkdir -p "$HOME/Library/Caches"
+mkdir -p "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle"
+echo "vm data" > "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle/rootfs.img"
+
+clean_orphaned_app_data
+
+if [[ -d "$HOME/Library/Application Support/Claude/vm_bundles/claudevm.bundle" ]]; then
+    echo "PASS: Recent Claude VM kept"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"UNEXPECTED:Orphaned Claude workspace VM"* ]]
+    [[ "$output" == *"PASS: Recent Claude VM kept"* ]]
 }
 
 @test "clean_orphaned_app_data keeps Claude VM bundle when Claude is installed" {

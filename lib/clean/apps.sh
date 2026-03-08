@@ -261,6 +261,17 @@ is_claude_vm_bundle_orphaned() {
         return 1
     fi
 
+    if [[ -e "$vm_bundle_path" ]]; then
+        local last_modified_epoch
+        last_modified_epoch=$(get_file_mtime "$vm_bundle_path")
+        local current_epoch
+        current_epoch=$(get_epoch_seconds)
+        local days_since_modified=$(((current_epoch - last_modified_epoch) / 86400))
+        if [[ $days_since_modified -lt ${ORPHAN_AGE_THRESHOLD:-60} ]]; then
+            return 1
+        fi
+    fi
+
     if [[ -z "$ORPHAN_MDFIND_CACHE_FILE" ]]; then
         ORPHAN_MDFIND_CACHE_FILE=$(mktemp "${TMPDIR:-/tmp}/mole_mdfind_cache.XXXXXX")
         register_temp_file "$ORPHAN_MDFIND_CACHE_FILE"
