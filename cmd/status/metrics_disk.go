@@ -23,20 +23,20 @@ var skipDiskMounts = map[string]bool{
 }
 
 var skipDiskFSTypes = map[string]bool{
-	"afpfs":    true,
-	"autofs":   true,
-	"cifs":     true,
-	"devfs":    true,
-	"fuse":     true,
-	"fuseblk":  true,
-	"fusefs":   true,
-	"macfuse":  true,
-	"nfs":      true,
-	"osxfuse":  true,
-	"procfs":   true,
-	"smbfs":    true,
-	"tmpfs":    true,
-	"webdav":   true,
+	"afpfs":   true,
+	"autofs":  true,
+	"cifs":    true,
+	"devfs":   true,
+	"fuse":    true,
+	"fuseblk": true,
+	"fusefs":  true,
+	"macfuse": true,
+	"nfs":     true,
+	"osxfuse": true,
+	"procfs":  true,
+	"smbfs":   true,
+	"tmpfs":   true,
+	"webdav":  true,
 }
 
 func collectDisks() ([]DiskStatus, error) {
