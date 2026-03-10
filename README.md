@@ -26,22 +26,22 @@
 
 ## Quick Start
 
-**Install via Homebrew:**
+**Install via Homebrew**
 
 ```bash
 brew install mole
 ```
 
-**Or via script:**
+**Or via script**
 
 ```bash
 # Optional args: -s latest for main branch code, -s 1.17.0 for specific version
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 ```
 
-**Windows:** Mole is built for macOS. An experimental Windows version is available in the [windows branch](https://github.com/tw93/Mole/tree/windows) for early adopters.
+> Note: Mole is built for macOS. An experimental Windows version is available in the [windows branch](https://github.com/tw93/Mole/tree/windows) for early adopters.
 
-**Run:**
+**Run**
 
 ```bash
 mo                           # Interactive menu
@@ -60,13 +60,16 @@ mo update --nightly          # Update to latest unreleased main build, script in
 mo remove                    # Remove Mole from system
 mo --help                    # Show help
 mo --version                 # Show installed version
+```
 
-# Safe preview before applying changes
+**Preview safely**
+
+```bash
 mo clean --dry-run
 mo uninstall --dry-run
 mo purge --dry-run
 
-# --dry-run also works with: optimize, installer, remove, completion, touchid enable
+# Also works with: optimize, installer, remove, completion, touchid enable
 mo clean --dry-run --debug   # Preview + detailed logs
 mo optimize --whitelist      # Manage protected optimization rules
 mo clean --whitelist         # Manage protected caches
@@ -160,7 +163,7 @@ Use `mo optimize --whitelist` to exclude specific optimizations.
 
 ### Disk Space Analyzer
 
-By default, Mole skips external drives under `/Volumes` for faster startup. To inspect them, run `mo analyze /Volumes` or a specific mount path.
+> Note: By default, Mole skips external drives under `/Volumes` for faster startup. To inspect them, run `mo analyze /Volumes` or a specific mount path.
 
 ```bash
 $ mo analyze
@@ -226,10 +229,10 @@ Select Categories to Clean - 18.5GB (8 selected)
   ● backend-service    2.5GB | node_modules
 ```
 
-> We recommend installing `fd` on macOS.
+> Note: We recommend installing `fd` on macOS.
 > `brew install fd`
 
-> **Use with caution:** This permanently deletes selected artifacts. Review carefully before confirming. Projects newer than 7 days are marked and unselected by default.
+> Safety: This permanently deletes selected artifacts. Review carefully before confirming. Projects newer than 7 days are marked and unselected by default.
 
 <details>
 <summary><strong>Custom Scan Paths</strong></summary>
