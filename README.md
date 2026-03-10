@@ -74,10 +74,28 @@ mo purge --paths             # Configure project scan directories
 mo analyze /Volumes          # Analyze external drives only
 ```
 
+## Security & Safety Design
+
+Mole is a local system maintenance tool. Commands such as `clean`, `uninstall`, `purge`, `installer`, `remove`, and parts of `optimize` can perform destructive local operations.
+
+Mole is designed with safety-first defaults for local system maintenance.
+
+- Destructive operations are guarded by path validation, protected directory rules, conservative cleanup boundaries, and explicit confirmation where appropriate.
+- Mole prioritizes bounded cleanup over aggressive cleanup.
+- High-risk paths, sensitive data categories, system locations, and sudo flows have explicit protection boundaries.
+- When uncertainty exists, the tool should refuse, skip, or require stronger confirmation instead of widening deletion scope.
+- `mo analyze` is intentionally safer than cleanup flows for ad hoc deletion because it moves files to Trash through Finder instead of directly deleting them.
+- Release assets are published with SHA-256 checksums, curated safety notes, and GitHub artifact attestations.
+
+Review these documents before using high-risk commands:
+
+- [SECURITY.md](SECURITY.md)
+- [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
+
 ## Tips
 
 - Video tutorial: Watch the [Mole tutorial video](https://www.youtube.com/watch?v=UEe9-w4CcQ0), thanks to PAPAYA 電腦教室.
-- Safety and logs: Deletions are permanent. Review with `--dry-run` first, and add `--debug` when needed. File operations are logged to `~/.config/mole/operations.log`. Disable with `MO_NO_OPLOG=1`. See [Security Audit](SECURITY_AUDIT.md).
+- Safety and logs: `clean`, `uninstall`, `purge`, `installer`, and `remove` are destructive. Review with `--dry-run` first, and add `--debug` when needed. File operations are logged to `~/.config/mole/operations.log`. Disable with `MO_NO_OPLOG=1`. Review [SECURITY.md](SECURITY.md) and [SECURITY_AUDIT.md](SECURITY_AUDIT.md).
 - Navigation: Mole supports arrow keys and Vim bindings `h/j/k/l`.
 
 ## Features in Detail
