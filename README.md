@@ -76,21 +76,13 @@ mo analyze /Volumes          # Analyze external drives only
 
 ## Security & Safety Design
 
-Mole is a local system maintenance tool. Commands such as `clean`, `uninstall`, `purge`, `installer`, `remove`, and parts of `optimize` can perform destructive local operations.
+Mole is a local system maintenance tool, and some commands can perform destructive local operations.
 
-Mole is designed with safety-first defaults for local system maintenance.
+Mole uses safety-first defaults: path validation, protected-directory rules, conservative cleanup boundaries, and explicit confirmation for higher-risk actions. When risk or uncertainty is high, Mole skips, refuses, or requires stronger confirmation rather than broadening deletion scope.
 
-- Destructive operations are guarded by path validation, protected directory rules, conservative cleanup boundaries, and explicit confirmation where appropriate.
-- Mole prioritizes bounded cleanup over aggressive cleanup.
-- High-risk paths, sensitive data categories, system locations, and sudo flows have explicit protection boundaries.
-- When uncertainty exists, the tool should refuse, skip, or require stronger confirmation instead of widening deletion scope.
-- `mo analyze` is intentionally safer than cleanup flows for ad hoc deletion because it moves files to Trash through Finder instead of directly deleting them.
-- Release assets are published with SHA-256 checksums, curated safety notes, and GitHub artifact attestations.
+`mo analyze` is safer for ad hoc cleanup because it moves files to Trash through Finder instead of deleting them directly.
 
-Review these documents before using high-risk commands:
-
-- [SECURITY.md](SECURITY.md)
-- [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
+Review [SECURITY.md](SECURITY.md) and [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for reporting guidance, safety boundaries, and current limitations.
 
 ## Tips
 
