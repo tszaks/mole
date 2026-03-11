@@ -80,3 +80,4 @@ run_tests.ps1
 AGENTS.md
 mole_guidelines.md
 CLAUDE.md
+.claude/settings.local.json
