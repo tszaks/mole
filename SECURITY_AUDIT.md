@@ -80,6 +80,57 @@ Some subpaths under otherwise protected roots are explicitly allowlisted for bou
 
 This design keeps cleanup scoped to known-safe maintenance targets instead of broad root-level deletion patterns.
 
+## Path Protection Reference
+
+### Protected Prefixes (Never Deleted)
+
+```text
+/
+/System
+/bin
+/sbin
+/usr
+/etc
+/var
+/private
+/Library/Extensions
+```
+
+### Whitelist Exceptions (Allowlisted for Cleanup)
+
+Some subpaths under protected roots are explicitly allowlisted:
+
+- `/private/tmp`
+- `/private/var/tmp`
+- `/private/var/log`
+- `/private/var/folders`
+- `/private/var/db/diagnostics`
+- `/private/var/db/DiagnosticPipeline`
+- `/private/var/db/powerlog`
+- `/private/var/db/reportmemoryexception`
+
+### Protected Categories
+
+In addition to path blocking, these categories are protected:
+
+- Keychains, password managers, credentials
+- VPN/proxy tools (Shadowsocks, V2Ray, Clash, Tailscale)
+- AI tools (Cursor, Claude, ChatGPT, Ollama)
+- Browser history and cookies
+- Time Machine data (during active backup)
+- `com.apple.*` LaunchAgents/LaunchDaemons
+- iCloud-synced `Mobile Documents`
+
+## Implementation Details
+
+All deletion routes through `lib/core/file_ops.sh`:
+
+- `validate_path_for_deletion()` - Empty, relative, traversal checks
+- `should_protect_path()` - Prefix and pattern matching
+- `safe_remove()`, `safe_find_delete()`, `safe_sudo_remove()` - Guarded operations
+
+See [`journal/2026-03-11-safe-remove-design.md`](journal/2026-03-11-safe-remove-design.md) for design rationale.
+
 ## Protected Directories and Categories
 
 Mole has explicit protected-path and protected-category logic in addition to root-path blocking.
