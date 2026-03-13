@@ -952,6 +952,24 @@ clean_project_artifacts() {
     if [[ -t 1 ]]; then
         start_inline_spinner "Calculating sizes..."
     fi
+
+    # Pre-compute all sizes in parallel to avoid sequential timeout hangs (issue #560).
+    # With N artifacts each taking up to 15s, sequential calculation can take N×15s.
+    # Parallel: all sizes computed concurrently, total ≤ single longest du call.
+    local -a _size_tmpfiles=()
+    local -a _size_pids=()
+    for _sz_item in "${safe_to_clean[@]}"; do
+        local _stmp
+        _stmp=$(mktemp)
+        register_temp_file "$_stmp"
+        _size_tmpfiles+=("$_stmp")
+        (get_dir_size_kb "$_sz_item" > "$_stmp" 2> /dev/null) &
+        _size_pids+=($!)
+    done
+    for _spid in "${_size_pids[@]+"${_size_pids[@]}"}"; do
+        wait "$_spid" 2> /dev/null || true
+    done
+
     local -a menu_options=()
     local -a item_paths=()
     local -a item_sizes=()
@@ -1172,16 +1190,20 @@ clean_project_artifacts() {
         printf "%-*s %9s | %-*s" "$printf_width" "$truncated_path" "$size_str" "$artifact_col" "$artifact_type"
     }
     # Build menu options - one line per artifact
-    # Pass 1: collect data into parallel arrays (needed for pre-scan of widths)
+    # Pass 1: collect data into parallel arrays (needed for pre-scan of widths).
+    # Sizes are read from pre-computed results (parallel du calls launched above).
     local -a raw_project_paths=()
     local -a raw_artifact_types=()
+    local _sz_idx=0
     for item in "${safe_to_clean[@]}"; do
         local project_path
         project_path=$(get_project_path "$item")
         local artifact_type
         artifact_type=$(get_artifact_display_name "$item")
         local size_raw
-        size_raw=$(get_dir_size_kb "$item")
+        size_raw=$(cat "${_size_tmpfiles[_sz_idx]}" 2> /dev/null || echo "0")
+        rm -f "${_size_tmpfiles[_sz_idx]}" 2> /dev/null || true
+        _sz_idx=$((_sz_idx + 1))
         local size_kb=0
         local size_human=""
         local size_unknown=false

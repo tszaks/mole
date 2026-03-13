@@ -810,6 +810,11 @@ should_protect_path() {
         */Library/Mobile\ Documents* | */Mobile\ Documents*)
             return 0
             ;;
+        # CoreAudio and audio subsystem caches (issue #553)
+        # Cleaning these can cause audio output loss on Intel Macs
+        *com.apple.coreaudio* | *com.apple.audio.* | *coreaudiod*)
+            return 0
+            ;;
     esac
 
     # 6. Match full path against protected patterns
