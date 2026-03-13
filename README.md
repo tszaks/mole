@@ -210,6 +210,42 @@ Health score is based on CPU, memory, disk, temperature, and I/O load, with colo
 
 Shortcuts: In `mo status`, press `k` to toggle the cat and save the preference, and `q` to quit.
 
+#### Machine-Readable Output
+
+Both `mo analyze` and `mo status` support a `--json` flag for scripting and automation.
+
+`mo status` also auto-detects when its output is piped (not a terminal) and switches to JSON automatically.
+
+```bash
+# Disk analysis as JSON
+$ mo analyze --json ~/Documents
+{
+  "path": "/Users/you/Documents",
+  "entries": [
+    { "name": "Library", "path": "...", "size": 80939438080, "is_dir": true },
+    ...
+  ],
+  "total_size": 168393441280,
+  "total_files": 42187
+}
+
+# System status as JSON
+$ mo status --json
+{
+  "host": "MacBook-Pro",
+  "health_score": 92,
+  "cpu": { "usage": 45.2, "logical_cpu": 8, ... },
+  "memory": { "total": 25769803776, "used": 15049334784, "used_percent": 58.4 },
+  "disks": [ ... ],
+  "uptime": "3d 12h 45m",
+  ...
+}
+
+# Auto-detected JSON when piped
+$ mo status | jq '.health_score'
+92
+```
+
 ### Project Artifact Purge
 
 Clean old build artifacts such as `node_modules`, `target`, `build`, and `dist` to free up disk space.
