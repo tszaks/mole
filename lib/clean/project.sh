@@ -1175,7 +1175,6 @@ clean_project_artifacts() {
             fi
 
             [[ $available_width -lt $min_width ]] && available_width=$min_width
-            [[ $available_width -gt 60 ]] && available_width=60
         fi
 
         # Truncate project path if needed
@@ -1273,7 +1272,6 @@ clean_project_artifacts() {
 
     [[ $max_path_display_width -lt $min_path_width ]] && max_path_display_width=$min_path_width
     [[ $available_for_path -lt $max_path_display_width ]] && max_path_display_width=$available_for_path
-    [[ $max_path_display_width -gt 60 ]] && max_path_display_width=60
     # Ensure path width is at least 5 on very narrow terminals
     [[ $max_path_display_width -lt 5 ]] && max_path_display_width=5
 
