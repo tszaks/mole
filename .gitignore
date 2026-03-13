@@ -42,6 +42,7 @@ tests/tmp-*
 *.lock
 
 # AI Assistant Instructions
+.claude/
 .agents/
 .gemini/
 .kiro/
