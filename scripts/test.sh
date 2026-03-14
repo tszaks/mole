@@ -112,51 +112,76 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
         unset _ncpu _jobs
     fi
 
-    if bats --help 2>&1 | grep -q -- "--formatter"; then
-        formatter="${BATS_FORMATTER:-pretty}"
-        if [[ "$formatter" == "tap" ]]; then
+    # core_performance.bats has wall-clock timing assertions that are skewed by
+    # CPU contention from parallel test workers. When parallel mode is active,
+    # split it out to run sequentially after the parallel batch completes.
+    _perf_files=()
+    if [[ ${#bats_opts[@]} -gt 0 ]]; then
+        _all=("$@")
+        _rest=()
+        if [[ ${#_all[@]} -eq 1 && -d "${_all[0]}" ]]; then
+            while IFS= read -r _f; do
+                case "$_f" in
+                    *core_performance.bats) _perf_files+=("$_f") ;;
+                    *) _rest+=("$_f") ;;
+                esac
+            done < <(find "${_all[0]}" -type f -name '*.bats' | sort)
+        else
+            for _f in "${_all[@]}"; do
+                case "$_f" in
+                    *core_performance.bats) _perf_files+=("$_f") ;;
+                    *) _rest+=("$_f") ;;
+                esac
+            done
+        fi
+        if [[ ${#_rest[@]} -gt 0 ]]; then
+            set -- "${_rest[@]}"
+        else
+            set --
+        fi
+        unset _all _rest _f
+    fi
+
+    # Accumulate pass/fail across all bats invocations.
+    _unit_rc=0
+
+    # Main run (parallel when bats_opts has --jobs, skipped if no files remain).
+    if [[ $# -gt 0 ]]; then
+        if bats --help 2>&1 | grep -q -- "--formatter"; then
+            formatter="${BATS_FORMATTER:-pretty}"
+            if [[ "$formatter" == "tap" ]]; then
+                if $use_color; then
+                    esc=$'\033'
+                    bats ${bats_opts[@]+"${bats_opts[@]}"} --formatter tap "$@" |
+                        sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
+                            -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /" || _unit_rc=1
+                else
+                    bats ${bats_opts[@]+"${bats_opts[@]}"} --formatter tap "$@" || _unit_rc=1
+                fi
+            else
+                # Pretty format for local development
+                bats ${bats_opts[@]+"${bats_opts[@]}"} --formatter "$formatter" "$@" || _unit_rc=1
+            fi
+        else
             if $use_color; then
                 esc=$'\033'
-                if bats "${bats_opts[@]}" --formatter tap "$@" |
+                bats ${bats_opts[@]+"${bats_opts[@]}"} --tap "$@" |
                     sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
-                        -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /"; then
-                    report_unit_result 0
-                else
-                    report_unit_result 1
-                fi
+                        -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /" || _unit_rc=1
             else
-                if bats "${bats_opts[@]}" --formatter tap "$@"; then
-                    report_unit_result 0
-                else
-                    report_unit_result 1
-                fi
-            fi
-        else
-            # Pretty format for local development
-            if bats "${bats_opts[@]}" --formatter "$formatter" "$@"; then
-                report_unit_result 0
-            else
-                report_unit_result 1
-            fi
-        fi
-    else
-        if $use_color; then
-            esc=$'\033'
-            if bats "${bats_opts[@]}" --tap "$@" |
-                sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
-                    -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /"; then
-                report_unit_result 0
-            else
-                report_unit_result 1
-            fi
-        else
-            if bats "${bats_opts[@]}" --tap "$@"; then
-                report_unit_result 0
-            else
-                report_unit_result 1
+                bats ${bats_opts[@]+"${bats_opts[@]}"} --tap "$@" || _unit_rc=1
             fi
         fi
     fi
+
+    # Post-run: timing-sensitive perf tests run after parallel workers have
+    # finished so CPU contention does not skew wall-clock assertions.
+    for _pf in ${_perf_files[@]+"${_perf_files[@]}"}; do
+        bats "$_pf" || _unit_rc=1
+    done
+    unset _perf_files _pf
+
+    report_unit_result "$_unit_rc"
 else
     printf "${YELLOW}${ICON_WARNING} bats not installed or no tests found, skipping${NC}\n"
 fi
