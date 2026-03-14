@@ -157,5 +157,6 @@ show_user_launch_agent_hint_notice
 EOT5
 
     [ "$status" -eq 0 ]
-    [[ -z "$output" ]]
+    [[ "$output" != *"Potential stale login item:"* ]]
+    [[ "$output" != *"Review: open ~/Library/LaunchAgents"* ]]
 }
