@@ -97,3 +97,65 @@ EOT3
     [[ "$output" == *"~/Library/Developer/Xcode/DerivedData"* ]]
     [[ "$output" == *"Review: mo analyze, Device backups, docker system df"* ]]
 }
+
+@test "show_user_launch_agent_hint_notice reports missing app-backed target" {
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$HOME/Library/LaunchAgents/com.example.stale.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.stale</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Missing.app/Contents/MacOS/Missing</string>
+    </array>
+</dict>
+</plist>
+PLIST
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOT4'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+show_user_launch_agent_hint_notice
+EOT4
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Potential stale login item: com.example.stale.plist"* ]]
+    [[ "$output" == *"Missing app/helper target"* ]]
+    [[ "$output" == *"Review: open ~/Library/LaunchAgents"* ]]
+}
+
+@test "show_user_launch_agent_hint_notice skips custom shell wrappers" {
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$HOME/Library/LaunchAgents/com.example.custom.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.custom</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>$HOME/bin/custom-task</string>
+    </array>
+</dict>
+</plist>
+PLIST
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOT5'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+show_user_launch_agent_hint_notice
+EOT5
+
+    [ "$status" -eq 0 ]
+    [[ -z "$output" ]]
+}

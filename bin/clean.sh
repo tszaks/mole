@@ -976,7 +976,7 @@ perform_cleanup() {
     start_section "Orphaned data"
     clean_orphaned_app_data
     clean_orphaned_system_services
-    clean_orphaned_launch_agents
+    show_user_launch_agent_hint_notice
     end_section
 
     # ===== 11. Apple Silicon =====

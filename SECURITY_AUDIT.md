@@ -119,6 +119,7 @@ In addition to path blocking, these categories are protected:
 - Browser history and cookies
 - Time Machine data (during active backup)
 - `com.apple.*` LaunchAgents/LaunchDaemons
+- user-owned `~/Library/LaunchAgents/*.plist` automation/configuration
 - iCloud-synced `Mobile Documents`
 
 ## Implementation Details
@@ -145,6 +146,7 @@ Protected or conservatively handled categories include:
 - browser history and cookies
 - Time Machine data while backup state is active or ambiguous
 - `com.apple.*` LaunchAgents and LaunchDaemons
+- user-owned `~/Library/LaunchAgents/*.plist` automation/configuration
 - iCloud-synced `Mobile Documents` data
 
 Project purge also uses conservative heuristics:

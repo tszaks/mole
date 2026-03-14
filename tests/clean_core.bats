@@ -98,6 +98,29 @@ run_clean_dry_run() {
     [ -f "$HOME/Library/Caches/TestApp/cache.tmp" ]
 }
 
+@test "mo clean --dry-run reports stale login item without deleting it" {
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$HOME/Library/LaunchAgents/com.example.stale.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.stale</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Missing.app/Contents/MacOS/Missing</string>
+    </array>
+</dict>
+</plist>
+PLIST
+
+    run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Potential stale login item: com.example.stale.plist"* ]]
+    [ -f "$HOME/Library/LaunchAgents/com.example.stale.plist" ]
+}
+
 @test "mo clean honors whitelist entries" {
     mkdir -p "$HOME/Library/Caches/WhitelistedApp"
     echo "keep me" > "$HOME/Library/Caches/WhitelistedApp/data.tmp"
@@ -322,4 +345,3 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Time Machine backup in progress, skipping cleanup"* ]]
 }
-
