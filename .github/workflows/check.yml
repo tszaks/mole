@@ -66,6 +66,8 @@ jobs:
     name: Check
     runs-on: macos-latest
     needs: format
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
