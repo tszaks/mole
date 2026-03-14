@@ -153,7 +153,7 @@ func moveToTrash(path string) error {
 }
 
 // validatePath checks path safety for external commands.
-// Returns error if path is empty, relative, contains null bytes, or escapes root.
+// Returns error if path is empty, relative, contains null bytes, or has traversal.
 func validatePath(path string) error {
 	if path == "" {
 		return fmt.Errorf("path is empty")
@@ -164,10 +164,11 @@ func validatePath(path string) error {
 	if strings.Contains(path, "\x00") {
 		return fmt.Errorf("path contains null bytes")
 	}
-	// Ensure Clean doesn't radically alter the path (path traversal check).
-	clean := filepath.Clean(path)
-	if !strings.HasPrefix(clean, "/") {
-		return fmt.Errorf("path escapes root: %s", path)
+	// Check for path traversal attempts (.. components).
+	for _, component := range strings.Split(path, string(filepath.Separator)) {
+		if component == ".." {
+			return fmt.Errorf("path contains traversal components: %s", path)
+		}
 	}
 	return nil
 }
