@@ -103,8 +103,8 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
     # Cap at 6 jobs to balance speed vs. system load during CI.
     bats_opts=()
     if command -v parallel > /dev/null 2>&1 && bats --help 2>&1 | grep -q -- "--jobs"; then
-        _ncpu="$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
-        _jobs="$(( _ncpu > 6 ? 6 : (_ncpu < 2 ? 2 : _ncpu) ))"
+        _ncpu="$(sysctl -n hw.logicalcpu 2> /dev/null || nproc 2> /dev/null || echo 4)"
+        _jobs="$((_ncpu > 6 ? 6 : (_ncpu < 2 ? 2 : _ncpu)))"
         # --no-parallelize-within-files ensures each test file's tests run
         # sequentially (they share a $HOME set by setup_file and are not safe
         # to run concurrently). Parallelism is only across files.
