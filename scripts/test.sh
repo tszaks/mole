@@ -98,12 +98,26 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
     if [[ -t 1 && "${TERM:-}" != "dumb" ]]; then
         use_color=true
     fi
+
+    # Enable parallel execution across test files when GNU parallel is available.
+    # Cap at 6 jobs to balance speed vs. system load during CI.
+    bats_opts=()
+    if command -v parallel > /dev/null 2>&1 && bats --help 2>&1 | grep -q -- "--jobs"; then
+        _ncpu="$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
+        _jobs="$(( _ncpu > 6 ? 6 : (_ncpu < 2 ? 2 : _ncpu) ))"
+        # --no-parallelize-within-files ensures each test file's tests run
+        # sequentially (they share a $HOME set by setup_file and are not safe
+        # to run concurrently). Parallelism is only across files.
+        bats_opts+=("--jobs" "$_jobs" "--no-parallelize-within-files")
+        unset _ncpu _jobs
+    fi
+
     if bats --help 2>&1 | grep -q -- "--formatter"; then
         formatter="${BATS_FORMATTER:-pretty}"
         if [[ "$formatter" == "tap" ]]; then
             if $use_color; then
                 esc=$'\033'
-                if bats --formatter tap "$@" |
+                if bats "${bats_opts[@]}" --formatter tap "$@" |
                     sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
                         -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /"; then
                     report_unit_result 0
@@ -111,7 +125,7 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
                     report_unit_result 1
                 fi
             else
-                if bats --formatter tap "$@"; then
+                if bats "${bats_opts[@]}" --formatter tap "$@"; then
                     report_unit_result 0
                 else
                     report_unit_result 1
@@ -119,7 +133,7 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
             fi
         else
             # Pretty format for local development
-            if bats --formatter "$formatter" "$@"; then
+            if bats "${bats_opts[@]}" --formatter "$formatter" "$@"; then
                 report_unit_result 0
             else
                 report_unit_result 1
@@ -128,7 +142,7 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
     else
         if $use_color; then
             esc=$'\033'
-            if bats --tap "$@" |
+            if bats "${bats_opts[@]}" --tap "$@" |
                 sed -e "s/^ok /${esc}[32mok ${esc}[0m /" \
                     -e "s/^not ok /${esc}[31mnot ok ${esc}[0m /"; then
                 report_unit_result 0
@@ -136,7 +150,7 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
                 report_unit_result 1
             fi
         else
-            if bats --tap "$@"; then
+            if bats "${bats_opts[@]}" --tap "$@"; then
                 report_unit_result 0
             else
                 report_unit_result 1

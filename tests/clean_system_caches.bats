@@ -72,10 +72,10 @@ setup() {
     mkdir -p "$test_cache"
 
     run bash -c "
-        run_with_timeout() { shift; \"\$@\"; }
-        export -f run_with_timeout
         source '$PROJECT_ROOT/lib/core/common.sh'
         source '$PROJECT_ROOT/lib/clean/caches.sh'
+        run_with_timeout() { shift; \"\$@\"; }
+        export -f run_with_timeout
         clean_service_worker_cache 'TestBrowser' '$test_cache'
     "
     [ "$status" -eq 0 ]
@@ -89,6 +89,10 @@ setup() {
     mkdir -p "$test_cache/def456_https_example.com_0"
 
     run bash -c "
+        export DRY_RUN=true
+        export PROTECTED_SW_DOMAINS=(capcut.com photopea.com)
+        source '$PROJECT_ROOT/lib/core/common.sh'
+        source '$PROJECT_ROOT/lib/clean/caches.sh'
         run_with_timeout() {
             local timeout=\"\$1\"
             shift
@@ -105,10 +109,6 @@ setup() {
             \"\$@\"
         }
         export -f run_with_timeout
-        export DRY_RUN=true
-        export PROTECTED_SW_DOMAINS=(capcut.com photopea.com)
-        source '$PROJECT_ROOT/lib/core/common.sh'
-        source '$PROJECT_ROOT/lib/clean/caches.sh'
         clean_service_worker_cache 'TestBrowser' '$test_cache'
     "
     [ "$status" -eq 0 ]
