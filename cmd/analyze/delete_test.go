@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -79,6 +80,17 @@ func TestMoveToTrashNonExistent(t *testing.T) {
 	err := moveToTrash("/nonexistent/path/that/does/not/exist")
 	if err == nil {
 		t.Fatal("expected error for non-existent path")
+	}
+}
+
+func TestMoveToTrashRejectsTraversal(t *testing.T) {
+	// Verify the full production path rejects ".." before filepath.Abs resolves it.
+	err := moveToTrash("/tmp/fakedir/../../../etc/passwd")
+	if err == nil {
+		t.Fatal("expected error for path with traversal components")
+	}
+	if !strings.Contains(err.Error(), "traversal") {
+		t.Fatalf("expected traversal error, got: %v", err)
 	}
 }
 

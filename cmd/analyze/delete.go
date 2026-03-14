@@ -122,12 +122,17 @@ func trashPathWithProgress(root string, counter *int64) (int64, error) {
 // moveToTrash uses macOS Finder to move a file/directory to Trash.
 // This is the safest method as it uses the system's native trash mechanism.
 func moveToTrash(path string) error {
+	// Validate raw input before Abs resolves ".." components away.
+	if err := validatePath(path); err != nil {
+		return err
+	}
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to resolve path: %w", err)
 	}
 
-	// Validate path to prevent path traversal attacks.
+	// Validate resolved path as well (defense-in-depth).
 	if err := validatePath(absPath); err != nil {
 		return err
 	}
