@@ -775,18 +775,14 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					for path := range m.largeMultiSelected {
 						go func(p string) {
-							ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-							defer cancel()
-							_ = exec.CommandContext(ctx, "open", p).Run()
+							_ = safeOpen(p, false)
 						}(path)
 					}
 					m.status = fmt.Sprintf("Opening %d items...", count)
 				} else {
 					selected := m.largeFiles[m.largeSelected]
 					go func(path string) {
-						ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-						defer cancel()
-						_ = exec.CommandContext(ctx, "open", path).Run()
+						_ = safeOpen(path, false)
 					}(selected.Path)
 					m.status = fmt.Sprintf("Opening %s...", selected.Name)
 				}
@@ -800,18 +796,14 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				for path := range m.multiSelected {
 					go func(p string) {
-						ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-						defer cancel()
-						_ = exec.CommandContext(ctx, "open", p).Run()
+						_ = safeOpen(p, false)
 					}(path)
 				}
 				m.status = fmt.Sprintf("Opening %d items...", count)
 			} else {
 				selected := m.entries[m.selected]
 				go func(path string) {
-					ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-					defer cancel()
-					_ = exec.CommandContext(ctx, "open", path).Run()
+					_ = safeOpen(path, false)
 				}(selected.Path)
 				m.status = fmt.Sprintf("Opening %s...", selected.Name)
 			}
@@ -829,18 +821,14 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					for path := range m.largeMultiSelected {
 						go func(p string) {
-							ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-							defer cancel()
-							_ = exec.CommandContext(ctx, "open", "-R", p).Run()
+							_ = safeOpen(p, true)
 						}(path)
 					}
 					m.status = fmt.Sprintf("Showing %d items in Finder...", count)
 				} else {
 					selected := m.largeFiles[m.largeSelected]
 					go func(path string) {
-						ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-						defer cancel()
-						_ = exec.CommandContext(ctx, "open", "-R", path).Run()
+						_ = safeOpen(path, true)
 					}(selected.Path)
 					m.status = fmt.Sprintf("Showing %s in Finder...", selected.Name)
 				}
@@ -854,18 +842,14 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				for path := range m.multiSelected {
 					go func(p string) {
-						ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-						defer cancel()
-						_ = exec.CommandContext(ctx, "open", "-R", p).Run()
+						_ = safeOpen(p, true)
 					}(path)
 				}
 				m.status = fmt.Sprintf("Showing %d items in Finder...", count)
 			} else {
 				selected := m.entries[m.selected]
 				go func(path string) {
-					ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
-					defer cancel()
-					_ = exec.CommandContext(ctx, "open", "-R", path).Run()
+					_ = safeOpen(path, true)
 				}(selected.Path)
 				m.status = fmt.Sprintf("Showing %s in Finder...", selected.Name)
 			}
@@ -1171,4 +1155,18 @@ func scanOverviewPathCmd(path string, index int) tea.Cmd {
 			Err:   err,
 		}
 	}
+}
+
+// safeOpen executes 'open' command with path validation.
+func safeOpen(path string, reveal bool) error {
+	if err := validatePath(path); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), openCommandTimeout)
+	defer cancel()
+	args := []string{path}
+	if reveal {
+		args = []string{"-R", path}
+	}
+	return exec.CommandContext(ctx, "open", args...).Run()
 }

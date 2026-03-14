@@ -126,6 +126,11 @@ func moveToTrash(path string) error {
 		return fmt.Errorf("failed to resolve path: %w", err)
 	}
 
+	// Validate path to prevent path traversal attacks.
+	if err := validatePath(absPath); err != nil {
+		return err
+	}
+
 	// Escape path for AppleScript (handle quotes and backslashes).
 	escapedPath := strings.ReplaceAll(absPath, "\\", "\\\\")
 	escapedPath = strings.ReplaceAll(escapedPath, "\"", "\\\"")
@@ -144,5 +149,25 @@ func moveToTrash(path string) error {
 		return fmt.Errorf("failed to move to Trash: %s", strings.TrimSpace(string(output)))
 	}
 
+	return nil
+}
+
+// validatePath checks path safety for external commands.
+// Returns error if path is empty, relative, contains null bytes, or escapes root.
+func validatePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("path is empty")
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("path must be absolute: %s", path)
+	}
+	if strings.Contains(path, "\x00") {
+		return fmt.Errorf("path contains null bytes")
+	}
+	// Ensure Clean doesn't radically alter the path (path traversal check).
+	clean := filepath.Clean(path)
+	if !strings.HasPrefix(clean, "/") {
+		return fmt.Errorf("path escapes root: %s", path)
+	}
 	return nil
 }
