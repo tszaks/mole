@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -165,10 +166,8 @@ func validatePath(path string) error {
 		return fmt.Errorf("path contains null bytes")
 	}
 	// Check for path traversal attempts (.. components).
-	for _, component := range strings.Split(path, string(filepath.Separator)) {
-		if component == ".." {
-			return fmt.Errorf("path contains traversal components: %s", path)
-		}
+	if slices.Contains(strings.Split(path, string(filepath.Separator)), "..") {
+		return fmt.Errorf("path contains traversal components: %s", path)
 	}
 	return nil
 }

@@ -275,23 +275,22 @@ func getAPFSContainerFreeBytes(mountpoint string) (uint64, error) {
 	}
 
 	const key = "<key>APFSContainerFree</key>"
-	idx := strings.Index(out, key)
-	if idx == -1 {
+	_, rest, found := strings.Cut(out, key)
+	if !found {
 		return 0, fmt.Errorf("APFSContainerFree not found")
 	}
 
-	rest := out[idx+len(key):]
-	start := strings.Index(rest, "<integer>")
-	if start == -1 {
+	_, rest, found = strings.Cut(rest, "<integer>")
+	if !found {
 		return 0, fmt.Errorf("APFSContainerFree value not found")
 	}
-	rest = rest[start+len("<integer>"):]
-	end := strings.Index(rest, "</integer>")
-	if end == -1 {
+
+	value, _, found := strings.Cut(rest, "</integer>")
+	if !found {
 		return 0, fmt.Errorf("APFSContainerFree end tag not found")
 	}
 
-	val, err := strconv.ParseUint(strings.TrimSpace(rest[:end]), 10, 64)
+	val, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse APFSContainerFree: %v", err)
 	}
