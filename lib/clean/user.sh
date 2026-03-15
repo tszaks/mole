@@ -71,6 +71,29 @@ _clean_recent_items() {
     safe_clean ~/Library/Preferences/com.apple.recentitems.plist "Recent items preferences" || true
 }
 
+# Internal: Clean incomplete browser downloads, skipping files currently open.
+_clean_incomplete_downloads() {
+    local -a patterns=(
+        "$HOME/Downloads/"*.download
+        "$HOME/Downloads/"*.crdownload
+        "$HOME/Downloads/"*.part
+    )
+    local labels=("Safari incomplete downloads" "Chrome incomplete downloads" "Partial incomplete downloads")
+    local i=0
+    for pattern in "${patterns[@]}"; do
+        local label="${labels[$i]}"
+        i=$((i + 1))
+        for f in $pattern; do
+            [[ -e "$f" ]] || continue
+            if lsof -F n -- "$f" > /dev/null 2>&1; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipping active download: $(basename "$f")"
+                continue
+            fi
+            safe_clean "$f" "$label" || true
+        done
+    done
+}
+
 # Internal: Clean old mail downloads.
 _clean_mail_downloads() {
     local mail_age_days=${MOLE_MAIL_AGE_DAYS:-}
@@ -459,9 +482,7 @@ clean_app_caches() {
     safe_clean ~/Library/Caches/com.apple.QuickLook.thumbnailcache "QuickLook thumbnails" || true
     safe_clean ~/Library/Caches/Quick\ Look/* "QuickLook cache" || true
     safe_clean ~/Library/Caches/com.apple.iconservices* "Icon services cache" || true
-    safe_clean ~/Downloads/*.download "Safari incomplete downloads" || true
-    safe_clean ~/Downloads/*.crdownload "Chrome incomplete downloads" || true
-    safe_clean ~/Downloads/*.part "Partial incomplete downloads" || true
+    _clean_incomplete_downloads
     safe_clean ~/Library/Autosave\ Information/* "Autosave information" || true
     safe_clean ~/Library/IdentityCaches/* "Identity caches" || true
     safe_clean ~/Library/Suggestions/* "Siri suggestions cache" || true
