@@ -50,7 +50,7 @@ setup() {
     stdout_output="$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; log_info '$message'")"
     [[ "$stdout_output" == *"$message"* ]]
 
-    local log_file="$HOME/.config/mole/mole.log"
+    local log_file="$HOME/Library/Logs/mole/mole.log"
     [[ -f "$log_file" ]]
     grep -q "INFO: $message" "$log_file"
 }
@@ -64,13 +64,13 @@ setup() {
     [[ -s "$stderr_file" ]]
     grep -q "$message" "$stderr_file"
 
-    local log_file="$HOME/.config/mole/mole.log"
+    local log_file="$HOME/Library/Logs/mole/mole.log"
     [[ -f "$log_file" ]]
     grep -q "ERROR: $message" "$log_file"
 }
 
 @test "rotate_log_once only checks log size once per session" {
-    local log_file="$HOME/.config/mole/mole.log"
+    local log_file="$HOME/Library/Logs/mole/mole.log"
     mkdir -p "$(dirname "$log_file")"
     dd if=/dev/zero of="$log_file" bs=1024 count=1100 2> /dev/null
 

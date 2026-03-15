@@ -427,6 +427,12 @@ clean_support_app_data() {
         safe_find_delete "$idle_assets_dir" "*" "$support_age_days" "f" || true
     fi
 
+    # Clean system-level idle/aerial screensaver videos (macOS re-downloads as needed).
+    local sys_idle_assets_dir="/Library/Application Support/com.apple.idleassetsd/Customer"
+    if sudo test -d "$sys_idle_assets_dir" 2> /dev/null; then
+        safe_sudo_find_delete "$sys_idle_assets_dir" "*" "$support_age_days" "f" || true
+    fi
+
     # Clean old aerial wallpaper videos (can be large, safe to remove).
     safe_clean ~/Library/Application\ Support/com.apple.wallpaper/aerials/videos/* "Aerial wallpaper videos"
 

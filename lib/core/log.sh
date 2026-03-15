@@ -21,9 +21,9 @@ fi
 # Logging Configuration
 # ============================================================================
 
-readonly LOG_FILE="${HOME}/.config/mole/mole.log"
-readonly DEBUG_LOG_FILE="${HOME}/.config/mole/mole_debug_session.log"
-readonly OPERATIONS_LOG_FILE="${HOME}/.config/mole/operations.log"
+readonly LOG_FILE="${HOME}/Library/Logs/mole/mole.log"
+readonly DEBUG_LOG_FILE="${HOME}/Library/Logs/mole/mole_debug_session.log"
+readonly OPERATIONS_LOG_FILE="${HOME}/Library/Logs/mole/operations.log"
 readonly LOG_MAX_SIZE_DEFAULT=1048576   # 1MB
 readonly OPLOG_MAX_SIZE_DEFAULT=5242880 # 5MB
 

@@ -206,7 +206,7 @@ EOF
 	[ "$status" -eq 0 ]
 	MOLE_OUTPUT="$output"
 
-	DEBUG_LOG="$HOME/.config/mole/mole_debug_session.log"
+	DEBUG_LOG="$HOME/Library/Logs/mole/mole_debug_session.log"
 	[ -f "$DEBUG_LOG" ]
 
 	run grep "Mole Debug Session" "$DEBUG_LOG"
@@ -228,7 +228,7 @@ EOF
 	run env HOME="$HOME" TERM="xterm-256color" MOLE_TEST_MODE=1 MO_DEBUG=1 "$PROJECT_ROOT/mole" clean --dry-run
 	[ "$status" -eq 0 ]
 
-	DEBUG_LOG="$HOME/.config/mole/mole_debug_session.log"
+	DEBUG_LOG="$HOME/Library/Logs/mole/mole_debug_session.log"
 
 	run grep "User:" "$DEBUG_LOG"
 	[ "$status" -eq 0 ]
