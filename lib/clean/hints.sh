@@ -101,6 +101,19 @@ hint_is_app_scoped_launch_target() {
 }
 
 # shellcheck disable=SC2329
+hint_is_system_binary() {
+    local program="$1"
+
+    case "$program" in
+        /bin/* | /sbin/* | /usr/bin/* | /usr/sbin/* | /usr/libexec/*)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
+# shellcheck disable=SC2329
 hint_launch_agent_bundle_exists() {
     local bundle_id="$1"
 
@@ -433,6 +446,9 @@ show_user_launch_agent_hint_notice() {
         local associated=""
 
         program=$(hint_extract_launch_agent_program_path "$plist")
+        if [[ -n "$program" ]] && hint_is_system_binary "$program"; then
+            continue
+        fi
         if [[ -n "$program" ]] && hint_is_app_scoped_launch_target "$program" && [[ ! -e "$program" ]]; then
             reason="Missing app/helper target"
             target="${program/#$HOME/~}"

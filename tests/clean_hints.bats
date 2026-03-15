@@ -23,6 +23,10 @@ setup() {
     mkdir -p "$HOME/.config/mole"
 }
 
+teardown() {
+    rm -rf "$HOME/Library/LaunchAgents"
+}
+
 @test "probe_project_artifact_hints reuses purge targets and excludes noisy names" {
     local root="$HOME/hints-root"
     mkdir -p "$root/proj/node_modules" "$root/proj/vendor" "$root/proj/bin"
@@ -153,6 +157,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
 note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
 show_user_launch_agent_hint_notice
 EOT5
 
