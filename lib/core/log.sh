@@ -303,8 +303,10 @@ log_system_info() {
         fi
         echo "Shell: ${SHELL:-unknown}, ${TERM:-unknown}"
 
-        # Check sudo status non-interactively
-        if sudo -n true 2> /dev/null; then
+        # Check sudo status non-interactively (skip in test mode)
+        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+            echo "Sudo Access: Skipped (test mode)"
+        elif sudo -n true 2> /dev/null; then
             echo "Sudo Access: Active"
         else
             echo "Sudo Access: Required"

@@ -11,7 +11,13 @@ clean_user_essentials() {
     if ! is_path_whitelisted "$HOME/.Trash"; then
         local trash_count
         local trash_count_status=0
-        trash_count=$(run_with_timeout 3 osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null) || trash_count_status=$?
+        # Skip AppleScript during tests to avoid permission dialogs
+        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+            trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -exec printf '.' ';' 2> /dev/null |
+                wc -c | awk '{print $1}' || echo "0")
+        else
+            trash_count=$(run_with_timeout 3 osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null) || trash_count_status=$?
+        fi
         if [[ $trash_count_status -eq 124 ]]; then
             debug_log "Finder trash count timed out, using direct .Trash scan"
             trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -exec printf '.' ';' 2> /dev/null |
@@ -22,10 +28,18 @@ clean_user_essentials() {
         if [[ "$DRY_RUN" == "true" ]]; then
             [[ $trash_count -gt 0 ]] && echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $trash_count items" || echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
         elif [[ $trash_count -gt 0 ]]; then
-            if run_with_timeout 5 osascript -e 'tell application "Finder" to empty trash' > /dev/null 2>&1; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $trash_count items"
-                note_activity
+            local emptied_via_finder=false
+            # Skip AppleScript during tests to avoid permission dialogs
+            if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+                debug_log "Skipping Finder AppleScript in test mode"
             else
+                if run_with_timeout 5 osascript -e 'tell application "Finder" to empty trash' > /dev/null 2>&1; then
+                    emptied_via_finder=true
+                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $trash_count items"
+                    note_activity
+                fi
+            fi
+            if [[ "$emptied_via_finder" != "true" ]]; then
                 debug_log "Finder trash empty failed or timed out, falling back to direct deletion"
                 local cleaned_count=0
                 while IFS= read -r -d '' item; do
@@ -452,8 +466,11 @@ clean_support_app_data() {
 
     # Clean system-level idle/aerial screensaver videos (macOS re-downloads as needed).
     local sys_idle_assets_dir="/Library/Application Support/com.apple.idleassetsd/Customer"
-    if sudo test -d "$sys_idle_assets_dir" 2> /dev/null; then
-        safe_sudo_find_delete "$sys_idle_assets_dir" "*" "$support_age_days" "f" || true
+    # Skip sudo operations during tests to avoid password prompts
+    if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
+        if sudo test -d "$sys_idle_assets_dir" 2> /dev/null; then
+            safe_sudo_find_delete "$sys_idle_assets_dir" "*" "$support_age_days" "f" || true
+        fi
     fi
 
     # Clean old aerial wallpaper videos (can be large, safe to remove).

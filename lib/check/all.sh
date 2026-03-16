@@ -13,6 +13,11 @@ list_login_items() {
         return
     fi
 
+    # Skip AppleScript during tests to avoid permission dialogs
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        return
+    fi
+
     local raw_items
     raw_items=$(osascript -e 'tell application "System Events" to get the name of every login item' 2> /dev/null || echo "")
     [[ -z "$raw_items" || "$raw_items" == "missing value" ]] && return

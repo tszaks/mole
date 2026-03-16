@@ -9,6 +9,10 @@ setup_file() {
 
     HOME="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-brew-uninstall-home.XXXXXX")"
     export HOME
+
+    # Prevent AppleScript permission dialogs during tests
+    MOLE_TEST_MODE=1
+    export MOLE_TEST_MODE
 }
 
 teardown_file() {
