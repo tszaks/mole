@@ -119,12 +119,12 @@ setup() {
 
     result=$(find_app_files "com.tencent.xinWeChat" "WeChat")
 
-    [[ "$result" =~ "Library/Application Support/FileProvider/com.tencent.xinWeChat.WeChatFileProviderExtension" ]]
-    [[ "$result" =~ "Library/Application Scripts/com.tencent.xinWeChat.WeChatMacShare" ]]
-    [[ "$result" =~ "Library/Application Scripts/5A4RE8SF68.com.tencent.xinWeChat" ]]
-    [[ "$result" =~ "Library/Containers/com.tencent.xinWeChat.WeChatFileProviderExtension" ]]
-    [[ "$result" =~ "Library/Group Containers/5A4RE8SF68.com.tencent.xinWeChat" ]]
-    [[ ! "$result" =~ "Library/Containers/com.tencent.otherapp.Helper" ]]
+    [[ "$result" =~ Library/Application\ Support/FileProvider/com.tencent.xinWeChat.WeChatFileProviderExtension ]]
+    [[ "$result" =~ Library/Application\ Scripts/com.tencent.xinWeChat.WeChatMacShare ]]
+    [[ "$result" =~ Library/Application\ Scripts/5A4RE8SF68.com.tencent.xinWeChat ]]
+    [[ "$result" =~ Library/Containers/com.tencent.xinWeChat.WeChatFileProviderExtension ]]
+    [[ "$result" =~ Library/Group\ Containers/5A4RE8SF68.com.tencent.xinWeChat ]]
+    [[ ! "$result" =~ Library/Containers/com.tencent.otherapp.Helper ]]
 }
 
 @test "find_app_files does not match empty app name" {
