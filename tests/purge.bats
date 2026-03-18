@@ -139,7 +139,7 @@ format_purge_target_path "$HOME/www/app/node_modules"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == "~/www/app/node_modules" ]]
+	[[ "$output" == \~/www/app/node_modules ]]
 }
 
 @test "filter_nested_artifacts: removes nested node_modules" {
