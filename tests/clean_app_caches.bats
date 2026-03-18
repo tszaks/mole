@@ -84,13 +84,17 @@ safe_clean() { :; }
 clean_xcode_tools() { echo "xcode"; }
 clean_code_editors() { echo "editors"; }
 clean_communication_apps() { echo "comm"; }
+clean_dingtalk() { echo "dingtalk"; }
+clean_ai_apps() { echo "ai"; }
 clean_user_gui_applications
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"xcode"* ]]
-    [[ "$output" == *"editors"* ]]
+    [[ "$output" != *"xcode"* ]]
+    [[ "$output" != *"editors"* ]]
     [[ "$output" == *"comm"* ]]
+    [[ "$output" == *"dingtalk"* ]]
+    [[ "$output" == *"ai"* ]]
 }
 
 @test "clean_ai_apps calls expected caches" {
