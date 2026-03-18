@@ -1520,6 +1520,7 @@ opt_bluetooth_reset
 EOF
 
     [ "$status" -eq 0 ]
+    [[ "$output" == *"Bluetooth devices may disconnect briefly during refresh"* ]]
     [[ "$output" == *"Bluetooth module restarted"* ]]
 }
 
