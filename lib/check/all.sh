@@ -386,9 +386,34 @@ check_macos_update() {
 
         # Prefer avoiding false negatives: if the system indicates updates are pending,
         # only clear the flag when softwareupdate returns a list without any update entries.
+        # However, macOS doesn't distinguish between system and App Store updates in the
+        # LastRecommendedUpdatesAvailable counter, so we additionally require that at least
+        # one listed update is a macOS system update before showing a macOS update warning.
         if [[ $sw_status -eq 0 && -n "$sw_output" ]]; then
             if ! echo "$sw_output" | grep -qE '^[[:space:]]*\*'; then
+                # No update entries at all
                 updates_available="false"
+            else
+                # softwareupdate output may include both macOS and App Store updates.
+                # Treat only entries whose Label contains "macOS" as system updates.
+                local has_macos_update="false"
+                while IFS= read -r line; do
+                    [[ "$line" =~ ^[[:space:]]*\* ]] || continue
+                    local label="$line"
+                    label="${label#*Label: }"
+                    label="${label%%,*}"
+                    local lower_label
+                    lower_label=$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')
+                    if [[ "$lower_label" == macos* || "$lower_label" == *"macos "* || "$lower_label" == *" macos"* ]]; then
+                        has_macos_update="true"
+                        break
+                    fi
+                done <<< "$sw_output"
+
+                if [[ "$has_macos_update" != "true" ]]; then
+                    # Only App Store updates are pending – don't flag macOS as outdated
+                    updates_available="false"
+                fi
             fi
         fi
     fi

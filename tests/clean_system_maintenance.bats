@@ -669,6 +669,46 @@ EOF
     [[ "$output" != *"SHOULD_NOT_CALL_SOFTWAREUPDATE"* ]]
 }
 
+@test "check_macos_update does not flag macOS when only App Store updates are pending" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+
+defaults() { echo "1"; }
+
+run_with_timeout() {
+    local timeout="${1:-}"
+    shift
+    if [[ "$timeout" != "10" ]]; then
+        echo "BAD_TIMEOUT:$timeout"
+        return 124
+    fi
+    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
+        cat <<'OUT'
+Software Update Tool
+
+Software Update found the following new or updated software:
+   * Label: Xcode-15.3
+OUT
+        return 0
+    fi
+    return 124
+}
+
+start_inline_spinner(){ :; }
+stop_inline_spinner(){ :; }
+
+check_macos_update
+echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"System up to date"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=false"* ]]
+    [[ "$output" != *"BAD_TIMEOUT:"* ]]
+}
+
 @test "check_macos_update outputs debug info when MO_DEBUG set" {
     run bash --noprofile --norc << 'EOF'
 set -euo pipefail
