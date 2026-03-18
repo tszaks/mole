@@ -53,7 +53,7 @@ NC='\033[0m'
 readonly ICON_SUCCESS="✓"
 readonly ICON_ERROR="☻"
 readonly ICON_WARNING="●"
-readonly ICON_LIST="•"
+readonly ICON_LIST="●"
 
 echo -e "${BLUE}=== Mole Check, ${MODE} ===${NC}\n"
 
