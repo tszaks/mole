@@ -193,6 +193,39 @@ EOF
     [[ "$output" != *"App caches"* ]] || [[ "$output" == *"already clean"* ]]
 }
 
+@test "clean_app_caches skips expensive size scans for large sandboxed caches" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+safe_clean() { :; }
+should_protect_data() { return 1; }
+is_critical_system_component() { return 1; }
+get_path_size_kb() {
+    echo "SHOULD_NOT_SIZE_SCAN"
+    return 0
+}
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Containers/com.example.large/Data/Library/Caches"
+for i in $(seq 1 101); do
+    touch "$HOME/Library/Containers/com.example.large/Data/Library/Caches/file-$i.tmp"
+done
+
+clean_app_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Sandboxed app caches"* ]]
+    [[ "$output" != *"SHOULD_NOT_SIZE_SCAN"* ]]
+}
+
 @test "clean_application_support_logs counts nested directory contents in dry-run size summary" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -449,6 +482,36 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"PASS"* ]]
     [[ "$output" != *"Group Containers logs/caches"* ]]
+}
+
+@test "clean_group_container_caches skips per-item size scans for large candidates" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+get_path_size_kb() {
+    echo "SHOULD_NOT_SIZE_SCAN"
+    return 0
+}
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Group Containers/group.com.example.large/Library/Caches"
+for i in $(seq 1 101); do
+    touch "$HOME/Library/Group Containers/group.com.example.large/Library/Caches/file-$i.tmp"
+done
+
+clean_group_container_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Group Containers logs/caches"* ]]
+    [[ "$output" != *"SHOULD_NOT_SIZE_SCAN"* ]]
 }
 
 @test "clean_finder_metadata respects protection flag" {
