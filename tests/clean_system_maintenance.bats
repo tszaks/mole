@@ -607,8 +607,8 @@ echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Update available"* ]]
-    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=true"* ]]
+    [[ "$output" == *"System up to date"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=false"* ]]
     [[ "$output" != *"BAD_TIMEOUT:"* ]]
 }
 
@@ -641,8 +641,8 @@ echo "MACOS_UPDATE_AVAILABLE=$MACOS_UPDATE_AVAILABLE"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Update available"* ]]
-    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=true"* ]]
+    [[ "$output" == *"System up to date"* ]]
+    [[ "$output" == *"MACOS_UPDATE_AVAILABLE=false"* ]]
     [[ "$output" != *"BAD_TIMEOUT:"* ]]
 }
 

@@ -227,37 +227,42 @@ fi
 echo ""
 
 echo "6. Testing installation..."
-# Skip if Homebrew mole is installed (install.sh will refuse to overwrite)
-install_test_home=""
-if command -v brew > /dev/null 2>&1 && brew list mole &> /dev/null; then
-    printf "${GREEN}${ICON_SUCCESS} Installation test skipped, Homebrew${NC}\n"
+# Installation script is macOS-specific; skip this test on non-macOS platforms
+if [[ "$(uname -s)" != "Darwin" ]]; then
+    printf "${YELLOW}${ICON_WARNING} Installation test skipped (non-macOS)${NC}\n"
 else
-    install_test_home="$(mktemp -d /tmp/mole-test-home.XXXXXX 2> /dev/null || true)"
-    if [[ -z "$install_test_home" ]]; then
-        install_test_home="/tmp/mole-test-home"
-        mkdir -p "$install_test_home"
+    # Skip if Homebrew mole is installed (install.sh will refuse to overwrite)
+    install_test_home=""
+    if command -v brew > /dev/null 2>&1 && brew list mole &> /dev/null; then
+        printf "${GREEN}${ICON_SUCCESS} Installation test skipped, Homebrew${NC}\n"
+    else
+        install_test_home="$(mktemp -d /tmp/mole-test-home.XXXXXX 2> /dev/null || true)"
+        if [[ -z "$install_test_home" ]]; then
+            install_test_home="/tmp/mole-test-home"
+            mkdir -p "$install_test_home"
+        fi
     fi
-fi
-if [[ -z "$install_test_home" ]]; then
-    :
-elif HOME="$install_test_home" \
-    XDG_CONFIG_HOME="$install_test_home/.config" \
-    XDG_CACHE_HOME="$install_test_home/.cache" \
-    MO_NO_OPLOG=1 \
-    ./install.sh --prefix /tmp/mole-test > /dev/null 2>&1; then
-    if [ -f /tmp/mole-test/mole ]; then
-        printf "${GREEN}${ICON_SUCCESS} Installation test passed${NC}\n"
+    if [[ -z "$install_test_home" ]]; then
+        :
+    elif HOME="$install_test_home" \
+        XDG_CONFIG_HOME="$install_test_home/.config" \
+        XDG_CACHE_HOME="$install_test_home/.cache" \
+        MO_NO_OPLOG=1 \
+        ./install.sh --prefix /tmp/mole-test > /dev/null 2>&1; then
+        if [[ -f "/tmp/mole-test/mole" ]]; then
+            printf "${GREEN}${ICON_SUCCESS} Installation test passed${NC}\n"
+        else
+            printf "${RED}${ICON_ERROR} Installation test failed${NC}\n"
+            ((FAILED++))
+        fi
     else
         printf "${RED}${ICON_ERROR} Installation test failed${NC}\n"
         ((FAILED++))
     fi
-else
-    printf "${RED}${ICON_ERROR} Installation test failed${NC}\n"
-    ((FAILED++))
-fi
-MO_NO_OPLOG=1 safe_remove "/tmp/mole-test" true || true
-if [[ -n "$install_test_home" ]]; then
-    MO_NO_OPLOG=1 safe_remove "$install_test_home" true || true
+    MO_NO_OPLOG=1 safe_remove "/tmp/mole-test" true || true
+    if [[ -n "$install_test_home" ]]; then
+        MO_NO_OPLOG=1 safe_remove "$install_test_home" true || true
+    fi
 fi
 echo ""
 

@@ -351,24 +351,29 @@ check_macos_update() {
     # Check whitelist
     if command -v is_whitelisted > /dev/null && is_whitelisted "check_macos_updates"; then return; fi
 
-    # Fast check using system preferences
-    local updates_available="false"
-    if [[ $(get_software_updates) == "Updates Available" ]]; then
-        updates_available="true"
+    # Fast check using system preferences to avoid unnecessary scans.
+    # We only surface a macOS update when softwareupdate itself lists a macOS
+    # system update. If softwareupdate fails, times out, or does not list any
+    # macOS-labelled entries, we treat the system as up to date to avoid
+    # false-positive warnings.
+    local updates_available
+    updates_available="false"
 
-        # Verify with softwareupdate using --no-scan to avoid triggering a fresh scan
-        # which can timeout. We prioritize avoiding false negatives (missing actual updates)
-        # over false positives, so we only clear the update flag when softwareupdate
-        # explicitly reports "No new software available"
-        local sw_output=""
-        local sw_status=0
-        local spinner_started=false
+    if [[ $(get_software_updates) == "Updates Available" ]]; then
+        local sw_output
+        sw_output=""
+        local sw_status
+        sw_status=0
+        local spinner_started
+        spinner_started="false"
+
         if [[ -t 1 ]]; then
             MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking macOS updates..."
-            spinner_started=true
+            spinner_started="true"
         fi
 
-        local softwareupdate_timeout=10
+        local softwareupdate_timeout
+        softwareupdate_timeout=10
         if sw_output=$(run_with_timeout "$softwareupdate_timeout" softwareupdate -l --no-scan 2> /dev/null); then
             :
         else
@@ -384,22 +389,18 @@ check_macos_update() {
             echo "[DEBUG] softwareupdate exit status: $sw_status, output lines: $(echo "$sw_output" | wc -l | tr -d ' ')" >&2
         fi
 
-        # Prefer avoiding false negatives: if the system indicates updates are pending,
-        # only clear the flag when softwareupdate returns a list without any update entries.
-        # However, macOS doesn't distinguish between system and App Store updates in the
-        # LastRecommendedUpdatesAvailable counter, so we additionally require that at least
-        # one listed update is a macOS system update before showing a macOS update warning.
+        # Only trust softwareupdate as the source of truth. We surface a macOS
+        # update *only* when softwareupdate successfully returns at least one
+        # macOS-labelled entry; otherwise we prefer a false negative over a
+        # false positive.
         if [[ $sw_status -eq 0 && -n "$sw_output" ]]; then
-            if ! echo "$sw_output" | grep -qE '^[[:space:]]*\*'; then
-                # No update entries at all
-                updates_available="false"
-            else
-                # softwareupdate output may include both macOS and App Store updates.
-                # Treat only entries whose Label contains "macOS" as system updates.
-                local has_macos_update="false"
+            if echo "$sw_output" | grep -qE '^[[:space:]]*\*'; then
+                local has_macos_update
+                has_macos_update="false"
                 while IFS= read -r line; do
                     [[ "$line" =~ ^[[:space:]]*\* ]] || continue
-                    local label="$line"
+                    local label
+                    label="$line"
                     label="${label#*Label: }"
                     label="${label%%,*}"
                     local lower_label
@@ -410,9 +411,8 @@ check_macos_update() {
                     fi
                 done <<< "$sw_output"
 
-                if [[ "$has_macos_update" != "true" ]]; then
-                    # Only App Store updates are pending – don't flag macOS as outdated
-                    updates_available="false"
+                if [[ "$has_macos_update" == "true" ]]; then
+                    updates_available="true"
                 fi
             fi
         fi
