@@ -238,6 +238,25 @@ EOF
     rm -rf "$HOME/go"
 }
 
+@test "discover_project_cache_roots dedupes aliased roots by filesystem identity" {
+    mkdir -p "$HOME/code/demo/.dart_tool"
+    touch "$HOME/code/demo/pubspec.yaml"
+    mkdir -p "$HOME/.config/mole"
+    ln -s "$HOME/code" "$HOME/Code"
+    printf '%s\n' "$HOME/Code" > "$HOME/.config/mole/purge_paths"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/caches.sh"
+roots=$(discover_project_cache_roots)
+printf '%s\n' "$roots"
+printf 'COUNT=%s\n' "$(printf '%s\n' "$roots" | sed '/^$/d' | wc -l | tr -d ' ')"
+EOF
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"COUNT=1"* ]]
+}
+
 @test "clean_project_caches skips stalled root scans" {
     mkdir -p "$HOME/.config/mole"
     mkdir -p "$HOME/SlowProjects/app"

@@ -125,6 +125,18 @@ PLIST
     [ -f "$HOME/Library/LaunchAgents/com.example.stale.plist" ]
 }
 
+@test "mo clean --dry-run does not export duplicate targets across sections" {
+    mkdir -p "$HOME/Library/Application Support/Code/CachedData"
+    echo "cache" > "$HOME/Library/Application Support/Code/CachedData/data.bin"
+
+    run env HOME="$HOME" MOLE_TEST_MODE=0 "$PROJECT_ROOT/mole" clean --dry-run
+    [ "$status" -eq 0 ]
+
+    run grep -c "Application Support/Code/CachedData" "$HOME/.config/mole/clean-list.txt"
+    [ "$status" -eq 0 ]
+    [ "$output" -eq 1 ]
+}
+
 @test "mo clean honors whitelist entries" {
     mkdir -p "$HOME/Library/Caches/WhitelistedApp"
     echo "keep me" > "$HOME/Library/Caches/WhitelistedApp/data.tmp"
