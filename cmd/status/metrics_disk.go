@@ -67,26 +67,30 @@ func collectDisks() ([]DiskStatus, error) {
 		if err != nil || usage.Total == 0 {
 			continue
 		}
+		total := usage.Total
+		if runtime.GOOS == "darwin" {
+			total = correctDiskTotalBytes(part.Mountpoint, total)
+		}
 		// Skip <1GB volumes.
-		if usage.Total < 1<<30 {
+		if total < 1<<30 {
 			continue
 		}
 		// Use size-based dedupe key for shared pools.
-		volKey := fmt.Sprintf("%s:%d", part.Fstype, usage.Total)
+		volKey := fmt.Sprintf("%s:%d", part.Fstype, total)
 		if seenVolume[volKey] {
 			continue
 		}
 		used := usage.Used
 		usedPercent := usage.UsedPercent
 		if runtime.GOOS == "darwin" && strings.ToLower(part.Fstype) == "apfs" {
-			used, usedPercent = correctAPFSDiskUsage(part.Mountpoint, usage.Total, usage.Used)
+			used, usedPercent = correctAPFSDiskUsage(part.Mountpoint, total, usage.Used)
 		}
 
 		disks = append(disks, DiskStatus{
 			Mount:       part.Mountpoint,
 			Device:      part.Device,
 			Used:        used,
-			Total:       usage.Total,
+			Total:       total,
 			UsedPercent: usedPercent,
 			Fstype:      part.Fstype,
 		})
@@ -228,6 +232,39 @@ func isExternalDisk(device string) (bool, error) {
 	return external, nil
 }
 
+// correctDiskTotalBytes uses diskutil's plist output when macOS reports a
+// meaningfully different disk size than gopsutil. This fixes external APFS
+// volumes that can show doubled capacities through statfs/gopsutil.
+func correctDiskTotalBytes(mountpoint string, rawTotal uint64) uint64 {
+	if rawTotal == 0 || !commandExists("diskutil") {
+		return rawTotal
+	}
+
+	diskutilTotal, err := getDiskutilTotalBytes(mountpoint)
+	if err != nil || diskutilTotal == 0 {
+		return rawTotal
+	}
+
+	if uint64AbsDiff(rawTotal, diskutilTotal) > 1<<30 {
+		return diskutilTotal
+	}
+
+	return rawTotal
+}
+
+func getDiskutilTotalBytes(mountpoint string) (uint64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := runCmd(ctx, "diskutil", "info", "-plist", mountpoint)
+	if err != nil {
+		return 0, err
+	}
+
+	// Prefer TotalSize, but keep older/plainer keys as fallbacks.
+	return extractPlistUint(out, "TotalSize", "DiskSize", "Size")
+}
+
 // correctAPFSDiskUsage returns Finder-accurate used bytes and percent for an
 // APFS volume, accounting for purgeable caches and APFS local snapshots that
 // statfs incorrectly counts as "used". Uses a three-tier fallback:
@@ -274,27 +311,7 @@ func getAPFSContainerFreeBytes(mountpoint string) (uint64, error) {
 		return 0, err
 	}
 
-	const key = "<key>APFSContainerFree</key>"
-	_, rest, found := strings.Cut(out, key)
-	if !found {
-		return 0, fmt.Errorf("APFSContainerFree not found")
-	}
-
-	_, rest, found = strings.Cut(rest, "<integer>")
-	if !found {
-		return 0, fmt.Errorf("APFSContainerFree value not found")
-	}
-
-	value, _, found := strings.Cut(rest, "</integer>")
-	if !found {
-		return 0, fmt.Errorf("APFSContainerFree end tag not found")
-	}
-
-	val, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse APFSContainerFree: %v", err)
-	}
-	return val, nil
+	return extractPlistUint(out, "APFSContainerFree")
 }
 
 // getFinderStartupDiskFreeBytes queries Finder via osascript for the startup
@@ -334,6 +351,41 @@ func getFinderStartupDiskFreeBytes() (free, total uint64, err error) {
 	finderDiskTotal = uint64(totalF)
 	finderDiskCachedAt = time.Now()
 	return finderDiskFree, finderDiskTotal, nil
+}
+
+func extractPlistUint(plist string, keys ...string) (uint64, error) {
+	for _, key := range keys {
+		marker := "<key>" + key + "</key>"
+		_, rest, found := strings.Cut(plist, marker)
+		if !found {
+			continue
+		}
+
+		_, rest, found = strings.Cut(rest, "<integer>")
+		if !found {
+			continue
+		}
+
+		value, _, found := strings.Cut(rest, "</integer>")
+		if !found {
+			continue
+		}
+
+		parsed, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse %s: %v", key, err)
+		}
+		return parsed, nil
+	}
+
+	return 0, fmt.Errorf("%s not found", strings.Join(keys, "/"))
+}
+
+func uint64AbsDiff(a, b uint64) uint64 {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
 
 func (c *Collector) collectDiskIO(now time.Time) DiskIOStatus {

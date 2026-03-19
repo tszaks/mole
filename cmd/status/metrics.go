@@ -347,7 +347,7 @@ func (c *Collector) Collect() (MetricsSnapshot, error) {
 	}, mergeErr
 }
 
-func runCmd(ctx context.Context, name string, args ...string) (string, error) {
+var runCmd = func(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	output, err := cmd.Output()
 	if err != nil {
@@ -356,7 +356,7 @@ func runCmd(ctx context.Context, name string, args ...string) (string, error) {
 	return string(output), nil
 }
 
-func commandExists(name string) bool {
+var commandExists = func(name string) bool {
 	if name == "" {
 		return false
 	}
