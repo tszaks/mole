@@ -80,6 +80,41 @@ EOF
     [[ "$output" == *"Trash · emptied, 2 items"* ]]
 }
 
+@test "clean_user_essentials keeps Mole runtime logs while cleaning other user logs" {
+    mkdir -p "$HOME/Library/Logs/mole"
+    mkdir -p "$HOME/Library/Logs/OtherApp"
+    touch "$HOME/Library/Logs/mole/operations.log"
+    touch "$HOME/Library/Logs/OtherApp/old.log"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+DRY_RUN=false
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+safe_clean() {
+    local path=""
+    for path in "${@:1:$#-1}"; do
+        if should_protect_path "$path"; then
+            continue
+        fi
+        /bin/rm -rf "$path"
+    done
+}
+
+clean_user_essentials
+
+[[ -d "$HOME/Library/Logs/mole" ]]
+[[ -f "$HOME/Library/Logs/mole/operations.log" ]]
+[[ ! -e "$HOME/Library/Logs/OtherApp/old.log" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "clean_app_caches includes macOS system caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

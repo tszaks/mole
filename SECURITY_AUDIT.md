@@ -226,7 +226,7 @@ Mole exposes multiple safety controls before and during destructive actions:
 - interactive high-risk flows require explicit confirmation before deletion
 - purge marks recent projects conservatively and leaves them unselected by default
 - analyzer delete uses Finder Trash rather than direct permanent removal
-- operation logs are written to `~/.config/mole/operations.log` unless disabled with `MO_NO_OPLOG=1`
+- operation logs are written to `~/Library/Logs/mole/operations.log` unless disabled with `MO_NO_OPLOG=1`
 - timeouts bound external commands so stalled discovery or uninstall operations do not silently hang the entire flow
 
 Relevant timeout behavior includes:

@@ -802,6 +802,10 @@ should_protect_path() {
         */Library/Preferences/com.apple.dock.plist | */Library/Preferences/com.apple.finder.plist)
             return 0
             ;;
+        # Protect Mole's own runtime logs so cleanup cannot delete its active log targets.
+        */Library/Logs/mole | */Library/Logs/mole/ | */Library/Logs/mole/*)
+            return 0
+            ;;
         # Bluetooth and WiFi configurations
         */ByHost/com.apple.bluetooth.* | */ByHost/com.apple.wifi.*)
             return 0

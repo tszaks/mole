@@ -69,6 +69,25 @@ setup() {
     grep -q "ERROR: $message" "$log_file"
 }
 
+@test "log_operation recreates operations log if the log directory disappears mid-session" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+rm -rf "$HOME/Library/Logs/mole"
+log_operation "clean" "REMOVED" "/tmp/example" "1KB"
+EOF
+    [ "$status" -eq 0 ]
+
+    local oplog="$HOME/Library/Logs/mole/operations.log"
+    [[ -f "$oplog" ]]
+    grep -Fq "[clean] REMOVED /tmp/example (1KB)" "$oplog"
+}
+
+@test "should_protect_path protects Mole runtime logs" {
+    result="$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_path '$HOME/Library/Logs/mole/operations.log' && echo protected || echo not-protected")"
+    [ "$result" = "protected" ]
+}
+
 @test "rotate_log_once only checks log size once per session" {
     local log_file="$HOME/Library/Logs/mole/mole.log"
     mkdir -p "$(dirname "$log_file")"
