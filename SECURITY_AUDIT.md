@@ -124,7 +124,7 @@ In addition to path blocking, these categories are protected:
 
 ## Implementation Details
 
-All deletion routes through `lib/core/file_ops.sh`:
+All deletion routes pass through `lib/core/file_ops.sh`:
 
 - `validate_path_for_deletion()` - Empty, relative, traversal checks
 - `should_protect_path()` - Prefix and pattern matching
