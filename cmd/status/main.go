@@ -165,6 +165,7 @@ func (m model) View() string {
 
 	header, mole := renderHeader(m.metrics, m.errMessage, m.animFrame, termWidth, m.catHidden)
 
+	var cardContent string
 	if termWidth <= 80 {
 		cardWidth := termWidth
 		if cardWidth > 2 {
@@ -179,27 +180,31 @@ func (m model) View() string {
 			}
 			rendered = append(rendered, renderCard(c, cardWidth, 0))
 		}
-		// Combine header, mole, and cards with consistent spacing
-		var content []string
-		content = append(content, header)
-		if mole != "" {
-			content = append(content, mole)
-		}
-		content = append(content, lipgloss.JoinVertical(lipgloss.Left, rendered...))
-		return lipgloss.JoinVertical(lipgloss.Left, content...)
+		cardContent = lipgloss.JoinVertical(lipgloss.Left, rendered...)
+	} else {
+		cardWidth := max(24, termWidth/2-4)
+		cards := buildCards(m.metrics, cardWidth)
+		cardContent = renderTwoColumns(cards, termWidth)
 	}
 
-	cardWidth := max(24, termWidth/2-4)
-	cards := buildCards(m.metrics, cardWidth)
-	twoCol := renderTwoColumns(cards, termWidth)
 	// Combine header, mole, and cards with consistent spacing
-	var content []string
-	content = append(content, header)
+	parts := []string{header}
 	if mole != "" {
-		content = append(content, mole)
+		parts = append(parts, mole)
 	}
-	content = append(content, twoCol)
-	return lipgloss.JoinVertical(lipgloss.Left, content...)
+	parts = append(parts, cardContent)
+	output := lipgloss.JoinVertical(lipgloss.Left, parts...)
+
+	// Pad output to exactly fill the terminal height so every frame fully
+	// overwrites the alt screen buffer, preventing ghost lines on resize.
+	if m.height > 0 {
+		contentHeight := lipgloss.Height(output)
+		if contentHeight < m.height {
+			output += strings.Repeat("\n", m.height-contentHeight)
+		}
+	}
+
+	return output
 }
 
 func (m model) collectCmd() tea.Cmd {
