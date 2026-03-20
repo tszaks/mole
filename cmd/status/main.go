@@ -59,6 +59,21 @@ type model struct {
 	catHidden   bool // true = hidden, false = visible
 }
 
+// padViewToHeight ensures the rendered frame always overwrites the full
+// terminal region by padding with empty lines up to the current height.
+func padViewToHeight(view string, height int) string {
+	if height <= 0 {
+		return view
+	}
+
+	contentHeight := lipgloss.Height(view)
+	if contentHeight >= height {
+		return view
+	}
+
+	return view + strings.Repeat("\n", height-contentHeight)
+}
+
 // getConfigPath returns the path to the status preferences file.
 func getConfigPath() string {
 	home, err := os.UserHomeDir()
@@ -194,17 +209,7 @@ func (m model) View() string {
 	}
 	parts = append(parts, cardContent)
 	output := lipgloss.JoinVertical(lipgloss.Left, parts...)
-
-	// Pad output to exactly fill the terminal height so every frame fully
-	// overwrites the alt screen buffer, preventing ghost lines on resize.
-	if m.height > 0 {
-		contentHeight := lipgloss.Height(output)
-		if contentHeight < m.height {
-			output += strings.Repeat("\n", m.height-contentHeight)
-		}
-	}
-
-	return output
+	return padViewToHeight(output, m.height)
 }
 
 func (m model) collectCmd() tea.Cmd {
