@@ -61,6 +61,13 @@ Describe "Optimize Command" {
             $result = & powershell -ExecutionPolicy Bypass -File "$script:BinDir\optimize.ps1" -ShowHelp 2>&1
             $result -join "`n" | Should -Match "DryRun|Disk|DNS"
         }
+
+        It "Should guard disk optimization when the system drive cannot be resolved to a volume" {
+            $source = Get-Content "$script:BinDir\optimize.ps1" -Raw
+            $source | Should -Match "function Test-SystemDriveOptimizable"
+            $source | Should -Match "Get-Volume -DriveLetter"
+            $source | Should -Match "Disk optimization skipped:"
+        }
     }
 }
 

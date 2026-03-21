@@ -133,6 +133,21 @@ function Get-SystemDriveLetter {
     return $match.Value.ToUpperInvariant()
 }
 
+function Test-SystemDriveOptimizable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DriveLetter
+    )
+
+    $getVolume = Get-Command Get-Volume -ErrorAction SilentlyContinue
+    if (-not $getVolume) {
+        return $true
+    }
+
+    $volume = Get-Volume -DriveLetter $DriveLetter -ErrorAction SilentlyContinue | Select-Object -First 1
+    return ($null -ne $volume)
+}
+
 function Optimize-DiskDrive {
     <#
     .SYNOPSIS
@@ -155,15 +170,31 @@ function Optimize-DiskDrive {
         return
     }
 
+    if (-not (Get-Command Optimize-Volume -ErrorAction SilentlyContinue)) {
+        Write-Host "  $esc[90mDisk optimization skipped: Optimize-Volume is not available on this system$esc[0m"
+        return
+    }
+
     try {
         $systemDriveLetter = Get-SystemDriveLetter
+        if (-not (Test-SystemDriveOptimizable -DriveLetter $systemDriveLetter)) {
+            Write-Host "  $esc[90mDisk optimization skipped: Windows could not resolve drive ${systemDriveLetter} to an optimizable volume$esc[0m"
+            return
+        }
+
         Write-Host "  Running Windows default optimization on drive ${systemDriveLetter}:..."
         $null = Optimize-Volume -DriveLetter $systemDriveLetter -ErrorAction Stop
         Write-Host "  $esc[32m$($script:Icons.Success)$esc[0m Drive optimization completed"
         $script:OptimizationsApplied++
     }
     catch {
-        Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Disk optimization failed: $_"
+        $message = $_.Exception.Message
+        if ($message -match 'MSFT_Volume' -or $message -match 'DriveLetter') {
+            Write-Host "  $esc[90mDisk optimization skipped: Windows could not resolve drive ${systemDriveLetter} to an optimizable volume$esc[0m"
+            return
+        }
+
+        Write-Host "  $esc[31m$($script:Icons.Error)$esc[0m Disk optimization failed: $message"
     }
 }
 
