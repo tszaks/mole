@@ -361,17 +361,26 @@ check_homebrew_updates() {
             spinner_started=true
         fi
 
-        if formula_outdated=$(run_with_timeout 8 brew outdated --formula --quiet 2> /dev/null); then
-            :
-        else
-            formula_status=$?
-        fi
-
-        if cask_outdated=$(run_with_timeout 8 brew outdated --cask --quiet 2> /dev/null); then
-            :
-        else
-            cask_status=$?
-        fi
+        local _brew_formula_tmp _brew_cask_tmp
+        _brew_formula_tmp=$(mktemp_file "brew_formula")
+        _brew_cask_tmp=$(mktemp_file "brew_cask")
+        (
+            run_with_timeout 8 brew outdated --formula --quiet > "$_brew_formula_tmp" 2> /dev/null
+            echo $? > "${_brew_formula_tmp}.status"
+        ) &
+        local _formula_pid=$!
+        (
+            run_with_timeout 8 brew outdated --cask --quiet > "$_brew_cask_tmp" 2> /dev/null
+            echo $? > "${_brew_cask_tmp}.status"
+        ) &
+        local _cask_pid=$!
+        wait "$_formula_pid" 2> /dev/null || true
+        wait "$_cask_pid" 2> /dev/null || true
+        formula_outdated=$(cat "$_brew_formula_tmp" 2> /dev/null || true)
+        cask_outdated=$(cat "$_brew_cask_tmp" 2> /dev/null || true)
+        formula_status=$(cat "${_brew_formula_tmp}.status" 2> /dev/null || echo "1")
+        cask_status=$(cat "${_brew_cask_tmp}.status" 2> /dev/null || echo "1")
+        rm -f "$_brew_formula_tmp" "$_brew_cask_tmp" "${_brew_formula_tmp}.status" "${_brew_cask_tmp}.status" 2> /dev/null || true
 
         if [[ "$spinner_started" == "true" ]]; then
             stop_inline_spinner
@@ -380,8 +389,12 @@ check_homebrew_updates() {
         if [[ $formula_status -eq 0 || $cask_status -eq 0 ]]; then
             formula_count=$(printf '%s\n' "$formula_outdated" | awk 'NF {count++} END {print count + 0}')
             cask_count=$(printf '%s\n' "$cask_outdated" | awk 'NF {count++} END {print count + 0}')
-            ensure_user_file "$cache_file"
-            printf '%s %s\n' "$formula_count" "$cask_count" > "$cache_file" 2> /dev/null || true
+            # Only cache when both calls succeeded; partial results (one side failed)
+            # must not be written as zeros — next run should retry the failed side.
+            if [[ $formula_status -eq 0 && $cask_status -eq 0 ]]; then
+                ensure_user_file "$cache_file"
+                printf '%s %s\n' "$formula_count" "$cask_count" > "$cache_file" 2> /dev/null || true
+            fi
         elif [[ $formula_status -eq 124 || $cask_status -eq 124 ]]; then
             printf "  ${GRAY}${ICON_WARNING}${NC} %-12s ${YELLOW}%s${NC}\n" "Homebrew" "Check timed out"
             return
