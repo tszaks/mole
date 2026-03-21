@@ -80,6 +80,18 @@ function Invoke-GitCommand {
     }
 }
 
+function Get-PowerShellCommand {
+    if (Get-Command powershell.exe -ErrorAction SilentlyContinue) {
+        return "powershell.exe"
+    }
+
+    if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+        return "pwsh"
+    }
+
+    throw "PowerShell executable not found"
+}
+
 # Main installation
 try {
     Write-Host ""
@@ -150,7 +162,11 @@ try {
     Write-Step "Running installer..."
     Write-Host ""
 
-    & (Join-Path $InstallDir "install.ps1") -InstallDir $InstallDir -AddToPath
+    $powerShellCommand = Get-PowerShellCommand
+    & $powerShellCommand -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "install.ps1") -InstallDir $InstallDir -AddToPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installer exited with code $LASTEXITCODE"
+    }
 
     Write-Host ""
     Write-Success "Installation complete!"

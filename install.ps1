@@ -98,7 +98,7 @@ function Show-InstallerHelp {
     $c = $script:Colors
     Write-Host "  $($c.Green)USAGE:$($c.NC)"
     Write-Host ""
-    Write-Host "    .\install.ps1 [options]"
+    Write-Host "    powershell -ExecutionPolicy Bypass -File .\install.ps1 [options]"
     Write-Host ""
     Write-Host "  $($c.Green)OPTIONS:$($c.NC)"
     Write-Host ""
@@ -118,19 +118,19 @@ function Show-InstallerHelp {
     Write-Host "  $($c.Green)EXAMPLES:$($c.NC)"
     Write-Host ""
     Write-Host "    $($c.Gray)# Install with defaults$($c.NC)"
-    Write-Host "    .\install.ps1"
+    Write-Host "    powershell -ExecutionPolicy Bypass -File .\install.ps1"
     Write-Host ""
     Write-Host "    $($c.Gray)# Install and add to PATH$($c.NC)"
-    Write-Host "    .\install.ps1 -AddToPath"
+    Write-Host "    powershell -ExecutionPolicy Bypass -File .\install.ps1 -AddToPath"
     Write-Host ""
     Write-Host "    $($c.Gray)# Custom install location$($c.NC)"
-    Write-Host "    .\install.ps1 -InstallDir C:\Tools\Mole -AddToPath"
+    Write-Host "    powershell -ExecutionPolicy Bypass -File .\install.ps1 -InstallDir C:\Tools\Mole -AddToPath"
     Write-Host ""
     Write-Host "    $($c.Gray)# Full installation$($c.NC)"
-    Write-Host "    .\install.ps1 -AddToPath -CreateShortcut"
+    Write-Host "    powershell -ExecutionPolicy Bypass -File .\install.ps1 -AddToPath -CreateShortcut"
     Write-Host ""
     Write-Host "    $($c.Gray)# Uninstall$($c.NC)"
-    Write-Host "    .\install.ps1 -Uninstall"
+    Write-Host "    powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall"
     Write-Host ""
 }
 
@@ -403,7 +403,7 @@ powershell.exe -ExecutionPolicy Bypass -NoLogo -NoProfile -Command "& '%MOLE_DIR
         Write-Host "    & `"$InstallDir\mole.ps1`""
         Write-Host ""
         Write-Host "  Or add to PATH with:"
-        Write-Host "    .\install.ps1 -AddToPath"
+        Write-Host "    powershell -ExecutionPolicy Bypass -File .\install.ps1 -AddToPath"
     }
 
     Write-Host ""

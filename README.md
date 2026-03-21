@@ -59,10 +59,10 @@ git clone --branch windows https://github.com/tw93/Mole.git $installDir
 cd $installDir
 
 # Run the installer in place (keeps .git for mo update)
-.\install.ps1 -InstallDir $installDir -AddToPath
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -InstallDir $installDir -AddToPath
 
 # Optional: Create Start Menu shortcut
-.\install.ps1 -InstallDir $installDir -AddToPath -CreateShortcut
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -InstallDir $installDir -AddToPath -CreateShortcut
 ```
 
 Run:
@@ -280,10 +280,10 @@ Custom scan paths can be configured with `mo purge --paths`.
 
 ```powershell
 # Install to custom location from a cloned windows branch
-.\install.ps1 -InstallDir C:\Tools\Mole -AddToPath
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -InstallDir C:\Tools\Mole -AddToPath
 
 # Create Start Menu shortcut
-.\install.ps1 -InstallDir C:\Tools\Mole -AddToPath -CreateShortcut
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -InstallDir C:\Tools\Mole -AddToPath -CreateShortcut
 
 # Refresh the source channel later
 mo update
@@ -292,7 +292,7 @@ mo update
 ### Uninstall
 
 ```powershell
-.\install.ps1 -Uninstall
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 ```
 
 ## Configuration

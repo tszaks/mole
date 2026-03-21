@@ -370,7 +370,7 @@ Expand-Archive release/mole-1.0.0-x64.zip -DestinationPath test-install
 
 # Test installation
 cd test-install/mole-1.0.0-x64
-.\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 # Verify mole works
 mole --version
