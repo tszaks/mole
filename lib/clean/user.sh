@@ -916,11 +916,14 @@ clean_external_volume_target() {
         size_kb=$(get_path_size_kb "$target_path" 2> /dev/null || echo "0")
         [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
-        found_any=true
-        cleaned_count=$((cleaned_count + 1))
-        total_size=$((total_size + size_kb))
-        if [[ "$DRY_RUN" != "true" ]]; then
-            safe_remove "$target_path" true > /dev/null 2>&1 || true
+        if [[ "$DRY_RUN" == "true" ]]; then
+            found_any=true
+            cleaned_count=$((cleaned_count + 1))
+            total_size=$((total_size + size_kb))
+        elif safe_remove "$target_path" true > /dev/null 2>&1; then
+            found_any=true
+            cleaned_count=$((cleaned_count + 1))
+            total_size=$((total_size + size_kb))
         fi
     done
 
@@ -938,11 +941,14 @@ clean_external_volume_target() {
         size_kb=$(get_path_size_kb "$metadata_file" 2> /dev/null || echo "0")
         [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
-        found_any=true
-        cleaned_count=$((cleaned_count + 1))
-        total_size=$((total_size + size_kb))
-        if [[ "$DRY_RUN" != "true" ]]; then
-            safe_remove "$metadata_file" true > /dev/null 2>&1 || true
+        if [[ "$DRY_RUN" == "true" ]]; then
+            found_any=true
+            cleaned_count=$((cleaned_count + 1))
+            total_size=$((total_size + size_kb))
+        elif safe_remove "$metadata_file" true > /dev/null 2>&1; then
+            found_any=true
+            cleaned_count=$((cleaned_count + 1))
+            total_size=$((total_size + size_kb))
         fi
     done < <(command find "$volume" -type f -name "._*" -print0 2> /dev/null || true)
 

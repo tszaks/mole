@@ -485,7 +485,9 @@ scan_applications() {
                     local resolved_target="$link_target"
                     if [[ "$link_target" != /* ]]; then
                         local link_dir="${app_path%/*}"
-                        resolved_target=$(cd "$link_dir" 2> /dev/null && cd "${link_target%/*}" 2> /dev/null && pwd)/"${link_target##*/}" 2> /dev/null || echo ""
+                        local _link_parent="${link_target%/*}"
+                        [[ "$_link_parent" == "$link_target" ]] && _link_parent="."
+                        resolved_target=$(cd "$link_dir" 2> /dev/null && cd "$_link_parent" 2> /dev/null && pwd)/"${link_target##*/}" 2> /dev/null || echo ""
                     fi
                     case "$resolved_target" in
                         /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/* | /private/etc/*)
