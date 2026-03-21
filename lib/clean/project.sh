@@ -285,7 +285,8 @@ is_safe_project_artifact() {
 
     # Must not be a direct child of the search root.
     local relative_path="${path#"$search_path"/}"
-    local depth=$(echo "$relative_path" | LC_ALL=C tr -cd '/' | wc -c)
+    local _rel_stripped="${relative_path//\//}"
+    local depth=$((${#relative_path} - ${#_rel_stripped}))
     if [[ $depth -lt 1 ]]; then
         # Allow direct-child artifacts only when the search path is itself
         # a project root (single-project mode).
@@ -429,7 +430,7 @@ scan_purge_targets() {
                 if [[ -n "$item" ]] && is_safe_project_artifact "$item" "$search_path"; then
                     echo "$item"
                     # Update scanning path to show current project directory
-                    local project_dir=$(dirname "$item")
+                    local project_dir="${item%/*}"
                     echo "$project_dir" > "$stats_dir/purge_scanning" 2> /dev/null || true
                 fi
             done < "$input_file" | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
@@ -446,15 +447,11 @@ scan_purge_targets() {
         debug_log "MO_USE_FIND=1: Forcing find instead of fd"
         use_find=true
     elif command -v fd > /dev/null 2>&1; then
-        # Escape regex special characters in target names for fd patterns
-        local escaped_targets=()
-        for target in "${PURGE_TARGETS[@]}"; do
-            escaped_targets+=("^$(printf '%s' "$target" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')\$")
-        done
-        local pattern="($(
-            IFS='|'
-            echo "${escaped_targets[*]}"
-        ))"
+        # Escape regex special characters in target names for fd patterns (single sed pass)
+        local _escaped_lines
+        _escaped_lines=$(printf '%s\n' "${PURGE_TARGETS[@]}" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')
+        local pattern
+        pattern="($(printf '%s\n' "$_escaped_lines" | sed -e 's/^/^/' -e 's/$/$/' | paste -sd '|' -))"
         local fd_args=(
             "--absolute-path"
             "--hidden"
@@ -546,14 +543,16 @@ filter_protected_artifacts() {
 # Check if a path was modified recently (safety check).
 is_recently_modified() {
     local path="$1"
+    local current_time="${2:-}"
     local age_days=$MIN_AGE_DAYS
     if [[ ! -e "$path" ]]; then
         return 1
     fi
     local mod_time
     mod_time=$(get_file_mtime "$path")
-    local current_time
-    current_time=$(get_epoch_seconds)
+    if [[ -z "$current_time" || ! "$current_time" =~ ^[0-9]+$ ]]; then
+        current_time=$(get_epoch_seconds)
+    fi
     local age_seconds=$((current_time - mod_time))
     local age_in_days=$((age_seconds / 86400))
     if [[ $age_in_days -lt $age_days ]]; then
@@ -1048,8 +1047,10 @@ clean_project_artifacts() {
         return 2 # Special code: nothing to clean
     fi
     # Mark recently modified items (for default selection state)
+    local _now_epoch
+    _now_epoch=$(get_epoch_seconds)
     for item in "${all_found_items[@]}"; do
-        if is_recently_modified "$item"; then
+        if is_recently_modified "$item" "$_now_epoch"; then
             recently_modified+=("$item")
         fi
         # Add all items to safe_to_clean, let user choose
@@ -1332,10 +1333,12 @@ clean_project_artifacts() {
     # can avoid repeated filesystem traversals during the O(N^2) duplicate check.
     local -a _cached_basenames=()
     local -a _cached_project_names=()
+    local -a _cached_project_paths=()
     local _pre_idx
     for _pre_idx in "${!safe_to_clean[@]}"; do
         _cached_basenames[_pre_idx]="${safe_to_clean[$_pre_idx]##*/}"
         _cached_project_names[_pre_idx]=$(get_project_name "${safe_to_clean[$_pre_idx]}")
+        _cached_project_paths[_pre_idx]=$(get_project_path "${safe_to_clean[$_pre_idx]}")
     done
 
     # Build menu options - one line per artifact
@@ -1346,8 +1349,7 @@ clean_project_artifacts() {
     local -a item_display_paths=()
     local _sz_idx=0
     for item in "${safe_to_clean[@]}"; do
-        local project_path
-        project_path=$(get_project_path "$item")
+        local project_path="${_cached_project_paths[$_sz_idx]}"
         local artifact_type
         artifact_type=$(get_artifact_display_name "$item")
         local size_raw
