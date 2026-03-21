@@ -57,6 +57,10 @@ lib/AGENTS.md
 tests/AGENTS.md
 
 # Build artifacts
+analyze
+status
+bin/analyze-*
+bin/status-*
 bin/*.exe
 cmd/analyze/*.exe
 cmd/status/*.exe
@@ -84,3 +88,4 @@ windows-readme-update.md
 mole_guidelines.md
 run_tests.ps1
 session.json
+journal/2026-03-11-safe-remove-design.md
