@@ -88,9 +88,9 @@ _clean_recent_items() {
 # Internal: Clean incomplete browser downloads, skipping files currently open.
 _clean_incomplete_downloads() {
     local -a patterns=(
-        "$HOME/Downloads/"*.download
-        "$HOME/Downloads/"*.crdownload
-        "$HOME/Downloads/"*.part
+        "$HOME/Downloads/*.download"
+        "$HOME/Downloads/*.crdownload"
+        "$HOME/Downloads/*.part"
     )
     local labels=("Safari incomplete downloads" "Chrome incomplete downloads" "Partial incomplete downloads")
     local i=0

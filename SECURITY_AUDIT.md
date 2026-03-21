@@ -52,6 +52,7 @@ Core controls include:
 - paths containing control characters are rejected
 - raw `find ... -delete` is avoided for security-sensitive cleanup logic
 - removal flows use guarded helpers such as `safe_remove()`, `safe_sudo_remove()`, `safe_find_delete()`, and `safe_sudo_find_delete()`
+- incomplete download cleanup skips files currently open (lsof check) and uses quoted glob patterns to prevent word-splitting on filenames that contain spaces
 
 Blocked paths remain protected even with sudo. Examples include:
 
@@ -180,6 +181,7 @@ Path traversal handling is also explicit:
 - non-absolute paths are rejected for destructive helpers
 - `..` is rejected when it appears as a path component
 - legitimate names containing `..` inside a single path element remain allowed to avoid false positives for real application data
+- `mo analyze` delete validates the raw user-supplied path before `filepath.Abs` resolves it, then validates the resolved absolute path a second time, closing a window where traversal segments could survive `Abs` normalization
 
 ## Privilege Escalation and Sudo Boundaries
 
@@ -193,6 +195,7 @@ Key properties:
 - sudo deletion uses the same path validation gate as non-sudo deletion
 - sudo cleanup skips or reports denied operations instead of widening scope
 - authentication, SIP/MDM, and read-only filesystem failures are classified separately in file-operation results
+- sudo credential prompting passes through the system's native PAM prompt rather than a hardcoded string, ensuring correct behavior across locales and PAM configurations
 
 When sudo is denied or unavailable, Mole prefers skipping privileged cleanup to forcing execution through unsafe fallback behavior.
 
@@ -223,8 +226,10 @@ This reduces the risk of incorrectly classifying active software as orphaned dat
 Mole exposes multiple safety controls before and during destructive actions:
 
 - `--dry-run` previews are available for major destructive commands
+- dry-run output deduplicates targets by filesystem identity (device+inode), so aliased paths and symlinks do not appear as separate items
 - interactive high-risk flows require explicit confirmation before deletion
 - purge marks recent projects conservatively and leaves them unselected by default
+- purge configuration is written atomically (mktemp then rename) to prevent partial writes if the process is interrupted
 - analyzer delete uses Finder Trash rather than direct permanent removal
 - operation logs are written to `~/Library/Logs/mole/operations.log` unless disabled with `MO_NO_OPLOG=1`
 - timeouts bound external commands so stalled discovery or uninstall operations do not silently hang the entire flow
@@ -243,9 +248,10 @@ Mole treats release trust as part of its security posture, not just a packaging 
 Repository-level signals include:
 
 - weekly Dependabot updates for Go modules and GitHub Actions
+- pre-commit hook that mirrors GitHub CI checks locally (shell syntax, shfmt, shellcheck, Go vet)
 - CI checks for unsafe `rm -rf` usage patterns and core protection behavior
 - targeted tests for path validation, purge boundaries, symlink behavior, dry-run flows, and destructive helpers
-- CodeQL scanning for Go and GitHub Actions workflows
+- CodeQL scanning for Go and GitHub Actions workflows, with workflow permission hardening
 - curated changelog-driven release notes with a dedicated `Safety-related changes` section
 - published SHA-256 checksums for release assets
 - GitHub artifact attestations for release assets
@@ -271,8 +277,11 @@ Key coverage areas include:
 - path validation rejects empty, relative, traversal, and system paths
 - symlinked directories are rejected for destructive scans
 - purge protects shallow or ambiguous paths and filters nested artifacts
-- dry-run flows preview actions without applying them
+- dry-run flows preview actions without applying them and do not emit duplicate targets
 - confirmation flows exist for high-risk interactive operations
+- sudo credential prompting and session management (`tests/manage_sudo.bats`)
+- purge config path discovery and write behavior (`tests/purge_config_paths.bats`)
+- hint and cleanup-hint flows (`tests/clean_hints.bats`)
 
 ## Known Limitations and Future Work
 

@@ -767,7 +767,11 @@ select_purge_categories() {
         printf "%s\n" "$clear_line"
 
         local current_index=$((top_index + cursor_pos))
-        local current_full_path="${PURGE_CATEGORY_FULL_PATHS_ARRAY[current_index]:-}"
+        local current_full_path=""
+        local paths_len="${#PURGE_CATEGORY_FULL_PATHS_ARRAY[@]}"
+        if [[ "$paths_len" -gt 0 && "$current_index" -lt "$paths_len" ]]; then
+            current_full_path="${PURGE_CATEGORY_FULL_PATHS_ARRAY[current_index]}"
+        fi
         if [[ -n "$current_full_path" ]]; then
             printf "%s${GRAY}Full path:${NC} %s\n" "$clear_line" "$current_full_path"
             printf "%s\n" "$clear_line"
