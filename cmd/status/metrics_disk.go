@@ -332,6 +332,9 @@ func getFinderStartupDiskFreeBytes() (free, total uint64, err error) {
 	out, err := runCmd(ctx, "osascript", "-e",
 		`tell application "Finder" to return {free space of startup disk, capacity of startup disk}`)
 	if err != nil {
+		// Cache the failure timestamp so repeated calls within diskCacheTTL
+		// return immediately instead of each waiting the full 5s timeout.
+		finderDiskCachedAt = time.Now()
 		return 0, 0, err
 	}
 
