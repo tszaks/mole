@@ -102,24 +102,60 @@ discover_project_dirs() {
     printf '%s\n' "${discovered[@]}" | sort -u
 }
 
-# Save discovered paths to config.
-save_discovered_paths() {
+# Prepare purge config directory/file ownership when possible.
+prepare_purge_config_path() {
+    ensure_user_dir "$(dirname "$PURGE_CONFIG_FILE")"
+    ensure_user_file "$PURGE_CONFIG_FILE"
+}
+
+# Write purge config content atomically when possible.
+write_purge_config() {
+    local header="$1"
+    shift
     local -a paths=("$@")
 
-    ensure_user_dir "$(dirname "$PURGE_CONFIG_FILE")"
+    prepare_purge_config_path
 
-    cat > "$PURGE_CONFIG_FILE" << 'EOF'
-# Mole Purge Paths - Auto-discovered project directories
-# Edit this file to customize, or run: mo purge --paths
-# Add one path per line (supports ~ for home directory)
+    local tmp_file
+    tmp_file=$(mktemp_file "mole-purge-paths") || return 1
+
+    if ! cat > "$tmp_file" << EOF; then
+$header
 EOF
+        rm -f "$tmp_file" 2> /dev/null || true
+        return 1
+    fi
 
-    printf '\n' >> "$PURGE_CONFIG_FILE"
     for path in "${paths[@]}"; do
         # Convert $HOME to ~ for portability
         path="${path/#$HOME/~}"
-        echo "$path" >> "$PURGE_CONFIG_FILE"
+        if ! printf '%s\n' "$path" >> "$tmp_file"; then
+            rm -f "$tmp_file" 2> /dev/null || true
+            return 1
+        fi
     done
+
+    if ! mv "$tmp_file" "$PURGE_CONFIG_FILE" 2> /dev/null; then
+        rm -f "$tmp_file" 2> /dev/null || true
+        return 1
+    fi
+
+    return 0
+}
+
+warn_purge_config_write_failure() {
+    [[ -t 1 ]] || return 0
+    [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]] || return 0
+    echo -e "${YELLOW}${ICON_WARNING}${NC} Could not save purge paths to ${PURGE_CONFIG_FILE/#$HOME/~}, using discovered paths for this run" >&2
+}
+
+# Save discovered paths to config.
+save_discovered_paths() {
+    local -a paths=("$@")
+    write_purge_config "# Mole Purge Paths - Auto-discovered project directories
+# Edit this file to customize, or run: mo purge --paths
+# Add one path per line (supports ~ for home directory)
+" "${paths[@]}"
 }
 
 # Load purge paths from config or auto-discover
@@ -142,10 +178,12 @@ load_purge_config() {
 
         if [[ ${#discovered[@]} -gt 0 ]]; then
             PURGE_SEARCH_PATHS=("${discovered[@]}")
-            save_discovered_paths "${discovered[@]}"
-
-            if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
-                echo -e "${GRAY}Found ${#discovered[@]} project directories, saved to config${NC}" >&2
+            if save_discovered_paths "${discovered[@]}"; then
+                if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
+                    echo -e "${GRAY}Found ${#discovered[@]} project directories, saved to config${NC}" >&2
+                fi
+            else
+                warn_purge_config_write_failure
             fi
         else
             PURGE_SEARCH_PATHS=("${DEFAULT_PURGE_SEARCH_PATHS[@]}")

@@ -237,6 +237,34 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "mo clean --help includes external volume option" {
+	run env HOME="$HOME" "$PROJECT_ROOT/mole" clean --help
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"--external PATH"* ]]
+}
+
+@test "mo clean --external accepts canonicalized custom root" {
+	real_root="$(mktemp -d "$HOME/ext-real.XXXXXX")"
+	link_root="$HOME/ext-link"
+	ln -s "$real_root" "$link_root"
+	mkdir -p "$link_root/USB/.Trashes"
+	touch "$link_root/USB/.Trashes/cache.tmp"
+
+	mock_bin="$HOME/mock-bin"
+	mkdir -p "$mock_bin"
+	cat > "$mock_bin/diskutil" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+	chmod +x "$mock_bin/diskutil"
+
+	run env HOME="$HOME" PATH="$mock_bin:$PATH" MOLE_EXTERNAL_VOLUMES_ROOT="$link_root" \
+		MOLE_TEST_NO_AUTH=1 "$PROJECT_ROOT/mole" clean --external "$link_root/USB" --dry-run
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Clean External Volume"* ]]
+	[[ "$output" == *"External volume cleanup"* ]]
+}
+
 @test "touchid status reflects pam file contents" {
 	pam_file="$HOME/pam_test"
 	cat >"$pam_file" <<'EOF'

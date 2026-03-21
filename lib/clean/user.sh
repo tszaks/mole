@@ -510,6 +510,30 @@ cache_top_level_entry_count_capped() {
     printf '%s\n' "$count"
 }
 
+directory_has_entries() {
+    local dir="$1"
+    [[ -d "$dir" ]] || return 1
+
+    local _nullglob_state
+    local _dotglob_state
+    _nullglob_state=$(shopt -p nullglob || true)
+    _dotglob_state=$(shopt -p dotglob || true)
+    shopt -s nullglob dotglob
+
+    local item
+    for item in "$dir"/*; do
+        if [[ -e "$item" ]]; then
+            eval "$_nullglob_state"
+            eval "$_dotglob_state"
+            return 0
+        fi
+    done
+
+    eval "$_nullglob_state"
+    eval "$_dotglob_state"
+    return 1
+}
+
 clean_app_caches() {
     start_section_spinner "Scanning app caches..."
 
@@ -545,6 +569,9 @@ clean_app_caches() {
     local total_size_partial=false
     local cleaned_count=0
     local found_any=false
+    local precise_size_limit="${MOLE_CONTAINER_CACHE_PRECISE_SIZE_LIMIT:-64}"
+    [[ "$precise_size_limit" =~ ^[0-9]+$ ]] || precise_size_limit=64
+    local precise_size_used=0
 
     local _ng_state
     _ng_state=$(shopt -p nullglob || true)
@@ -587,12 +614,11 @@ process_container_cache() {
     local container_dir="$1"
     [[ -d "$container_dir" ]] || return 0
     [[ -L "$container_dir" ]] && return 0
-    local bundle_id
-    bundle_id=$(basename "$container_dir")
+    local bundle_id="${container_dir##*/}"
     if is_critical_system_component "$bundle_id"; then
         return 0
     fi
-    if should_protect_data "$bundle_id" || should_protect_data "$(echo "$bundle_id" | LC_ALL=C tr '[:upper:]' '[:lower:]')"; then
+    if should_protect_data "$bundle_id"; then
         return 0
     fi
     local cache_dir="$container_dir/Data/Library/Caches"
@@ -603,11 +629,12 @@ process_container_cache() {
     [[ "$item_count" =~ ^[0-9]+$ ]] || item_count=0
     [[ "$item_count" -eq 0 ]] && return 0
 
-    if [[ "$item_count" -le 100 ]]; then
+    if [[ "$item_count" -le 100 && "$precise_size_used" -lt "$precise_size_limit" ]]; then
         local size
         size=$(get_path_size_kb "$cache_dir" 2> /dev/null || echo "0")
         [[ "$size" =~ ^[0-9]+$ ]] || size=0
         total_size=$((total_size + size))
+        precise_size_used=$((precise_size_used + 1))
     else
         total_size_partial=true
     fi
@@ -634,7 +661,7 @@ process_container_cache() {
 clean_group_container_caches() {
     local group_containers_dir="$HOME/Library/Group Containers"
     [[ -d "$group_containers_dir" ]] || return 0
-    if ! find "$group_containers_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
+    if ! directory_has_entries "$group_containers_dir"; then
         return 0
     fi
 
@@ -644,14 +671,15 @@ clean_group_container_caches() {
     local cleaned_count=0
     local found_any=false
 
-    # Collect all non-Apple container directories first
-    local -a containers=()
     local container_dir
+    local _nullglob_state
+    _nullglob_state=$(shopt -p nullglob || true)
+    shopt -s nullglob
+
     for container_dir in "$group_containers_dir"/*; do
         [[ -d "$container_dir" ]] || continue
         [[ -L "$container_dir" ]] && continue
-        local container_id
-        container_id=$(basename "$container_dir")
+        local container_id="${container_dir##*/}"
 
         # Skip Apple-owned shared containers entirely.
         case "$container_id" in
@@ -659,13 +687,6 @@ clean_group_container_caches() {
                 continue
                 ;;
         esac
-        containers+=("$container_dir")
-    done
-
-    # Process each container's candidate directories
-    for container_dir in "${containers[@]}"; do
-        local container_id
-        container_id=$(basename "$container_dir")
         local normalized_id="$container_id"
         [[ "$normalized_id" == group.* ]] && normalized_id="${normalized_id#group.}"
 
@@ -753,6 +774,7 @@ clean_group_container_caches() {
             fi
         done
     done
+    eval "$_nullglob_state"
 
     stop_section_spinner
 
@@ -779,6 +801,168 @@ clean_group_container_caches() {
         total_items=$((total_items + 1))
         note_activity
     fi
+}
+
+resolve_existing_path() {
+    local path="$1"
+    [[ -e "$path" ]] || return 1
+
+    if command -v realpath > /dev/null 2>&1; then
+        realpath "$path" 2> /dev/null && return 0
+    fi
+
+    local dir base
+    dir=$(cd -P "$(dirname "$path")" 2> /dev/null && pwd) || return 1
+    base=$(basename "$path")
+    printf '%s/%s\n' "$dir" "$base"
+}
+
+external_volume_root() {
+    printf '%s\n' "${MOLE_EXTERNAL_VOLUMES_ROOT:-/Volumes}"
+}
+
+validate_external_volume_target() {
+    local target="$1"
+    local root
+    root=$(external_volume_root)
+    local resolved_root="$root"
+    if [[ -e "$root" ]]; then
+        resolved_root=$(resolve_existing_path "$root" 2> /dev/null || printf '%s\n' "$root")
+    fi
+    resolved_root="${resolved_root%/}"
+
+    if [[ -z "$target" ]]; then
+        echo "Missing external volume path" >&2
+        return 1
+    fi
+    if [[ "$target" != /* ]]; then
+        echo "External volume path must be absolute: $target" >&2
+        return 1
+    fi
+    if [[ "$target" == "$root" || "$target" == "$resolved_root" ]]; then
+        echo "Refusing to clean the volumes root directly: $resolved_root" >&2
+        return 1
+    fi
+    if [[ -L "$target" ]]; then
+        echo "Refusing to clean symlinked volume path: $target" >&2
+        return 1
+    fi
+
+    local resolved
+    resolved=$(resolve_existing_path "$target") || {
+        echo "External volume path does not exist: $target" >&2
+        return 1
+    }
+
+    if [[ "$resolved" != "$resolved_root/"* ]]; then
+        echo "External volume path must be under $resolved_root: $resolved" >&2
+        return 1
+    fi
+
+    local relative_path="${resolved#"$resolved_root"/}"
+    if [[ -z "$relative_path" || "$relative_path" == "$resolved" || "$relative_path" == */* ]]; then
+        echo "External cleanup only supports mounted paths directly under $resolved_root: $resolved" >&2
+        return 1
+    fi
+
+    local disk_info=""
+    disk_info=$(run_with_timeout 2 command diskutil info "$resolved" 2> /dev/null || echo "")
+    if [[ -n "$disk_info" ]]; then
+        if echo "$disk_info" | grep -Eq 'Internal:[[:space:]]+Yes'; then
+            echo "Refusing to clean an internal volume: $resolved" >&2
+            return 1
+        fi
+
+        local protocol=""
+        protocol=$(echo "$disk_info" | awk -F: '/Protocol:/ {gsub(/^[[:space:]]+/, "", $2); print $2; exit}')
+        case "$protocol" in
+            SMB | NFS | AFP | CIFS | WebDAV)
+                echo "Refusing to clean network volume protocol $protocol: $resolved" >&2
+                return 1
+                ;;
+        esac
+    fi
+
+    printf '%s\n' "$resolved"
+}
+
+clean_external_volume_target() {
+    local volume="$1"
+    [[ -d "$volume" ]] || return 1
+    [[ -L "$volume" ]] && return 1
+
+    local -a top_level_targets=(
+        "$volume/.TemporaryItems"
+        "$volume/.Trashes"
+        "$volume/.Spotlight-V100"
+        "$volume/.fseventsd"
+    )
+    local cleaned_count=0
+    local total_size=0
+    local found_any=false
+    local volume_name="${volume##*/}"
+
+    start_section_spinner "Scanning external volume..."
+
+    local target_path
+    for target_path in "${top_level_targets[@]}"; do
+        [[ -e "$target_path" ]] || continue
+        [[ -L "$target_path" ]] && continue
+        if should_protect_path "$target_path" 2> /dev/null || is_path_whitelisted "$target_path" 2> /dev/null; then
+            continue
+        fi
+
+        local size_kb
+        size_kb=$(get_path_size_kb "$target_path" 2> /dev/null || echo "0")
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+        found_any=true
+        cleaned_count=$((cleaned_count + 1))
+        total_size=$((total_size + size_kb))
+        if [[ "$DRY_RUN" != "true" ]]; then
+            safe_remove "$target_path" true > /dev/null 2>&1 || true
+        fi
+    done
+
+    if [[ "$PROTECT_FINDER_METADATA" != "true" ]]; then
+        clean_ds_store_tree "$volume" "${volume_name} volume, .DS_Store"
+    fi
+
+    while IFS= read -r -d '' metadata_file; do
+        [[ -e "$metadata_file" ]] || continue
+        if should_protect_path "$metadata_file" 2> /dev/null || is_path_whitelisted "$metadata_file" 2> /dev/null; then
+            continue
+        fi
+
+        local size_kb
+        size_kb=$(get_path_size_kb "$metadata_file" 2> /dev/null || echo "0")
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+        found_any=true
+        cleaned_count=$((cleaned_count + 1))
+        total_size=$((total_size + size_kb))
+        if [[ "$DRY_RUN" != "true" ]]; then
+            safe_remove "$metadata_file" true > /dev/null 2>&1 || true
+        fi
+    done < <(command find "$volume" -type f -name "._*" -print0 2> /dev/null || true)
+
+    stop_section_spinner
+
+    if [[ "$found_any" == "true" ]]; then
+        local size_human
+        size_human=$(bytes_to_human "$((total_size * 1024))")
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} External volume cleanup${NC}, ${YELLOW}${volume_name}, $size_human dry${NC}"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} External volume cleanup${NC}, ${GREEN}${volume_name}, $size_human${NC}"
+        fi
+        files_cleaned=$((files_cleaned + cleaned_count))
+        total_size_cleaned=$((total_size_cleaned + total_size))
+        total_items=$((total_items + 1))
+        note_activity
+    fi
+
+    return 0
 }
 
 # Browser caches (Safari/Chrome/Edge/Firefox).

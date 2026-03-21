@@ -612,20 +612,22 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.deleteConfirm = false
 			m.deleteTarget = nil
 			return m, nil
+		case "ctrl+c":
+			return m, tea.Quit
 		default:
 			return m, nil
 		}
 	}
 
 	switch msg.String() {
-	case "q", "ctrl+c", "Q":
+	case "q", "Q", "ctrl+c":
 		return m, tea.Quit
 	case "esc":
 		if m.showLargeFiles {
 			m.showLargeFiles = false
 			return m, nil
 		}
-		return m, tea.Quit
+		return m.goBack()
 	case "up", "k", "K":
 		if m.showLargeFiles {
 			if m.largeSelected > 0 {
@@ -666,53 +668,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showLargeFiles = false
 			return m, nil
 		}
-		if len(m.history) == 0 {
-			if !m.inOverviewMode() {
-				return m, m.switchToOverviewMode()
-			}
-			return m, nil
-		}
-		last := m.history[len(m.history)-1]
-		m.history = m.history[:len(m.history)-1]
-		m.path = last.Path
-		m.selected = last.Selected
-		m.offset = last.EntryOffset
-		m.largeSelected = last.LargeSelected
-		m.largeOffset = last.LargeOffset
-		m.isOverview = last.IsOverview
-		if last.Dirty {
-			// On overview return, refresh cached entries.
-			if last.IsOverview {
-				m.hydrateOverviewEntries()
-				m.totalSize = sumKnownEntrySizes(m.entries)
-				m.status = "Ready"
-				m.scanning = false
-				if nextPendingOverviewIndex(m.entries) >= 0 {
-					m.overviewScanning = true
-					return m, m.scheduleOverviewScans()
-				}
-				return m, nil
-			}
-			m.status = "Scanning..."
-			m.scanning = true
-			return m, tea.Batch(m.scanCmd(m.path), tickCmd())
-		}
-		m.entries = last.Entries
-		m.largeFiles = last.LargeFiles
-		m.totalSize = last.TotalSize
-		m.clampEntrySelection()
-		m.clampLargeSelection()
-		if len(m.entries) == 0 {
-			m.selected = 0
-		} else if m.selected >= len(m.entries) {
-			m.selected = len(m.entries) - 1
-		}
-		if m.selected < 0 {
-			m.selected = 0
-		}
-		m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
-		m.scanning = false
-		return m, nil
+		return m.goBack()
 	case "r", "R":
 		m.multiSelected = make(map[string]bool)
 		m.largeMultiSelected = make(map[string]bool)
@@ -959,6 +915,57 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	return m, nil
+}
+
+func (m model) goBack() (tea.Model, tea.Cmd) {
+	if len(m.history) == 0 {
+		if !m.inOverviewMode() {
+			return m, m.switchToOverviewMode()
+		}
+		return m, nil
+	}
+
+	last := m.history[len(m.history)-1]
+	m.history = m.history[:len(m.history)-1]
+	m.path = last.Path
+	m.selected = last.Selected
+	m.offset = last.EntryOffset
+	m.largeSelected = last.LargeSelected
+	m.largeOffset = last.LargeOffset
+	m.isOverview = last.IsOverview
+	if last.Dirty {
+		// On overview return, refresh cached entries.
+		if last.IsOverview {
+			m.hydrateOverviewEntries()
+			m.totalSize = sumKnownEntrySizes(m.entries)
+			m.status = "Ready"
+			m.scanning = false
+			if nextPendingOverviewIndex(m.entries) >= 0 {
+				m.overviewScanning = true
+				return m, m.scheduleOverviewScans()
+			}
+			return m, nil
+		}
+		m.status = "Scanning..."
+		m.scanning = true
+		return m, tea.Batch(m.scanCmd(m.path), tickCmd())
+	}
+	m.entries = last.Entries
+	m.largeFiles = last.LargeFiles
+	m.totalSize = last.TotalSize
+	m.clampEntrySelection()
+	m.clampLargeSelection()
+	if len(m.entries) == 0 {
+		m.selected = 0
+	} else if m.selected >= len(m.entries) {
+		m.selected = len(m.entries) - 1
+	}
+	if m.selected < 0 {
+		m.selected = 0
+	}
+	m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
+	m.scanning = false
 	return m, nil
 }
 
