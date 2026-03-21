@@ -13,15 +13,15 @@ clean_user_essentials() {
         local trash_count_status=0
         # Skip AppleScript during tests to avoid permission dialogs
         if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-            trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -exec printf '.' ';' 2> /dev/null |
-                wc -c | awk '{print $1}' || echo "0")
+            trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
+                tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
         else
             trash_count=$(run_with_timeout 3 osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null) || trash_count_status=$?
         fi
         if [[ $trash_count_status -eq 124 ]]; then
             debug_log "Finder trash count timed out, using direct .Trash scan"
-            trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -exec printf '.' ';' 2> /dev/null |
-                wc -c | awk '{print $1}' || echo "0")
+            trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
+                tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
         fi
         [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count="0"
 
@@ -1093,24 +1093,13 @@ app_support_item_size_bytes() {
             return 1
         fi
 
-        local du_tmp
-        du_tmp=$(mktemp)
-        local du_status=0
+        local du_output
         # Use stricter timeout for directories
-        if run_with_timeout "$timeout_seconds" du -skP "$item" > "$du_tmp" 2> /dev/null; then
-            du_status=0
-        else
-            du_status=$?
-        fi
-
-        if [[ $du_status -ne 0 ]]; then
-            rm -f "$du_tmp"
+        if ! du_output=$(run_with_timeout "$timeout_seconds" du -skP "$item" 2> /dev/null); then
             return 1
         fi
 
-        local size_kb
-        size_kb=$(awk 'NR==1 {print $1; exit}' "$du_tmp")
-        rm -f "$du_tmp"
+        local size_kb="${du_output%%[^0-9]*}"
         [[ "$size_kb" =~ ^[0-9]+$ ]] || return 1
         printf '%s\n' "$((size_kb * 1024))"
         return 0
@@ -1155,12 +1144,9 @@ clean_application_support_logs() {
     last_progress_update=$(get_epoch_seconds)
     for app_dir in ~/Library/Application\ Support/*; do
         [[ -d "$app_dir" ]] || continue
-        local app_name
-        app_name=$(basename "$app_dir")
+        local app_name="${app_dir##*/}"
         app_count=$((app_count + 1))
         update_progress_if_needed "$app_count" "$total_apps" last_progress_update 1 || true
-        local app_name_lower
-        app_name_lower=$(echo "$app_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
         local is_protected=false
         if is_path_whitelisted "$app_dir" 2> /dev/null; then
             is_protected=true
@@ -1168,8 +1154,12 @@ clean_application_support_logs() {
             is_protected=true
         elif should_protect_data "$app_name"; then
             is_protected=true
-        elif should_protect_data "$app_name_lower"; then
-            is_protected=true
+        else
+            local app_name_lower
+            app_name_lower=$(echo "$app_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+            if should_protect_data "$app_name_lower"; then
+                is_protected=true
+            fi
         fi
         if [[ "$is_protected" == "true" ]]; then
             continue

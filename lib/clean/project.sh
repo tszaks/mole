@@ -1089,8 +1089,8 @@ clean_project_artifacts() {
     get_project_name() {
         local path="$1"
 
-        local current_dir
-        current_dir=$(dirname "$path")
+        local current_dir="${path%/*}"
+        [[ -z "$current_dir" ]] && current_dir="/"
         local monorepo_root=""
         local project_root=""
 
@@ -1123,20 +1123,23 @@ clean_project_artifacts() {
 
             # If we found project but still checking for monorepo above
             # (only stop if we're beyond reasonable depth)
-            local depth=$(echo "${current_dir#"$HOME"}" | LC_ALL=C tr -cd '/' | wc -c | tr -d ' ')
+            local _rel="${current_dir#"$HOME"}"
+            local _stripped="${_rel//\//}"
+            local depth=$((${#_rel} - ${#_stripped}))
             if [[ -n "$project_root" && $depth -lt 2 ]]; then
                 break
             fi
 
-            current_dir=$(dirname "$current_dir")
+            local _parent="${current_dir%/*}"
+            current_dir="${_parent:-/}"
         done
 
         # Determine result: monorepo > project > fallback
         local result=""
         if [[ -n "$monorepo_root" ]]; then
-            result=$(basename "$monorepo_root")
+            result="${monorepo_root##*/}"
         elif [[ -n "$project_root" ]]; then
-            result=$(basename "$project_root")
+            result="${project_root##*/}"
         else
             # Fallback: first directory under search root
             local search_roots=()
@@ -1149,14 +1152,16 @@ clean_project_artifacts() {
                 root="${root%/}"
                 if [[ -n "$root" && "$path" == "$root/"* ]]; then
                     local relative_path="${path#"$root"/}"
-                    result=$(echo "$relative_path" | cut -d'/' -f1)
+                    result="${relative_path%%/*}"
                     break
                 fi
             done
 
             # Final fallback: use grandparent directory
             if [[ -z "$result" ]]; then
-                result=$(dirname "$(dirname "$path")" | xargs basename)
+                local _gp="${path%/*}"
+                _gp="${_gp%/*}"
+                result="${_gp##*/}"
             fi
         fi
 
@@ -1170,8 +1175,8 @@ clean_project_artifacts() {
     get_project_path() {
         local path="$1"
 
-        local current_dir
-        current_dir=$(dirname "$path")
+        local current_dir="${path%/*}"
+        [[ -z "$current_dir" ]] && current_dir="/"
         local monorepo_root=""
         local project_root=""
 
@@ -1203,12 +1208,15 @@ clean_project_artifacts() {
             fi
 
             # If we found project but still checking for monorepo above
-            local depth=$(echo "${current_dir#"$HOME"}" | LC_ALL=C tr -cd '/' | wc -c | tr -d ' ')
+            local _rel="${current_dir#"$HOME"}"
+            local _stripped="${_rel//\//}"
+            local depth=$((${#_rel} - ${#_stripped}))
             if [[ -n "$project_root" && $depth -lt 2 ]]; then
                 break
             fi
 
-            current_dir=$(dirname "$current_dir")
+            local _parent="${current_dir%/*}"
+            current_dir="${_parent:-/}"
         done
 
         # Determine result: monorepo > project > fallback
@@ -1219,7 +1227,7 @@ clean_project_artifacts() {
             result="$project_root"
         else
             # Fallback: use parent directory of artifact
-            result=$(dirname "$path")
+            result="${path%/*}"
         fi
 
         # Convert to ~ format for cleaner display
@@ -1229,23 +1237,48 @@ clean_project_artifacts() {
 
     # Helper to get artifact display name
     # For duplicate artifact names within same project, include parent directory for context
+    # Uses pre-computed _cached_basenames and _cached_project_names arrays when available.
     get_artifact_display_name() {
         local path="$1"
-        local artifact_name=$(basename "$path")
-        local project_name=$(get_project_name "$path")
-        local parent_name=$(basename "$(dirname "$path")")
+        local artifact_name="${path##*/}"
+        local parent_name="${path%/*}"
+        parent_name="${parent_name##*/}"
+
+        local project_name
+        if [[ -n "${_cached_project_names[*]+x}" ]]; then
+            # Fast path: use pre-computed cache
+            local _idx
+            project_name=""
+            for _idx in "${!safe_to_clean[@]}"; do
+                if [[ "${safe_to_clean[$_idx]}" == "$path" ]]; then
+                    project_name="${_cached_project_names[$_idx]}"
+                    break
+                fi
+            done
+        else
+            project_name=$(get_project_name "$path")
+        fi
 
         # Check if there are other items with same artifact name AND same project
         local has_duplicate=false
-        for other_item in "${safe_to_clean[@]}"; do
-            if [[ "$other_item" != "$path" && "$(basename "$other_item")" == "$artifact_name" ]]; then
-                # Same artifact name, check if same project
-                if [[ "$(get_project_name "$other_item")" == "$project_name" ]]; then
+        if [[ -n "${_cached_basenames[*]+x}" ]]; then
+            local _idx
+            for _idx in "${!safe_to_clean[@]}"; do
+                if [[ "${safe_to_clean[$_idx]}" != "$path" && "${_cached_basenames[$_idx]}" == "$artifact_name" && "${_cached_project_names[$_idx]}" == "$project_name" ]]; then
                     has_duplicate=true
                     break
                 fi
-            fi
-        done
+            done
+        else
+            for other_item in "${safe_to_clean[@]}"; do
+                if [[ "$other_item" != "$path" && "${other_item##*/}" == "$artifact_name" ]]; then
+                    if [[ "$(get_project_name "$other_item")" == "$project_name" ]]; then
+                        has_duplicate=true
+                        break
+                    fi
+                fi
+            done
+        fi
 
         # If duplicate exists in same project and parent is not the project itself, show parent/artifact
         if [[ "$has_duplicate" == "true" && "$parent_name" != "$project_name" && "$parent_name" != "." && "$parent_name" != "/" ]]; then
@@ -1295,6 +1328,16 @@ clean_project_artifacts() {
         # Format: "project_path  size | artifact_type"
         printf "%-*s %9s | %-*s" "$printf_width" "$truncated_path" "$size_str" "$artifact_col" "$artifact_type"
     }
+    # Pre-compute basenames and project names once so get_artifact_display_name()
+    # can avoid repeated filesystem traversals during the O(N^2) duplicate check.
+    local -a _cached_basenames=()
+    local -a _cached_project_names=()
+    local _pre_idx
+    for _pre_idx in "${!safe_to_clean[@]}"; do
+        _cached_basenames[_pre_idx]="${safe_to_clean[$_pre_idx]##*/}"
+        _cached_project_names[_pre_idx]=$(get_project_name "${safe_to_clean[$_pre_idx]}")
+    done
+
     # Build menu options - one line per artifact
     # Pass 1: collect data into parallel arrays (needed for pre-scan of widths).
     # Sizes are read from pre-computed results (parallel du calls launched above).

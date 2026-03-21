@@ -129,12 +129,18 @@ discover_project_cache_roots() {
         [[ -d "$root" ]] && roots+=("$root")
     done < <(mole_purge_read_paths_config "$HOME/.config/mole/purge_paths")
 
+    local _indicator_tmp
+    _indicator_tmp=$(create_temp_file)
+    local -a _indicator_pids=()
+    local _max_jobs
+    _max_jobs=$(get_optimal_parallel_jobs scan)
+
     local dir
     local base
     for dir in "$HOME"/*/; do
         [[ -d "$dir" ]] || continue
         dir="${dir%/}"
-        base=$(basename "$dir")
+        base="${dir##*/}"
 
         case "$base" in
             .* | Library | Applications | Movies | Music | Pictures | Public)
@@ -142,10 +148,23 @@ discover_project_cache_roots() {
                 ;;
         esac
 
-        if project_cache_has_indicators "$dir" 5; then
-            roots+=("$dir")
+        (project_cache_has_indicators "$dir" 5 && echo "$dir" >> "$_indicator_tmp") &
+        _indicator_pids+=($!)
+
+        if [[ ${#_indicator_pids[@]} -ge $_max_jobs ]]; then
+            wait "${_indicator_pids[0]}" 2> /dev/null || true
+            _indicator_pids=("${_indicator_pids[@]:1}")
         fi
     done
+    for _pid in "${_indicator_pids[@]}"; do
+        wait "$_pid" 2> /dev/null || true
+    done
+
+    local _found_dir
+    while IFS= read -r _found_dir; do
+        [[ -n "$_found_dir" ]] && roots+=("$_found_dir")
+    done < "$_indicator_tmp"
+    rm -f "$_indicator_tmp"
 
     [[ ${#roots[@]} -eq 0 ]] && return 0
 
@@ -211,8 +230,13 @@ clean_project_caches() {
         start_inline_spinner "Searching project caches..."
     fi
 
+    local -a _scan_pids=()
     for root in "${scan_roots[@]}"; do
-        scan_project_cache_root "$root" "$matches_tmp_file"
+        scan_project_cache_root "$root" "$matches_tmp_file" &
+        _scan_pids+=($!)
+    done
+    for _pid in "${_scan_pids[@]}"; do
+        wait "$_pid" 2> /dev/null || true
     done
 
     if [[ -t 1 ]]; then
