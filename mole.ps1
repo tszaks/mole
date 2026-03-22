@@ -24,6 +24,12 @@ Set-StrictMode -Version Latest
 $script:MOLE_ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:MOLE_BIN = Join-Path $script:MOLE_ROOT "bin"
 $script:MOLE_LIB = Join-Path $script:MOLE_ROOT "lib"
+$script:MOLE_CORE = Join-Path $script:MOLE_LIB "core"
+
+# Read the version before loading the rest of the runtime so every entrypoint
+# resolves the same release tag.
+. "$script:MOLE_CORE\version.ps1"
+$script:MOLE_VER = Get-MoleVersionString -RootDir $script:MOLE_ROOT
 
 # Import core
 . "$script:MOLE_LIB\core\common.ps1"
@@ -32,7 +38,6 @@ $script:MOLE_LIB = Join-Path $script:MOLE_ROOT "lib"
 # Version Info
 # ============================================================================
 
-$script:MOLE_VER = "1.0.0"
 $script:MOLE_BUILD = "2026-01-07"
 
 function Show-Version {

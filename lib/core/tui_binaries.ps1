@@ -9,6 +9,9 @@ if ((Get-Variable -Name 'MOLE_TUI_BINARIES_LOADED' -Scope Script -ErrorAction Si
 }
 $script:MOLE_TUI_BINARIES_LOADED = $true
 
+$script:MOLE_TUI_CORE_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
+. "$script:MOLE_TUI_CORE_DIR\version.ps1"
+
 $script:MoleGitHubRepo = "tw93/Mole"
 $script:MoleGitHubApiRoot = "https://api.github.com/repos/$($script:MoleGitHubRepo)"
 $script:MoleGitHubHeaders = @{
@@ -19,17 +22,7 @@ $script:MoleGitHubHeaders = @{
 function Get-MoleVersionFromScriptFile {
     param([string]$WindowsDir)
 
-    $moleScript = Join-Path $WindowsDir "mole.ps1"
-    if (-not (Test-Path $moleScript)) {
-        return $null
-    }
-
-    $content = Get-Content $moleScript -Raw
-    if ($content -match '\$script:MOLE_VER\s*=\s*"([^"]+)"') {
-        return $Matches[1]
-    }
-
-    return $null
+    return Get-MoleVersionString -RootDir $WindowsDir
 }
 
 function Get-TuiBinaryAssetName {
@@ -136,16 +129,48 @@ function Build-TuiBinary {
 
     Write-Host "Building $Name tool..." -ForegroundColor Cyan
 
+    $stdoutPath = Join-Path $env:TEMP "mole-$Name-build.stdout.log"
+    $stderrPath = Join-Path $env:TEMP "mole-$Name-build.stderr.log"
+
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+        if (Test-Path $path) {
+            Remove-Item $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     Push-Location $WindowsDir
     try {
-        $result = & go build -o "$DestinationPath" $SourcePath 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Failed to build $Name tool: $result" -ForegroundColor Red
-            return $false
-        }
+        $process = Start-Process -FilePath "go" `
+            -ArgumentList @("build", "-o", $DestinationPath, $SourcePath) `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+    }
+    catch {
+        Write-Host "Failed to start go build for $Name tool: $_" -ForegroundColor Red
+        return $false
     }
     finally {
         Pop-Location
+    }
+
+    $buildOutput = @()
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+        if (Test-Path $path) {
+            $content = (Get-Content $path -Raw).Trim()
+            if ($content) {
+                $buildOutput += $content
+            }
+            Remove-Item $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($process.ExitCode -ne 0) {
+        $message = if ($buildOutput.Count -gt 0) { $buildOutput -join [Environment]::NewLine } else { "go build exited with code $($process.ExitCode)" }
+        Write-Host "Failed to build $Name tool: $message" -ForegroundColor Red
+        return $false
     }
 
     return $true
@@ -169,15 +194,24 @@ function Ensure-TuiBinary {
         $Version = Get-MoleVersionFromScriptFile -WindowsDir $WindowsDir
     }
 
-    if (Restore-PrebuiltTuiBinary -Name $Name -WindowsDir $WindowsDir -DestinationPath $DestinationPath -Version $Version) {
-        return $DestinationPath
+    try {
+        if (Restore-PrebuiltTuiBinary -Name $Name -WindowsDir $WindowsDir -DestinationPath $DestinationPath -Version $Version) {
+            return $DestinationPath
+        }
+    }
+    catch {
+        Write-Host "Failed to restore prebuilt $Name tool: $_" -ForegroundColor Yellow
     }
 
     if (Get-Command go -ErrorAction SilentlyContinue) {
-        if (Build-TuiBinary -Name $Name -WindowsDir $WindowsDir -DestinationPath $DestinationPath -SourcePath $SourcePath) {
-            return $DestinationPath
+        try {
+            if (Build-TuiBinary -Name $Name -WindowsDir $WindowsDir -DestinationPath $DestinationPath -SourcePath $SourcePath) {
+                return $DestinationPath
+            }
         }
-        return $null
+        catch {
+            Write-Host "Failed to prepare $Name tool: $_" -ForegroundColor Yellow
+        }
     }
 
     return $null

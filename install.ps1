@@ -19,13 +19,16 @@ Set-StrictMode -Version Latest
 # Configuration
 # ============================================================================
 
-$script:VERSION = "1.0.0"
 $script:SourceDir = if ($MyInvocation.MyCommand.Path) {
     Split-Path -Parent $MyInvocation.MyCommand.Path
 } else {
     $PSScriptRoot
 }
+$script:CoreDir = Join-Path $script:SourceDir "lib\core"
 $script:ShortcutName = "Mole"
+
+. (Join-Path $script:CoreDir "version.ps1")
+$script:VERSION = Get-MoleVersionString -RootDir $script:SourceDir
 
 # Colors (using [char]27 for PowerShell 5.1 compatibility)
 $script:ESC = [char]27
@@ -39,7 +42,7 @@ $script:Colors = @{
     NC      = "$($script:ESC)[0m"
 }
 
-. (Join-Path $script:SourceDir "lib\core\tui_binaries.ps1")
+. (Join-Path $script:CoreDir "tui_binaries.ps1")
 
 # ============================================================================
 # Helpers
@@ -258,7 +261,13 @@ function Ensure-OptionalTuiTools {
 
     foreach ($tool in $tools) {
         $destination = Join-Path $RootDir $tool.Output
-        $binPath = Ensure-TuiBinary -Name $tool.Name -WindowsDir $RootDir -DestinationPath $destination -SourcePath $tool.Source -Version $version
+        try {
+            $binPath = Ensure-TuiBinary -Name $tool.Name -WindowsDir $RootDir -DestinationPath $destination -SourcePath $tool.Source -Version $version
+        }
+        catch {
+            Write-MoleWarning "Skipping $($tool.Name).exe after a non-fatal setup error: $_"
+            $binPath = $null
+        }
         if ($binPath) {
             Write-Success "Ready: $($tool.Name).exe"
         }

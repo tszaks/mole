@@ -16,6 +16,9 @@ $script:MOLE_CORE_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:MOLE_LIB_DIR = Split-Path -Parent $script:MOLE_CORE_DIR
 $script:MOLE_ROOT_DIR = Split-Path -Parent $script:MOLE_LIB_DIR
 
+# Version helpers are standalone and safe to load before the other core modules.
+. "$script:MOLE_CORE_DIR\version.ps1"
+
 # ============================================================================
 # Load Core Modules
 # ============================================================================
@@ -36,7 +39,7 @@ $script:MOLE_ROOT_DIR = Split-Path -Parent $script:MOLE_LIB_DIR
 # Version Information
 # ============================================================================
 
-$script:MOLE_VERSION = "1.0.0"
+$script:MOLE_VERSION = Get-MoleVersionString -RootDir $script:MOLE_ROOT_DIR
 $script:MOLE_BUILD_DATE = "2026-01-07"
 
 function Get-MoleVersion {

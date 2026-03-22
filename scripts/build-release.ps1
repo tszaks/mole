@@ -23,15 +23,15 @@ $projectRoot = Split-Path -Parent $scriptDir
 $releaseDir = Join-Path $projectRoot "release"
 $binDir = Join-Path $projectRoot "bin"
 $cmdDir = Join-Path $projectRoot "cmd"
+$versionFile = Join-Path $projectRoot "VERSION"
 
-# Read version from mole.ps1 if not provided
+# Read version from VERSION if not provided
 if (-not $Version) {
-    $moleScript = Join-Path $projectRoot "mole.ps1"
-    $content = Get-Content $moleScript -Raw
-    if ($content -match '\$script:MOLE_VER\s*=\s*"([^"]+)"') {
-        $Version = $Matches[1]
-    } else {
-        Write-Host "Error: Could not detect version from mole.ps1" -ForegroundColor Red
+    if (Test-Path $versionFile) {
+        $Version = (Get-Content $versionFile -Raw).Trim()
+    }
+    if (-not $Version) {
+        Write-Host "Error: Could not detect version from VERSION" -ForegroundColor Red
         exit 1
     }
 }

@@ -259,6 +259,64 @@ function Clear-GoCaches {
     }
 }
 
+function Get-MiseCachePath {
+    <#
+    .SYNOPSIS
+        Resolve the mise cache directory without touching installs/plugins
+    #>
+
+    if (-not [string]::IsNullOrWhiteSpace($env:MISE_CACHE_DIR)) {
+        return $env:MISE_CACHE_DIR
+    }
+
+    if (-not (Get-Command mise -ErrorAction SilentlyContinue)) {
+        return $null
+    }
+
+    try {
+        $cachePath = (& mise cache path 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($cachePath)) {
+            return $cachePath.Trim()
+        }
+    }
+    catch {
+        Write-Debug "mise cache path failed: $_"
+    }
+
+    return $null
+}
+
+function Clear-MiseCache {
+    <#
+    .SYNOPSIS
+        Clean mise internal cache only
+    .DESCRIPTION
+        Respects MISE_CACHE_DIR and never removes the installs/plugins data tree.
+    #>
+
+    $hasMise = [bool](Get-Command mise -ErrorAction SilentlyContinue)
+    $cachePath = Get-MiseCachePath
+    $clearedByCommand = $false
+
+    if ($hasMise -and -not (Test-DryRunMode)) {
+        try {
+            $null = & mise cache clear 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "mise cache"
+                Set-SectionActivity
+                $clearedByCommand = $true
+            }
+        }
+        catch {
+            Write-Debug "mise cache clear failed: $_"
+        }
+    }
+
+    if (-not $clearedByCommand -and $cachePath -and (Test-Path $cachePath)) {
+        Clear-DirectoryContents -Path $cachePath -Description "mise cache"
+    }
+}
+
 # ============================================================================
 # Rust Ecosystem
 # ============================================================================
@@ -701,6 +759,9 @@ function Invoke-DevToolsCleanup {
     
     # Go ecosystem
     Clear-GoCaches
+
+    # mise cache
+    Clear-MiseCache
     
     # Rust ecosystem
     Clear-RustCaches

@@ -47,13 +47,11 @@ jobs:
             $version = "${{ github.ref }}" -replace '^refs/tags/[Vv]', ''
             $version = $version -replace '-windows$', ''
           } else {
-            $content = Get-Content mole.ps1 -Raw
-            if ($content -match '\$script:MOLE_VER\s*=\s*"([^"]+)"') {
-              $version = $Matches[1]
-            } else {
-              Write-Error "Could not detect version"
-              exit 1
-            }
+            $version = (Get-Content VERSION -Raw).Trim()
+          }
+          if (-not $version) {
+            Write-Error "Could not detect version"
+            exit 1
           }
           Write-Host "Version: $version"
           "VERSION=$version" >> $env:GITHUB_OUTPUT
