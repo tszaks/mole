@@ -141,6 +141,12 @@ EOF
     [[ "$output" == *"Font cache cleared"* ]]
 }
 
+@test "optimize does not auto-fix Gatekeeper anymore" {
+    run grep -n "spctl --master-enable\\|SECURITY_FIXES+=([\"']gatekeeper|" "$PROJECT_ROOT/bin/optimize.sh"
+
+    [ "$status" -eq 1 ]
+}
+
 @test "opt_font_cache_rebuild skips when Firefox helpers are running" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
