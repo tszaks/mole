@@ -260,6 +260,44 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "uninstall_resolve_display_name keeps versioned app names when metadata is generic" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+function run_with_timeout() {
+    shift
+    "$@"
+}
+
+function mdls() {
+    echo "Xcode"
+}
+
+function plutil() {
+    if [[ "$3" == *"Info.plist" ]]; then
+        echo "Xcode"
+        return 0
+    fi
+    return 1
+}
+
+MOLE_UNINSTALL_USER_LC_ALL=""
+MOLE_UNINSTALL_USER_LANG=""
+
+eval "$(sed -n '/^uninstall_resolve_display_name()/,/^}/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+app_path="$HOME/Applications/Xcode 16.4.app"
+mkdir -p "$app_path/Contents"
+touch "$app_path/Contents/Info.plist"
+
+result=$(uninstall_resolve_display_name "$app_path" "Xcode 16.4.app")
+[[ "$result" == "Xcode 16.4" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "decode_file_list handles empty input" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

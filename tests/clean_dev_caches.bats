@@ -206,6 +206,23 @@ EOF
     [[ "$output" == *"Docker unused data|Docker unused data docker system prune -af --volumes"* ]]
 }
 
+@test "clean_dev_mise respects MISE_CACHE_DIR and only targets cache" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MISE_CACHE_DIR="/tmp/mise-cache" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_tool_cache() { :; }
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+clean_dev_mise
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"mise cache|/tmp/mise-cache/*"* ]]
+    [[ "$output" != *".local/share/mise"* ]]
+}
+
 @test "clean_developer_tools runs key stages" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -217,6 +234,7 @@ clean_homebrew() { echo "brew"; }
 clean_project_caches() { :; }
 clean_dev_python() { :; }
 clean_dev_go() { :; }
+clean_dev_mise() { echo "mise"; }
 clean_dev_rust() { :; }
 check_rust_toolchains() { :; }
 check_android_ndk() { :; }
@@ -248,6 +266,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"npm"* ]]
+    [[ "$output" == *"mise"* ]]
     [[ "$output" == *"brew"* ]]
 }
 

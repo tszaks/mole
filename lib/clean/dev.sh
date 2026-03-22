@@ -146,6 +146,41 @@ clean_dev_go() {
     fi
     note_activity
 }
+
+get_mise_cache_path() {
+    if [[ -n "${MISE_CACHE_DIR:-}" && "${MISE_CACHE_DIR}" == /* ]]; then
+        echo "$MISE_CACHE_DIR"
+        return 0
+    fi
+
+    if command -v mise > /dev/null 2>&1; then
+        local mise_cache_path
+        mise_cache_path=$(run_with_timeout 2 mise cache path 2> /dev/null || echo "")
+        if [[ -n "$mise_cache_path" && "$mise_cache_path" == /* ]]; then
+            echo "$mise_cache_path"
+            return 0
+        fi
+    fi
+
+    echo "$HOME/Library/Caches/mise"
+}
+
+clean_dev_mise() {
+    local mise_cache_path
+    mise_cache_path=$(get_mise_cache_path)
+
+    if command -v mise > /dev/null 2>&1; then
+        if [[ "$DRY_RUN" != "true" ]]; then
+            clean_tool_cache "mise cache" bash -c 'mise cache clear > /dev/null 2>&1 || true'
+            note_activity
+        else
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} mise cache · would clean"
+            note_activity
+        fi
+    fi
+
+    safe_clean "$mise_cache_path"/* "mise cache"
+}
 # Rust/cargo caches.
 clean_dev_rust() {
     safe_clean ~/.cargo/registry/cache/* "Rust cargo cache"
@@ -1040,6 +1075,7 @@ clean_developer_tools() {
     clean_dev_npm
     clean_dev_python
     clean_dev_go
+    clean_dev_mise
     clean_dev_rust
     check_rust_toolchains
     clean_dev_docker
