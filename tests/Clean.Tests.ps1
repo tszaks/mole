@@ -107,6 +107,12 @@ Describe "Developer Tools Cleanup Module" {
             Get-Command Clear-GoCaches -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
     }
+
+    Context "mise Cleanup" {
+        It "Should have mise cache cleanup function" {
+            Get-Command Clear-MiseCache -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+    }
     
     Context "Rust Cleanup" {
         It "Should have Rust cache cleanup function" {

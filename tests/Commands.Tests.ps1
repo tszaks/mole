@@ -5,6 +5,7 @@ BeforeAll {
     # Get the windows directory path (tests are in windows/tests/)
     $script:WindowsDir = Split-Path -Parent $PSScriptRoot
     $script:BinDir = Join-Path $script:WindowsDir "bin"
+    $script:InstallScript = Join-Path $script:WindowsDir "install.ps1"
 }
 
 Describe "Clean Command" {
@@ -174,6 +175,44 @@ Describe "Main Entry Point" {
             $helpText | Should -Match "status"
             $helpText | Should -Match "update"
             $helpText | Should -Match "remove"
+        }
+    }
+}
+
+Describe "Installer Script" {
+    Context "Version Source" {
+        It "Should read the version from VERSION" {
+            $source = Get-Content $script:InstallScript -Raw
+            $source | Should -Match "version\.ps1"
+            $source | Should -Match "Get-MoleVersionString -RootDir \$script:SourceDir"
+        }
+    }
+
+    Context "Optional TUI Tools" {
+        It "Should downgrade TUI setup errors to warnings" {
+            $source = Get-Content $script:InstallScript -Raw
+            $source | Should -Match "Ensure-TuiBinary"
+            $source | Should -Match "Skipping .*non-fatal setup error"
+            $source | Should -Match "Could not prepare .*Install Go or wait for a Windows prerelease asset"
+        }
+    }
+}
+
+Describe "Source Install Hygiene" {
+    Context ".gitattributes" {
+        It "Should normalize tracked line endings for Windows source installs" {
+            $source = Get-Content (Join-Path $script:WindowsDir ".gitattributes") -Raw
+            $source | Should -Match '\* text=auto eol=lf'
+            $source | Should -Match '\*\.ps1 text eol=lf'
+            $source | Should -Match '\*\.cmd text eol=crlf'
+        }
+    }
+
+    Context ".gitignore" {
+        It "Should ignore generated launcher batch files" {
+            $source = Get-Content (Join-Path $script:WindowsDir ".gitignore") -Raw
+            $source | Should -Match '(?m)^mole\.cmd$'
+            $source | Should -Match '(?m)^mo\.cmd$'
         }
     }
 }

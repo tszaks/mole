@@ -5,12 +5,15 @@ BeforeAll {
     # Get the windows directory path (tests are in windows/tests/)
     $script:WindowsDir = Split-Path -Parent $PSScriptRoot
     $script:LibDir = Join-Path $script:WindowsDir "lib"
+    $script:VersionFile = Join-Path $script:WindowsDir "VERSION"
 
     # Import core modules
     . "$script:LibDir\core\base.ps1"
     . "$script:LibDir\core\log.ps1"
     . "$script:LibDir\core\ui.ps1"
     . "$script:LibDir\core\file_ops.ps1"
+    . "$script:LibDir\core\version.ps1"
+    . "$script:LibDir\core\tui_binaries.ps1"
 }
 
 Describe "Base Module" {
@@ -237,6 +240,20 @@ Describe "UI Module" {
     Context "Read-Confirmation" {
         It "Should have Read-Confirmation function" {
             Get-Command Read-Confirmation -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+    }
+}
+
+Describe "Version Helpers" {
+    Context "Shared VERSION Source" {
+        It "Should read the version from VERSION" {
+            $expected = (Get-Content $script:VersionFile -Raw).Trim()
+            Get-MoleVersionString -RootDir $script:WindowsDir | Should -Be $expected
+        }
+
+        It "Should keep TUI release lookup aligned with VERSION" {
+            $expected = (Get-Content $script:VersionFile -Raw).Trim()
+            Get-MoleVersionFromScriptFile -WindowsDir $script:WindowsDir | Should -Be $expected
         }
     }
 }
