@@ -12,40 +12,47 @@ $script:MOLE_BASE_LOADED = $true
 # ============================================================================
 # Color Definitions (ANSI escape codes for modern terminals)
 # ============================================================================
-$script:ESC = [char]27
-$script:DefaultColors = @{
-    Green      = "$ESC[0;32m"
-    Blue       = "$ESC[0;34m"
-    Cyan       = "$ESC[0;36m"
-    Yellow     = "$ESC[0;33m"
-    Purple     = "$ESC[0;35m"
-    PurpleBold = "$ESC[1;35m"
-    Red        = "$ESC[0;31m"
-    Gray       = "$ESC[0;90m"
-    White      = "$ESC[0;37m"
-    NC         = "$ESC[0m"  # No Color / Reset
+function Get-MoleDefaultColors {
+    $esc = [char]27
+    return @{
+        Green      = "$esc[0;32m"
+        Blue       = "$esc[0;34m"
+        Cyan       = "$esc[0;36m"
+        Yellow     = "$esc[0;33m"
+        Purple     = "$esc[0;35m"
+        PurpleBold = "$esc[1;35m"
+        Red        = "$esc[0;31m"
+        Gray       = "$esc[0;90m"
+        White      = "$esc[0;37m"
+        NC         = "$esc[0m"  # No Color / Reset
+    }
 }
 
 # ============================================================================
 # Icon Definitions
 # ============================================================================
-$script:DefaultIcons = @{
-    Confirm  = [char]0x25CE  # ◎
-    Admin    = [char]0x2699  # ⚙
-    Success  = [char]0x2713  # ✓
-    Error    = [char]0x263B  # ☻
-    Warning  = [char]0x25CF  # ●
-    Empty    = [char]0x25CB  # ○
-    Solid    = [char]0x25CF  # ●
-    List     = [char]0x2022  # •
-    Arrow    = [char]0x27A4  # ➤
-    DryRun   = [char]0x2192  # →
-    NavUp    = [char]0x2191  # ↑
-    NavDown  = [char]0x2193  # ↓
-    Folder   = [char]0x25A0  # ■ (folder substitute)
-    File     = [char]0x25A1  # □ (file substitute)
-    Trash    = [char]0x2718  # ✘ (trash substitute)
+function Get-MoleDefaultIcons {
+    return @{
+        Confirm  = [char]0x25CE  # ◎
+        Admin    = [char]0x2699  # ⚙
+        Success  = [char]0x2713  # ✓
+        Error    = [char]0x263B  # ☻
+        Warning  = [char]0x25CF  # ●
+        Empty    = [char]0x25CB  # ○
+        Solid    = [char]0x25CF  # ●
+        List     = [char]0x2022  # •
+        Arrow    = [char]0x27A4  # ➤
+        DryRun   = [char]0x2192  # →
+        NavUp    = [char]0x2191  # ↑
+        NavDown  = [char]0x2193  # ↓
+        Folder   = [char]0x25A0  # ■ (folder substitute)
+        File     = [char]0x25A1  # □ (file substitute)
+        Trash    = [char]0x2718  # ✘ (trash substitute)
+    }
 }
+
+$script:DefaultColors = Get-MoleDefaultColors
+$script:DefaultIcons = Get-MoleDefaultIcons
 
 function Get-OrCreateScriptHashtable {
     param(
@@ -63,22 +70,77 @@ function Get-OrCreateScriptHashtable {
     return $table
 }
 
+function Get-MoleDefaultHashtable {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Colors', 'Icons')]
+        [string]$Name
+    )
+
+    $defaultVariable = Get-Variable -Name "Default$Name" -Scope Script -ErrorAction SilentlyContinue
+    if ($defaultVariable -and $defaultVariable.Value -is [hashtable]) {
+        return $defaultVariable.Value
+    }
+
+    switch ($Name) {
+        'Colors' { return Get-MoleDefaultColors }
+        'Icons' { return Get-MoleDefaultIcons }
+    }
+}
+
 function Initialize-MoleVisualDefaults {
+    $defaultColors = Get-MoleDefaultHashtable -Name "Colors"
     $colors = Get-OrCreateScriptHashtable -Name "Colors"
 
-    foreach ($entry in $script:DefaultColors.GetEnumerator()) {
+    foreach ($entry in $defaultColors.GetEnumerator()) {
         if (-not $colors.ContainsKey($entry.Key)) {
             $colors[$entry.Key] = $entry.Value
         }
     }
 
+    $defaultIcons = Get-MoleDefaultHashtable -Name "Icons"
     $icons = Get-OrCreateScriptHashtable -Name "Icons"
 
-    foreach ($entry in $script:DefaultIcons.GetEnumerator()) {
+    foreach ($entry in $defaultIcons.GetEnumerator()) {
         if (-not $icons.ContainsKey($entry.Key)) {
             $icons[$entry.Key] = $entry.Value
         }
     }
+}
+
+function Get-MoleVisualValue {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Colors', 'Icons')]
+        [string]$TableName,
+
+        [Parameter(Mandatory)]
+        [string]$Key
+    )
+
+    $table = Get-OrCreateScriptHashtable -Name $TableName
+    if (-not $table.ContainsKey($Key)) {
+        $defaults = Get-MoleDefaultHashtable -Name $TableName
+        if ($defaults.ContainsKey($Key)) {
+            $table[$Key] = $defaults[$Key]
+        }
+    }
+
+    if ($table.ContainsKey($Key)) {
+        return $table[$Key]
+    }
+
+    return $null
+}
+
+function Get-MoleColor {
+    param([Parameter(Mandatory)][string]$Name)
+    return Get-MoleVisualValue -TableName "Colors" -Key $Name
+}
+
+function Get-MoleIcon {
+    param([Parameter(Mandatory)][string]$Name)
+    return Get-MoleVisualValue -TableName "Icons" -Key $Name
 }
 
 Initialize-MoleVisualDefaults

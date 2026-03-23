@@ -6,7 +6,7 @@ BeforeAll {
     $script:WindowsDir = Split-Path -Parent $PSScriptRoot
     $script:BinDir = Join-Path $script:WindowsDir "bin"
     $script:InstallScript = Join-Path $script:WindowsDir "install.ps1"
-    $script:VisualDefaultsErrorPattern = 'property ''Solid'' cannot be found|找不到属性.?Solid|VariableIsUndefined|\$script:Colors'
+    $script:VisualDefaultsErrorPattern = 'property ''(Solid|Error)'' cannot be found|找不到属性.?(Solid|Error)|VariableIsUndefined|\$script:Colors'
 }
 
 Describe "Clean Command" {

@@ -70,6 +70,14 @@ Describe "Base Module" {
             $script:Icons.Solid | Should -Be "*"
             $script:Icons.Admin | Should -Not -BeNullOrEmpty
         }
+
+        It "Should restore missing icon entries on demand" {
+            $script:Icons = @{ Solid = "*" }
+
+            (Get-MoleIcon -Name "Error") | Should -Not -BeNullOrEmpty
+            $script:Icons.Error | Should -Not -BeNullOrEmpty
+            $script:Icons.Solid | Should -Be "*"
+        }
     }
 
     Context "Test-IsAdmin" {
@@ -241,6 +249,19 @@ Describe "Logging Module" {
         It "Should have Write-MoleError function" {
             # Note: The actual function is Write-MoleError
             { Write-MoleError "Test message" } | Should -Not -Throw
+        }
+
+        It "Should log errors even when the icon table is partial" {
+            $originalIcons = $script:Icons.Clone()
+
+            try {
+                $script:Icons = @{ Solid = "*" }
+                { Write-MoleError "Test message" } | Should -Not -Throw
+                $script:Icons.Error | Should -Not -BeNullOrEmpty
+            }
+            finally {
+                $script:Icons = $originalIcons
+            }
         }
     }
 

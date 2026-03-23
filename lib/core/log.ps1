@@ -40,8 +40,8 @@ function Write-LogMessage {
     )
 
     $timestamp = Get-Date -Format "HH:mm:ss"
-    $colorCode = $script:Colors[$Color]
-    $nc = $script:Colors.NC
+    $colorCode = Get-MoleColor -Name $Color
+    $nc = Get-MoleColor -Name "NC"
 
     $formattedIcon = if ($Icon) { "$Icon " } else { "" }
     $output = "  ${colorCode}${formattedIcon}${nc}${Message}"
@@ -60,7 +60,7 @@ function Write-Info {
         Write an informational message
     #>
     param([string]$Message)
-    Write-LogMessage -Message $Message -Level "INFO" -Color "Cyan" -Icon $script:Icons.List
+    Write-LogMessage -Message $Message -Level "INFO" -Color "Cyan" -Icon (Get-MoleIcon -Name "List")
 }
 
 function Write-Success {
@@ -69,7 +69,7 @@ function Write-Success {
         Write a success message
     #>
     param([string]$Message)
-    Write-LogMessage -Message $Message -Level "SUCCESS" -Color "Green" -Icon $script:Icons.Success
+    Write-LogMessage -Message $Message -Level "SUCCESS" -Color "Green" -Icon (Get-MoleIcon -Name "Success")
 }
 
 
@@ -79,7 +79,7 @@ function Write-MoleWarning {
         Write a warning message
     #>
     param([string]$Message)
-    Write-LogMessage -Message $Message -Level "WARN" -Color "Yellow" -Icon $script:Icons.Warning
+    Write-LogMessage -Message $Message -Level "WARN" -Color "Yellow" -Icon (Get-MoleIcon -Name "Warning")
 }
 
 function Write-MoleError {
@@ -88,7 +88,7 @@ function Write-MoleError {
         Write an error message
     #>
     param([string]$Message)
-    Write-LogMessage -Message $Message -Level "ERROR" -Color "Red" -Icon $script:Icons.Error
+    Write-LogMessage -Message $Message -Level "ERROR" -Color "Red" -Icon (Get-MoleIcon -Name "Error")
 }
 
 
@@ -100,8 +100,8 @@ function Write-Debug {
     param([string]$Message)
 
     if ($script:LogConfig.DebugEnabled) {
-        $gray = $script:Colors.Gray
-        $nc = $script:Colors.NC
+        $gray = Get-MoleColor -Name "Gray"
+        $nc = Get-MoleColor -Name "NC"
         Write-Host "  ${gray}[DEBUG] $Message${nc}"
     }
 }
@@ -112,7 +112,7 @@ function Write-DryRun {
         Write a dry-run message (action that would be taken)
     #>
     param([string]$Message)
-    Write-LogMessage -Message $Message -Level "DRYRUN" -Color "Yellow" -Icon $script:Icons.DryRun
+    Write-LogMessage -Message $Message -Level "DRYRUN" -Color "Yellow" -Icon (Get-MoleIcon -Name "DryRun")
 }
 
 # ============================================================================
@@ -136,9 +136,9 @@ function Start-Section {
     $script:CurrentSection.Activity = $false
     $script:CurrentSection.Name = $Title
 
-    $purple = $script:Colors.PurpleBold
-    $nc = $script:Colors.NC
-    $arrow = $script:Icons.Arrow
+    $purple = Get-MoleColor -Name "PurpleBold"
+    $nc = Get-MoleColor -Name "NC"
+    $arrow = Get-MoleIcon -Name "Arrow"
 
     Write-Host ""
     Write-Host "${purple}${arrow} ${Title}${nc}"
@@ -181,8 +181,8 @@ function Start-Spinner {
     param([string]$Message = "Working...")
 
     $script:SpinnerIndex = 0
-    $gray = $script:Colors.Gray
-    $nc = $script:Colors.NC
+    $gray = Get-MoleColor -Name "Gray"
+    $nc = Get-MoleColor -Name "NC"
 
     Write-Host -NoNewline "  ${gray}$($script:SpinnerFrames[0]) $Message${nc}"
 }
@@ -196,8 +196,8 @@ function Update-Spinner {
 
     $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $script:SpinnerFrames.Count
     $frame = $script:SpinnerFrames[$script:SpinnerIndex]
-    $gray = $script:Colors.Gray
-    $nc = $script:Colors.NC
+    $gray = Get-MoleColor -Name "Gray"
+    $nc = Get-MoleColor -Name "NC"
 
     # Move cursor to beginning of line and clear
     Write-Host -NoNewline "`r  ${gray}$frame $Message${nc}    "
@@ -232,8 +232,8 @@ function Write-Progress {
     $empty = $Width - $filled
 
     $bar = ("[" + ("=" * $filled) + (" " * $empty) + "]")
-    $cyan = $script:Colors.Cyan
-    $nc = $script:Colors.NC
+    $cyan = Get-MoleColor -Name "Cyan"
+    $nc = Get-MoleColor -Name "NC"
 
     Write-Host -NoNewline "`r  ${cyan}$bar${nc} ${percent}% $Message    "
 }
