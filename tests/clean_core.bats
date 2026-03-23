@@ -91,6 +91,26 @@ run_clean_dry_run() {
     [[ "$output" == *"full preview"* ]]
 }
 
+@test "mo clean --dry-run survives an unwritable TMPDIR" {
+    local blocked_tmp="$HOME/blocked-tmp"
+    mkdir -p "$blocked_tmp"
+    chmod 500 "$blocked_tmp"
+
+    set_mock_sudo_uncached
+    local test_path="$PATH"
+    if [[ -n "${TEST_MOCK_BIN:-}" ]]; then
+        test_path="$TEST_MOCK_BIN:$PATH"
+    fi
+
+    run env HOME="$HOME" TMPDIR="$blocked_tmp" MOLE_TEST_MODE=1 PATH="$test_path" \
+        "$PROJECT_ROOT/mole" clean --dry-run
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"mktemp:"* ]]
+    [[ "$output" != *"Failed to create temporary file"* ]]
+    [ -d "$HOME/.cache/mole/tmp" ]
+}
+
 @test "mo clean --dry-run reports user cache without deleting it" {
     mkdir -p "$HOME/Library/Caches/TestApp"
     echo "cache data" > "$HOME/Library/Caches/TestApp/cache.tmp"

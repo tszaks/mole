@@ -221,7 +221,8 @@ is_bundle_orphaned() {
     if [[ -n "$bundle_id" ]] && [[ "$bundle_id" =~ ^[a-zA-Z0-9._-]+$ ]] && [[ ${#bundle_id} -ge 5 ]]; then
         # Initialize cache file if needed
         if [[ -z "$ORPHAN_MDFIND_CACHE_FILE" ]]; then
-            ORPHAN_MDFIND_CACHE_FILE=$(mktemp "${TMPDIR:-/tmp}/mole_mdfind_cache.XXXXXX")
+            ensure_mole_temp_root
+            ORPHAN_MDFIND_CACHE_FILE=$(mktemp "$MOLE_RESOLVED_TMPDIR/mole_mdfind_cache.XXXXXX")
             register_temp_file "$ORPHAN_MDFIND_CACHE_FILE"
         fi
 
@@ -277,7 +278,8 @@ is_claude_vm_bundle_orphaned() {
     fi
 
     if [[ -z "$ORPHAN_MDFIND_CACHE_FILE" ]]; then
-        ORPHAN_MDFIND_CACHE_FILE=$(mktemp "${TMPDIR:-/tmp}/mole_mdfind_cache.XXXXXX")
+        ensure_mole_temp_root
+        ORPHAN_MDFIND_CACHE_FILE=$(mktemp "$MOLE_RESOLVED_TMPDIR/mole_mdfind_cache.XXXXXX")
         register_temp_file "$ORPHAN_MDFIND_CACHE_FILE"
     fi
 
@@ -449,7 +451,8 @@ clean_orphaned_system_services() {
 
         if [[ -n "$bundle_id" ]] && [[ "$bundle_id" =~ ^[a-zA-Z0-9._-]+$ ]] && [[ ${#bundle_id} -ge 5 ]]; then
             if [[ -z "$mdfind_cache_file" ]]; then
-                mdfind_cache_file=$(mktemp "${TMPDIR:-/tmp}/mole_mdfind_cache.XXXXXX")
+                ensure_mole_temp_root
+                mdfind_cache_file=$(mktemp "$MOLE_RESOLVED_TMPDIR/mole_mdfind_cache.XXXXXX")
                 register_temp_file "$mdfind_cache_file"
             fi
 

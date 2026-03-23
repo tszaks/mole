@@ -324,7 +324,8 @@ start_inline_spinner() {
 
     if [[ -t 1 ]]; then
         # Create unique stop flag file for this spinner instance
-        INLINE_SPINNER_STOP_FILE="${TMPDIR:-/tmp}/mole_spinner_$$_$RANDOM.stop"
+        ensure_mole_temp_root
+        INLINE_SPINNER_STOP_FILE="$MOLE_RESOLVED_TMPDIR/mole_spinner_$$_$RANDOM.stop"
 
         (
             local stop_file="$INLINE_SPINNER_STOP_FILE"

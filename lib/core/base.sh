@@ -556,10 +556,93 @@ bytes_to_human_kb() {
 declare -a MOLE_TEMP_FILES=()
 declare -a MOLE_TEMP_DIRS=()
 
+normalize_temp_root() {
+    local path="${1:-}"
+    [[ -z "$path" ]] && return 1
+
+    if [[ "$path" == "~"* ]]; then
+        path="${path/#\~/$HOME}"
+    fi
+
+    while [[ "$path" != "/" && "$path" == */ ]]; do
+        path="${path%/}"
+    done
+
+    [[ -n "$path" ]] || return 1
+    printf '%s\n' "$path"
+}
+
+probe_temp_root() {
+    local raw_path="$1"
+    local allow_create="${2:-false}"
+    local path
+    local probe=""
+
+    path=$(normalize_temp_root "$raw_path") || return 1
+
+    if [[ "$allow_create" == "true" ]]; then
+        ensure_user_dir "$path"
+    fi
+
+    [[ -d "$path" ]] || return 1
+
+    probe=$(mktemp "$path/mole.probe.XXXXXX" 2> /dev/null) || return 1
+    rm -f "$probe" 2> /dev/null || true
+
+    printf '%s\n' "$path"
+}
+
+ensure_mole_temp_root() {
+    if [[ -n "${MOLE_RESOLVED_TMPDIR:-}" ]]; then
+        return 0
+    fi
+
+    local resolved=""
+    local candidate="${TMPDIR:-}"
+    local invoking_home=""
+
+    if [[ -n "$candidate" ]]; then
+        resolved=$(probe_temp_root "$candidate" false || true)
+    fi
+
+    if [[ -z "$resolved" ]]; then
+        invoking_home=$(get_invoking_home)
+        if [[ -n "$invoking_home" ]]; then
+            resolved=$(probe_temp_root "$invoking_home/.cache/mole/tmp" true || true)
+        fi
+    fi
+
+    if [[ -z "$resolved" ]]; then
+        resolved=$(probe_temp_root "/tmp" false || true)
+    fi
+
+    [[ -n "$resolved" ]] || resolved="/tmp"
+    MOLE_RESOLVED_TMPDIR="$resolved"
+    export MOLE_RESOLVED_TMPDIR
+}
+
+get_mole_temp_root() {
+    ensure_mole_temp_root
+    printf '%s\n' "$MOLE_RESOLVED_TMPDIR"
+}
+
+prepare_mole_tmpdir() {
+    ensure_mole_temp_root
+    export TMPDIR="$MOLE_RESOLVED_TMPDIR"
+    printf '%s\n' "$MOLE_RESOLVED_TMPDIR"
+}
+
+mole_temp_path_template() {
+    local prefix="${1:-mole}"
+    ensure_mole_temp_root
+    printf '%s/%s.XXXXXX\n' "$MOLE_RESOLVED_TMPDIR" "$prefix"
+}
+
 # Create tracked temporary file
 create_temp_file() {
     local temp
-    temp=$(mktemp "${TMPDIR:-/tmp}/mole.XXXXXX") || return 1
+    ensure_mole_temp_root
+    temp=$(mktemp "$MOLE_RESOLVED_TMPDIR/mole.XXXXXX") || return 1
     register_temp_file "$temp"
     echo "$temp"
 }
@@ -567,7 +650,8 @@ create_temp_file() {
 # Create tracked temporary directory
 create_temp_dir() {
     local temp
-    temp=$(mktemp -d "${TMPDIR:-/tmp}/mole.XXXXXX") || return 1
+    ensure_mole_temp_root
+    temp=$(mktemp -d "$MOLE_RESOLVED_TMPDIR/mole.XXXXXX") || return 1
     register_temp_dir "$temp"
     echo "$temp"
 }
@@ -588,9 +672,8 @@ mktemp_file() {
     local prefix="${1:-mole}"
     local temp
     local error_msg
-    # Use TMPDIR if set, otherwise /tmp
     # Add .XXXXXX suffix to work with both BSD and GNU mktemp
-    if ! error_msg=$(mktemp "${TMPDIR:-/tmp}/${prefix}.XXXXXX" 2>&1); then
+    if ! error_msg=$(mktemp "$(mole_temp_path_template "$prefix")" 2>&1); then
         echo "Error: Failed to create temporary file: $error_msg" >&2
         return 1
     fi
