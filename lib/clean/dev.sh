@@ -439,7 +439,9 @@ clean_xcode_device_support() {
                 done
 
                 if [[ $removed_count -gt 0 ]]; then
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${display_name} · removed ${removed_count} old versions, ${stale_size_human}"
+                    local line_color
+                    line_color=$(cleanup_result_color_kb "$stale_size_kb")
+                    echo -e "  ${line_color}${ICON_SUCCESS}${NC} ${display_name} · removed ${removed_count} old versions, ${line_color}${stale_size_human}${NC}"
                     note_activity
                 fi
             fi
@@ -655,10 +657,12 @@ clean_xcode_simulator_runtime_volumes() {
     if [[ $removed_count -gt 0 ]]; then
         local removed_human
         removed_human=$(bytes_to_human "$((removed_size_kb * 1024))")
+        local line_color
+        line_color=$(cleanup_result_color_kb "$removed_size_kb")
         if [[ $skipped_protected -gt 0 ]]; then
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode runtime volumes · removed ${removed_count} (${removed_human}), skipped ${skipped_protected} protected"
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode runtime volumes · removed ${removed_count} (${line_color}${removed_human}${NC}), skipped ${skipped_protected} protected"
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode runtime volumes · removed ${removed_count} (${removed_human})"
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode runtime volumes · removed ${removed_count} (${line_color}${removed_human}${NC})"
         fi
         note_activity
     else
@@ -745,9 +749,13 @@ clean_dev_mobile() {
                         fi
 
                         if ((removed_unavailable > 0)); then
-                            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${removed_unavailable}, ${unavailable_size_human}"
+                            local line_color
+                            line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
+                            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${removed_unavailable}, ${line_color}${unavailable_size_human}${NC}"
                         else
-                            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · cleanup completed, ${unavailable_size_human}"
+                            local line_color
+                            line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
+                            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · cleanup completed, ${line_color}${unavailable_size_human}${NC}"
                         fi
                     else
                         stop_section_spinner
@@ -793,7 +801,9 @@ clean_dev_mobile() {
 
                             if ((manually_removed > 0)); then
                                 if ((manual_failed == 0)); then
-                                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${manually_removed} (fallback), ${unavailable_size_human}"
+                                    local line_color
+                                    line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
+                                    echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${manually_removed} (fallback), ${line_color}${unavailable_size_human}${NC}"
                                 else
                                     echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode unavailable simulators · partially cleaned ${manually_removed}/${#unavailable_udids[@]}, ${unavailable_size_human}"
                                 fi

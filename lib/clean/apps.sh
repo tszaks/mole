@@ -48,12 +48,14 @@ clean_ds_store_tree() {
     if [[ $file_count -gt 0 ]]; then
         local size_human
         size_human=$(bytes_to_human "$total_bytes")
+        local size_kb=$(((total_bytes + 1023) / 1024))
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label${NC}, ${YELLOW}$file_count files, $size_human dry${NC}"
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $label${NC}, ${GREEN}$file_count files, $size_human${NC}"
+            local line_color
+            line_color=$(cleanup_result_color_kb "$size_kb")
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} $label${NC}, ${line_color}$file_count files, $size_human${NC}"
         fi
-        local size_kb=$(((total_bytes + 1023) / 1024))
         files_cleaned=$((files_cleaned + file_count))
         total_size_cleaned=$((total_size_cleaned + size_kb))
         total_items=$((total_items + 1))

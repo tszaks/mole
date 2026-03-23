@@ -44,6 +44,21 @@ setup() {
     [[ -n "$result" ]]
 }
 
+@test "cleanup_result_color_kb switches from yellow to green at 1 GiB" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+if [[ "$(cleanup_result_color_kb $((MOLE_ONE_GIB_KB - 1)))" == "$YELLOW" ]] &&
+    [[ "$(cleanup_result_color_kb "$MOLE_ONE_GIB_KB")" == "$GREEN" ]]; then
+    echo "ok"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [ "$output" = "ok" ]
+}
+
 @test "log_info prints message and appends to log file" {
     local message="Informational message from test"
     local stdout_output

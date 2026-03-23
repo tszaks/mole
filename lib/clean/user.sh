@@ -233,7 +233,9 @@ clean_chrome_old_versions() {
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Chrome old versions${NC}, ${YELLOW}${cleaned_count} dirs, $size_human dry${NC}"
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Chrome old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
+            local line_color
+            line_color=$(cleanup_result_color_kb "$total_size")
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Chrome old versions${NC}, ${line_color}${cleaned_count} dirs, $size_human${NC}"
         fi
         files_cleaned=$((files_cleaned + cleaned_count))
         total_size_cleaned=$((total_size_cleaned + total_size))
@@ -319,7 +321,9 @@ clean_edge_old_versions() {
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Edge old versions${NC}, ${YELLOW}${cleaned_count} dirs, $size_human dry${NC}"
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Edge old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
+            local line_color
+            line_color=$(cleanup_result_color_kb "$total_size")
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Edge old versions${NC}, ${line_color}${cleaned_count} dirs, $size_human${NC}"
         fi
         files_cleaned=$((files_cleaned + cleaned_count))
         total_size_cleaned=$((total_size_cleaned + total_size))
@@ -381,7 +385,9 @@ clean_edge_updater_old_versions() {
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Edge updater old versions${NC}, ${YELLOW}${cleaned_count} dirs, $size_human dry${NC}"
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Edge updater old versions${NC}, ${GREEN}${cleaned_count} dirs, $size_human${NC}"
+            local line_color
+            line_color=$(cleanup_result_color_kb "$total_size")
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Edge updater old versions${NC}, ${line_color}${cleaned_count} dirs, $size_human${NC}"
         fi
         files_cleaned=$((files_cleaned + cleaned_count))
         total_size_cleaned=$((total_size_cleaned + total_size))
@@ -597,7 +603,9 @@ clean_app_caches() {
             else
                 local size_human
                 size_human=$(bytes_to_human "$((total_size * 1024))")
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Sandboxed app caches${NC}, ${GREEN}$size_human${NC}"
+                local line_color
+                line_color=$(cleanup_result_color_kb "$total_size")
+                echo -e "  ${line_color}${ICON_SUCCESS}${NC} Sandboxed app caches${NC}, ${line_color}$size_human${NC}"
             fi
         fi
         files_cleaned=$((files_cleaned + cleaned_count))
@@ -793,7 +801,9 @@ clean_group_container_caches() {
             else
                 local size_human
                 size_human=$(bytes_to_human "$((total_size * 1024))")
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Group Containers logs/caches${NC}, ${GREEN}$size_human${NC}"
+                local line_color
+                line_color=$(cleanup_result_color_kb "$total_size")
+                echo -e "  ${line_color}${ICON_SUCCESS}${NC} Group Containers logs/caches${NC}, ${line_color}$size_human${NC}"
             fi
         fi
         files_cleaned=$((files_cleaned + cleaned_count))
@@ -960,7 +970,9 @@ clean_external_volume_target() {
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} External volume cleanup${NC}, ${YELLOW}${volume_name}, $size_human dry${NC}"
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} External volume cleanup${NC}, ${GREEN}${volume_name}, $size_human${NC}"
+            local line_color
+            line_color=$(cleanup_result_color_kb "$total_size")
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} External volume cleanup${NC}, ${line_color}${volume_name}, $size_human${NC}"
         fi
         files_cleaned=$((files_cleaned + cleaned_count))
         total_size_cleaned=$((total_size_cleaned + total_size))
@@ -1340,10 +1352,12 @@ clean_application_support_logs() {
                 echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Application Support logs/caches${NC}, ${YELLOW}$size_human dry${NC}"
             fi
         else
+            local line_color
+            line_color=$(cleanup_result_color_kb "$total_size_kb")
             if [[ "$total_size_partial" == "true" ]]; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Application Support logs/caches${NC}, ${GREEN}at least $size_human${NC}"
+                echo -e "  ${line_color}${ICON_SUCCESS}${NC} Application Support logs/caches${NC}, ${line_color}at least $size_human${NC}"
             else
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Application Support logs/caches${NC}, ${GREEN}$size_human${NC}"
+                echo -e "  ${line_color}${ICON_SUCCESS}${NC} Application Support logs/caches${NC}, ${line_color}$size_human${NC}"
             fi
         fi
         files_cleaned=$((files_cleaned + cleaned_count))

@@ -117,7 +117,6 @@ if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
 fi
 
 # Section tracking and summary counters.
-readonly MOLE_ONE_GIB_KB=$((1024 * 1024))
 total_items=0
 TRACK_SECTION=0
 SECTION_ACTIVITY=0
@@ -651,13 +650,8 @@ safe_clean() {
             label+=" ${#targets[@]} items"
         fi
 
-        local line_color=$GREEN
-        if ((total_size_kb < MOLE_ONE_GIB_KB)); then
-            line_color=$YELLOW
-        fi
-
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${line_color}${ICON_DRY_RUN}${NC} $label${NC}, ${line_color}$size_human dry${NC}"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label${NC}, ${YELLOW}$size_human dry${NC}"
 
             local paths_temp
             paths_temp=$(create_temp_file)
@@ -717,6 +711,8 @@ safe_clean() {
                 done
             fi
         else
+            local line_color
+            line_color=$(cleanup_result_color_kb "$total_size_kb")
             echo -e "  ${line_color}${ICON_SUCCESS}${NC} $label${NC}, ${line_color}$size_human${NC}"
         fi
         files_cleaned=$((files_cleaned + total_count))

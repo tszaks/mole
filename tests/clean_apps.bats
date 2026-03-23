@@ -32,8 +32,8 @@ source "$PROJECT_ROOT/lib/clean/apps.sh"
 start_inline_spinner() { :; }
 stop_section_spinner() { :; }
 note_activity() { :; }
-get_file_size() { echo 10; }
-bytes_to_human() { echo "0B"; }
+get_file_size() { echo $((2 * 1024 * 1024 * 1024)); }
+bytes_to_human() { echo "2.15GB"; }
 files_cleaned=0
 total_size_cleaned=0
 total_items=0
@@ -44,6 +44,30 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"DS test"* ]]
+    [[ "$output" == *$'\033[0;33m→\033[0m'* ]]
+}
+
+@test "clean_ds_store_tree uses yellow for small successful cleanups" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+start_inline_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+get_file_size() { echo 512; }
+bytes_to_human() { echo "512B"; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+mkdir -p "$HOME/test_ds"
+touch "$HOME/test_ds/.DS_Store"
+clean_ds_store_tree "$HOME/test_ds" "DS test"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DS test"* ]]
+    [[ "$output" == *$'\033[0;33m✓\033[0m'* ]]
 }
 
 @test "scan_installed_apps uses cache when fresh" {

@@ -78,6 +78,7 @@ readonly MOLE_SAVED_STATE_AGE_DAYS=30    # Saved state retention (days) - increa
 readonly MOLE_TM_BACKUP_SAFE_HOURS=48    # TM backup safety window (hours)
 readonly MOLE_MAX_DS_STORE_FILES=500     # Max .DS_Store files to clean per scan
 readonly MOLE_MAX_ORPHAN_ITERATIONS=100  # Max iterations for orphaned app data scan
+readonly MOLE_ONE_GIB_KB=$((1024 * 1024))
 
 # ============================================================================
 # Whitelist Configuration
@@ -546,6 +547,18 @@ bytes_to_human() {
 # Returns: formatted string
 bytes_to_human_kb() {
     bytes_to_human "$((${1:-0} * 1024))"
+}
+
+# Pick a cleanup result color using the shared 1 GiB threshold.
+cleanup_result_color_kb() {
+    local size_kb="${1:-0}"
+    [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+    if ((size_kb >= MOLE_ONE_GIB_KB)); then
+        printf '%s' "$GREEN"
+    else
+        printf '%s' "$YELLOW"
+    fi
 }
 
 # ============================================================================

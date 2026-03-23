@@ -309,7 +309,9 @@ clean_time_machine_failed_backups() {
                     continue
                 fi
                 if tmutil delete "$inprogress_file" 2> /dev/null; then
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Incomplete backup: $backup_name${NC}, ${GREEN}$size_human${NC}"
+                    local line_color
+                    line_color=$(cleanup_result_color_kb "$size_kb")
+                    echo -e "  ${line_color}${ICON_SUCCESS}${NC} Incomplete backup: $backup_name${NC}, ${line_color}$size_human${NC}"
                     tm_cleaned=$((tm_cleaned + 1))
                     files_cleaned=$((files_cleaned + 1))
                     total_size_cleaned=$((total_size_cleaned + size_kb))
@@ -360,7 +362,9 @@ clean_time_machine_failed_backups() {
                         continue
                     fi
                     if tmutil delete "$inprogress_file" 2> /dev/null; then
-                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Incomplete APFS backup in $bundle_name: $backup_name${NC}, ${GREEN}$size_human${NC}"
+                        local line_color
+                        line_color=$(cleanup_result_color_kb "$size_kb")
+                        echo -e "  ${line_color}${ICON_SUCCESS}${NC} Incomplete APFS backup in $bundle_name: $backup_name${NC}, ${line_color}$size_human${NC}"
                         tm_cleaned=$((tm_cleaned + 1))
                         files_cleaned=$((files_cleaned + 1))
                         total_size_cleaned=$((total_size_cleaned + size_kb))
