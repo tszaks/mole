@@ -37,6 +37,41 @@ Describe "Base Module" {
         }
     }
 
+    Context "Visual Defaults Initialization" {
+        BeforeEach {
+            $script:OriginalColors = $script:Colors.Clone()
+            $script:OriginalIcons = $script:Icons.Clone()
+        }
+
+        AfterEach {
+            $script:Colors = $script:OriginalColors.Clone()
+            $script:Icons = $script:OriginalIcons.Clone()
+        }
+
+        It "Should initialize missing visual tables under strict mode" {
+            Remove-Variable -Name Colors -Scope Script -ErrorAction SilentlyContinue
+            Remove-Variable -Name Icons -Scope Script -ErrorAction SilentlyContinue
+
+            { Initialize-MoleVisualDefaults } | Should -Not -Throw
+            $script:Colors.Cyan | Should -Not -BeNullOrEmpty
+            $script:Colors.Green | Should -Not -BeNullOrEmpty
+            $script:Icons.Solid | Should -Not -BeNullOrEmpty
+            $script:Icons.Trash | Should -Not -BeNullOrEmpty
+        }
+
+        It "Should preserve existing values while filling missing defaults" {
+            $script:Colors = @{ Cyan = "custom-cyan" }
+            $script:Icons = @{ Solid = "*" }
+
+            Initialize-MoleVisualDefaults
+
+            $script:Colors.Cyan | Should -Be "custom-cyan"
+            $script:Colors.Green | Should -Not -BeNullOrEmpty
+            $script:Icons.Solid | Should -Be "*"
+            $script:Icons.Admin | Should -Not -BeNullOrEmpty
+        }
+    }
+
     Context "Test-IsAdmin" {
         It "Should return a boolean" {
             $result = Test-IsAdmin

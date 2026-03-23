@@ -47,24 +47,36 @@ $script:DefaultIcons = @{
     Trash    = [char]0x2718  # ✘ (trash substitute)
 }
 
-function Initialize-MoleVisualDefaults {
-    if (-not ($script:Colors -is [hashtable])) {
-        $script:Colors = @{}
+function Get-OrCreateScriptHashtable {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    $existing = Get-Variable -Name $Name -Scope Script -ErrorAction SilentlyContinue
+    if ($existing -and $existing.Value -is [hashtable]) {
+        return $existing.Value
     }
 
+    $table = @{}
+    Set-Variable -Name $Name -Scope Script -Value $table
+    return $table
+}
+
+function Initialize-MoleVisualDefaults {
+    $colors = Get-OrCreateScriptHashtable -Name "Colors"
+
     foreach ($entry in $script:DefaultColors.GetEnumerator()) {
-        if (-not $script:Colors.ContainsKey($entry.Key)) {
-            $script:Colors[$entry.Key] = $entry.Value
+        if (-not $colors.ContainsKey($entry.Key)) {
+            $colors[$entry.Key] = $entry.Value
         }
     }
 
-    if (-not ($script:Icons -is [hashtable])) {
-        $script:Icons = @{}
-    }
+    $icons = Get-OrCreateScriptHashtable -Name "Icons"
 
     foreach ($entry in $script:DefaultIcons.GetEnumerator()) {
-        if (-not $script:Icons.ContainsKey($entry.Key)) {
-            $script:Icons[$entry.Key] = $entry.Value
+        if (-not $icons.ContainsKey($entry.Key)) {
+            $icons[$entry.Key] = $entry.Value
         }
     }
 }

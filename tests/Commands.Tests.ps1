@@ -6,6 +6,7 @@ BeforeAll {
     $script:WindowsDir = Split-Path -Parent $PSScriptRoot
     $script:BinDir = Join-Path $script:WindowsDir "bin"
     $script:InstallScript = Join-Path $script:WindowsDir "install.ps1"
+    $script:VisualDefaultsErrorPattern = 'property ''Solid'' cannot be found|找不到属性.?Solid|VariableIsUndefined|\$script:Colors'
 }
 
 Describe "Clean Command" {
@@ -49,7 +50,7 @@ Describe "Clean Command" {
             Stop-Job $job -ErrorAction SilentlyContinue
             Remove-Job $job -Force -ErrorAction SilentlyContinue
 
-            $output | Should -Not -Match "property 'Solid' cannot be found|找不到属性.?Solid"
+            $output | Should -Not -Match $script:VisualDefaultsErrorPattern
         }
     }
 }
@@ -175,7 +176,9 @@ Describe "Main Entry Point" {
         It "Should show version without error" {
             $result = & powershell -ExecutionPolicy Bypass -File $script:MolePath -Version 2>&1
             $result | Should -Not -BeNullOrEmpty
-            $result -join "`n" | Should -Match "Mole|v\d+\.\d+"
+            $output = $result -join "`n"
+            $output | Should -Not -Match $script:VisualDefaultsErrorPattern
+            $output | Should -Match "Mole|v\d+\.\d+"
         }
 
         It "Should not throw missing Solid property errors during menu startup" {
@@ -189,7 +192,7 @@ Describe "Main Entry Point" {
             Stop-Job $job -ErrorAction SilentlyContinue
             Remove-Job $job -Force -ErrorAction SilentlyContinue
 
-            $output | Should -Not -Match "property 'Solid' cannot be found|找不到属性.?Solid"
+            $output | Should -Not -Match $script:VisualDefaultsErrorPattern
         }
         
         It "Should list available commands in help" {
