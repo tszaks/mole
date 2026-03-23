@@ -215,7 +215,7 @@ Describe "Installer Script" {
         It "Should read the version from VERSION" {
             $source = Get-Content $script:InstallScript -Raw
             $source | Should -Match "version\.ps1"
-            $source | Should -Match "Get-MoleVersionString -RootDir \$script:SourceDir"
+            $source | Should -Match 'Get-MoleVersionString -RootDir \$script:SourceDir'
         }
     }
 
