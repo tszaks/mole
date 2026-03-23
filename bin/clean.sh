@@ -117,6 +117,7 @@ if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
 fi
 
 # Section tracking and summary counters.
+readonly MOLE_ONE_GIB_KB=$((1024 * 1024))
 total_items=0
 TRACK_SECTION=0
 SECTION_ACTIVITY=0
@@ -650,8 +651,13 @@ safe_clean() {
             label+=" ${#targets[@]} items"
         fi
 
+        local line_color=$GREEN
+        if ((total_size_kb < MOLE_ONE_GIB_KB)); then
+            line_color=$YELLOW
+        fi
+
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label${NC}, ${YELLOW}$size_human dry${NC}"
+            echo -e "  ${line_color}${ICON_DRY_RUN}${NC} $label${NC}, ${line_color}$size_human dry${NC}"
 
             local paths_temp
             paths_temp=$(create_temp_file)
@@ -711,7 +717,7 @@ safe_clean() {
                 done
             fi
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $label${NC}, ${GREEN}$size_human${NC}"
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} $label${NC}, ${line_color}$size_human${NC}"
         fi
         files_cleaned=$((files_cleaned + total_count))
         total_size_cleaned=$((total_size_cleaned + total_size_kb))
@@ -1103,9 +1109,9 @@ perform_cleanup() {
 
             summary_details+=("$summary_line")
 
-            # Movie comparison only if >= 1GB (1048576 KB)
-            if ((total_size_cleaned >= 1048576)); then
-                local freed_gb=$((total_size_cleaned / 1048576))
+            # Movie comparison only if >= 1GB
+            if ((total_size_cleaned >= MOLE_ONE_GIB_KB)); then
+                local freed_gb=$((total_size_cleaned / MOLE_ONE_GIB_KB))
                 local movies=$((freed_gb * 10 / 45))
 
                 if [[ $movies -gt 0 ]]; then
