@@ -285,6 +285,7 @@ batch_uninstall_applications() {
     # Pre-scan: running apps, sudo needs, size.
     local -a running_apps=()
     local -a sudo_apps=()
+    local -a brew_cask_apps=()
     local total_estimated_size=0
     local -a app_details=()
 
@@ -320,6 +321,10 @@ batch_uninstall_applications() {
                 cask_name="$detected_cask"
                 is_brew_cask="true"
             fi
+        fi
+
+        if [[ "$is_brew_cask" == "true" ]]; then
+            brew_cask_apps+=("$app_name")
         fi
 
         # Check if sudo is needed
@@ -383,10 +388,7 @@ batch_uninstall_applications() {
 
     # Warn if brew cask apps are present.
     local has_brew_cask=false
-    for detail in "${app_details[@]}"; do
-        IFS='|' read -r _ _ _ _ _ _ _ _ is_brew_cask_flag _ <<< "$detail"
-        [[ "$is_brew_cask_flag" == "true" ]] && has_brew_cask=true
-    done
+    [[ ${#brew_cask_apps[@]} -gt 0 ]] && has_brew_cask=true
 
     if [[ "$has_brew_cask" == "true" ]]; then
         echo -e "${GRAY}${ICON_WARNING} Homebrew apps will be fully cleaned, --zap removes configs and data${NC}"
@@ -467,11 +469,19 @@ batch_uninstall_applications() {
     # that user explicitly chose to uninstall. System-critical components remain protected.
     export MOLE_UNINSTALL_MODE=1
 
-    # Request sudo if needed for non-Homebrew removal operations.
-    # Note: Homebrew resets sudo timestamp at process startup, so pre-auth would
-    # cause duplicate password prompts in cask-only flows.
-    if [[ ${#sudo_apps[@]} -gt 0 && "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        if ! ensure_sudo_session "Admin required for system apps: ${sudo_apps[*]}"; then
+    # Establish sudo once before uninstalling apps that need admin access.
+    # Homebrew cask removal can prompt via sudo during uninstall hooks, which
+    # does not work reliably under Mole's timed non-interactive execution path.
+    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]] &&
+        { [[ ${#sudo_apps[@]} -gt 0 ]] || [[ ${#brew_cask_apps[@]} -gt 0 ]]; }; then
+        local admin_prompt="Admin required to uninstall selected apps"
+        if [[ ${#sudo_apps[@]} -gt 0 && ${#brew_cask_apps[@]} -eq 0 ]]; then
+            admin_prompt="Admin required for system apps: ${sudo_apps[*]}"
+        elif [[ ${#brew_cask_apps[@]} -gt 0 && ${#sudo_apps[@]} -eq 0 ]]; then
+            admin_prompt="Admin required for Homebrew casks: ${brew_cask_apps[*]}"
+        fi
+
+        if ! ensure_sudo_session "$admin_prompt"; then
             echo ""
             log_error "Admin access denied"
             _restore_uninstall_traps
