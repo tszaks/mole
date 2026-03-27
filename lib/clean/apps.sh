@@ -332,7 +332,7 @@ clean_orphaned_app_data() {
                     fi
                 fi
             fi
-        done < <(find "$claude_support_dir" -maxdepth 3 -name "*.bundle" -type d -print0 2>/dev/null || true)
+        done < <(find "$claude_support_dir" -maxdepth 3 -name "*.bundle" -type d -print0 2> /dev/null || true)
     fi
 
     # CRITICAL: NEVER add LaunchAgents or LaunchDaemons (breaks login items/startup apps).
