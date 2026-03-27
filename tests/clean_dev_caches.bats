@@ -206,6 +206,38 @@ EOF
     [[ "$output" == *"Docker unused data|Docker unused data docker system prune -af --volumes"* ]]
 }
 
+@test "clean_dev_docker skips prune when Docker paths are whitelisted" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+run_with_timeout() { shift; "$@"; }
+clean_tool_cache() { echo "$1|$*"; }
+safe_clean() { :; }
+note_activity() { :; }
+debug_log() { :; }
+is_path_whitelisted() {
+    [[ "$1" == "$HOME/.docker" ]] && return 0
+    return 1
+}
+export -f is_path_whitelisted
+docker() {
+    if [[ "$1" == "info" ]]; then
+        return 0
+    fi
+    return 0
+}
+export -f docker
+clean_dev_docker
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Docker unused data · skipped (whitelisted)"* ]]
+    [[ "$output" != *"docker system prune"* ]]
+}
+
 @test "clean_dev_mise respects MISE_CACHE_DIR and only targets cache" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MISE_CACHE_DIR="/tmp/mise-cache" bash --noprofile --norc <<'EOF'
 set -euo pipefail

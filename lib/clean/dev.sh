@@ -236,7 +236,16 @@ clean_dev_docker() {
                 # Remove unused images, stopped containers, unused networks, and
                 # anonymous volumes in one pass. This maps better to the large
                 # reclaimable "docker system df" buckets users typically see.
-                clean_tool_cache "Docker unused data" docker system prune -af --volumes
+                # Skip if Docker paths are whitelisted: docker system prune operates
+                # through the daemon API and bypasses filesystem-level whitelist checks.
+                if is_path_whitelisted "$HOME/.docker" ||
+                    is_path_whitelisted "$HOME/Library/Containers/com.docker.docker" ||
+                    is_path_whitelisted "$HOME/Library/Group Containers/group.com.docker"; then
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Docker unused data · skipped (whitelisted)"
+                    debug_log "Docker cleanup skipped: Docker paths found in whitelist"
+                else
+                    clean_tool_cache "Docker unused data" docker system prune -af --volumes
+                fi
             else
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Docker unused data · skipped (daemon not running)"
                 note_activity
