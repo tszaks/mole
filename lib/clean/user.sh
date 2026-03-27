@@ -157,7 +157,7 @@ _clean_mail_downloads() {
     if [[ $count -gt 0 ]]; then
         local cleaned_mb
         cleaned_mb=$(echo "$cleaned_kb" | awk '{printf "%.1f", $1/1024}' || echo "0.0")
-        echo "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $count mail attachments, about ${cleaned_mb}MB"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $count mail attachments older than ${mail_age_days}d, about ${cleaned_mb}MB"
         note_activity
     fi
 }
@@ -192,6 +192,13 @@ clean_chrome_old_versions() {
         current_version=$(readlink "$current_link" 2> /dev/null || true)
         current_version="${current_version##*/}"
         [[ -n "$current_version" ]] || continue
+
+        # Verify the Current symlink target exists. If broken, skip to avoid
+        # accidentally deleting the active browser version.
+        if [[ ! -d "$versions_dir/$current_version" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome Current symlink is broken · skipping version cleanup"
+            continue
+        fi
 
         local -a old_versions=()
         local dir name
@@ -280,6 +287,13 @@ clean_edge_old_versions() {
         current_version=$(readlink "$current_link" 2> /dev/null || true)
         current_version="${current_version##*/}"
         [[ -n "$current_version" ]] || continue
+
+        # Verify the Current symlink target exists. If broken, skip to avoid
+        # accidentally deleting the active browser version.
+        if [[ ! -d "$versions_dir/$current_version" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Edge Current symlink is broken · skipping version cleanup"
+            continue
+        fi
 
         local -a old_versions=()
         local dir name
@@ -646,7 +660,12 @@ clean_app_caches() {
     stop_section_spinner
 
     # Sandboxed app caches
-    safe_clean ~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/* "Wallpaper agent cache"
+    # Skip wallpaper agent cache if the agent is running — clearing it resets the wallpaper.
+    if ! pgrep -x "WallpaperAgent" > /dev/null 2>&1; then
+        safe_clean ~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/* "Wallpaper agent cache"
+    else
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Wallpaper agent is running · cache cleanup skipped"
+    fi
     safe_clean ~/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/* "Media analysis cache"
     safe_clean ~/Library/Containers/com.apple.AppStore/Data/Library/Caches/* "App Store cache"
     safe_clean ~/Library/Containers/com.apple.configurator.xpc.InternetService/Data/tmp/* "Apple Configurator temp files"
