@@ -11,10 +11,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Batch uninstall with a single confirmation.
 
-get_lsregister_path() {
-    echo "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-}
-
 is_uninstall_dry_run() {
     [[ "${MOLE_DRY_RUN:-0}" == "1" ]]
 }

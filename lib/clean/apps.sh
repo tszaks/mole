@@ -36,7 +36,7 @@ clean_ds_store_tree() {
         total_bytes=$((total_bytes + size))
         file_count=$((file_count + 1))
         if [[ "$DRY_RUN" != "true" ]]; then
-            rm -f "$ds_file" 2> /dev/null || true
+            safe_remove "$ds_file" true 2> /dev/null || true
         fi
         if [[ $file_count -ge $MOLE_MAX_DS_STORE_FILES ]]; then
             break
@@ -584,7 +584,7 @@ clean_orphaned_system_services() {
             local filename
             filename=$(basename "$orphan_file")
 
-            if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+            if [[ "$DRY_RUN" == "true" ]]; then
                 debug_log "[DRY RUN] Would remove orphaned service: $orphan_file"
             else
                 # Unload if it's a LaunchDaemon/LaunchAgent

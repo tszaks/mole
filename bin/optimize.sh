@@ -65,8 +65,14 @@ parse_optimization_items() {
 
         [[ "$in_array" != "true" ]] && continue
 
-        # Count braces to track object boundaries
-        if [[ "$line" == *'{'* ]]; then
+        # Strip quoted strings before counting braces to handle braces inside string values
+        # e.g., "description": "Use {braces} here" should not affect brace counting
+        local line_for_counting
+        # shellcheck disable=SC2001
+        line_for_counting=$(echo "$line" | sed 's/"[^"]*"//g')
+
+        # Count braces to track object boundaries (using stripped line)
+        if [[ "$line_for_counting" == *'{'* ]]; then
             ((brace_count++))
         fi
 
@@ -74,7 +80,7 @@ parse_optimization_items() {
             current_item+="$line"
         fi
 
-        if [[ "$line" == *'}'* ]]; then
+        if [[ "$line_for_counting" == *'}'* ]]; then
             ((brace_count--))
             if ((brace_count == 0)) && [[ -n "$current_item" ]]; then
                 # Extract fields from the collected item
@@ -89,8 +95,8 @@ parse_optimization_items() {
             fi
         fi
 
-        # End of array
-        [[ "$line" == *']'* ]] && ((brace_count == 0)) && break
+        # End of array (using stripped line)
+        [[ "$line_for_counting" == *']'* ]] && ((brace_count == 0)) && break
     done <<< "$json"
 }
 

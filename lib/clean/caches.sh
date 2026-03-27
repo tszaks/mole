@@ -49,6 +49,7 @@ clean_service_worker_cache() {
     [[ ! -d "$cache_path" ]] && return 0
     local cleaned_size=0
     local protected_count=0
+    # shellcheck disable=SC2016
     while IFS= read -r cache_dir; do
         [[ ! -d "$cache_dir" ]] && continue
         # Extract a best-effort domain name from cache folder.
@@ -68,7 +69,7 @@ clean_service_worker_cache() {
             fi
             cleaned_size=$((cleaned_size + size))
         fi
-    done < <(run_with_timeout 10 sh -c "find '$cache_path' -type d -depth 2 2> /dev/null || true")
+    done < <(run_with_timeout 10 sh -c 'find "$1" -type d -depth 2 2>/dev/null || true' _ "$cache_path")
     if [[ $cleaned_size -gt 0 ]]; then
         local spinner_was_running=false
         if [[ -t 1 && -n "${INLINE_SPINNER_PID:-}" ]]; then
