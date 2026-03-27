@@ -138,23 +138,60 @@ setup() {
     rm -rf "$HOME/Projects"
 }
 
-@test "clean_project_caches removes pycache directories as single targets" {
-    mkdir -p "$HOME/Projects/python-app/__pycache__"
+@test "clean_project_caches groups pycache directories by project root" {
+    mkdir -p "$HOME/Projects/python-app/pkg/__pycache__"
+    mkdir -p "$HOME/Projects/python-app/subpkg/__pycache__"
     touch "$HOME/Projects/python-app/pyproject.toml"
-    touch "$HOME/Projects/python-app/__pycache__/module.pyc"
+    touch "$HOME/Projects/python-app/pkg/__pycache__/module.pyc"
+    touch "$HOME/Projects/python-app/subpkg/__pycache__/other.pyc"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
-safe_clean() { echo "$2|$1"; }
+DRY_RUN=true
 clean_project_caches
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Python bytecode cache|$HOME/Projects/python-app/__pycache__"* ]]
+    [[ "$output" == *"Python bytecode cache"* ]]
+    [[ "$output" == *"~/Projects/python-app"* ]]
+    [[ "$output" == *"2 dirs"* ]]
     [[ "$output" != *"module.pyc"* ]]
 
     rm -rf "$HOME/Projects"
+}
+
+@test "clean_project_caches pycache dry-run exports grouped targets and counts skips" {
+    mkdir -p "$HOME/Projects/python-app/pkg/__pycache__"
+    mkdir -p "$HOME/Projects/python-app/protected/__pycache__"
+    touch "$HOME/Projects/python-app/pyproject.toml"
+    touch "$HOME/Projects/python-app/pkg/__pycache__/module.pyc"
+    touch "$HOME/Projects/python-app/protected/__pycache__/blocked.pyc"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/caches.sh"
+DRY_RUN=true
+EXPORT_LIST_FILE="$HOME/export.txt"
+whitelist_skipped_count=0
+should_protect_path() {
+    [[ "$1" == *"/protected/__pycache__" ]]
+}
+clean_project_caches
+printf '\nEXPORT\n'
+cat "$EXPORT_LIST_FILE"
+printf '\nSKIPPED=%s\n' "$whitelist_skipped_count"
+EOF
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"1 dirs"* ]]
+    [[ "$output" == *"1 skipped"* ]]
+    [[ "$output" == *"EXPORT"* ]]
+    [[ "$output" == *"$HOME/Projects/python-app/pkg/__pycache__"* ]]
+    [[ "$output" != *"$HOME/Projects/python-app/protected/__pycache__"* ]]
+    [[ "$output" == *"SKIPPED=1"* ]]
+
+    rm -rf "$HOME/Projects" "$HOME/export.txt"
 }
 
 @test "clean_project_caches scans configured roots instead of HOME" {

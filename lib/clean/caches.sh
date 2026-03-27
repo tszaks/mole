@@ -199,7 +199,20 @@ scan_project_cache_root() {
     )
 
     local status=0
-    run_with_timeout "$scan_timeout" "${find_args[@]}" >> "$output_file" 2> /dev/null || status=$?
+    local tmp_file
+    tmp_file=$(create_temp_file)
+    run_with_timeout "$scan_timeout" "${find_args[@]}" > "$tmp_file" 2> /dev/null || status=$?
+
+    if [[ -s "$tmp_file" ]]; then
+        while IFS= read -r match_path; do
+            [[ -z "$match_path" ]] && continue
+            local project_root=""
+            project_root=$(project_cache_group_root "$root" "$match_path")
+            [[ -z "$project_root" ]] && project_root="$root"
+            printf '%s\t%s\n' "$project_root" "$match_path" >> "$output_file"
+        done < "$tmp_file"
+    fi
+    rm -f "$tmp_file"
 
     if [[ $status -eq 124 ]]; then
         debug_log "Project cache scan timed out: $root"
@@ -210,12 +223,208 @@ scan_project_cache_root() {
     return 0
 }
 
+project_cache_group_root() {
+    local scan_root="$1"
+    local cache_path="$2"
+    local candidate
+
+    candidate=$(dirname "$cache_path")
+    while [[ -n "$candidate" && "$candidate" != "/" ]]; do
+        if mole_purge_is_project_root "$candidate"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+        [[ "$candidate" == "$scan_root" ]] && break
+        candidate=$(dirname "$candidate")
+    done
+
+    printf '%s\n' "$scan_root"
+}
+
+clean_project_cache_target() {
+    if [[ $# -lt 2 ]]; then
+        return 0
+    fi
+
+    local description="${*: -1}"
+    local -a target_paths=("${@:1:$#-1}")
+
+    if declare -f safe_clean > /dev/null 2>&1; then
+        safe_clean "${target_paths[@]}" "$description" || true
+        return 0
+    fi
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        return 0
+    fi
+
+    local target_path=""
+    for target_path in "${target_paths[@]}"; do
+        [[ -e "$target_path" ]] || continue
+        safe_remove "$target_path" true || true
+    done
+}
+
+flush_python_group_if_needed() {
+    local group_root="$1"
+    local array_name="$2"
+
+    local group_count=0
+    eval 'group_count=${#'"$array_name"'[@]}'
+    [[ -z "$group_root" || "$group_count" -eq 0 ]] && return 0
+    eval 'local -a group_dirs=( "${'"$array_name"'[@]}" )'
+    clean_python_bytecode_cache_group "$group_root" "${group_dirs[@]}"
+}
+
+process_project_cache_matches() {
+    local matches_file="$1"
+    [[ -f "$matches_file" ]] || return 0
+
+    local current_python_root=""
+    local -a current_python_dirs=()
+    local record_root=""
+    local cache_dir=""
+    while IFS=$'\t' read -r record_root cache_dir; do
+        [[ -n "$record_root" && -n "$cache_dir" ]] || continue
+        case "$(basename "$cache_dir")" in
+            ".next")
+                flush_python_group_if_needed "$current_python_root" current_python_dirs
+                current_python_root=""
+                current_python_dirs=()
+                [[ -d "$cache_dir/cache" ]] && clean_project_cache_target "$cache_dir/cache"/* "Next.js build cache" || true
+                ;;
+            "__pycache__")
+                if [[ "$record_root" != "$current_python_root" && ${#current_python_dirs[@]} -gt 0 ]]; then
+                    flush_python_group_if_needed "$current_python_root" current_python_dirs
+                    current_python_dirs=()
+                fi
+                current_python_root="$record_root"
+                [[ -d "$cache_dir" ]] && current_python_dirs+=("$cache_dir")
+                ;;
+            ".dart_tool")
+                flush_python_group_if_needed "$current_python_root" current_python_dirs
+                current_python_root=""
+                current_python_dirs=()
+                if [[ -d "$cache_dir" ]]; then
+                    clean_project_cache_target "$cache_dir" "Flutter build cache (.dart_tool)" || true
+                    local build_dir="$(dirname "$cache_dir")/build"
+                    if [[ -d "$build_dir" ]]; then
+                        clean_project_cache_target "$build_dir" "Flutter build cache (build/)" || true
+                    fi
+                fi
+                ;;
+        esac
+    done < <(LC_ALL=C sort -u "$matches_file" 2> /dev/null)
+
+    flush_python_group_if_needed "$current_python_root" current_python_dirs
+}
+
+clean_python_bytecode_cache_group() {
+    local project_root="$1"
+    shift
+
+    local -a cache_dirs=("$@")
+    [[ ${#cache_dirs[@]} -eq 0 ]] && return 0
+
+    local display_root="${project_root/#$HOME/~}"
+    local total_size_kb=0
+    local removed_count=0
+    local skipped_count=0
+    local -a dry_run_paths=()
+    local -a dry_run_sizes=()
+
+    local cache_dir
+    for cache_dir in "${cache_dirs[@]}"; do
+        [[ -d "$cache_dir" ]] || continue
+
+        if should_protect_path "$cache_dir"; then
+            skipped_count=$((skipped_count + 1))
+            whitelist_skipped_count=$((${whitelist_skipped_count:-0} + 1))
+            log_operation "clean" "SKIPPED" "$cache_dir" "protected"
+            continue
+        fi
+
+        if is_path_whitelisted "$cache_dir"; then
+            skipped_count=$((skipped_count + 1))
+            whitelist_skipped_count=$((${whitelist_skipped_count:-0} + 1))
+            log_operation "clean" "SKIPPED" "$cache_dir" "whitelist"
+            continue
+        fi
+
+        local size_kb
+        size_kb=$(get_path_size_kb "$cache_dir")
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+            if declare -f register_dry_run_cleanup_target > /dev/null 2>&1; then
+                register_dry_run_cleanup_target "$cache_dir" || continue
+            fi
+            dry_run_paths+=("$cache_dir")
+            dry_run_sizes+=("$size_kb")
+        else
+            if ! safe_remove "$cache_dir" true; then
+                continue
+            fi
+        fi
+
+        total_size_kb=$((total_size_kb + size_kb))
+        removed_count=$((removed_count + 1))
+    done
+
+    if [[ $removed_count -eq 0 ]]; then
+        return 0
+    fi
+
+    local size_human
+    size_human=$(bytes_to_human "$((total_size_kb * 1024))")
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        if [[ -n "${EXPORT_LIST_FILE:-}" ]]; then
+            ensure_user_file "$EXPORT_LIST_FILE"
+            local i=0
+            for ((i = 0; i < ${#dry_run_paths[@]}; i++)); do
+                local path="${dry_run_paths[i]}"
+                local path_size_kb="${dry_run_sizes[i]:-0}"
+                local path_size_human
+                path_size_human=$(bytes_to_human "$((path_size_kb * 1024))")
+                echo "${path}  # ${path_size_human}" >> "$EXPORT_LIST_FILE"
+            done
+        fi
+
+        if [[ $skipped_count -gt 0 ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Python bytecode cache · ${display_root}${NC}, ${YELLOW}${removed_count} dirs, ${size_human} dry, ${skipped_count} skipped${NC}"
+        else
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Python bytecode cache · ${display_root}${NC}, ${YELLOW}${removed_count} dirs, ${size_human} dry${NC}"
+        fi
+    else
+        local line_color
+        line_color=$(cleanup_result_color_kb "$total_size_kb")
+        if [[ $skipped_count -gt 0 ]]; then
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Python bytecode cache · ${display_root}${NC}, ${line_color}${removed_count} dirs, ${size_human}${NC}, ${skipped_count} skipped"
+        else
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Python bytecode cache · ${display_root}${NC}, ${line_color}${removed_count} dirs, ${size_human}${NC}"
+        fi
+    fi
+
+    files_cleaned=$((${files_cleaned:-0} + removed_count))
+    total_size_cleaned=$((${total_size_cleaned:-0} + total_size_kb))
+    total_items=$((${total_items:-0} + 1))
+    if declare -f note_activity > /dev/null 2>&1; then
+        note_activity
+    fi
+}
+
+flush_python_bytecode_cache_group() {
+    local group_root="$1"
+    shift
+    local -a group_dirs=("$@")
+    [[ -z "$group_root" || ${#group_dirs[@]} -eq 0 ]] && return 0
+    clean_python_bytecode_cache_group "$group_root" "${group_dirs[@]}"
+}
+
 # Next.js/Python/Flutter project caches scoped to discovered project roots.
 clean_project_caches() {
     stop_inline_spinner 2> /dev/null || true
-
-    local matches_tmp_file
-    matches_tmp_file=$(create_temp_file)
 
     local -a scan_roots=()
     local root
@@ -230,38 +439,25 @@ clean_project_caches() {
         start_inline_spinner "Searching project caches..."
     fi
 
-    local -a _scan_pids=()
     for root in "${scan_roots[@]}"; do
-        scan_project_cache_root "$root" "$matches_tmp_file" &
-        _scan_pids+=($!)
-    done
-    for _pid in "${_scan_pids[@]}"; do
-        wait "$_pid" 2> /dev/null || true
+        local root_matches_file
+        root_matches_file=$(create_temp_file)
+        scan_project_cache_root "$root" "$root_matches_file"
+
+        if [[ -t 1 ]]; then
+            stop_inline_spinner
+        fi
+
+        process_project_cache_matches "$root_matches_file"
+        rm -f "$root_matches_file"
+
+        if [[ -t 1 ]]; then
+            MOLE_SPINNER_PREFIX="  "
+            start_inline_spinner "Searching project caches..."
+        fi
     done
 
     if [[ -t 1 ]]; then
         stop_inline_spinner
     fi
-
-    while IFS= read -r cache_dir; do
-        case "$(basename "$cache_dir")" in
-            ".next")
-                [[ -d "$cache_dir/cache" ]] && safe_clean "$cache_dir/cache"/* "Next.js build cache" || true
-                ;;
-            "__pycache__")
-                # Remove the cache directory itself so we avoid expanding every
-                # .pyc file into a separate safe_clean target.
-                [[ -d "$cache_dir" ]] && safe_clean "$cache_dir" "Python bytecode cache" || true
-                ;;
-            ".dart_tool")
-                if [[ -d "$cache_dir" ]]; then
-                    safe_clean "$cache_dir" "Flutter build cache (.dart_tool)" || true
-                    local build_dir="$(dirname "$cache_dir")/build"
-                    if [[ -d "$build_dir" ]]; then
-                        safe_clean "$build_dir" "Flutter build cache (build/)" || true
-                    fi
-                fi
-                ;;
-        esac
-    done < <(LC_ALL=C sort -u "$matches_tmp_file" 2> /dev/null)
 }
