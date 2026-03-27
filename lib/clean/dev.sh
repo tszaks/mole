@@ -757,13 +757,11 @@ clean_dev_mobile() {
                             removed_unavailable=0
                         fi
 
+                        local line_color
+                        line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
                         if ((removed_unavailable > 0)); then
-                            local line_color
-                            line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
                             echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${removed_unavailable}, ${line_color}${unavailable_size_human}${NC}"
                         else
-                            local line_color
-                            line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
                             echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · cleanup completed, ${line_color}${unavailable_size_human}${NC}"
                         fi
                     else

@@ -294,3 +294,34 @@ EOF
     run bash -c "export MOLE_BASE_LOADED=1; export MOLE_READ_KEY_FORCE_CHAR=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'j' | read_key"
     [ "$output" = "CHAR:j" ]
 }
+
+@test "ensure_sudo_session returns 1 and sets MOLE_SUDO_ESTABLISHED=false in test mode" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 bash --noprofile --norc <<'SCRIPT'
+source "$PROJECT_ROOT/lib/core/base.sh"
+source "$PROJECT_ROOT/lib/core/sudo.sh"
+MOLE_SUDO_ESTABLISHED=""
+ensure_sudo_session "Test prompt" && rc=0 || rc=$?
+echo "EXIT=$rc"
+echo "FLAG=$MOLE_SUDO_ESTABLISHED"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"EXIT=1"* ]]
+    [[ "$output" == *"FLAG=false"* ]]
+}
+
+@test "ensure_sudo_session short-circuits to 0 when session already established" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/base.sh"
+source "$PROJECT_ROOT/lib/core/sudo.sh"
+has_sudo_session() { return 0; }
+export -f has_sudo_session
+MOLE_SUDO_ESTABLISHED="true"
+ensure_sudo_session "Test prompt"
+echo "EXIT=$?"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"EXIT=0"* ]]
+}

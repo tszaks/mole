@@ -414,14 +414,6 @@ clean_python_bytecode_cache_group() {
     fi
 }
 
-flush_python_bytecode_cache_group() {
-    local group_root="$1"
-    shift
-    local -a group_dirs=("$@")
-    [[ -z "$group_root" || ${#group_dirs[@]} -eq 0 ]] && return 0
-    clean_python_bytecode_cache_group "$group_root" "${group_dirs[@]}"
-}
-
 # Next.js/Python/Flutter project caches scoped to discovered project roots.
 clean_project_caches() {
     stop_inline_spinner 2> /dev/null || true
