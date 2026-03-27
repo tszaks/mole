@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
       - name: Install tools
-        run: brew install bats-core shellcheck
+        run: brew install bats-core shellcheck coreutils
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v5
@@ -56,7 +56,7 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
       - name: Install tools
-        run: brew install bats-core
+        run: brew install bats-core coreutils
 
       - name: Check for unsafe rm usage
         run: |

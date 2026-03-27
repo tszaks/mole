@@ -23,6 +23,20 @@ echo ""
 
 FAILED=0
 
+enforce_timeout_dependency_in_ci() {
+    if [[ "${CI:-}" != "true" && "${GITHUB_ACTIONS:-}" != "true" ]]; then
+        return 0
+    fi
+
+    if command -v gtimeout > /dev/null 2>&1 || command -v timeout > /dev/null 2>&1; then
+        return 0
+    fi
+
+    printf "${RED}${ICON_ERROR} Missing timeout binary (gtimeout/timeout) in CI${NC}\n"
+    printf "${YELLOW}${ICON_WARNING} Install coreutils to provide gtimeout${NC}\n"
+    exit 1
+}
+
 report_unit_result() {
     if [[ $1 -eq 0 ]]; then
         printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
@@ -31,6 +45,8 @@ report_unit_result() {
         ((FAILED++))
     fi
 }
+
+enforce_timeout_dependency_in_ci
 
 echo "1. Linting test scripts..."
 if command -v shellcheck > /dev/null 2>&1; then
