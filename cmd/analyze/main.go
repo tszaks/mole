@@ -923,7 +923,7 @@ func (m model) goBack() (tea.Model, tea.Cmd) {
 		if !m.inOverviewMode() {
 			return m, m.switchToOverviewMode()
 		}
-		return m, nil
+		return m, tea.Quit
 	}
 
 	last := m.history[len(m.history)-1]

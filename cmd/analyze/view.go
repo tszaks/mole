@@ -329,7 +329,7 @@ func (m model) View() string {
 		if len(m.history) > 0 {
 			fmt.Fprintf(&b, "%s↑↓←→ | Enter | R Refresh | O Open | F File | Esc Back | Q/Ctrl+C Quit%s\n", colorGray, colorReset)
 		} else {
-			fmt.Fprintf(&b, "%s↑↓→ | Enter | R Refresh | O Open | F File | Ctrl+C Quit%s\n", colorGray, colorReset)
+			fmt.Fprintf(&b, "%s↑↓→ | Enter | R Refresh | O Open | F File | Esc/Q Quit%s\n", colorGray, colorReset)
 		}
 	} else if m.showLargeFiles {
 		selectCount := len(m.largeMultiSelected)
