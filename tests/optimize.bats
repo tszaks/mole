@@ -167,7 +167,7 @@ opt_font_cache_rebuild
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Skipped font cache rebuild because browsers or helpers are still running: Firefox"* ]]
+    [[ "$output" == *"Font cache rebuild skipped · Firefox still running"* ]]
 }
 
 @test "browser_family_is_running does not treat generic renderer helpers as Zen Browser" {
