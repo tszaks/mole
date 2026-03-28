@@ -581,13 +581,9 @@ clean_support_app_data() {
     fi
 
     # Do not touch Messages attachments, only preview/sticker caches.
-    if pgrep -x "Messages" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Messages is running · preview cache cleanup skipped"
-    else
-        safe_clean ~/Library/Messages/StickerCache/* "Messages sticker cache"
-        safe_clean ~/Library/Messages/Caches/Previews/Attachments/* "Messages preview attachment cache"
-        safe_clean ~/Library/Messages/Caches/Previews/StickerCache/* "Messages preview sticker cache"
-    fi
+    safe_clean ~/Library/Messages/StickerCache/* "Messages sticker cache"
+    safe_clean ~/Library/Messages/Caches/Previews/Attachments/* "Messages preview attachment cache"
+    safe_clean ~/Library/Messages/Caches/Previews/StickerCache/* "Messages preview sticker cache"
 }
 
 # App caches (merged: macOS system caches + Sandboxed apps).
