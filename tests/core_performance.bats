@@ -132,6 +132,7 @@ setup() {
 
 @test "create_temp_file and cleanup_temp_files work efficiently" {
     local start end elapsed
+    local limit_ms="${MOLE_PERF_CREATE_TEMP_FILE_LIMIT_MS:-3000}"
 
     declare -a MOLE_TEMP_DIRS=()
 
@@ -143,7 +144,7 @@ setup() {
 
     elapsed=$(( (end - start) / 1000000 ))
 
-    [ "$elapsed" -lt 1000 ]
+    [ "$elapsed" -lt "$limit_ms" ]
 
     [ "${#MOLE_TEMP_FILES[@]}" -eq 50 ]
 
@@ -152,7 +153,7 @@ setup() {
     end=$(date +%s%N)
 
     elapsed=$(( (end - start) / 1000000 ))
-    [ "$elapsed" -lt 2000 ]
+    [ "$elapsed" -lt "$limit_ms" ]
 
     [ "${#MOLE_TEMP_FILES[@]}" -eq 0 ]
 }

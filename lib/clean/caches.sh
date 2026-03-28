@@ -329,7 +329,8 @@ clean_python_bytecode_cache_group() {
     local -a cache_dirs=("$@")
     [[ ${#cache_dirs[@]} -eq 0 ]] && return 0
 
-    local display_root="${project_root/#$HOME/~}"
+    local display_root
+    display_root=$(basename "$project_root")
     local total_size_kb=0
     local removed_count=0
     local skipped_count=0

@@ -47,7 +47,7 @@ EOF
     [[ "$output" == *$'\033[0;33m→\033[0m'* ]]
 }
 
-@test "clean_ds_store_tree uses yellow for small successful cleanups" {
+@test "clean_ds_store_tree uses green for successful cleanups" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -67,7 +67,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"DS test"* ]]
-    [[ "$output" == *$'\033[0;33m✓\033[0m'* ]]
+    [[ "$output" == *$'\033[0;32m✓\033[0m'* ]]
 }
 
 @test "scan_installed_apps uses cache when fresh" {

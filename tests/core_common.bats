@@ -44,16 +44,16 @@ setup() {
     [[ -n "$result" ]]
 }
 
-@test "cleanup_result_color_kb switches from yellow to green at 1 GB" {
+@test "cleanup_result_color_kb always returns green" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
-below_threshold_kb=$(((MOLE_ONE_GB_BYTES - 1) / 1024))
-at_threshold_kb=$(((MOLE_ONE_GB_BYTES + 1023) / 1024))
+small_kb=1
+large_kb=$(((MOLE_ONE_GB_BYTES * 2) / 1024))
 
-if [[ "$(cleanup_result_color_kb "$below_threshold_kb")" == "$YELLOW" ]] &&
-    [[ "$(cleanup_result_color_kb "$at_threshold_kb")" == "$GREEN" ]]; then
+if [[ "$(cleanup_result_color_kb "$small_kb")" == "$GREEN" ]] &&
+    [[ "$(cleanup_result_color_kb "$large_kb")" == "$GREEN" ]]; then
     echo "ok"
 fi
 EOF
