@@ -557,6 +557,15 @@ scan_applications() {
             return 0
         fi
 
+        local plist="$app_path/Contents/Info.plist"
+        if [[ -f "$plist" ]]; then
+            local bg_only
+            bg_only=$(defaults read "$plist" LSBackgroundOnly 2> /dev/null || echo "")
+            if [[ "$bg_only" == "1" || "$bg_only" == "YES" || "$bg_only" == "true" ]]; then
+                return 0
+            fi
+        fi
+
         local display_name="${cached_display_name:-}"
         if [[ -z "$display_name" ]]; then
             display_name=$(uninstall_resolve_display_name "$app_path" "$app_name")
@@ -646,6 +655,8 @@ scan_applications() {
     local current_epoch
     current_epoch=$(get_epoch_seconds)
     local inline_metadata_count=0
+    local inline_metadata_effective_limit=$MOLE_UNINSTALL_INLINE_METADATA_LIMIT
+    [[ $cache_source_is_temp == true ]] && inline_metadata_effective_limit=99999
     local metadata_total=0
     metadata_total=$(wc -l < "$merged_file" 2> /dev/null || echo "0")
     [[ "$metadata_total" =~ ^[0-9]+$ ]] || metadata_total=0
@@ -706,7 +717,7 @@ scan_applications() {
         fi
 
         if [[ $needs_refresh == true ]]; then
-            if [[ $inline_metadata_count -lt $MOLE_UNINSTALL_INLINE_METADATA_LIMIT ]]; then
+            if [[ $inline_metadata_count -lt $inline_metadata_effective_limit ]]; then
                 local inline_metadata inline_size_kb inline_epoch inline_updated_epoch
                 inline_metadata=$(uninstall_collect_inline_metadata "$app_path" "${app_mtime:-0}" "$current_epoch")
                 IFS='|' read -r inline_size_kb inline_epoch inline_updated_epoch <<< "$inline_metadata"

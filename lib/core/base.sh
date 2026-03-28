@@ -552,14 +552,7 @@ bytes_to_human_kb() {
 
 # Pick a cleanup result color using the displayed decimal 1 GB threshold.
 cleanup_result_color_kb() {
-    local size_kb="${1:-0}"
-    [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
-
-    if ((size_kb * 1024 >= MOLE_ONE_GB_BYTES)); then
-        printf '%s' "$GREEN"
-    else
-        printf '%s' "$YELLOW"
-    fi
+    printf '%s' "$GREEN"
 }
 
 # ============================================================================
