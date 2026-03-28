@@ -17,8 +17,7 @@ VERSION="1.32.0"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
 is_touchid_configured() {
-    local pam_sudo_file="/etc/pam.d/sudo"
-    [[ -f "$pam_sudo_file" ]] && grep -q "pam_tid.so" "$pam_sudo_file" 2> /dev/null
+    grep -q "pam_tid.so" /etc/pam.d/sudo /etc/pam.d/sudo_local 2> /dev/null
 }
 
 get_latest_version() {
@@ -759,7 +758,7 @@ show_main_menu() {
 
     if [[ -t 0 ]]; then
         printf '\r\033[2K\n'
-        local controls="${GRAY}↑↓  |  Enter  |  M More"
+        local controls="${GRAY}↑↓  |  Enter  |  M More  |  V Version"
         if ! is_touchid_configured; then
             controls="${controls}  |  T TouchID"
         elif [[ "${MAIN_MENU_SHOW_UPDATE:-false}" == "true" ]]; then

@@ -223,6 +223,7 @@ read_key() {
         'q' | 'Q') echo "QUIT" ;;
         'R') echo "RETRY" ;;
         'm' | 'M') echo "MORE" ;;
+        'v' | 'V') echo "VERSION" ;;
         'u' | 'U') echo "UPDATE" ;;
         't' | 'T') echo "TOUCHID" ;;
         'j' | 'J') echo "DOWN" ;;
