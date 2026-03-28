@@ -667,8 +667,11 @@ clean_app_caches() {
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Wallpaper agent is running · cache cleanup skipped"
     fi
     safe_clean ~/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/* "Media analysis cache"
+    safe_clean ~/Library/Containers/com.apple.mediaanalysisd/Data/tmp/* "Media analysis temp files"
     safe_clean ~/Library/Containers/com.apple.AppStore/Data/Library/Caches/* "App Store cache"
     safe_clean ~/Library/Containers/com.apple.configurator.xpc.InternetService/Data/tmp/* "Apple Configurator temp files"
+    safe_clean ~/Library/Containers/com.apple.wallpaper.extension.aerials/Data/tmp/* "Wallpaper aerials temp files"
+    safe_clean ~/Library/Containers/com.apple.geod/Data/tmp/* "Geod temp files"
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
     start_section_spinner "Scanning sandboxed apps..."
@@ -1092,6 +1095,10 @@ clean_browsers() {
     safe_clean ~/Library/Application\ Support/Google/Chrome/*/Application\ Cache/* "Chrome app cache"
     safe_clean ~/Library/Application\ Support/Google/Chrome/*/GPUCache/* "Chrome GPU cache"
     safe_clean ~/Library/Application\ Support/Google/Chrome/component_crx_cache/* "Chrome component CRX cache"
+    local _chrome_profile
+    for _chrome_profile in "$HOME/Library/Application Support/Google/Chrome"/*/; do
+        clean_service_worker_cache "Chrome" "$_chrome_profile/Service Worker/CacheStorage"
+    done
     safe_clean ~/Library/Application\ Support/Google/GoogleUpdater/crx_cache/* "GoogleUpdater CRX cache"
     safe_clean ~/Library/Application\ Support/Google/GoogleUpdater/*.old "GoogleUpdater old files"
     safe_clean ~/Library/Caches/Chromium/* "Chromium cache"
@@ -1160,7 +1167,11 @@ clean_cloud_storage() {
 # Office app caches.
 clean_office_applications() {
     safe_clean ~/Library/Caches/com.microsoft.Word "Microsoft Word cache"
+    safe_clean ~/Library/Containers/com.microsoft.Word/Data/Library/Caches/* "Microsoft Word container cache"
+    safe_clean ~/Library/Containers/com.microsoft.Word/Data/tmp/* "Microsoft Word temp files"
     safe_clean ~/Library/Caches/com.microsoft.Excel "Microsoft Excel cache"
+    safe_clean ~/Library/Containers/com.microsoft.Excel/Data/Library/Caches/* "Microsoft Excel container cache"
+    safe_clean ~/Library/Containers/com.microsoft.Excel/Data/tmp/* "Microsoft Excel temp files"
     safe_clean ~/Library/Caches/com.microsoft.Powerpoint "Microsoft PowerPoint cache"
     safe_clean ~/Library/Caches/com.microsoft.Outlook/* "Microsoft Outlook cache"
     safe_clean ~/Library/Caches/com.apple.iWork.* "Apple iWork cache"

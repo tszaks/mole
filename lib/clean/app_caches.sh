@@ -114,16 +114,14 @@ clean_media_players() {
     local spotify_cache="$HOME/Library/Caches/com.spotify.client"
     local spotify_data="$HOME/Library/Application Support/Spotify"
     local has_offline_music=false
-    # Heuristics: offline DB or large cache.
-    if [[ -f "$spotify_data/PersistentCache/Storage/offline.bnk" ]] ||
+    # offline.bnk exists even with no offline downloads; only treat it as evidence
+    # when it has real content (>1 KB). Encrypted track blobs (*.file) are reliable.
+    local bnk_file="$spotify_data/PersistentCache/Storage/offline.bnk"
+    local bnk_size=0
+    [[ -f "$bnk_file" ]] && bnk_size=$(stat -f%z "$bnk_file" 2> /dev/null || echo 0)
+    if [[ $bnk_size -gt 1024 ]] ||
         [[ -d "$spotify_data/PersistentCache/Storage" && -n "$(find "$spotify_data/PersistentCache/Storage" -type f -name "*.file" 2> /dev/null | head -1)" ]]; then
         has_offline_music=true
-    elif [[ -d "$spotify_cache" ]]; then
-        local cache_size_kb
-        cache_size_kb=$(get_path_size_kb "$spotify_cache")
-        if [[ $cache_size_kb -ge 512000 ]]; then
-            has_offline_music=true
-        fi
     fi
     if [[ "$has_offline_music" == "true" ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Spotify cache protected · offline music detected"
