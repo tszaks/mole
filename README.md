@@ -135,6 +135,8 @@ Uninstalling: Photoshop 2024
     - Logs, WebKit storage, Cookies
     - Extensions, Plugins, Launch daemons
 
+Note: On macOS 15 and later, Local Network permission entries can outlive app removal. Mole warns when an uninstalled app declares Local Network usage, but it does not auto-reset `/Volumes/Data/Library/Preferences/com.apple.networkextension*.plist` because that reset is global and requires Recovery mode.
+
 ====================================================================
 Space freed: 12.8GB
 ====================================================================
@@ -250,7 +252,7 @@ $ mo status | jq '.health_score'
 
 ### Project Artifact Purge
 
-Clean old build artifacts such as `node_modules`, `target`, `build`, and `dist` to free up disk space.
+Clean old build artifacts such as `node_modules`, `target`, `.build`, `build`, and `dist` to free up disk space.
 
 ```bash
 mo purge
