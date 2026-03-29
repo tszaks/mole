@@ -54,8 +54,12 @@ clean_service_worker_cache() {
         [[ ! -d "$cache_dir" ]] && continue
         # Extract a best-effort domain name from cache folder.
         local domain=$(basename "$cache_dir" | grep -oE '[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}' | head -1 || echo "")
-        local size
-        size=$(get_path_size_kb "$cache_dir" 2> /dev/null || echo 0)
+        local size=0
+        local _du_out
+        if _du_out=$(run_with_timeout 5 du -skP "$cache_dir" 2> /dev/null); then
+            local _sz="${_du_out%%[^0-9]*}"
+            [[ "$_sz" =~ ^[0-9]+$ ]] && size="$_sz"
+        fi
         local is_protected=false
         for protected_domain in "${PROTECTED_SW_DOMAINS[@]}"; do
             if [[ "$domain" == *"$protected_domain"* ]]; then
