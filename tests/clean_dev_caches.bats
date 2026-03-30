@@ -159,6 +159,134 @@ EOF
     [[ "$output" != *"(custom path)"* ]]
 }
 
+@test "clean_dev_npm cleans default bun cache when bun is unavailable" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_tool_cache() { echo "$1|$*"; }
+safe_clean() { echo "$2|$1"; }
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+npm() { return 0; }
+bun() { return 1; }
+export -f npm bun
+clean_dev_npm
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Bun cache|$HOME/.bun/install/cache/*"* ]]
+    [[ "$output" != *"bun cache|bun cache bun pm cache rm"* ]]
+    [[ "$output" != *"Orphaned bun cache"* ]]
+}
+
+@test "clean_dev_npm uses bun cache command for default bun cache path" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_tool_cache() { echo "$1|$*"; }
+safe_clean() { echo "$2|$1"; }
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+npm() { return 0; }
+bun() {
+    if [[ "$1" == "--version" ]]; then
+        echo "1.2.0"
+        return 0
+    fi
+    if [[ "$1" == "pm" && "$2" == "cache" && "${3:-}" == "rm" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "pm" && "$2" == "cache" ]]; then
+        echo "$HOME/.bun/install/cache"
+        return 0
+    fi
+    return 0
+}
+export -f npm bun
+clean_dev_npm
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"bun cache|bun cache bun pm cache rm"* ]]
+    [[ "$output" != *"Orphaned bun cache"* ]]
+}
+
+@test "clean_dev_npm cleans orphaned default bun cache when custom path is configured" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_tool_cache() { echo "$1|$*"; }
+safe_clean() { echo "$2|$1"; }
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+npm() { return 0; }
+bun() {
+    if [[ "$1" == "--version" ]]; then
+        echo "1.2.0"
+        return 0
+    fi
+    if [[ "$1" == "pm" && "$2" == "cache" && "${3:-}" == "rm" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "pm" && "$2" == "cache" ]]; then
+        echo "/tmp/mole-bun-cache"
+        return 0
+    fi
+    return 0
+}
+export -f npm bun
+clean_dev_npm
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"bun cache|bun cache bun pm cache rm"* ]]
+    [[ "$output" == *"Orphaned bun cache|$HOME/.bun/install/cache/*"* ]]
+}
+
+@test "clean_dev_npm treats default bun cache path with trailing slash as same path" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_tool_cache() { echo "$1|$*"; }
+safe_clean() { echo "$2|$1"; }
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+npm() { return 0; }
+bun() {
+    if [[ "$1" == "--version" ]]; then
+        echo "1.2.0"
+        return 0
+    fi
+    if [[ "$1" == "pm" && "$2" == "cache" && "${3:-}" == "rm" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "pm" && "$2" == "cache" ]]; then
+        echo "$HOME/.bun/install/cache/"
+        return 0
+    fi
+    return 0
+}
+export -f npm bun
+clean_dev_npm
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"bun cache|bun cache bun pm cache rm"* ]]
+    [[ "$output" != *"Orphaned bun cache"* ]]
+}
+
 @test "clean_dev_docker skips when daemon not running" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
 set -euo pipefail

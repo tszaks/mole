@@ -87,27 +87,39 @@ clean_dev_npm() {
         # pnpm not installed or not usable, just clean the default store directory
         safe_clean "$pnpm_default_store"/* "pnpm store"
     fi
+    local bun_default_cache="$HOME/.bun/install/cache"
+    local bun_cache_path="$bun_default_cache"
+    if command -v bun > /dev/null 2>&1 && bun --version > /dev/null 2>&1; then
+        clean_tool_cache "bun cache" bun pm cache rm
+
+        start_section_spinner "Checking bun cache path..."
+        bun_cache_path=$(run_with_timeout 2 bun pm cache 2> /dev/null) || bun_cache_path=""
+        stop_section_spinner
+
+        if [[ -z "$bun_cache_path" || "$bun_cache_path" != /* ]]; then
+            bun_cache_path="$bun_default_cache"
+        fi
+
+        local bun_cache_path_normalized="${bun_cache_path%/}"
+        local bun_default_cache_normalized="${bun_default_cache%/}"
+        if [[ -d "$bun_cache_path_normalized" ]]; then
+            bun_cache_path_normalized=$(cd "$bun_cache_path_normalized" 2> /dev/null && pwd -P) || bun_cache_path_normalized="${bun_cache_path%/}"
+        fi
+        if [[ -d "$bun_default_cache_normalized" ]]; then
+            bun_default_cache_normalized=$(cd "$bun_default_cache_normalized" 2> /dev/null && pwd -P) || bun_default_cache_normalized="${bun_default_cache%/}"
+        fi
+
+        if [[ "$bun_cache_path_normalized" != "$bun_default_cache_normalized" ]]; then
+            safe_clean "$bun_default_cache"/* "Orphaned bun cache"
+        fi
+    else
+        safe_clean "$bun_default_cache"/* "Bun cache"
+    fi
+
     note_activity
     safe_clean ~/.tnpm/_cacache/* "tnpm cache directory"
     safe_clean ~/.tnpm/_logs/* "tnpm logs"
     safe_clean ~/.yarn/cache/* "Yarn cache"
-
-    # Bun cache - check if bun is installed and usable
-    if command -v bun > /dev/null 2>&1 && bun --version > /dev/null 2>&1; then
-        clean_tool_cache "bun cache" bun pm cache rm
-        local bun_cache_path
-        start_section_spinner "Checking bun cache path..."
-        bun_cache_path=$(run_with_timeout 2 bun pm cache 2> /dev/null) || bun_cache_path=""
-        stop_section_spinner
-        # If custom cache path, also clean orphaned default location
-        if [[ -n "$bun_cache_path" && "$bun_cache_path" != "$HOME/.bun/install/cache" ]]; then
-            safe_clean ~/.bun/install/cache/* "Orphaned bun cache"
-        fi
-    else
-        # bun not installed, just clean the default cache directory
-        safe_clean ~/.bun/install/cache/* "bun cache"
-    fi
-    note_activity
 }
 # Python/pip ecosystem caches.
 clean_dev_python() {
@@ -258,6 +270,7 @@ clean_dev_docker() {
                     is_path_whitelisted "$HOME/Library/Containers/com.docker.docker" ||
                     is_path_whitelisted "$HOME/Library/Group Containers/group.com.docker"; then
                     echo -e "  ${GRAY}${ICON_WARNING}${NC} Docker unused data · skipped (whitelisted)"
+                    echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Review: mo clean --whitelist, protect Docker Desktop data to disable this prune${NC}"
                     debug_log "Docker cleanup skipped: Docker paths found in whitelist"
                 else
                     clean_tool_cache "Docker unused data" docker system prune -af --volumes
@@ -270,6 +283,7 @@ clean_dev_docker() {
         else
             note_activity
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Docker unused data · would clean"
+            echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Review: mo clean --whitelist, protect Docker Desktop data to disable this prune${NC}"
         fi
     fi
     safe_clean ~/.docker/buildx/cache/* "Docker BuildX cache"
