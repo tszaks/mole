@@ -222,6 +222,21 @@ end_section() {
 # shellcheck disable=SC2329
 normalize_paths_for_cleanup() {
     local -a input_paths=("$@")
+
+    # Fast path for large batches: O(n log n) via sort|awk instead of O(n²) bash loops.
+    # Lex sort guarantees every parent path precedes its children, so a single-pass
+    # awk can filter child paths by tracking only the last kept path.
+    if [[ ${#input_paths[@]} -gt 500 ]]; then
+        printf '%s\n' "${input_paths[@]}" |
+            awk '{sub(/\/$/, ""); if ($0 != "") print}' |
+            LC_ALL=C sort -u |
+            awk 'BEGIN { last = "" } {
+                if (last != "" && substr($0, 1, length(last) + 1) == last "/") next
+                last = $0; print
+            }'
+        return
+    fi
+
     local -a unique_paths=()
 
     for path in "${input_paths[@]}"; do
