@@ -972,6 +972,12 @@ clean_dev_jetbrains_toolbox() {
     _restore_whitelist
 }
 
+# JetBrains IDE logs are safe to rebuild, unlike some cache subtrees that can
+# invalidate IDE indexes and trigger expensive reindexing.
+clean_dev_jetbrains_logs() {
+    safe_clean ~/Library/Logs/JetBrains/* "JetBrains IDE logs"
+}
+
 # Other language tool caches.
 clean_dev_other_langs() {
     safe_clean ~/.bundle/cache/* "Ruby Bundler cache"
@@ -1108,6 +1114,7 @@ clean_developer_tools() {
     clean_dev_mobile
     clean_dev_jvm
     clean_dev_jetbrains_toolbox
+    clean_dev_jetbrains_logs
     clean_dev_other_langs
     clean_dev_cicd
     clean_dev_database

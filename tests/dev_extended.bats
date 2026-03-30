@@ -273,6 +273,64 @@ EOF
     [[ "$output" != *"/241.2"* ]]
 }
 
+@test "clean_dev_jetbrains_logs only targets JetBrains logs" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { printf '%s|%s\n' "$1" "$2"; }
+clean_dev_jetbrains_logs
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$HOME/Library/Logs/JetBrains/*|JetBrains IDE logs"* ]]
+    [[ "$output" != *"Library/Caches/JetBrains"* ]]
+}
+
+@test "clean_developer_tools includes JetBrains logs but not JetBrains cache sweep" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+stop_section_spinner() { :; }
+note_activity() { :; }
+safe_clean() { printf '%s|%s\n' "$1" "$2"; }
+clean_tool_cache() { :; }
+check_rust_toolchains() { :; }
+clean_dev_npm() { :; }
+clean_dev_python() { :; }
+clean_dev_go() { :; }
+clean_dev_mise() { :; }
+clean_dev_rust() { :; }
+clean_dev_docker() { :; }
+clean_dev_cloud() { :; }
+clean_dev_nix() { :; }
+clean_dev_shell() { :; }
+clean_dev_frontend() { :; }
+clean_project_caches() { :; }
+clean_dev_mobile() { :; }
+clean_dev_jvm() { :; }
+clean_dev_jetbrains_toolbox() { :; }
+clean_dev_other_langs() { :; }
+clean_dev_cicd() { :; }
+clean_dev_database() { :; }
+clean_dev_api_tools() { :; }
+clean_dev_network() { :; }
+clean_dev_misc() { :; }
+clean_dev_elixir() { :; }
+clean_dev_haskell() { :; }
+clean_dev_ocaml() { :; }
+clean_xcode_tools() { :; }
+clean_code_editors() { :; }
+clean_homebrew() { :; }
+clean_developer_tools
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$HOME/Library/Logs/JetBrains/*|JetBrains IDE logs"* ]]
+    [[ "$output" != *"Library/Caches/JetBrains"* ]]
+}
+
 @test "clean_xcode_simulator_runtime_volumes shows scan progress and skips sizing in-use volumes" {
     local volumes_root="$HOME/sim-volumes"
     local cryptex_root="$HOME/sim-cryptex"
