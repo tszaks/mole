@@ -84,6 +84,13 @@ Describe "Optimize Command" {
             $source | Should -Match "Get-Volume -DriveLetter"
             $source | Should -Match "Disk optimization skipped:"
         }
+
+        It "Should rebuild font cache without touching user font installs" {
+            $source = Get-Content "$script:BinDir\optimize.ps1" -Raw
+            $source | Should -Match 'ServiceProfiles\\LocalService\\AppData\\Local\\FontCache'
+            $source | Should -Match 'System32\\FNTCACHE\.DAT'
+            $source | Should -Not -Match 'LOCALAPPDATA\\Microsoft\\Windows\\Fonts'
+        }
     }
 }
 

@@ -510,9 +510,10 @@ function Repair-FontCache {
         return
     }
 
-    # Font cache locations
+    # Only clear system-managed cache files. Per-user installed fonts may live
+    # in the user's profile, so deleting that directory can remove usable fonts
+    # instead of just rebuilding cache state.
     $fontCachePaths = @(
-        "$env:LOCALAPPDATA\Microsoft\Windows\Fonts"
         "$env:WINDIR\ServiceProfiles\LocalService\AppData\Local\FontCache"
         "$env:WINDIR\System32\FNTCACHE.DAT"
     )
