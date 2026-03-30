@@ -158,6 +158,98 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "batch_uninstall_applications warns when removed app declares Local Network usage" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+sudo() { return 0; }
+
+app_bundle="$HOME/Applications/NetworkApp.app"
+mkdir -p "$app_bundle/Contents"
+cat > "$app_bundle/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.NetworkApp</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Discover devices on the local network</string>
+</dict>
+</plist>
+PLIST
+
+selected_apps=()
+selected_apps+=("0|$app_bundle|NetworkApp|com.example.NetworkApp|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Local Network permissions"* ]]
+	[[ "$output" == *"NetworkApp"* ]]
+	[[ "$output" == *"Recovery mode"* ]]
+}
+
+@test "batch_uninstall_applications skips Local Network warning for regular apps" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+sudo() { return 0; }
+
+app_bundle="$HOME/Applications/PlainApp.app"
+mkdir -p "$app_bundle/Contents"
+cat > "$app_bundle/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.PlainApp</string>
+</dict>
+</plist>
+PLIST
+
+selected_apps=()
+selected_apps+=("0|$app_bundle|PlainApp|com.example.PlainApp|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"Local Network permissions"* ]]
+}
+
 @test "batch_uninstall_applications preview shows full related file list" {
 	mkdir -p "$HOME/Applications/TestApp.app"
 	mkdir -p "$HOME/Library/Application Support/TestApp"
