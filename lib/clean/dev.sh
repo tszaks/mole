@@ -91,7 +91,23 @@ clean_dev_npm() {
     safe_clean ~/.tnpm/_cacache/* "tnpm cache directory"
     safe_clean ~/.tnpm/_logs/* "tnpm logs"
     safe_clean ~/.yarn/cache/* "Yarn cache"
-    safe_clean ~/.bun/install/cache/* "Bun cache"
+
+    # Bun cache - check if bun is installed and usable
+    if command -v bun > /dev/null 2>&1 && bun --version > /dev/null 2>&1; then
+        clean_tool_cache "bun cache" bun pm cache rm
+        local bun_cache_path
+        start_section_spinner "Checking bun cache path..."
+        bun_cache_path=$(run_with_timeout 2 bun pm cache 2> /dev/null) || bun_cache_path=""
+        stop_section_spinner
+        # If custom cache path, also clean orphaned default location
+        if [[ -n "$bun_cache_path" && "$bun_cache_path" != "$HOME/.bun/install/cache" ]]; then
+            safe_clean ~/.bun/install/cache/* "Orphaned bun cache"
+        fi
+    else
+        # bun not installed, just clean the default cache directory
+        safe_clean ~/.bun/install/cache/* "bun cache"
+    fi
+    note_activity
 }
 # Python/pip ecosystem caches.
 clean_dev_python() {
