@@ -253,38 +253,10 @@ check_rust_toolchains() {
 # Docker caches (guarded by daemon check).
 clean_dev_docker() {
     if command -v docker > /dev/null 2>&1; then
-        if [[ "$DRY_RUN" != "true" ]]; then
-            start_section_spinner "Checking Docker daemon..."
-            local docker_running=false
-            if run_with_timeout 3 docker info > /dev/null 2>&1; then
-                docker_running=true
-            fi
-            stop_section_spinner
-            if [[ "$docker_running" == "true" ]]; then
-                # Remove unused images, stopped containers, unused networks, and
-                # anonymous volumes in one pass. This maps better to the large
-                # reclaimable "docker system df" buckets users typically see.
-                # Skip if Docker paths are whitelisted: docker system prune operates
-                # through the daemon API and bypasses filesystem-level whitelist checks.
-                if is_path_whitelisted "$HOME/.docker" ||
-                    is_path_whitelisted "$HOME/Library/Containers/com.docker.docker" ||
-                    is_path_whitelisted "$HOME/Library/Group Containers/group.com.docker"; then
-                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Docker unused data · skipped (whitelisted)"
-                    echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Review: mo clean --whitelist, protect Docker Desktop data to disable this prune${NC}"
-                    debug_log "Docker cleanup skipped: Docker paths found in whitelist"
-                else
-                    clean_tool_cache "Docker unused data" docker system prune -af --volumes
-                fi
-            else
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} Docker unused data · skipped (daemon not running)"
-                note_activity
-                debug_log "Docker daemon not running, skipping Docker cache cleanup"
-            fi
-        else
-            note_activity
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Docker unused data · would clean"
-            echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Review: mo clean --whitelist, protect Docker Desktop data to disable this prune${NC}"
-        fi
+        note_activity
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Docker unused data · skipped by default"
+        echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Review: docker system df${NC}"
+        debug_log "Docker daemon-managed cleanup skipped by default"
     fi
     safe_clean ~/.docker/buildx/cache/* "Docker BuildX cache"
 }

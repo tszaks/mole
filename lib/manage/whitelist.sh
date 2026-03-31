@@ -142,7 +142,7 @@ Firefox browser cache|$HOME/Library/Caches/Firefox/*|browser_cache
 Brave browser cache|$HOME/Library/Caches/BraveSoftware/Brave-Browser/*|browser_cache
 Surge proxy cache|$HOME/Library/Caches/com.nssurge.surge-mac/*|network_tools
 Surge configuration and data|$HOME/Library/Application Support/com.nssurge.surge-mac/*|network_tools
-Docker Desktop data (skip Docker unused data prune)|$HOME/Library/Containers/com.docker.docker/Data/*|container_cache
+Docker BuildX cache|$HOME/.docker/buildx/cache/*|container_cache
 Podman container cache|$HOME/.local/share/containers/cache/*|container_cache
 Font cache|$HOME/Library/Caches/com.apple.FontRegistry/*|system_cache
 Spotlight metadata cache|$HOME/Library/Caches/com.apple.spotlight/*|system_cache
