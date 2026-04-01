@@ -82,11 +82,13 @@ clean_service_worker_cache() {
             spinner_was_running=true
         fi
         local cleaned_mb=$((cleaned_size / 1024))
+        local line_color
+        line_color=$(cleanup_result_color_kb "$cleaned_size")
         if [[ "$DRY_RUN" != "true" ]]; then
             if [[ $protected_count -gt 0 ]]; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $browser_name Service Worker, ${cleaned_mb}MB, ${protected_count} protected"
+                echo -e "  ${line_color}${ICON_SUCCESS}${NC} $browser_name Service Worker${NC}, ${line_color}${cleaned_mb}MB${NC}, ${protected_count} protected"
             else
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $browser_name Service Worker, ${cleaned_mb}MB"
+                echo -e "  ${line_color}${ICON_SUCCESS}${NC} $browser_name Service Worker${NC}, ${line_color}${cleaned_mb}MB${NC}"
             fi
         else
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $browser_name Service Worker, would clean ${cleaned_mb}MB, ${protected_count} protected"

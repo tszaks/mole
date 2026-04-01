@@ -99,7 +99,7 @@ discover_project_dirs() {
         fi
     done
 
-    printf '%s\n' "${discovered[@]}" | sort -u
+    printf '%s\n' "${discovered[@]+"${discovered[@]}"}" | sort -u
 }
 
 # Prepare purge config directory/file ownership when possible.
@@ -472,8 +472,12 @@ scan_purge_targets() {
             # Check if fd actually found anything - if empty, fallback to find
             if [[ -s "$output_file.raw" ]]; then
                 debug_log "Using fd for scanning (found results)"
-                use_find=false
                 process_scan_results "$output_file.raw"
+                if [[ -s "$output_file" ]]; then
+                    use_find=false
+                else
+                    debug_log "fd results became empty after filtering, falling back to find"
+                fi
             else
                 debug_log "fd returned empty results, falling back to find"
                 rm -f "$output_file.raw"

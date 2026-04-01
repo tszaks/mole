@@ -118,6 +118,41 @@ setup() {
     rm -rf "$test_cache"
 }
 
+@test "clean_service_worker_cache colors cleaned size with success color" {
+    local test_cache="$HOME/test_sw_cache_colored"
+    mkdir -p "$test_cache/abc123_https_example.com_0"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/caches.sh"
+DRY_RUN=false
+declare -a PROTECTED_SW_DOMAINS=("capcut.com")
+safe_remove() { return 0; }
+note_activity() { :; }
+run_with_timeout() {
+    local timeout="\$1"
+    shift
+    if [[ "\$1" == "sh" ]]; then
+        printf '%s\n' "$test_cache/abc123_https_example.com_0"
+        return 0
+    fi
+    if [[ "\$1" == "du" ]]; then
+        printf '1024\t%s\n' "$test_cache/abc123_https_example.com_0"
+        return 0
+    fi
+    "\$@"
+}
+clean_service_worker_cache 'TestBrowser' '$test_cache'
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TestBrowser Service Worker"* ]]
+    [[ "$output" == *$'\033[0;32m1MB\033[0m'* ]]
+
+    rm -rf "$test_cache"
+}
+
 @test "clean_project_caches completes without errors" {
     mkdir -p "$HOME/Projects/test-app/.next/cache"
     mkdir -p "$HOME/Projects/python-app/__pycache__"
