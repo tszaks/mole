@@ -61,16 +61,29 @@ func createInsightEntries() []dirEntry {
 		})
 	}
 
-	// Per-app caches breakdown
-	cacheBreakdownPaths := []struct {
+	// Cleanable paths — things mo clean can remove or the user can safely delete.
+	cleanablePaths := []struct {
 		name string
 		path string
 	}{
+		// Universal (everyone has these)
+		{"Trash", filepath.Join(home, ".Trash")},
+		{"System Caches", filepath.Join(home, "Library", "Caches")},
+		{"System Logs", filepath.Join(home, "Library", "Logs")},
+		{"Homebrew Cache", filepath.Join(home, "Library", "Caches", "Homebrew")},
+
+		// Developer-specific (only shown if path exists)
 		{"Xcode DerivedData", filepath.Join(home, "Library", "Developer", "Xcode", "DerivedData")},
+		{"Xcode Simulators", filepath.Join(home, "Library", "Developer", "CoreSimulator", "Devices")},
+		{"Xcode Archives", filepath.Join(home, "Library", "Developer", "Xcode", "Archives")},
 		{"Spotify Cache", filepath.Join(home, "Library", "Application Support", "Spotify", "PersistentCache")},
 		{"JetBrains Cache", filepath.Join(home, "Library", "Caches", "JetBrains")},
 		{"Docker Data", filepath.Join(home, "Library", "Containers", "com.docker.docker", "Data")},
+		{"pip Cache", filepath.Join(home, "Library", "Caches", "pip")},
+		{"Gradle Cache", filepath.Join(home, ".gradle", "caches")},
+		{"CocoaPods Cache", filepath.Join(home, "Library", "Caches", "CocoaPods")},
 	}
+	cacheBreakdownPaths := cleanablePaths
 	for _, c := range cacheBreakdownPaths {
 		if info, err := os.Stat(c.path); err == nil && info.IsDir() {
 			entries = append(entries, dirEntry{
@@ -230,10 +243,18 @@ func insightIcon(entry dirEntry) string {
 		return "📦"
 	case "Time Machine Local":
 		return "🕐"
-	case "Xcode DerivedData":
-		return "🔨"
-	case "Spotify Cache", "JetBrains Cache":
+	case "Trash":
 		return "🗑️"
+	case "System Caches", "Homebrew Cache", "pip Cache", "CocoaPods Cache", "Gradle Cache":
+		return "💾"
+	case "System Logs":
+		return "📋"
+	case "Xcode DerivedData", "Xcode Archives":
+		return "🔨"
+	case "Xcode Simulators":
+		return "📲"
+	case "Spotify Cache", "JetBrains Cache":
+		return "💾"
 	case "Docker Data":
 		return "🐳"
 	default:

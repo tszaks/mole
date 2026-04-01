@@ -44,6 +44,11 @@ func TestInsightIcon(t *testing.T) {
 		{"Mail Data", "📧"},
 		{"node_modules (all)", "📦"},
 		{"Time Machine Local", "🕐"},
+		{"Trash", "🗑️"},
+		{"System Caches", "💾"},
+		{"System Logs", "📋"},
+		{"Xcode Simulators", "📲"},
+		{"Docker Data", "🐳"},
 		{"Home", "📁"},
 		{"Applications", "📁"},
 	}
