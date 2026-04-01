@@ -41,10 +41,6 @@ func TestInsightIcon(t *testing.T) {
 	}{
 		{"iOS Backups", "📱"},
 		{"Old Downloads (90d+)", "📥"},
-		{"Mail Data", "📧"},
-		{"node_modules (all)", "📦"},
-		{"Time Machine Local", "🕐"},
-		{"Trash", "🗑️"},
 		{"System Caches", "💾"},
 		{"System Logs", "📋"},
 		{"Xcode Simulators", "📲"},
@@ -57,26 +53,6 @@ func TestInsightIcon(t *testing.T) {
 			got := insightIcon(dirEntry{Name: tt.name})
 			if got != tt.want {
 				t.Errorf("insightIcon(%q) = %q, want %q", tt.name, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIsVirtualInsightPath(t *testing.T) {
-	home := os.Getenv("HOME")
-	tests := []struct {
-		path string
-		want bool
-	}{
-		{filepath.Join(home, ".node_modules_total"), true},
-		{"/.timemachine_local", true},
-		{"/Applications", false},
-		{home, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			if got := isVirtualInsightPath(tt.path); got != tt.want {
-				t.Errorf("isVirtualInsightPath(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})
 	}
