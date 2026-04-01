@@ -246,6 +246,17 @@ func createOverviewEntries() []dirEntry {
 		dirEntry{Name: "System Library", Path: "/Library", IsDir: true, Size: -1},
 	)
 
+	// Hidden space insights — paths that silently accumulate disk usage.
+	entries = append(entries, createInsightEntries()...)
+
+	// node_modules total (virtual path — scanned specially).
+	if home != "" {
+		entries = append(entries, dirEntry{Name: "node_modules (all)", Path: filepath.Join(home, ".node_modules_total"), IsDir: true, Size: -1})
+	}
+
+	// Time Machine local snapshots (virtual path).
+	entries = append(entries, dirEntry{Name: "Time Machine Local", Path: "/.timemachine_local", IsDir: true, Size: -1})
+
 	return entries
 }
 
@@ -995,6 +1006,10 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	selected := m.entries[m.selected]
+	// Virtual entries (node_modules total, Time Machine) can't be navigated into.
+	if isVirtualInsightPath(selected.Path) {
+		return m, nil
+	}
 	if selected.IsDir {
 		if len(m.history) == 0 || m.history[len(m.history)-1].Path != m.path {
 			m.history = append(m.history, snapshotFromModel(m))
@@ -1154,7 +1169,19 @@ func (m *model) removePathFromView(path string) {
 
 func scanOverviewPathCmd(path string, index int) tea.Cmd {
 	return func() tea.Msg {
-		size, err := measureOverviewSize(path)
+		var size int64
+		var err error
+
+		home := os.Getenv("HOME")
+		switch {
+		case home != "" && path == filepath.Join(home, ".node_modules_total"):
+			size, err = measureNodeModulesTotal()
+		case path == "/.timemachine_local":
+			size, err = measureTimeMachineSnapshots()
+		default:
+			size, err = measureInsightSize(dirEntry{Path: path})
+		}
+
 		return overviewSizeMsg{
 			Path:  path,
 			Index: index,
