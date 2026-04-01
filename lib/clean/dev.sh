@@ -110,9 +110,9 @@ clean_dev_npm() {
             bun_cache_cleaned=true
         fi
 
-        start_section_spinner "Checking bun cache path..."
+        if [[ -t 1 ]]; then start_section_spinner "Checking bun cache path..."; fi
         bun_cache_path=$(run_with_timeout 2 bun pm cache 2> /dev/null) || bun_cache_path=""
-        stop_section_spinner
+        if [[ -t 1 ]]; then stop_section_spinner; fi
 
         if [[ -z "$bun_cache_path" || "$bun_cache_path" != /* ]]; then
             bun_cache_path="$bun_default_cache"

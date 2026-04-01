@@ -41,7 +41,7 @@ func TestInsightIcon(t *testing.T) {
 	}{
 		{"iOS Backups", "📱"},
 		{"Old Downloads (90d+)", "📥"},
-		{"System Caches", "💾"},
+		{"Homebrew Cache", "💾"},
 		{"System Logs", "📋"},
 		{"Xcode Simulators", "📲"},
 		{"Docker Data", "🐳"},
@@ -99,7 +99,7 @@ func TestMeasureInsightSizeFallsBackToOverview(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	size, err := measureInsightSize(dirEntry{Path: dir})
+	size, err := measureInsightSize(dir)
 	if err != nil {
 		t.Fatalf("measureInsightSize: %v", err)
 	}

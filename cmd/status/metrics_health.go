@@ -138,18 +138,12 @@ func calculateHealthScore(cpu CPUStatus, mem MemoryStatus, disks []DiskStatus, d
 	// Battery health penalty (only when battery present).
 	if len(batteries) > 0 {
 		b := batteries[0]
-		if b.CycleCount > batteryCycleDanger {
+		_, sev := batteryHealthLabel(b.CycleCount, b.Capacity)
+		switch sev {
+		case "danger":
 			score -= 5
-			issues = append(issues, "Battery Aging")
-		} else if b.CycleCount > batteryCycleWarn {
-			score -= 2
-		}
-		if b.Capacity > 0 && b.Capacity < batteryCapDanger {
-			score -= 5
-			if b.CycleCount <= batteryCycleDanger {
-				issues = append(issues, "Battery Degraded")
-			}
-		} else if b.Capacity > 0 && b.Capacity < batteryCapWarn {
+			issues = append(issues, "Battery Service Soon")
+		case "warn":
 			score -= 2
 		}
 	}

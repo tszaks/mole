@@ -67,8 +67,7 @@ func createInsightEntries() []dirEntry {
 		{"Gradle Cache", filepath.Join(home, ".gradle", "caches")},
 		{"CocoaPods Cache", filepath.Join(home, "Library", "Caches", "CocoaPods")},
 	}
-	cacheBreakdownPaths := cleanablePaths
-	for _, c := range cacheBreakdownPaths {
+	for _, c := range cleanablePaths {
 		if info, err := os.Stat(c.path); err == nil && info.IsDir() {
 			entries = append(entries, dirEntry{
 				Name:  c.name,
@@ -82,18 +81,16 @@ func createInsightEntries() []dirEntry {
 	return entries
 }
 
-// measureInsightSize measures the size of an insight entry.
-// Some insights need special measurement (e.g., Old Downloads only counts old files).
-func measureInsightSize(entry dirEntry) (int64, error) {
+// measureInsightSize measures the size of a path.
+// Old Downloads is treated specially: only files older than 90 days are counted.
+func measureInsightSize(path string) (int64, error) {
 	home := os.Getenv("HOME")
 
-	// Old Downloads: only count files older than 90 days.
-	if home != "" && entry.Path == filepath.Join(home, "Downloads") {
-		return measureOldDownloads(entry.Path, 90)
+	if home != "" && path == filepath.Join(home, "Downloads") {
+		return measureOldDownloads(path, 90)
 	}
 
-	// All others: standard directory size measurement.
-	return measureOverviewSize(entry.Path)
+	return measureOverviewSize(path)
 }
 
 // measureOldDownloads calculates total size of files in a directory
@@ -140,7 +137,7 @@ func insightIcon(entry dirEntry) string {
 		return "📱"
 	case "Old Downloads (90d+)":
 		return "📥"
-	case "System Caches", "Homebrew Cache", "pip Cache", "CocoaPods Cache", "Gradle Cache":
+	case "Homebrew Cache", "pip Cache", "CocoaPods Cache", "Gradle Cache", "Spotify Cache", "JetBrains Cache":
 		return "💾"
 	case "System Logs":
 		return "📋"
@@ -148,8 +145,6 @@ func insightIcon(entry dirEntry) string {
 		return "🔨"
 	case "Xcode Simulators":
 		return "📲"
-	case "Spotify Cache", "JetBrains Cache":
-		return "💾"
 	case "Docker Data":
 		return "🐳"
 	default:
