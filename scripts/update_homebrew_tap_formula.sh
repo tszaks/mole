@@ -64,6 +64,43 @@ if [[ ! -f "$formula_path" ]]; then
     exit 1
 fi
 
+replacement_counts="$(
+    TAG="$tag" \
+        SOURCE_SHA="$source_sha" \
+        ARM_SHA="$arm_sha" \
+        AMD_SHA="$amd_sha" \
+        perl -0ne '
+        my $text = $_;
+
+        my $source_replacements = (
+            $text =~ s{url "https://github.com/tw93/(?:Mole|mole)/archive/refs/tags/[^"]+\.tar\.gz"\n  sha256 "[^"]+"}{
+              qq{url "https://github.com/tw93/Mole/archive/refs/tags/$ENV{TAG}.tar.gz"\n  sha256 "$ENV{SOURCE_SHA}"}
+            }se
+        );
+
+        my $arm_replacements = (
+            $text =~ s{(on_arm do\s+url ")https://github.com/tw93/(?:Mole|mole)/releases/download/[^/]+/binaries-darwin-arm64\.tar\.gz("\s+sha256 ")[^"]+(")}{
+              qq{$1https://github.com/tw93/Mole/releases/download/$ENV{TAG}/binaries-darwin-arm64.tar.gz$2$ENV{ARM_SHA}$3}
+            }se
+        );
+
+        my $amd_replacements = (
+            $text =~ s{(on_intel do\s+url ")https://github.com/tw93/(?:Mole|mole)/releases/download/[^/]+/binaries-darwin-amd64\.tar\.gz("\s+sha256 ")[^"]+(")}{
+              qq{$1https://github.com/tw93/Mole/releases/download/$ENV{TAG}/binaries-darwin-amd64.tar.gz$2$ENV{AMD_SHA}$3}
+            }se
+        );
+
+        print "$source_replacements $arm_replacements $amd_replacements\n";
+    ' "$formula_path"
+)"
+
+read -r source_replacements arm_replacements amd_replacements <<< "$replacement_counts"
+
+if [[ "$source_replacements" != "1" || "$arm_replacements" != "1" || "$amd_replacements" != "1" ]]; then
+    echo "Failed to update formula: expected 1 replacement for source/arm/amd, got ${source_replacements}/${arm_replacements}/${amd_replacements}" >&2
+    exit 1
+fi
+
 TAG="$tag" \
     SOURCE_SHA="$source_sha" \
     ARM_SHA="$arm_sha" \

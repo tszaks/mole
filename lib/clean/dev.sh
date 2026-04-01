@@ -89,8 +89,26 @@ clean_dev_npm() {
     fi
     local bun_default_cache="$HOME/.bun/install/cache"
     local bun_cache_path="$bun_default_cache"
+    local bun_cache_cleaned=false
+    local bun_dry_run="${DRY_RUN:-false}"
     if command -v bun > /dev/null 2>&1 && bun --version > /dev/null 2>&1; then
-        clean_tool_cache "bun cache" bun pm cache rm
+        if [[ "$bun_dry_run" != "true" ]]; then
+            if [[ -t 1 ]]; then
+                start_section_spinner "Cleaning bun cache..."
+            fi
+            if run_with_timeout 10 bun pm cache rm > /dev/null 2>&1; then
+                bun_cache_cleaned=true
+            fi
+            if [[ -t 1 ]]; then
+                stop_section_spinner
+            fi
+            if [[ "$bun_cache_cleaned" == "true" ]]; then
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} bun cache"
+            fi
+        else
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} bun cache · would clean"
+            bun_cache_cleaned=true
+        fi
 
         start_section_spinner "Checking bun cache path..."
         bun_cache_path=$(run_with_timeout 2 bun pm cache 2> /dev/null) || bun_cache_path=""
@@ -111,6 +129,11 @@ clean_dev_npm() {
 
         if [[ "$bun_cache_path_normalized" != "$bun_default_cache_normalized" ]]; then
             safe_clean "$bun_default_cache"/* "Orphaned bun cache"
+        fi
+
+        # If bun pm cache rm fails, fall back to filesystem cleanup to avoid no-op.
+        if [[ "$bun_cache_cleaned" != "true" ]]; then
+            safe_clean "$bun_cache_path"/* "Bun cache"
         fi
     else
         safe_clean "$bun_default_cache"/* "Bun cache"
