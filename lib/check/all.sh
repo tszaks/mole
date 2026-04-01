@@ -263,6 +263,7 @@ get_first_macos_software_update_summary() {
         /^[[:space:]]*Title:/ {
             title=$0
             sub(/^[[:space:]]*Title: */, "", title)
+            sub(/, Version:.*/, "", title)
             sub(/, Size:.*/, "", title)
             combined=tolower(label " " title)
             if (combined ~ /macos|background security improvement|rapid security response|security response/) {
