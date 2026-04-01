@@ -45,12 +45,14 @@ func createInsightEntries() []dirEntry {
 	}
 
 	// Cleanable paths — things mo clean can remove or the user can safely delete.
+	// System Caches (~Library/Caches) is intentionally omitted here because the
+	// specific cache subdirectories below are already its children; listing both
+	// would double-count the same bytes.
 	cleanablePaths := []struct {
 		name string
 		path string
 	}{
 		// Universal (everyone has these)
-		{"System Caches", filepath.Join(home, "Library", "Caches")},
 		{"System Logs", filepath.Join(home, "Library", "Logs")},
 		{"Homebrew Cache", filepath.Join(home, "Library", "Caches", "Homebrew")},
 

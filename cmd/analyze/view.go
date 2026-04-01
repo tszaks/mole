@@ -169,9 +169,15 @@ func (m model) View() string {
 				totalSize := m.totalSize
 				// Overview paths are short; fixed width keeps layout stable.
 				nameWidth := 22
+				displayNum := 0
 				for idx, entry := range m.entries {
 					icon := insightIcon(entry)
 					sizeVal := entry.Size
+					// Hide entries that have been scanned and are empty (standard dirs
+					// are never 0 bytes; only insight dirs in unused tool paths are).
+					if sizeVal == 0 {
+						continue
+					}
 					barValue := max(sizeVal, 0)
 					var percent float64
 					if totalSize > 0 && sizeVal >= 0 {
@@ -214,7 +220,8 @@ func (m model) View() string {
 						percentColor = colorCyan
 						sizeColor = colorCyan
 					}
-					displayIndex := idx + 1
+					displayNum++
+					displayIndex := displayNum
 
 					var hintLabel string
 					if entry.IsDir && isCleanableDir(entry.Path) {
