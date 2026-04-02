@@ -1117,6 +1117,14 @@ clean_dev_editors() {
     clean_service_worker_cache "VS Code" "$HOME/Library/Application Support/Code/Service Worker/CacheStorage"
     safe_clean ~/Library/Application\ Support/Code/Service\ Worker/ScriptCache/* "VS Code Service Worker ScriptCache"
     safe_clean ~/Library/Caches/Zed/* "Zed cache"
+    safe_clean ~/Library/Caches/Cursor/* "Cursor cache"
+    safe_clean ~/Library/Application\ Support/Cursor/CachedData/* "Cursor cached data"
+    safe_clean ~/Library/Application\ Support/Cursor/CachedExtensionVSIXs/* "Cursor extension cache"
+    safe_clean ~/Library/Application\ Support/Cursor/GPUCache/* "Cursor GPU cache"
+    safe_clean ~/Library/Application\ Support/Cursor/DawnGraphiteCache/* "Cursor Dawn cache"
+    safe_clean ~/Library/Application\ Support/Cursor/DawnWebGPUCache/* "Cursor WebGPU cache"
+    clean_service_worker_cache "Cursor" "$HOME/Library/Application Support/Cursor/Service Worker/CacheStorage"
+    safe_clean ~/Library/Application\ Support/Cursor/Service\ Worker/ScriptCache/* "Cursor Service Worker ScriptCache"
 }
 # Main developer tools cleanup sequence.
 clean_developer_tools() {
