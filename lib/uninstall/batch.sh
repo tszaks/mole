@@ -652,6 +652,12 @@ batch_uninstall_applications() {
             local -a leftover_paths=()
             while IFS= read -r _lf; do
                 [[ -n "$_lf" && -e "$_lf" ]] || continue
+                # Skip macOS-managed container stubs: containermanagerd protects
+                # these directories via com.apple.provenance xattr; rm -rf always
+                # fails on them by design. User data is already gone at this point.
+                if [[ "$_lf" == */Library/Containers/* && -f "$_lf/.com.apple.containermanagerd.metadata.plist" ]]; then
+                    continue
+                fi
                 leftover_paths+=("$_lf")
                 local _lfkb
                 _lfkb=$(get_path_size_kb "$_lf" || echo "0")
