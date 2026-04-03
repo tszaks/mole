@@ -1087,6 +1087,13 @@ find_app_files() {
         done
     fi
 
+    # Shared file lists (.sfl4 - recent documents etc.)
+    if [[ -n "$bundle_id" && "$bundle_id" != "unknown" ]] && [[ -d "$HOME/Library/Application Support/com.apple.sharedfilelist" ]]; then
+        while IFS= read -r -d '' sfl4_file; do
+            files_to_clean+=("$sfl4_file")
+        done < <(command find "$HOME/Library/Application Support/com.apple.sharedfilelist" -maxdepth 2 -name "${bundle_id}.sfl4" -print0 2> /dev/null)
+    fi
+
     # Launch Agents by name (special handling)
     # Note: LaunchDaemons are system-level and handled in find_app_system_files()
     # Minimum 5-char threshold prevents false positives (e.g., "Time" matching system agents)

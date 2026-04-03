@@ -646,6 +646,18 @@ batch_uninstall_applications() {
         if [[ -z "$reason" ]]; then
             remove_file_list "$related_files" "false" > /dev/null
 
+            # Check for related files that still exist after removal (silent failures,
+            # e.g. container directories managed by macOS that resist rm -rf).
+            local leftover_kb=0
+            local -a leftover_paths=()
+            while IFS= read -r _lf; do
+                [[ -n "$_lf" && -e "$_lf" ]] || continue
+                leftover_paths+=("$_lf")
+                local _lfkb
+                _lfkb=$(get_path_size_kb "$_lf" || echo "0")
+                leftover_kb=$((leftover_kb + _lfkb))
+            done <<< "$related_files"
+
             if [[ "$used_brew_successfully" == "true" ]]; then
                 remove_file_list "$diag_system" "true" > /dev/null
             else
@@ -688,6 +700,14 @@ batch_uninstall_applications() {
                 else
                     echo -e "${GREEN}${ICON_SUCCESS}${NC} ${app_name}"
                 fi
+            fi
+
+            # Warn about files that could not be removed and exclude them from freed total.
+            if [[ ${#leftover_paths[@]} -gt 0 ]]; then
+                for _lpath in "${leftover_paths[@]}"; do
+                    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Could not remove: ${_lpath/$HOME/~}"
+                done
+                total_kb=$((total_kb - leftover_kb))
             fi
 
             total_size_freed=$((total_size_freed + total_kb))
