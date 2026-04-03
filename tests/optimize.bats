@@ -396,3 +396,58 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"launch_agents"* ]]
 }
+
+@test "opt_periodic_maintenance reports current when log is fresh" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+tmplog="$(mktemp /tmp/mole-test-daily.XXXXXX)"
+touch "$tmplog"
+MOLE_PERIODIC_LOG="$tmplog" opt_periodic_maintenance
+rm -f "$tmplog"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already current"* ]]
+}
+
+@test "opt_periodic_maintenance triggers in dry-run when log is stale" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+tmplog="$(mktemp /tmp/mole-test-daily.XXXXXX)"
+touch -t "$(date -v-10d +%Y%m%d%H%M.%S)" "$tmplog"
+MOLE_PERIODIC_LOG="$tmplog" opt_periodic_maintenance
+rm -f "$tmplog"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Periodic maintenance triggered"* ]]
+}
+
+@test "opt_periodic_maintenance triggers in dry-run when log is missing" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+MOLE_PERIODIC_LOG="/tmp/mole-test-nonexistent-daily.out" opt_periodic_maintenance
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Periodic maintenance triggered"* ]]
+}
+
+@test "execute_optimization dispatches periodic_maintenance" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+opt_periodic_maintenance() { echo "periodic"; }
+execute_optimization periodic_maintenance
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"periodic"* ]]
+}

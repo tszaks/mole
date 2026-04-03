@@ -898,6 +898,36 @@ opt_launch_agents_cleanup() {
     opt_msg "Cleaned $broken_count broken Launch Agent(s)"
 }
 
+# macOS periodic maintenance scripts (daily/weekly/monthly).
+# Log path is configurable via MOLE_PERIODIC_LOG for testing; defaults to /var/log/daily.out.
+# A missing log file is treated as stale and triggers maintenance.
+opt_periodic_maintenance() {
+    local daily_log="${MOLE_PERIODIC_LOG:-/var/log/daily.out}"
+    local stale_days=7
+
+    if [[ -f "$daily_log" ]]; then
+        local last_mod now age_days
+        last_mod=$(stat -f %m "$daily_log" 2> /dev/null || echo "0")
+        now=$(get_epoch_seconds)
+        age_days=$(((now - last_mod) / 86400))
+
+        if [[ $age_days -lt $stale_days ]]; then
+            opt_msg "Periodic maintenance already current (${age_days}d ago)"
+            return 0
+        fi
+    fi
+
+    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+        if sudo periodic daily weekly monthly 2> /dev/null; then
+            opt_msg "Periodic maintenance triggered"
+        else
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to run periodic maintenance"
+        fi
+    else
+        opt_msg "Periodic maintenance triggered"
+    fi
+}
+
 # Dispatch optimization by action name.
 execute_optimization() {
     local action="$1"
@@ -920,6 +950,7 @@ execute_optimization() {
         bluetooth_reset) opt_bluetooth_reset ;;
         spotlight_index_optimize) opt_spotlight_index_optimize ;;
         launch_agents_cleanup) opt_launch_agents_cleanup ;;
+        periodic_maintenance) opt_periodic_maintenance ;;
         *)
             echo -e "${YELLOW}${ICON_ERROR}${NC} Unknown action: $action"
             return 1

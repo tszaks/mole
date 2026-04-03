@@ -144,6 +144,7 @@ EOF
     items+=('bluetooth_reset|Bluetooth Refresh|Restart Bluetooth module to fix connectivity (skips if in use)|true')
     items+=('spotlight_index_optimize|Spotlight Optimization|Rebuild index if search is slow (smart detection)|true')
     items+=('launch_agents_cleanup|Launch Agents Cleanup|Remove broken LaunchAgents whose binaries no longer exist|true')
+    items+=('periodic_maintenance|Periodic Maintenance|Run macOS daily/weekly/monthly maintenance scripts if stale|true')
 
     # Removed high-risk optimizations:
     # - startup_items_cleanup: Risk of deleting legitimate app helpers
