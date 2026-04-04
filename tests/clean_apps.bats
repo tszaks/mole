@@ -87,6 +87,48 @@ EOF
     [[ "$output" == *"com.example.App"* ]]
 }
 
+@test "scan_installed_apps filters missing value from osascript output" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+# Create a fake .app with a plist that has no CFBundleIdentifier
+mkdir -p "$HOME/Applications/FakeApp.app/Contents"
+cat > "$HOME/Applications/FakeApp.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>FakeApp</string>
+</dict>
+</plist>
+PLIST
+
+# Create a valid .app alongside it
+mkdir -p "$HOME/Applications/GoodApp.app/Contents"
+cat > "$HOME/Applications/GoodApp.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.GoodApp</string>
+</dict>
+</plist>
+PLIST
+
+debug_log() { :; }
+scan_installed_apps "$HOME/installed.txt"
+cat "$HOME/installed.txt"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"com.example.GoodApp"* ]]
+    [[ "$output" != *"missing value"* ]]
+}
+
 @test "is_bundle_orphaned returns true for old uninstalled bundle" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORPHAN_AGE_THRESHOLD=30 bash --noprofile --norc <<'EOF'
 set -euo pipefail
