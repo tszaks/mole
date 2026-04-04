@@ -132,6 +132,14 @@ get_install_commit() {
     fi
 }
 
+get_latest_commit_from_github() {
+    local sha
+    sha=$(curl -fsSL --connect-timeout 2 --max-time 3 \
+        "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null |
+        grep '"sha"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    echo "$sha"
+}
+
 # Background update notice
 check_for_updates() {
     local msg_cache="$HOME/.cache/mole/update_message"
@@ -140,28 +148,44 @@ check_for_updates() {
 
     (
         (
-            local latest
+            local channel
+            channel=$(get_install_channel)
 
-            latest=$(get_latest_version_from_github)
-            if [[ -z "$latest" ]]; then
-                latest=$(get_latest_version)
-            fi
+            if [[ "$channel" == "nightly" ]]; then
+                # Nightly: compare commit hashes instead of version numbers
+                local installed_commit latest_commit
+                installed_commit=$(get_install_commit)
+                latest_commit=$(get_latest_commit_from_github)
 
-            if [[ -n "$latest" && "$VERSION" != "$latest" && "$(printf '%s\n' "$VERSION" "$latest" | sort -V | head -1)" == "$VERSION" ]]; then
-                if is_homebrew_install; then
-                    # For Homebrew, only notify if the brew tap has the new version available locally
-                    local brew_latest
-                    brew_latest=$(get_homebrew_latest_version || true)
-                    if [[ -n "$brew_latest" && "$brew_latest" != "$VERSION" && "$(printf '%s\n' "$VERSION" "$brew_latest" | sort -V | head -1)" == "$VERSION" ]]; then
-                        printf "\nUpdate %s available, run %smo update%s\n\n" "$brew_latest" "$GREEN" "$NC" > "$msg_cache"
-                    else
-                        echo -n > "$msg_cache"
-                    fi
+                if [[ -n "$installed_commit" && -n "$latest_commit" && "${installed_commit:0:7}" != "${latest_commit:0:7}" ]]; then
+                    printf "\nNew nightly commit %s available, run %smo update --nightly%s\n\n" "${latest_commit:0:7}" "$GREEN" "$NC" > "$msg_cache"
                 else
-                    printf "\nUpdate %s available, run %smo update%s\n\n" "$latest" "$GREEN" "$NC" > "$msg_cache"
+                    echo -n > "$msg_cache"
                 fi
             else
-                echo -n > "$msg_cache"
+                local latest
+
+                latest=$(get_latest_version_from_github)
+                if [[ -z "$latest" ]]; then
+                    latest=$(get_latest_version)
+                fi
+
+                if [[ -n "$latest" && "$VERSION" != "$latest" && "$(printf '%s\n' "$VERSION" "$latest" | sort -V | head -1)" == "$VERSION" ]]; then
+                    if is_homebrew_install; then
+                        # For Homebrew, only notify if the brew tap has the new version available locally
+                        local brew_latest
+                        brew_latest=$(get_homebrew_latest_version || true)
+                        if [[ -n "$brew_latest" && "$brew_latest" != "$VERSION" && "$(printf '%s\n' "$VERSION" "$brew_latest" | sort -V | head -1)" == "$VERSION" ]]; then
+                            printf "\nUpdate %s available, run %smo update%s\n\n" "$brew_latest" "$GREEN" "$NC" > "$msg_cache"
+                        else
+                            echo -n > "$msg_cache"
+                        fi
+                    else
+                        printf "\nUpdate %s available, run %smo update%s\n\n" "$latest" "$GREEN" "$NC" > "$msg_cache"
+                    fi
+                else
+                    echo -n > "$msg_cache"
+                fi
             fi
         ) > /dev/null 2>&1 < /dev/null &
     )

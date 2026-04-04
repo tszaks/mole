@@ -513,6 +513,7 @@ batch_uninstall_applications() {
     local -a failed_items=()
     local -a success_items=()
     local -a local_network_warning_apps=()
+    local -a system_extension_warning_apps=()
     local current_index=0
     for detail in "${app_details[@]}"; do
         current_index=$((current_index + 1))
@@ -725,6 +726,13 @@ batch_uninstall_applications() {
             if [[ "$has_local_network_usage" == "true" ]]; then
                 local_network_warning_apps+=("$app_name")
             fi
+
+            # Check for orphaned system extensions (camera, network, endpoint security, etc.)
+            if [[ -n "$bundle_id" && "$bundle_id" != "unknown" && "$bundle_id" =~ ^[A-Za-z0-9._-]+$ && -d /Library/SystemExtensions ]]; then
+                if command find /Library/SystemExtensions -maxdepth 3 -name "*.systemextension" -path "*${bundle_id}*" -print -quit 2> /dev/null | grep -q .; then
+                    system_extension_warning_apps+=("$app_name")
+                fi
+            fi
         else
             if [[ -t 1 ]]; then
                 if [[ ${#app_details[@]} -gt 1 ]]; then
@@ -853,6 +861,18 @@ batch_uninstall_applications() {
         summary_details+=("${ICON_REVIEW} Local Network permissions on macOS 15+ can outlive app removal: ${YELLOW}${local_network_list}${NC}")
         summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Mole does not reset ${GRAY}/Volumes/Data/Library/Preferences/com.apple.networkextension*.plist${NC}")
         summary_details+=("${GRAY}${ICON_SUBLIST}${NC} If stale or duplicate entries remain, clear them manually in Recovery mode because the reset is global${NC}")
+    fi
+
+    if [[ ${#system_extension_warning_apps[@]} -gt 0 ]]; then
+        local ext_list=""
+        local idx
+        for ((idx = 0; idx < ${#system_extension_warning_apps[@]}; idx++)); do
+            [[ $idx -gt 0 ]] && ext_list+=", "
+            ext_list+="${system_extension_warning_apps[idx]}"
+        done
+
+        summary_details+=("${ICON_REVIEW} System extensions may remain after removal: ${YELLOW}${ext_list}${NC}")
+        summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Check ${GRAY}System Settings > General > Login Items & Extensions${NC} to remove leftover extensions")
     fi
 
     local title="Uninstall complete"
