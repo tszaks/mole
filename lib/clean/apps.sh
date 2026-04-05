@@ -336,6 +336,9 @@ clean_orphaned_app_data() {
     fi
 
     # CRITICAL: NEVER add LaunchAgents or LaunchDaemons (breaks login items/startup apps).
+    # CRITICAL: NEVER add Containers/ (managed by containermanagerd, stubs expected).
+    # CRITICAL: NEVER add Application Scripts/ (could break Shortcuts/Automator workflows).
+    # CRITICAL: NEVER add Group Containers/ (TeamID.BundleID names cause false-positive orphan checks).
     local -a resource_types=(
         "$HOME/Library/Caches|Caches|com.*:org.*:net.*:io.*"
         "$HOME/Library/Logs|Logs|com.*:org.*:net.*:io.*"
@@ -343,6 +346,8 @@ clean_orphaned_app_data() {
         "$HOME/Library/WebKit|WebKit|com.*:org.*:net.*:io.*"
         "$HOME/Library/HTTPStorages|HTTP|com.*:org.*:net.*:io.*"
         "$HOME/Library/Cookies|Cookies|*.binarycookies"
+        "$HOME/Library/Application Support|AppSupport|com.*:org.*:net.*:io.*"
+        "$HOME/Library/Preferences|Prefs|com.*:org.*:net.*:io.*"
     )
     for resource_type in "${resource_types[@]}"; do
         IFS='|' read -r base_path label patterns <<< "$resource_type"
@@ -381,6 +386,7 @@ clean_orphaned_app_data() {
                     local bundle_id=$(basename "$match")
                     bundle_id="${bundle_id%.savedState}"
                     bundle_id="${bundle_id%.binarycookies}"
+                    bundle_id="${bundle_id%.plist}"
                     if is_bundle_orphaned "$bundle_id" "$match" "$installed_bundles"; then
                         local size_kb
                         size_kb=$(get_path_size_kb "$match")
@@ -554,6 +560,7 @@ clean_orphaned_system_services() {
             # Skip Apple system files
             [[ "$filename" == com.apple.* ]] && continue
 
+            local matched_known=false
             for pattern_entry in "${known_orphan_patterns[@]}"; do
                 local file_pattern="${pattern_entry%%:*}"
                 local app_path="${pattern_entry#*:}"
@@ -561,16 +568,29 @@ clean_orphaned_system_services() {
                 # shellcheck disable=SC2053
                 if [[ "$filename" == $file_pattern ]] && [[ ! -d "$app_path" ]]; then
                     if _system_service_app_exists "$bundle_id" "$app_path"; then
-                        continue
+                        matched_known=true
+                        break
                     fi
                     orphaned_files+=("$helper")
                     local size_kb
                     size_kb=$(sudo du -skP "$helper" 2> /dev/null | awk '{print $1}' || echo "0")
                     total_orphaned_kb=$((total_orphaned_kb + size_kb))
                     orphaned_count=$((orphaned_count + 1))
+                    matched_known=true
                     break
                 fi
             done
+
+            # Generic detection: bundle-ID-style helpers not matched by hardcoded list
+            if [[ "$matched_known" == "false" ]] && [[ "$bundle_id" =~ ^(com|org|net|io)\. ]]; then
+                if ! _system_service_app_exists "$bundle_id" ""; then
+                    orphaned_files+=("$helper")
+                    local size_kb
+                    size_kb=$(sudo du -skP "$helper" 2> /dev/null | awk '{print $1}' || echo "0")
+                    total_orphaned_kb=$((total_orphaned_kb + size_kb))
+                    orphaned_count=$((orphaned_count + 1))
+                fi
+            fi
         done < <(sudo find /Library/PrivilegedHelperTools -maxdepth 1 -type f -print0 2> /dev/null)
     fi
 
