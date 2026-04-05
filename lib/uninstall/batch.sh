@@ -553,6 +553,13 @@ batch_uninstall_applications() {
         # Stop spinner before any removal attempt (avoids mixed output on errors)
         [[ -t 1 ]] && stop_inline_spinner
 
+        # For large apps, print a waiting hint so the terminal does not appear frozen
+        if [[ -t 1 && $total_kb -gt 1048576 && -z "$reason" ]]; then
+            local _wait_size
+            _wait_size=$(bytes_to_human "$((total_kb * 1024))")
+            echo -e "  ${GRAY}Removing ${app_name} (${_wait_size}), please wait...${NC}"
+        fi
+
         local used_brew_successfully=false
         if [[ -z "$reason" ]]; then
             if [[ "$is_brew_cask" == "true" && -n "$cask_name" ]]; then
