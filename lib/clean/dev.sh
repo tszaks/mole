@@ -868,6 +868,7 @@ clean_dev_mobile() {
     safe_clean ~/.android/cache/* "Android SDK cache"
     safe_clean ~/Library/Developer/Xcode/UserData/IB\ Support/* "Xcode Interface Builder cache"
     safe_clean ~/.cache/swift-package-manager/* "Swift package manager cache"
+    safe_clean ~/Library/Caches/org.swift.swiftpm/* "Swift package manager library cache"
     # Expo/React Native caches (preserve state.json which contains auth tokens).
     safe_clean ~/.expo/expo-go/* "Expo Go cache"
     safe_clean ~/.expo/android-apk-cache/* "Expo Android APK cache"
@@ -1069,6 +1070,21 @@ clean_dev_misc() {
     safe_clean ~/Library/Application\ Support/Claude/GPUCache/* "Claude GPU cache"
     safe_clean ~/Library/Application\ Support/Claude/DawnGraphiteCache/* "Claude Dawn cache"
     safe_clean ~/Library/Application\ Support/Claude/DawnWebGPUCache/* "Claude WebGPU cache"
+    safe_clean ~/Library/Application\ Support/Claude/sentry/* "Claude sentry cache"
+    safe_clean ~/Library/Application\ Support/Claude/pending-uploads/* "Claude pending uploads"
+    # Qoder (VS Code fork, Electron)
+    safe_clean ~/Library/Application\ Support/Qoder/Cache/* "Qoder cache"
+    safe_clean ~/Library/Application\ Support/Qoder/CachedData/* "Qoder cached data"
+    safe_clean ~/Library/Application\ Support/Qoder/CachedExtensionVSIXs/* "Qoder extension cache"
+    safe_clean ~/Library/Application\ Support/Qoder/Code\ Cache/* "Qoder code cache"
+    safe_clean ~/Library/Application\ Support/Qoder/GPUCache/* "Qoder GPU cache"
+    safe_clean ~/Library/Application\ Support/Qoder/DawnGraphiteCache/* "Qoder Dawn cache"
+    safe_clean ~/Library/Application\ Support/Qoder/DawnWebGPUCache/* "Qoder WebGPU cache"
+    safe_clean ~/Library/Application\ Support/Qoder/logs/* "Qoder logs"
+    # Prisma ORM engine binaries cache
+    safe_clean ~/.cache/prisma/* "Prisma cache"
+    # OpenCode AI tool cache
+    safe_clean ~/.cache/opencode/* "OpenCode cache"
 }
 # Shell and VCS leftovers.
 clean_dev_shell() {
@@ -1117,6 +1133,8 @@ clean_dev_editors() {
     clean_service_worker_cache "VS Code" "$HOME/Library/Application Support/Code/Service Worker/CacheStorage"
     safe_clean ~/Library/Application\ Support/Code/Service\ Worker/ScriptCache/* "VS Code Service Worker ScriptCache"
     safe_clean ~/Library/Caches/Zed/* "Zed cache"
+    safe_clean ~/Library/Caches/copilot/* "GitHub Copilot cache"
+    safe_clean ~/.cache/vscode-ripgrep/* "VS Code ripgrep cache"
     safe_clean ~/Library/Caches/Cursor/* "Cursor cache"
     safe_clean ~/Library/Application\ Support/Cursor/CachedData/* "Cursor cached data"
     safe_clean ~/Library/Application\ Support/Cursor/CachedExtensionVSIXs/* "Cursor extension cache"

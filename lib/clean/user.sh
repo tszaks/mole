@@ -670,6 +670,13 @@ clean_app_caches() {
     safe_clean ~/Library/Containers/com.apple.geod/Data/tmp/* "Geod temp files"
     safe_clean ~/Library/Containers/com.apple.stocks/Data/Library/Caches/* "Stocks cache"
     safe_clean ~/Library/Application\ Support/com.apple.wallpaper/aerials/thumbnails/* "Wallpaper aerials thumbnails"
+    safe_clean ~/Library/Caches/com.apple.helpd/* "macOS Help system cache"
+    safe_clean ~/Library/Caches/GeoServices/* "Maps geo tile cache"
+    safe_clean ~/Library/Containers/com.apple.AvatarUI.AvatarPickerMemojiPicker/Data/Library/Caches/* "Memoji picker cache"
+    safe_clean ~/Library/Containers/com.apple.AMPArtworkAgent/Data/Library/Caches/* "Music album art cache"
+    safe_clean ~/Library/Containers/com.apple.CoreDevice.CoreDeviceService/Data/Library/Caches/* "CoreDevice service cache"
+    safe_clean ~/Library/Containers/com.apple.NeptuneOneExtension/Data/Library/Caches/* "Apple Intelligence extension cache"
+    safe_clean ~/Library/Containers/com.apple.AppleMediaServicesUI.UtilityExtension/Data/tmp/* "Apple Media Services temp files"
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
     start_section_spinner "Scanning sandboxed apps..."
