@@ -26,6 +26,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
 diskutil() {
+    echo "   Part of Whole:            disk0"
     echo "   SMART Status:             Verified"
 }
 export -f diskutil
@@ -42,6 +43,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
 diskutil() {
+    echo "   Part of Whole:            disk0"
     echo "   SMART Status:             Failing"
 }
 export -f diskutil
@@ -73,6 +75,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/check/all.sh"
 diskutil() {
+    echo "   Part of Whole:            disk0"
     echo "   SMART Status:             Not Supported"
 }
 export -f diskutil

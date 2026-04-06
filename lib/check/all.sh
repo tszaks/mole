@@ -774,8 +774,10 @@ check_disk_smart() {
         return
     fi
 
-    local smart_status
-    smart_status=$(diskutil info disk0 2> /dev/null | awk -F: '/SMART Status/ {gsub(/^[ \t]+/, "", $2); print $2}')
+    local boot_disk smart_status
+    boot_disk=$(diskutil info / 2> /dev/null | awk -F: '/Part of Whole/ {gsub(/^[ \t]+/, "", $2); print $2}')
+    [[ -z "$boot_disk" ]] && return
+    smart_status=$(diskutil info "$boot_disk" 2> /dev/null | awk -F: '/SMART Status/ {gsub(/^[ \t]+/, "", $2); print $2}')
 
     if [[ -z "$smart_status" ]]; then
         return

@@ -979,11 +979,16 @@ opt_notification_cleanup() {
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         if command -v sqlite3 > /dev/null 2>&1; then
+            local sql_ok=0
             sqlite3 "$nc_db" \
                 "DELETE FROM record WHERE delivered_date < strftime('%s','now','-30 days'); VACUUM;" \
-                2> /dev/null || true
-            killall NotificationCenter 2> /dev/null || true
-            opt_msg "Notification Center database cleaned (was $(bytes_to_human $((db_size * 1024))))"
+                2> /dev/null || sql_ok=$?
+            if [[ $sql_ok -eq 0 ]]; then
+                killall NotificationCenter 2> /dev/null || true
+                opt_msg "Notification Center database cleaned (was $(bytes_to_human $((db_size * 1024))))"
+            else
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Notification Center cleanup skipped (database busy or locked)"
+            fi
         else
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} sqlite3 not available"
         fi
@@ -1047,11 +1052,18 @@ opt_coreduet_cleanup() {
         done
         # Remove ZOBJECT entries older than 90 days (CoreTime is Mac epoch: seconds since 2001-01-01)
         if command -v sqlite3 > /dev/null 2>&1; then
+            local sql_ok=0
             sqlite3 "$knowledge_db" \
                 "DELETE FROM ZOBJECT WHERE ZCREATIONDATE < (strftime('%s','now','-90 days') - strftime('%s','2001-01-01')); VACUUM;" \
-                2> /dev/null || true
+                2> /dev/null || sql_ok=$?
+            if [[ $sql_ok -eq 0 ]]; then
+                opt_msg "Knowledge database cleaned (was $(bytes_to_human $((total_size * 1024))))"
+            else
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Knowledge database cleanup skipped (database busy or locked)"
+            fi
+        else
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} sqlite3 not available"
         fi
-        opt_msg "Knowledge database cleaned (was $(bytes_to_human $((total_size * 1024))))"
     else
         opt_msg "Knowledge database cleaned (was $(bytes_to_human $((total_size * 1024))))"
     fi
