@@ -1065,11 +1065,14 @@ clean_project_artifacts() {
         start_inline_spinner "Calculating sizes..."
     fi
 
-    # Pre-compute all sizes in parallel to avoid sequential timeout hangs (issue #560).
-    # With N artifacts each taking up to 15s, sequential calculation can take N×15s.
-    # Parallel: all sizes computed concurrently, total ≤ single longest du call.
+    # Pre-compute sizes in parallel with sliding-window throttle.
+    # Unbounded parallelism (all N at once) causes I/O contention on cold
+    # filesystem cache, making du timeout and display "unknown" sizes.
     local -a _size_tmpfiles=()
     local -a _size_pids=()
+    local _max_size_jobs
+    _max_size_jobs=$(get_optimal_parallel_jobs io)
+
     for _sz_item in "${safe_to_clean[@]}"; do
         local _stmp
         _stmp=$(mktemp)
@@ -1077,6 +1080,11 @@ clean_project_artifacts() {
         _size_tmpfiles+=("$_stmp")
         (get_dir_size_kb "$_sz_item" > "$_stmp" 2> /dev/null) &
         _size_pids+=($!)
+
+        if [[ ${#_size_pids[@]} -ge $_max_size_jobs ]]; then
+            wait "${_size_pids[0]}" 2> /dev/null || true
+            _size_pids=("${_size_pids[@]:1}")
+        fi
     done
     for _spid in "${_size_pids[@]+"${_size_pids[@]}"}"; do
         wait "$_spid" 2> /dev/null || true
