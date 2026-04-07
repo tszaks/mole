@@ -241,6 +241,13 @@ EOF
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" clean --help
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"--external PATH"* ]]
+	[[ "$output" == *"already-uninstalled apps"* ]]
+}
+
+@test "mo uninstall --help directs leftover-only cleanup to clean" {
+	run env HOME="$HOME" "$PROJECT_ROOT/mole" uninstall --help
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"already gone, use mo clean"* ]]
 }
 
 @test "mo clean --external accepts canonicalized custom root" {

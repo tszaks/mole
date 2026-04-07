@@ -246,6 +246,35 @@ func TestViewShowsEscBackAndCtrlCQuitHints(t *testing.T) {
 	}
 }
 
+func TestOverviewViewShowsFreeSpaceLabel(t *testing.T) {
+	m := model{
+		path:       "/",
+		isOverview: true,
+		diskFree:   123_400_000,
+		entries:    []dirEntry{{Name: "Home", Path: "/tmp/home", Size: 1, IsDir: true}},
+	}
+
+	view := m.View()
+	want := fmt.Sprintf("(%s free)", humanizeBytes(m.diskFree))
+	if !strings.Contains(view, want) {
+		t.Fatalf("expected free-space label %q in overview view, got:\n%s", want, view)
+	}
+}
+
+func TestOverviewViewOmitsFreeSpaceLabelWhenUnknown(t *testing.T) {
+	m := model{
+		path:       "/",
+		isOverview: true,
+		diskFree:   0,
+		entries:    []dirEntry{{Name: "Home", Path: "/tmp/home", Size: 1, IsDir: true}},
+	}
+
+	view := m.View()
+	if strings.Contains(view, "free)") {
+		t.Fatalf("expected overview view to omit free-space label when unavailable, got:\n%s", view)
+	}
+}
+
 func TestCacheSaveLoadRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

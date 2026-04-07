@@ -3,7 +3,7 @@
 show_clean_help() {
     echo "Usage: mo clean [OPTIONS]"
     echo ""
-    echo "Clean up disk space by removing caches, logs, and temporary files."
+    echo "Clean up disk space by removing caches, logs, temporary files, and app leftovers from already-uninstalled apps."
     echo ""
     echo "Options:"
     echo "  --dry-run, -n     Preview cleanup without making changes"
@@ -57,6 +57,7 @@ show_uninstall_help() {
     echo "Usage: mo uninstall [OPTIONS]"
     echo ""
     echo "Interactively remove applications and their leftover files."
+    echo "For leftovers from apps that are already gone, use mo clean."
     echo ""
     echo "Options:"
     echo "  --dry-run         Preview app uninstallation without making changes"

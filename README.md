@@ -19,7 +19,7 @@
 ## Features
 
 - **All-in-one toolkit**: Combines CleanMyMac, AppCleaner, DaisyDisk, and iStat Menus in a **single binary**
-- **Deep cleaning**: Removes caches, logs, and browser leftovers to **reclaim gigabytes of space**
+- **Deep cleaning**: Removes caches, logs, browser leftovers, and orphaned app data to **reclaim gigabytes of space**
 - **Smart uninstaller**: Removes apps plus launch agents, preferences, and **hidden remnants**
 - **Disk insights**: Visualizes usage, finds large files, **rebuilds caches**, and refreshes system services
 - **Live monitoring**: Shows real-time CPU, GPU, memory, disk, and network stats
@@ -45,8 +45,8 @@ curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 
 ```bash
 mo                           # Interactive menu
-mo clean                     # Deep cleanup
-mo uninstall                 # Remove apps + leftovers
+mo clean                     # Deep cleanup + already-uninstalled app leftovers
+mo uninstall                 # Remove installed apps + their leftovers
 mo optimize                  # Refresh caches & services
 mo analyze                   # Visual disk explorer
 mo status                    # Live system health dashboard
@@ -91,6 +91,7 @@ Review [SECURITY.md](SECURITY.md) and [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for
 
 - Video tutorial: Watch the [Mole tutorial video](https://www.youtube.com/watch?v=UEe9-w4CcQ0), thanks to PAPAYA 電腦教室.
 - Safety and logs: `clean`, `uninstall`, `purge`, `installer`, and `remove` are destructive. Review with `--dry-run` first, and add `--debug` when needed. File operations are logged to `~/Library/Logs/mole/operations.log`. Disable with `MO_NO_OPLOG=1`. Review [SECURITY.md](SECURITY.md) and [SECURITY_AUDIT.md](SECURITY_AUDIT.md).
+- App leftovers: use `mo clean` when the app is already uninstalled, and `mo uninstall` when the app is still installed.
 - Navigation: Mole supports arrow keys and Vim bindings `h/j/k/l`.
 
 ## Features in Detail

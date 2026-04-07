@@ -1055,8 +1055,8 @@ perform_cleanup() {
         clean_application_support_logs
         end_section
 
-        # ===== 10. Orphaned data =====
-        start_section "Orphaned data"
+        # ===== 10. App leftovers =====
+        start_section "App leftovers"
         clean_orphaned_app_data
         clean_orphaned_system_services
         show_user_launch_agent_hint_notice
