@@ -349,8 +349,8 @@ Real feedback from users who shared Mole on X.
 
 ## Support
 
-- If Mole helped you, star the repo or [share it](https://twitter.com/intent/tweet?url=https://github.com/tw93/Mole&text=Mole%20-%20Deep%20clean%20and%20optimize%20your%20Mac.) with friends.
-- Got ideas or bugs? Read the [Contributing Guide](CONTRIBUTING.md) and open an issue or PR.
+- If Mole helped you, [share it](https://twitter.com/intent/tweet?url=https://github.com/tw93/Mole&text=Mole%20-%20Deep%20clean%20and%20optimize%20your%20Mac.) with friends. A star is always welcome.
+- Got ideas or bugs? Read the [Contributing Guide](CONTRIBUTING.md) and open an issue or PR. Feel free to contribute your best AI model to solve it.
 - I have two cats, TangYuan and Coke. If you think Mole delights your life, you can feed them <a href="https://miaoyan.app/cats.html?name=Mole" target="_blank">canned food 🥩</a>.
 
 <a href="https://miaoyan.app/cats.html?name=Mole"><img src="https://cdn.jsdelivr.net/gh/tw93/MiaoYan@main/assets/sponsors.svg" width="1000" loading="lazy" /></a>
