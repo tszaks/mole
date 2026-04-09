@@ -136,7 +136,7 @@ get_latest_commit_from_github() {
     local sha
     sha=$(curl -fsSL --connect-timeout 2 --max-time 3 \
         "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null |
-        grep '"sha"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+        grep '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
     echo "$sha"
 }
 

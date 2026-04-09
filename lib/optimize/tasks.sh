@@ -1133,9 +1133,9 @@ opt_login_items_audit() {
         item="${item# }"
         item="${item% }"
         [[ -z "$item" ]] && continue
-        checked=$((checked + 1))
         # Skip items with single quotes to avoid breaking the mdfind query string
         [[ "$item" == *"'"* ]] && continue
+        checked=$((checked + 1))
         if ! mdfind "kMDItemFSName == '${item}.app'" 2> /dev/null | grep -q .; then
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Broken login item: $item (app not found)"
             broken=$((broken + 1))

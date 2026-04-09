@@ -18,7 +18,7 @@ clean_xcode_derived_data() {
     local -a projects=()
     while IFS= read -r -d '' dir; do
         projects+=("$dir")
-    done < <(find "$dd_dir" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null || true)
+    done < <(command find "$dd_dir" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null || true)
 
     local project_count=${#projects[@]}
     [[ $project_count -eq 0 ]] && return 0
