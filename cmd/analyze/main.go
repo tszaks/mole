@@ -44,12 +44,13 @@ type scanResult struct {
 }
 
 type cacheEntry struct {
-	Entries    []dirEntry
-	LargeFiles []fileEntry
-	TotalSize  int64
-	TotalFiles int64
-	ModTime    time.Time
-	ScanTime   time.Time
+	Entries      []dirEntry
+	LargeFiles   []fileEntry
+	TotalSize    int64
+	TotalFiles   int64
+	ModTime      time.Time
+	ScanTime     time.Time
+	NeedsRefresh bool
 }
 
 type historyEntry struct {
@@ -63,6 +64,7 @@ type historyEntry struct {
 	LargeSelected int
 	LargeOffset   int
 	Dirty         bool
+	NeedsRefresh  bool
 	IsOverview    bool
 }
 
@@ -127,6 +129,7 @@ type model struct {
 	totalFiles           int64           // Total files found in current/last scan
 	lastTotalFiles       int64           // Total files from previous scan (for progress bar)
 	diskFree             int64           // Free disk space for the analyzed volume
+	viewNeedsRefresh     bool
 }
 
 func (m model) inOverviewMode() bool {
@@ -366,6 +369,9 @@ func (m model) scanCmd(path string) tea.Cmd {
 				TotalSize:  cached.TotalSize,
 				TotalFiles: cached.TotalFiles,
 			}
+			if cached.NeedsRefresh {
+				return scanResultMsg{path: path, result: result, err: nil, stale: true}
+			}
 			return scanResultMsg{path: path, result: result, err: nil}
 		}
 
@@ -469,6 +475,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case scanResultMsg:
 		if msg.path != "" && msg.path != m.path {
+			if msg.err == nil {
+				filteredEntries := filterNonEmptyEntries(msg.result.Entries)
+				result := msg.result
+				result.Entries = filteredEntries
+				m.cache[msg.path] = historyEntryFromScanResult(msg.path, result, m.cache[msg.path], msg.stale)
+			}
 			return m, nil
 		}
 		m.scanning = false
@@ -476,19 +488,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Scan failed: %v", msg.err)
 			return m, nil
 		}
-		filteredEntries := make([]dirEntry, 0, len(msg.result.Entries))
-		for _, e := range msg.result.Entries {
-			if e.Size > 0 {
-				filteredEntries = append(filteredEntries, e)
-			}
-		}
+		filteredEntries := filterNonEmptyEntries(msg.result.Entries)
+		result := msg.result
+		result.Entries = filteredEntries
 		m.entries = filteredEntries
 		m.largeFiles = msg.result.LargeFiles
 		m.totalSize = msg.result.TotalSize
 		m.totalFiles = msg.result.TotalFiles
+		m.viewNeedsRefresh = msg.stale
 		m.clampEntrySelection()
 		m.clampLargeSelection()
-		m.cache[m.path] = cacheSnapshot(m)
+		m.cache[m.path] = historyEntryFromScanResult(m.path, result, m.cache[m.path], msg.stale)
 		if m.totalSize > 0 {
 			if m.overviewSizeCache == nil {
 				m.overviewSizeCache = make(map[string]int64)
@@ -973,6 +983,8 @@ func (m model) goBack() (tea.Model, tea.Cmd) {
 	m.entries = last.Entries
 	m.largeFiles = last.LargeFiles
 	m.totalSize = last.TotalSize
+	m.totalFiles = last.TotalFiles
+	m.viewNeedsRefresh = last.NeedsRefresh
 	m.clampEntrySelection()
 	m.clampLargeSelection()
 	if len(m.entries) == 0 {
@@ -982,6 +994,20 @@ func (m model) goBack() (tea.Model, tea.Cmd) {
 	}
 	if m.selected < 0 {
 		m.selected = 0
+	}
+	if last.NeedsRefresh {
+		m.status = fmt.Sprintf("Loaded cached data for %s, refreshing...", displayPath(m.path))
+		m.scanning = true
+		if m.totalFiles > 0 {
+			m.lastTotalFiles = m.totalFiles
+		}
+		atomic.StoreInt64(m.filesScanned, 0)
+		atomic.StoreInt64(m.dirsScanned, 0)
+		atomic.StoreInt64(m.bytesScanned, 0)
+		if m.currentPath != nil {
+			m.currentPath.Store("")
+		}
+		return m, tea.Batch(m.scanFreshCmd(m.path), tickCmd())
 	}
 	m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
 	m.scanning = false
@@ -1024,6 +1050,7 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 		m.status = "Scanning..."
 		m.scanning = true
 		m.isOverview = false
+		m.viewNeedsRefresh = false
 		m.multiSelected = make(map[string]bool)
 		m.largeMultiSelected = make(map[string]bool)
 
@@ -1039,12 +1066,21 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 			m.largeFiles = slices.Clone(cached.LargeFiles)
 			m.totalSize = cached.TotalSize
 			m.totalFiles = cached.TotalFiles
+			m.viewNeedsRefresh = cached.NeedsRefresh
 			m.selected = cached.Selected
 			m.offset = cached.EntryOffset
 			m.largeSelected = cached.LargeSelected
 			m.largeOffset = cached.LargeOffset
 			m.clampEntrySelection()
 			m.clampLargeSelection()
+			if cached.NeedsRefresh {
+				m.status = fmt.Sprintf("Loaded cached data for %s, refreshing...", displayPath(m.path))
+				m.scanning = true
+				if m.totalFiles > 0 {
+					m.lastTotalFiles = m.totalFiles
+				}
+				return m, tea.Batch(m.scanFreshCmd(m.path), tickCmd())
+			}
 			m.status = fmt.Sprintf("Cached view for %s", displayPath(m.path))
 			m.scanning = false
 			return m, nil
