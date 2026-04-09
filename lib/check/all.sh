@@ -804,8 +804,8 @@ check_orphan_launch_agents() {
         while IFS= read -r -d '' plist; do
             label=$(basename "$plist" .plist)
             [[ "$label" == com.apple.* ]] && continue
-            program=$(/usr/bin/plutil -extract Program raw -o - "$plist" 2> /dev/null \
-                || /usr/bin/plutil -extract ProgramArguments.0 raw -o - "$plist" 2> /dev/null)
+            program=$(/usr/bin/plutil -extract Program raw -o - "$plist" 2> /dev/null ||
+                /usr/bin/plutil -extract ProgramArguments.0 raw -o - "$plist" 2> /dev/null)
             [[ "$program" == /* && ! -e "$program" ]] && orphans+=("$label")
         done < <(find "$dir" -maxdepth 1 -name "*.plist" -print0 2> /dev/null)
     done
@@ -816,7 +816,8 @@ check_orphan_launch_agents() {
         return
     fi
 
-    local s=""; ((count > 1)) && s="s"
+    local s=""
+    ((count > 1)) && s="s"
     echo -e "  ${GRAY}${ICON_WARNING}${NC} Launch Agents ${YELLOW}${count} orphan${s}${NC}"
     local preview="${orphans[0]}"
     ((count > 1)) && preview="${preview}, ${orphans[1]}"
