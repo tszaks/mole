@@ -10,10 +10,11 @@ import (
 )
 
 type jsonOutput struct {
-	Path       string      `json:"path"`
-	Entries    []jsonEntry `json:"entries"`
-	TotalSize  int64       `json:"total_size"`
-	TotalFiles int64       `json:"total_files"`
+	Path       string          `json:"path"`
+	Entries    []jsonEntry     `json:"entries"`
+	LargeFiles []jsonFileEntry `json:"large_files,omitempty"`
+	TotalSize  int64           `json:"total_size"`
+	TotalFiles int64           `json:"total_files"`
 }
 
 type jsonEntry struct {
@@ -21,6 +22,12 @@ type jsonEntry struct {
 	Path  string `json:"path"`
 	Size  int64  `json:"size"`
 	IsDir bool   `json:"is_dir"`
+}
+
+type jsonFileEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Size int64  `json:"size"`
 }
 
 func runJSONMode(path string, isOverview bool) {
@@ -39,43 +46,32 @@ func performScanForJSON(path string) jsonOutput {
 	currentPath := &atomic.Value{}
 	currentPath.Store("")
 
-	items, err := os.ReadDir(path)
+	result, err := scanPathConcurrentAllEntries(path, &filesScanned, &dirsScanned, &bytesScanned, currentPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read directory: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to scan directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	var entries []jsonEntry
-	var totalSize int64
-
-	for _, item := range items {
-		fullPath := path + "/" + item.Name()
-		var size int64
-
-		if item.IsDir() {
-			size = calculateDirSizeFast(fullPath, &filesScanned, &dirsScanned, &bytesScanned, currentPath)
-		} else {
-			info, err := item.Info()
-			if err == nil {
-				size = info.Size()
-				atomic.AddInt64(&filesScanned, 1)
-				atomic.AddInt64(&bytesScanned, size)
-			}
-		}
-
-		totalSize += size
+	entries := make([]jsonEntry, 0, len(result.Entries))
+	for _, e := range result.Entries {
 		entries = append(entries, jsonEntry{
-			Name:  item.Name(),
-			Path:  fullPath,
-			Size:  size,
-			IsDir: item.IsDir(),
+			Name:  e.Name,
+			Path:  e.Path,
+			Size:  e.Size,
+			IsDir: e.IsDir,
 		})
+	}
+
+	largeFiles := make([]jsonFileEntry, 0, len(result.LargeFiles))
+	for _, f := range result.LargeFiles {
+		largeFiles = append(largeFiles, jsonFileEntry(f))
 	}
 
 	return jsonOutput{
 		Path:       path,
 		Entries:    entries,
-		TotalSize:  totalSize,
-		TotalFiles: atomic.LoadInt64(&filesScanned),
+		LargeFiles: largeFiles,
+		TotalSize:  result.TotalSize,
+		TotalFiles: result.TotalFiles,
 	}
 }

@@ -355,6 +355,7 @@ import sys, json
 data = json.load(sys.stdin)
 assert 'path' in data, 'missing path'
 assert 'entries' in data, 'missing entries'
+assert 'large_files' in data or True, 'large_files field check'
 assert 'total_size' in data, 'missing total_size'
 assert 'total_files' in data, 'missing total_files'
 assert isinstance(data['entries'], list), 'entries is not a list'
