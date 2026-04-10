@@ -131,7 +131,7 @@ mole_purge_quick_hint_target_names() {
 mole_purge_resolve_path_case() {
     local path="$1"
     if [[ -d "$path" ]]; then
-        (cd "$path" 2>/dev/null && pwd -P) || printf '%s\n' "$path"
+        (cd "$path" 2> /dev/null && pwd -P) || printf '%s\n' "$path"
     else
         printf '%s\n' "$path"
     fi
