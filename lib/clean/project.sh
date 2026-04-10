@@ -75,7 +75,9 @@ discover_project_dirs() {
 
     for path in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
         if [[ -d "$path" ]]; then
-            discovered+=("$path")
+            # Resolve to canonical casing to avoid duplicates on
+            # case-insensitive filesystems (macOS APFS).
+            discovered+=("$(mole_purge_resolve_path_case "$path")")
         fi
     done
 
@@ -84,9 +86,11 @@ discover_project_dirs() {
     for dir in "$HOME"/*/; do
         [[ ! -d "$dir" ]] && continue
         dir="${dir%/}" # Remove trailing slash
+        # Resolve casing so that ~/code and ~/Code compare equal.
+        dir=$(mole_purge_resolve_path_case "$dir")
 
         local already_found=false
-        for existing in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
+        for existing in "${discovered[@]+"${discovered[@]}"}"; do
             if [[ "$dir" == "$existing" ]]; then
                 already_found=true
                 break
@@ -1027,12 +1031,24 @@ clean_project_artifacts() {
         sleep 0.2
     fi
 
-    # Collect all results
+    # Collect all results and deduplicate (overlapping search roots on
+    # case-insensitive filesystems can produce identical canonical paths).
+    # Uses a simple linear search instead of associative arrays for bash 3 compat.
     for scan_output in "${scan_temps[@]+"${scan_temps[@]}"}"; do
         if [[ -f "$scan_output" ]]; then
             while IFS= read -r item; do
                 if [[ -n "$item" ]]; then
-                    all_found_items+=("$item")
+                    local _already_seen=false
+                    local _existing
+                    for _existing in "${all_found_items[@]+"${all_found_items[@]}"}"; do
+                        if [[ "$_existing" == "$item" ]]; then
+                            _already_seen=true
+                            break
+                        fi
+                    done
+                    if [[ "$_already_seen" == "false" ]]; then
+                        all_found_items+=("$item")
+                    fi
                 fi
             done < "$scan_output"
             rm -f "$scan_output"
