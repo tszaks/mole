@@ -829,12 +829,94 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# Match app names from scan data against user-provided search terms.
+# Performs case-insensitive substring matching on app display names.
+# Returns matched entries from apps_data in selected_apps.
+match_apps_by_name() {
+    local -a search_terms=("$@")
+    selected_apps=()
+    local -a matched_indices=()
+
+    for search_term in "${search_terms[@]}"; do
+        local search_lower
+        search_lower=$(echo "$search_term" | tr '[:upper:]' '[:lower:]')
+        # Escape glob characters to prevent pattern injection
+        search_lower=${search_lower//\\/\\\\}
+        search_lower=${search_lower//\*/\\*}
+        search_lower=${search_lower//\?/\\?}
+        search_lower=${search_lower//\[/\\[}
+        local found=false
+        local idx=0
+        for app_data in "${apps_data[@]}"; do
+            IFS='|' read -r epoch app_path app_name bundle_id size last_used size_kb <<< "$app_data"
+            local name_lower
+            name_lower=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+            # Also try matching against the .app directory base name
+            local dir_name
+            dir_name=$(basename "$app_path" .app)
+            local dir_lower
+            dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
+
+            if [[ "$name_lower" == "$search_lower" || "$dir_lower" == "$search_lower" ]]; then
+                # Exact match - prefer this
+                local already=false
+                local mi
+                for mi in "${matched_indices[@]+"${matched_indices[@]}"}"; do
+                    [[ -z "$mi" ]] && continue
+                    [[ "$mi" == "$idx" ]] && already=true && break
+                done
+                if [[ "$already" == "false" ]]; then
+                    selected_apps+=("$app_data")
+                    matched_indices+=("$idx")
+                fi
+                found=true
+                break
+            fi
+            idx=$((idx + 1))
+        done
+
+        # If no exact match, try substring match
+        if [[ "$found" == "false" ]]; then
+            idx=0
+            for app_data in "${apps_data[@]}"; do
+                IFS='|' read -r epoch app_path app_name bundle_id size last_used size_kb <<< "$app_data"
+                local name_lower
+                name_lower=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+                local dir_name
+                dir_name=$(basename "$app_path" .app)
+                local dir_lower
+                dir_lower=$(echo "$dir_name" | tr '[:upper:]' '[:lower:]')
+
+                if [[ "$name_lower" == *"$search_lower"* || "$dir_lower" == *"$search_lower"* ]]; then
+                    local already=false
+                    local mi
+                    for mi in "${matched_indices[@]+"${matched_indices[@]}"}"; do
+                        [[ -z "$mi" ]] && continue
+                        [[ "$mi" == "$idx" ]] && already=true && break
+                    done
+                    if [[ "$already" == "false" ]]; then
+                        selected_apps+=("$app_data")
+                        matched_indices+=("$idx")
+                    fi
+                    found=true
+                fi
+                idx=$((idx + 1))
+            done
+        fi
+
+        if [[ "$found" == "false" ]]; then
+            echo -e "${YELLOW}Warning:${NC} No application found matching '$search_term'"
+        fi
+    done
+}
+
 main() {
     # Set current command for operation logging
     export MOLE_CURRENT_COMMAND="uninstall"
     log_operation_session_start "uninstall"
 
-    # Global flags
+    # Parse flags and collect app name arguments
+    local -a app_name_args=()
     for arg in "$@"; do
         case "$arg" in
             "--help" | "-h")
@@ -859,9 +941,7 @@ main() {
                 exit 1
                 ;;
             *)
-                echo "Unknown uninstall argument: $arg"
-                echo "Use 'mo uninstall --help' for supported options."
-                exit 1
+                app_name_args+=("$arg")
                 ;;
         esac
     done
@@ -870,6 +950,60 @@ main() {
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}${ICON_DRY_RUN} DRY RUN MODE${NC}, No app files or settings will be modified"
         printf '\n'
+    fi
+
+    # Direct uninstall by app name
+    if [[ ${#app_name_args[@]} -gt 0 ]]; then
+        local apps_file=""
+        if ! apps_file=$(scan_applications); then
+            show_cursor
+            return 1
+        fi
+        if [[ ! -f "$apps_file" ]]; then
+            show_cursor
+            return 1
+        fi
+        if ! load_applications "$apps_file"; then
+            rm -f "$apps_file"
+            show_cursor
+            return 1
+        fi
+
+        match_apps_by_name "${app_name_args[@]}"
+        rm -f "$apps_file"
+
+        if [[ ${#selected_apps[@]} -eq 0 ]]; then
+            show_cursor
+            echo "No matching applications found."
+            return 1
+        fi
+
+        show_cursor
+        clear_screen
+        local selection_count=${#selected_apps[@]}
+        echo -e "${BLUE}${ICON_CONFIRM}${NC} Matched ${selection_count} app(s):"
+        local index=1
+        for selected_app in "${selected_apps[@]}"; do
+            IFS='|' read -r _ app_path app_name _ size last_used _ <<< "$selected_app"
+            local size_display
+            size_display=$(uninstall_normalize_size_display "$size")
+            local last_display
+            last_display=$(uninstall_normalize_last_used_display "$last_used")
+            printf "%d. %s  %s  |  Last: %s\n" "$index" "$app_name" "$size_display" "$last_display"
+            ((index++))
+        done
+
+        printf '\n'
+        printf "Proceed with uninstallation? [y/N] "
+        local confirm
+        read -r confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "Aborted."
+            return 0
+        fi
+
+        batch_uninstall_applications
+        return 0
     fi
 
     local first_scan=true

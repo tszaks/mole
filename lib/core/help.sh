@@ -54,10 +54,17 @@ show_touchid_help() {
 }
 
 show_uninstall_help() {
-    echo "Usage: mo uninstall [OPTIONS]"
+    echo "Usage: mo uninstall [OPTIONS] [APP_NAME ...]"
     echo ""
     echo "Interactively remove applications and their leftover files."
+    echo "Optionally specify one or more app names to uninstall directly."
     echo "For leftovers from apps that are already gone, use mo clean."
+    echo ""
+    echo "Examples:"
+    echo "  mo uninstall                   Open interactive app selector"
+    echo "  mo uninstall slack             Uninstall Slack"
+    echo "  mo uninstall slack zoom        Uninstall Slack and Zoom"
+    echo "  mo uninstall --dry-run slack   Preview Slack uninstallation"
     echo ""
     echo "Options:"
     echo "  --dry-run         Preview app uninstallation without making changes"

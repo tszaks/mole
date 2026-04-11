@@ -589,3 +589,119 @@ EOF
 	[[ "$output" != *"$fake_global_bin/mo"* ]]
 	[[ "$output" != *"brew uninstall --force mole"* ]]
 }
+@test "match_apps_by_name finds exact match case-insensitively" {
+	run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1000|$HOME/Applications/TestApp.app|TestApp|com.example.TestApp|1.2 GB|1000000|1258291"
+	"1001|$HOME/Applications/TestApp2.app|TestApp2|com.example.TestApp2|500 MB|1000001|512000"
+	"1002|$HOME/Applications/TestApp3.app|TestApp3|com.example.TestApp3|300 MB|1000002|307200"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "testapp"
+echo "count=${#selected_apps[@]}"
+echo "match=${selected_apps[0]}"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=1"* ]]
+	[[ "$output" == *"TestApp"* ]]
+}
+
+@test "match_apps_by_name finds by directory name" {
+	run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1002|$HOME/Applications/TestApp.app|Test Application|com.example.TestApp|300 MB|1000002|307200"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "TestApp"
+echo "count=${#selected_apps[@]}"
+echo "match=${selected_apps[0]}"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=1"* ]]
+	[[ "$output" == *"Test Application"* ]]
+}
+
+@test "match_apps_by_name warns on no match" {
+	run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1000|$HOME/Applications/TestApp.app|TestApp|com.example.TestApp|1.2 GB|1000000|1258291"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "nonexistent"
+echo "count=${#selected_apps[@]}"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Warning: No application found matching 'nonexistent'"* ]]
+	[[ "$output" == *"count=0"* ]]
+}
+
+@test "match_apps_by_name handles multiple app names" {
+	run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1000|$HOME/Applications/TestApp.app|TestApp|com.example.TestApp|1.2 GB|1000000|1258291"
+	"1001|$HOME/Applications/TestApp2.app|TestApp2|com.example.TestApp2|500 MB|1000001|512000"
+	"1002|$HOME/Applications/TestApp3.app|TestApp3|com.example.TestApp3|300 MB|1000002|307200"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "testapp2" "testapp3"
+echo "count=${#selected_apps[@]}"
+for app in "${selected_apps[@]}"; do
+    IFS='|' read -r _ _ name _ _ _ _ <<< "$app"
+    echo "matched=$name"
+done
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=2"* ]]
+	[[ "$output" == *"matched=TestApp2"* ]]
+	[[ "$output" == *"matched=TestApp3"* ]]
+}
+
+@test "match_apps_by_name falls back to substring match" {
+	run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1000|$HOME/Applications/TestApp.app|TestApp|com.example.TestApp|1.2 GB|1000000|1258291"
+	"1001|$HOME/Applications/SlackDesktop.app|Slack|com.tinyspeck.slackmacgap|200 MB|1000001|204800"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "test"
+echo "count=${#selected_apps[@]}"
+for app in "${selected_apps[@]}"; do
+    IFS='|' read -r _ _ name _ _ _ _ <<< "$app"
+    echo "matched=$name"
+done
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=1"* ]]
+	[[ "$output" == *"matched=TestApp"* ]]
+}
+
+@test "match_apps_by_name does not duplicate when same name given twice" {
+	run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1000|$HOME/Applications/TestApp.app|TestApp|com.example.TestApp|1.2 GB|1000000|1258291"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "testapp" "testapp"
+echo "count=${#selected_apps[@]}"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=1"* ]]
+}
