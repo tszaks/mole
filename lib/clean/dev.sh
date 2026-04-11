@@ -2,10 +2,25 @@
 # Developer Tools Cleanup Module
 set -euo pipefail
 
-# Tool cache helper (respects DRY_RUN).
+# Tool cache helper (respects DRY_RUN and whitelist).
+# Args:
+#   $1 = description (display name)
+#   $2 = cache path to check against whitelist (empty string to skip check)
+#   $3+ = command to run
 clean_tool_cache() {
     local description="$1"
-    shift
+    local cache_path="$2"
+    shift 2
+
+    if [[ -n "$cache_path" ]] && is_path_whitelisted "$cache_path"; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $description · would skip (whitelist)"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $description · skipped (whitelist)"
+        fi
+        return 0
+    fi
+
     if [[ "$DRY_RUN" != "true" ]]; then
         local command_succeeded=false
         if [[ -t 1 ]]; then
@@ -31,8 +46,6 @@ clean_dev_npm() {
     local npm_cache_path="$npm_default_cache"
 
     if command -v npm > /dev/null 2>&1; then
-        clean_tool_cache "npm cache" npm cache clean --force
-
         start_section_spinner "Checking npm cache path..."
         npm_cache_path=$(run_with_timeout 2 npm config get cache 2> /dev/null) || npm_cache_path=""
         stop_section_spinner
@@ -41,6 +54,7 @@ clean_dev_npm() {
             npm_cache_path="$npm_default_cache"
         fi
 
+        clean_tool_cache "npm cache" "$npm_cache_path" npm cache clean --force
         note_activity
     fi
 
@@ -75,11 +89,17 @@ clean_dev_npm() {
     local pnpm_default_store=~/Library/pnpm/store
     # Check if pnpm is actually usable (not just Corepack shim)
     if command -v pnpm > /dev/null 2>&1 && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm --version > /dev/null 2>&1; then
-        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "pnpm cache" pnpm store prune
         local pnpm_store_path
         start_section_spinner "Checking store path..."
         pnpm_store_path=$(COREPACK_ENABLE_DOWNLOAD_PROMPT=0 run_with_timeout 2 pnpm store path 2> /dev/null) || pnpm_store_path=""
         stop_section_spinner
+
+        local pnpm_cache_check="$pnpm_default_store"
+        if [[ -n "$pnpm_store_path" && "$pnpm_store_path" == /* ]]; then
+            pnpm_cache_check="$pnpm_store_path"
+        fi
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "pnpm cache" "$pnpm_cache_check" pnpm store prune
+
         if [[ -n "$pnpm_store_path" && "$pnpm_store_path" != "$pnpm_default_store" ]]; then
             safe_clean "$pnpm_default_store"/* "Orphaned pnpm store"
         fi
@@ -92,7 +112,25 @@ clean_dev_npm() {
     local bun_cache_cleaned=false
     local bun_dry_run="${DRY_RUN:-false}"
     if command -v bun > /dev/null 2>&1 && bun --version > /dev/null 2>&1; then
-        if [[ "$bun_dry_run" != "true" ]]; then
+        if [[ -t 1 ]]; then start_section_spinner "Checking bun cache path..."; fi
+        bun_cache_path=$(run_with_timeout 2 bun pm cache 2> /dev/null) || bun_cache_path=""
+        if [[ -t 1 ]]; then stop_section_spinner; fi
+
+        if [[ -z "$bun_cache_path" || "$bun_cache_path" != /* ]]; then
+            bun_cache_path="$bun_default_cache"
+        fi
+
+        local bun_protected=false
+        is_path_whitelisted "$bun_cache_path" && bun_protected=true
+
+        if [[ "$bun_protected" == "true" ]]; then
+            if [[ "$bun_dry_run" == "true" ]]; then
+                echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} bun cache · would skip (whitelist)"
+            else
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} bun cache · skipped (whitelist)"
+            fi
+            bun_cache_cleaned=true
+        elif [[ "$bun_dry_run" != "true" ]]; then
             if [[ -t 1 ]]; then
                 start_section_spinner "Cleaning bun cache..."
             fi
@@ -108,14 +146,6 @@ clean_dev_npm() {
         else
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} bun cache · would clean"
             bun_cache_cleaned=true
-        fi
-
-        if [[ -t 1 ]]; then start_section_spinner "Checking bun cache path..."; fi
-        bun_cache_path=$(run_with_timeout 2 bun pm cache 2> /dev/null) || bun_cache_path=""
-        if [[ -t 1 ]]; then stop_section_spinner; fi
-
-        if [[ -z "$bun_cache_path" || "$bun_cache_path" != /* ]]; then
-            bun_cache_path="$bun_default_cache"
         fi
 
         local bun_cache_path_normalized="${bun_cache_path%/}"
@@ -148,7 +178,12 @@ clean_dev_npm() {
 clean_dev_python() {
     # Check pip3 is functional (not just macOS stub that triggers CLT install dialog)
     if command -v pip3 > /dev/null 2>&1 && pip3 --version > /dev/null 2>&1; then
-        clean_tool_cache "pip cache" bash -c 'pip3 cache purge > /dev/null 2>&1 || true'
+        local pip_cache_path
+        pip_cache_path=$(run_with_timeout 2 pip3 cache dir 2> /dev/null) || pip_cache_path=""
+        if [[ -z "$pip_cache_path" || "$pip_cache_path" != /* ]]; then
+            pip_cache_path="$HOME/Library/Caches/pip"
+        fi
+        clean_tool_cache "pip cache" "$pip_cache_path" bash -c 'pip3 cache purge > /dev/null 2>&1 || true'
         note_activity
     fi
     safe_clean ~/.pyenv/cache/* "pyenv cache"
@@ -187,12 +222,12 @@ clean_dev_go() {
     fi
 
     if [[ "$build_protected" != "true" && "$mod_protected" != "true" ]]; then
-        clean_tool_cache "Go cache" bash -c 'go clean -modcache > /dev/null 2>&1 || true; go clean -cache > /dev/null 2>&1 || true'
+        clean_tool_cache "Go cache" "" bash -c 'go clean -modcache > /dev/null 2>&1 || true; go clean -cache > /dev/null 2>&1 || true'
     elif [[ "$build_protected" == "true" ]]; then
-        clean_tool_cache "Go module cache" bash -c 'go clean -modcache > /dev/null 2>&1 || true'
+        clean_tool_cache "Go module cache" "" bash -c 'go clean -modcache > /dev/null 2>&1 || true'
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go build cache · skipped (whitelist)"
     else
-        clean_tool_cache "Go build cache" bash -c 'go clean -cache > /dev/null 2>&1 || true'
+        clean_tool_cache "Go build cache" "" bash -c 'go clean -cache > /dev/null 2>&1 || true'
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go module cache · skipped (whitelist)"
     fi
     note_activity
@@ -222,7 +257,10 @@ clean_dev_mise() {
 
     if command -v mise > /dev/null 2>&1; then
         if [[ "$DRY_RUN" != "true" ]]; then
-            clean_tool_cache "mise cache" bash -c 'mise cache clear > /dev/null 2>&1 || true'
+            clean_tool_cache "mise cache" "$mise_cache_path" bash -c 'mise cache clear > /dev/null 2>&1 || true'
+            note_activity
+        elif is_path_whitelisted "$mise_cache_path"; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} mise cache · would skip (whitelist)"
             note_activity
         else
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} mise cache · would clean"
@@ -288,7 +326,9 @@ clean_dev_docker() {
 clean_dev_nix() {
     if command -v nix-collect-garbage > /dev/null 2>&1; then
         if [[ "$DRY_RUN" != "true" ]]; then
-            clean_tool_cache "Nix garbage collection" nix-collect-garbage --delete-older-than 30d
+            clean_tool_cache "Nix garbage collection" "/nix/store" nix-collect-garbage --delete-older-than 30d
+        elif is_path_whitelisted "/nix/store"; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Nix garbage collection · would skip (whitelist)"
         else
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Nix garbage collection · would clean"
         fi
