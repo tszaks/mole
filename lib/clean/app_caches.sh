@@ -75,12 +75,12 @@ clean_xcode_tools() {
         # Remove unavailable simulator devices (not supported by the current Xcode SDK).
         if command -v xcrun > /dev/null 2>&1; then
             local unavail_count
-            unavail_count=$(xcrun simctl list devices unavailable 2>/dev/null | grep -cE '\([0-9A-F-]{36}\)' || echo "0")
+            unavail_count=$(xcrun simctl list devices unavailable 2> /dev/null | grep -cE '\([0-9A-F-]{36}\)' || echo "0")
             if [[ "$unavail_count" -gt 0 ]]; then
                 if [[ "${DRY_RUN:-false}" == "true" ]]; then
                     echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Unavailable simulators · would delete ${unavail_count} devices"
                 else
-                    xcrun simctl delete unavailable 2>/dev/null || true
+                    xcrun simctl delete unavailable 2> /dev/null || true
                     echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Unavailable simulators · deleted ${unavail_count} devices"
                 fi
                 note_activity

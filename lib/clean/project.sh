@@ -1422,7 +1422,7 @@ clean_project_artifacts() {
         item_recent_flags+=("$is_recent")
         # Build human-readable age label (bash 3.2 compatible — no assoc arrays).
         local _mod_time _age_secs _age_d
-        _mod_time=$(get_file_mtime "$item" 2>/dev/null || echo "0")
+        _mod_time=$(get_file_mtime "$item" 2> /dev/null || echo "0")
         _age_secs=$((_now_epoch - _mod_time))
         _age_d=$((_age_secs / 86400))
         if [[ $_age_d -lt 1 ]]; then
