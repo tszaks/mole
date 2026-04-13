@@ -956,6 +956,10 @@ opt_periodic_maintenance() {
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+        if ! sudo -n true 2> /dev/null; then
+            opt_msg "Periodic maintenance skipped (requires sudo)"
+            return 0
+        fi
         if sudo periodic daily weekly monthly 2> /dev/null; then
             opt_msg "Periodic maintenance triggered"
         else
@@ -1036,7 +1040,15 @@ opt_notification_cleanup() {
 }
 
 # Verify filesystem integrity via diskutil.
+# Disabled by default: diskutil verifyVolume triggers kernel-level I/O that
+# cannot be interrupted by SIGKILL when the volume has APFS inconsistencies,
+# causing the system to freeze. Set MOLE_ENABLE_DISK_VERIFY=1 to opt in.
 opt_disk_verify() {
+    if [[ "${MOLE_ENABLE_DISK_VERIFY:-0}" != "1" ]]; then
+        opt_msg "Disk verify skipped (set MOLE_ENABLE_DISK_VERIFY=1 to enable)"
+        return 0
+    fi
+
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         opt_msg "Disk verify · skipped in dry-run"
         return 0
