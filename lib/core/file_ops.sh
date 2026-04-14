@@ -403,6 +403,157 @@ safe_sudo_remove() {
 }
 
 # ============================================================================
+# Unified deletion helper (Trash + permanent routing with forensic log)
+# ============================================================================
+
+# Route a deletion through either macOS Trash or permanent rm, while logging
+# every call for forensic review. Designed for destructive paths where undo
+# matters (e.g. uninstall). Not used by cache-clean paths.
+#
+# Usage: mole_delete <path> [needs_sudo=false]
+#
+# Environment:
+#   MOLE_DELETE_MODE      "permanent" (default) or "trash"
+#   MOLE_DRY_RUN=1        Log intent, do not delete
+#   MOLE_TEST_TRASH_DIR   Test-only override; Trash moves go here via `mv`
+#                         instead of Finder/trash CLI. Required for bats.
+#   MOLE_DELETE_LOG       Override the log file path (default:
+#                         ~/Library/Logs/mole/deletions.log)
+#
+# Returns 0 on success, 1 on failure. Always appends a tab-separated line to
+# the deletions log: <iso_ts>\t<mode>\t<size_kb>\t<status>\t<path>
+mole_delete() {
+    local path="$1"
+    local needs_sudo="${2:-false}"
+    local mode="${MOLE_DELETE_MODE:-permanent}"
+
+    [[ -z "$path" ]] && return 1
+
+    # Nothing to do if path does not exist (but a broken symlink still counts).
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        return 0
+    fi
+
+    # Validation is delegated to the underlying safe_* helpers (which call
+    # validate_path_for_deletion). Trash routing only applies to paths the
+    # user could legitimately restore from, so we short-circuit invalid paths
+    # up front to avoid a no-op Trash move followed by a validation failure.
+    if [[ ! -L "$path" ]] && ! validate_path_for_deletion "$path"; then
+        return 1
+    fi
+
+    # Capture size before the delete so the log line is still useful when the
+    # path is gone afterwards. sudo variant avoids "du: Permission denied".
+    local size_kb=0
+    if [[ -e "$path" ]]; then
+        if [[ "$needs_sudo" == "true" ]]; then
+            size_kb=$(sudo du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+        else
+            size_kb=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
+        fi
+    fi
+    [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        debug_log "[DRY RUN] Would delete ($mode): $path"
+        _mole_delete_log "$mode" "$size_kb" "dry-run" "$path"
+        return 0
+    fi
+
+    # Trash mode: attempt Trash move first, fall through to permanent removal
+    # on failure so destructive operations never get silently skipped.
+    if [[ "$mode" == "trash" ]]; then
+        if _mole_move_to_trash "$path" "$needs_sudo"; then
+            _mole_delete_log "trash" "$size_kb" "ok" "$path"
+            log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "TRASHED" "$path" "${size_kb}KB"
+            return 0
+        fi
+        debug_log "Trash move failed, falling back to permanent delete: $path"
+    fi
+
+    # Permanent path. Delegate to the existing safe_* helpers so path
+    # validation, sudo handling, and existing log_operation calls remain
+    # unchanged for callers that have always gone through rm -rf.
+    local rc=0
+    if [[ -L "$path" ]]; then
+        safe_remove_symlink "$path" "$needs_sudo" || rc=$?
+    elif [[ "$needs_sudo" == "true" ]]; then
+        safe_sudo_remove "$path" || rc=$?
+    else
+        safe_remove "$path" "true" || rc=$?
+    fi
+
+    local status_label="ok"
+    [[ $rc -ne 0 ]] && status_label="error"
+    # Mark the trash-mode fallback so forensics can tell why rm was used.
+    if [[ "$mode" == "trash" && "$status_label" == "ok" ]]; then
+        status_label="trash-fallback-rm"
+    fi
+    _mole_delete_log "$mode" "$size_kb" "$status_label" "$path"
+    return "$rc"
+}
+
+# Move a path to the macOS Trash. Test harnesses set MOLE_TEST_TRASH_DIR to
+# redirect the move to a tmpdir, avoiding any Finder/osascript interaction.
+_mole_move_to_trash() {
+    local path="$1"
+    local needs_sudo="${2:-false}"
+
+    if [[ -n "${MOLE_TEST_TRASH_DIR:-}" ]]; then
+        mkdir -p "$MOLE_TEST_TRASH_DIR" 2> /dev/null || return 1
+        local dest="$MOLE_TEST_TRASH_DIR/$(basename "$path").$$.$(date +%s 2> /dev/null || echo 0)"
+        mv "$path" "$dest" 2> /dev/null
+        return $?
+    fi
+
+    # Blocked in test mode so uninstall tests never hit Finder/AppleScript.
+    if [[ "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        return 1
+    fi
+
+    # Prefer the `trash` CLI (Homebrew formula) when available — it's faster
+    # and does not need Finder running. Fall back to AppleScript, which
+    # ships with macOS but prompts for auth on root-owned targets.
+    if command -v trash > /dev/null 2>&1; then
+        if [[ "$needs_sudo" == "true" ]]; then
+            sudo trash "$path" > /dev/null 2>&1 && return 0
+        else
+            trash "$path" > /dev/null 2>&1 && return 0
+        fi
+    fi
+
+    # AppleScript fallback. Pass the path via argv so special chars (quotes,
+    # backslashes) cannot break out of the quoted string.
+    osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT'
+on run argv
+    set p to POSIX file (item 1 of argv)
+    tell application "Finder"
+        delete p
+    end tell
+end run
+APPLESCRIPT
+}
+
+_mole_delete_log() {
+    local mode="$1"
+    local size_kb="$2"
+    local status="$3"
+    local target="$4"
+
+    local log_file="${MOLE_DELETE_LOG:-$HOME/Library/Logs/mole/deletions.log}"
+    local log_dir
+    log_dir=$(dirname "$log_file")
+    mkdir -p "$log_dir" 2> /dev/null || return 0
+
+    local ts
+    ts=$(date '+%Y-%m-%dT%H:%M:%S%z' 2> /dev/null || echo "unknown")
+
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+        "$ts" "$mode" "$size_kb" "$status" "$target" \
+        >> "$log_file" 2> /dev/null || true
+}
+
+# ============================================================================
 # Safe Find and Delete Operations
 # ============================================================================
 
