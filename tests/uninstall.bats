@@ -790,3 +790,44 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"count=1"* ]]
 }
+
+@test "main clears pending input before app selection after scan (#726)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+
+trace_file="$HOME/uninstall-trace.log"
+app_cache_file="$HOME/apps-cache.txt"
+touch "$app_cache_file"
+
+log_operation_session_start() { :; }
+show_uninstall_help() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+clear_screen() { :; }
+scan_applications() { printf '%s\n' "$app_cache_file"; }
+load_applications() {
+    printf 'load\n' >> "$trace_file"
+    return 0
+}
+drain_pending_input() {
+    printf 'drain\n' >> "$trace_file"
+}
+select_apps_for_uninstall() {
+    printf 'select\n' >> "$trace_file"
+    return 1
+}
+
+eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+
+main
+
+expected=$(printf 'load\ndrain\nselect\n')
+actual=$(cat "$trace_file")
+[[ "$actual" == "$expected" ]] || {
+    printf 'unexpected trace:\n%s\n' "$actual" >&2
+    exit 1
+}
+INNER
+
+	[ "$status" -eq 0 ]
+}
