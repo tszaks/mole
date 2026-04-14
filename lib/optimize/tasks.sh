@@ -960,10 +960,17 @@ opt_periodic_maintenance() {
             opt_msg "Periodic maintenance skipped (requires sudo)"
             return 0
         fi
-        if sudo periodic daily weekly monthly 2> /dev/null; then
+        # Capture stderr so --debug can surface the real failure reason
+        # (missing /etc/periodic scripts, SIP, broken launchd, etc.).
+        local periodic_output rc
+        if periodic_output=$(sudo periodic daily weekly monthly 2>&1); then
             opt_msg "Periodic maintenance triggered"
         else
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to run periodic maintenance"
+            rc=$?
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to run periodic maintenance (exit=$rc)"
+            if [[ -n "$periodic_output" ]]; then
+                debug_log "periodic stderr: $periodic_output"
+            fi
         fi
     else
         opt_msg "Periodic maintenance triggered"
