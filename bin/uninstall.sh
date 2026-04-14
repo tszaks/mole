@@ -934,6 +934,10 @@ main() {
     export MOLE_CURRENT_COMMAND="uninstall"
     log_operation_session_start "uninstall"
 
+    # Default to Trash routing so an accidental uninstall is recoverable.
+    # The caller can opt back into rm -rf with --permanent. See #723.
+    export MOLE_DELETE_MODE="${MOLE_DELETE_MODE:-trash}"
+
     # Parse flags and collect app name arguments
     local -a app_name_args=()
     for arg in "$@"; do
@@ -947,6 +951,9 @@ main() {
                 ;;
             "--dry-run" | "-n")
                 export MOLE_DRY_RUN=1
+                ;;
+            "--permanent")
+                export MOLE_DELETE_MODE="permanent"
                 ;;
             "--whitelist")
                 echo "Unknown uninstall option: $arg"

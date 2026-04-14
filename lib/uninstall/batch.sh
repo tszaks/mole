@@ -239,19 +239,14 @@ remove_file_list() {
             continue
         fi
 
-        if [[ -L "$file" ]]; then
-            safe_remove_symlink "$file" "$use_sudo" && ((++count)) || true
+        if [[ "$use_sudo" == "true" ]] && is_uninstall_dry_run; then
+            debug_log "[DRY RUN] Would sudo remove: $file"
+            ((++count))
         else
-            if [[ "$use_sudo" == "true" ]]; then
-                if is_uninstall_dry_run; then
-                    debug_log "[DRY RUN] Would sudo remove: $file"
-                    ((++count))
-                else
-                    safe_sudo_remove "$file" && ((++count)) || true
-                fi
-            else
-                safe_remove "$file" true && ((++count)) || true
-            fi
+            # mole_delete routes through Trash when MOLE_DELETE_MODE=trash
+            # (uninstall default), falls back to the underlying safe_* helpers
+            # in permanent mode or when Trash is unavailable. See #723.
+            mole_delete "$file" "$use_sudo" && ((++count)) || true
         fi
     done <<< "$file_list"
 
@@ -581,14 +576,8 @@ batch_uninstall_applications() {
                     fi
 
                     if [[ $cask_state -eq 1 ]]; then
-                        if [[ "$needs_sudo" == true ]]; then
-                            if ! safe_sudo_remove "$app_path"; then
-                                reason="brew cleanup incomplete, manual removal failed"
-                            fi
-                        else
-                            if ! safe_remove "$app_path" true; then
-                                reason="brew cleanup incomplete, manual removal failed"
-                            fi
+                        if ! mole_delete "$app_path" "$needs_sudo"; then
+                            reason="brew cleanup incomplete, manual removal failed"
                         fi
                     elif [[ $cask_state -eq 0 ]]; then
                         reason="brew uninstall failed, package still installed"
@@ -614,24 +603,24 @@ batch_uninstall_applications() {
                                 reason="protected system symlink, cannot remove"
                                 ;;
                             *)
-                                if ! safe_remove_symlink "$app_path" "true"; then
+                                if ! mole_delete "$app_path" "true"; then
                                     reason="failed to remove symlink"
                                 fi
                                 ;;
                         esac
                     else
-                        if ! safe_remove_symlink "$app_path" "true"; then
+                        if ! mole_delete "$app_path" "true"; then
                             reason="failed to remove symlink"
                         fi
                     fi
                 else
                     if is_uninstall_dry_run; then
-                        if ! safe_remove "$app_path" true; then
+                        if ! mole_delete "$app_path" "false"; then
                             reason="dry-run path validation failed"
                         fi
                     else
                         local ret=0
-                        safe_sudo_remove "$app_path" || ret=$?
+                        mole_delete "$app_path" "true" || ret=$?
                         if [[ $ret -ne 0 ]]; then
                             local diagnosis
                             diagnosis=$(diagnose_removal_failure "$ret" "$app_name")
@@ -640,7 +629,7 @@ batch_uninstall_applications() {
                     fi
                 fi
             else
-                if ! safe_remove "$app_path" true; then
+                if ! mole_delete "$app_path" "false"; then
                     if [[ ! -w "$(dirname "$app_path")" ]]; then
                         reason="parent directory not writable"
                     else
@@ -699,7 +688,7 @@ batch_uninstall_applications() {
                 if [[ -d "$HOME/Library/Preferences/ByHost" ]]; then
                     if [[ "$bundle_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
                         while IFS= read -r -d '' plist_file; do
-                            safe_remove "$plist_file" true > /dev/null || true
+                            mole_delete "$plist_file" "true" || true
                         done < <(command find "$HOME/Library/Preferences/ByHost" -maxdepth 1 -type f -name "${bundle_id}.*.plist" -print0 2> /dev/null || true)
                     else
                         debug_log "Skipping ByHost cleanup, invalid bundle id: $bundle_id"

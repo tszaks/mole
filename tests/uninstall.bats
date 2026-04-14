@@ -831,3 +831,70 @@ INNER
 
 	[ "$status" -eq 0 ]
 }
+
+
+# ---------------------------------------------------------------------------
+# #723: Trash routing default and --permanent flag
+# ---------------------------------------------------------------------------
+
+@test "uninstall main sets MOLE_DELETE_MODE=trash by default" {
+	local apps_cache
+	apps_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-723-trash.XXXXXX")"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+log_operation_session_start() { :; }
+show_uninstall_help() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+clear_screen() { :; }
+scan_applications() { printf '%s\n' "$APPS_CACHE_FILE"; }
+load_applications() { return 0; }
+drain_pending_input() { :; }
+select_apps_for_uninstall() {
+    printf 'delete_mode=%s\n' "${MOLE_DELETE_MODE:-unset}"
+    return 1
+}
+
+eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+main
+INNER
+
+	rm -f "$apps_cache"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"delete_mode=trash"* ]]
+}
+
+@test "uninstall main sets MOLE_DELETE_MODE=permanent with --permanent flag" {
+	local apps_cache
+	apps_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-723-perm.XXXXXX")"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+log_operation_session_start() { :; }
+show_uninstall_help() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+clear_screen() { :; }
+scan_applications() { printf '%s\n' "$APPS_CACHE_FILE"; }
+load_applications() { return 0; }
+drain_pending_input() { :; }
+select_apps_for_uninstall() {
+    printf 'delete_mode=%s\n' "${MOLE_DELETE_MODE:-unset}"
+    return 1
+}
+
+eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+main --permanent
+INNER
+
+	rm -f "$apps_cache"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"delete_mode=permanent"* ]]
+}
