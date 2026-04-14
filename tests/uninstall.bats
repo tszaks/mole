@@ -307,6 +307,91 @@ EOF
 	[[ "$output" != *"more files"* ]]
 }
 
+@test "uninstall_persist_cache_file heals non-writable destination" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+# Source only the helper by evaluating its function definition.
+eval "$(sed -n '/^uninstall_persist_cache_file()/,/^}$/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+src="$HOME/cache.src"
+dst="$HOME/cache.dst"
+printf 'fresh-data\n' > "$src"
+printf 'stale-data\n' > "$dst"
+chmod 0444 "$dst"
+[[ ! -w "$dst" ]] || { echo "precondition: dst should be read-only" >&2; exit 1; }
+
+uninstall_persist_cache_file "$src" "$dst"
+
+[[ ! -e "$src" ]] || { echo "src should be gone" >&2; exit 1; }
+[[ -f "$dst" ]] || { echo "dst missing" >&2; exit 1; }
+grep -q 'fresh-data' "$dst" || { echo "dst not updated"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "uninstall_persist_cache_file does not hang when mv would prompt (stdin closed)" {
+	# Regression for #722: BSD mv without -f prompts on non-writable dst and
+	# blocks reading stdin. The helper must close stdin and use -f.
+	#
+	# The hang detector uses a marker file rather than a PID-based watchdog:
+	# PIDs get recycled quickly on CI and a stale `kill -9 $pid` can succeed
+	# against an unrelated process, producing a false HANG. The marker
+	# approach only cares about whether the helper itself completed.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+eval "$(sed -n '/^uninstall_persist_cache_file()/,/^}$/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+src="$HOME/snap.src"
+dst="$HOME/snap.dst"
+done_marker="$HOME/snap.done"
+printf 'x\n' > "$src"
+printf 'y\n' > "$dst"
+chmod 0444 "$dst"
+
+(
+    printf 'n\nn\nn\n' | uninstall_persist_cache_file "$src" "$dst"
+    : > "$done_marker"
+) &
+bgpid=$!
+
+# Poll for completion marker for up to ~5s.
+for _ in $(seq 1 50); do
+    [[ -e "$done_marker" ]] && break
+    sleep 0.1
+done
+
+if [[ ! -e "$done_marker" ]]; then
+    kill -9 "$bgpid" 2>/dev/null || true
+    echo HANG
+fi
+wait "$bgpid" 2>/dev/null || true
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"HANG"* ]]
+}
+
+@test "uninstall_persist_cache_file is a no-op when source is empty" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+eval "$(sed -n '/^uninstall_persist_cache_file()/,/^}$/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+src="$HOME/empty.src"
+dst="$HOME/keep.dst"
+: > "$src"
+printf 'untouched\n' > "$dst"
+
+uninstall_persist_cache_file "$src" "$dst"
+
+[[ ! -e "$src" ]] || exit 1
+grep -q 'untouched' "$dst" || exit 1
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "safe_remove can remove a simple directory" {
 	mkdir -p "$HOME/test_dir"
 	touch "$HOME/test_dir/file.txt"
