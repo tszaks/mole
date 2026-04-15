@@ -420,7 +420,7 @@ func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	concurrency := min(runtime.NumCPU()*4, 64)
+	concurrency := min(runtime.NumCPU()*cpuMultiplier, maxWorkers)
 	sem := make(chan struct{}, concurrency)
 
 	var walk func(string)

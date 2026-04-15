@@ -22,10 +22,10 @@ const (
 	staleCacheTTL          = 3 * 24 * time.Hour
 
 	// Worker pool limits.
-	minWorkers         = 16
-	maxWorkers         = 64
-	cpuMultiplier      = 4
-	maxDirWorkers      = 32
+	minWorkers         = 8
+	maxWorkers         = 32
+	cpuMultiplier      = 2
+	maxDirWorkers      = 16
 	openCommandTimeout = 10 * time.Second
 )
 
