@@ -1266,7 +1266,7 @@ get_diagnostic_report_paths_for_app() {
             *) continue ;;
         esac
         case "$base" in
-            *.ips | *.crash | *.spin) ;;
+            *.ips | *.crash | *.spin | *.diag) ;;
             *) continue ;;
         esac
         printf '%s\n' "$f"
