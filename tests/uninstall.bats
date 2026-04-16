@@ -60,6 +60,33 @@ EOF
 	[[ "$result" == *"LaunchAgents/com.example.TestApp.plist"* ]]
 }
 
+@test "find_app_system_files discovers bundle-id-prefixed LaunchDaemons" {
+	fakebin="$HOME/fakebin"
+	mkdir -p "$fakebin"
+
+	cat > "$fakebin/find" <<'SCRIPT'
+#!/bin/sh
+args="$*"
+
+case "$args" in
+  *"/Library/LaunchDaemons"*' -name com.west2online.ClashXPro*.plist '*)
+    printf '%s\0' "/Library/LaunchDaemons/com.west2online.ClashXPro.ProxyConfigHelper.plist"
+    ;;
+esac
+SCRIPT
+	chmod +x "$fakebin/find"
+
+	run env HOME="$HOME" PATH="$fakebin:$PATH" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+result=$(find_app_system_files "com.west2online.ClashXPro" "ClashX Pro")
+[[ "$result" == *"/Library/LaunchDaemons/com.west2online.ClashXPro.ProxyConfigHelper.plist"* ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "get_diagnostic_report_paths_for_app avoids executable prefix collisions" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

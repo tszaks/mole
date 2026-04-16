@@ -1347,6 +1347,18 @@ find_app_system_files() {
         system_files+=("$p")
     done
 
+    # System LaunchAgents/LaunchDaemons often use bundle-id-derived helper
+    # labels (for example "<bundle>.ProxyConfigHelper.plist"), so scan for
+    # validated reverse-DNS bundle-id prefixes before falling back to app name.
+    if [[ -n "$bundle_id" && "$bundle_id" != "unknown" &&
+        "$bundle_id" =~ ^[a-zA-Z0-9][-a-zA-Z0-9]*(\.[a-zA-Z0-9][-a-zA-Z0-9]*)+$ ]]; then
+        for base in /Library/LaunchAgents /Library/LaunchDaemons; do
+            [[ -d "$base" ]] && while IFS= read -r -d '' plist; do
+                system_files+=("$plist")
+            done < <(command find "$base" -maxdepth 1 -name "${bundle_id}*.plist" -print0 2> /dev/null)
+        done
+    fi
+
     # System LaunchAgents/LaunchDaemons by name
     if [[ ${#app_name} -gt 3 ]]; then
         for base in /Library/LaunchAgents /Library/LaunchDaemons; do
