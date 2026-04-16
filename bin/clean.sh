@@ -73,7 +73,7 @@ if [[ -f "$HOME/.config/mole/whitelist" ]]; then
         fi
 
         if [[ "$line" != "$FINDER_METADATA_SENTINEL" ]]; then
-            if [[ ! "$line" =~ ^[a-zA-Z0-9/_.@\ *-]+$ ]]; then
+            if [[ "$line" =~ [[:cntrl:]] ]]; then
                 WHITELIST_WARNINGS+=("Invalid path format: $line")
                 continue
             fi

@@ -73,15 +73,17 @@ clean_xcode_tools() {
         safe_clean ~/Library/Developer/CoreSimulator/Devices/*/data/tmp/* "Simulator temp files"
         safe_clean ~/Library/Logs/CoreSimulator/* "CoreSimulator logs"
         # Remove unavailable simulator devices (not supported by the current Xcode SDK).
+        # run_with_timeout guards against xcrun blocking when only CLT is installed
+        # (can launch an invisible install dialog or wait on CoreSimulator XPC indefinitely).
         if command -v xcrun > /dev/null 2>&1; then
             local unavail_count
-            unavail_count=$(xcrun simctl list devices unavailable 2> /dev/null | command awk '/\([0-9A-F-]{36}\)/ { count++ } END { print count+0 }')
+            unavail_count=$(run_with_timeout 2 xcrun simctl list devices unavailable 2> /dev/null | command awk '/\([0-9A-F-]{36}\)/ { count++ } END { print count+0 }')
             [[ "$unavail_count" =~ ^[0-9]+$ ]] || unavail_count=0
             if [[ "$unavail_count" -gt 0 ]]; then
                 if [[ "${DRY_RUN:-false}" == "true" ]]; then
                     echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Unavailable simulators · would delete ${unavail_count} devices"
                 else
-                    xcrun simctl delete unavailable 2> /dev/null || true
+                    run_with_timeout 5 xcrun simctl delete unavailable 2> /dev/null || true
                     echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Unavailable simulators · deleted ${unavail_count} devices"
                 fi
                 note_activity

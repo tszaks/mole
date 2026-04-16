@@ -116,6 +116,25 @@ setup() {
     [ "$status" -eq 1 ]
 }
 
+@test "whitelist validation accepts special and non-ASCII characters (#749)" {
+    # Verify the [[:cntrl:]] guard accepts valid macOS path chars and rejects control chars.
+    run bash --noprofile --norc -c "
+        accept() { [[ ! \"\$1\" =~ [[:cntrl:]] ]] && echo ACCEPT || echo REJECT; }
+        accept '/Users/me/Library/Application Support/Foo & Bar'
+        accept '/Users/me/Library/Caches/com.example+beta'
+        accept '/Users/me/Library/Caches/com.example(Preview)'
+        accept '/Users/me/Library/Caches/บริษัท'
+        accept '/Users/me/Library/Caches/app,[test]'
+        [[ \$'line\nbreak' =~ [[:cntrl:]] ]] && echo REJECT_NEWLINE || echo FAIL
+        [[ \$'tab\there' =~ [[:cntrl:]] ]] && echo REJECT_TAB || echo FAIL
+    "
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"ACCEPT"* ]]
+    [[ "$output" != *"REJECT /Users"* ]]
+    [[ "$output" == *"REJECT_NEWLINE"* ]]
+    [[ "$output" == *"REJECT_TAB"* ]]
+}
+
 @test "is_path_whitelisted protects parent directories of whitelisted nested paths" {
     local status
     if HOME="$HOME" bash --noprofile --norc -c "
