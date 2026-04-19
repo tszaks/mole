@@ -50,55 +50,37 @@ json_validate() {
 
 # Parse optimization items from JSON array.
 # Outputs pipe-delimited records: action|name|description|safe
+# Single awk pass instead of per-item grep+sed to avoid subprocess overhead.
 parse_optimization_items() {
     local json="$1"
-    # Extract the optimizations array content
-    local in_array=false
-    local brace_count=0
-    local current_item=""
-
-    while IFS= read -r line; do
-        # Detect start of optimizations array
-        if [[ "$line" == *'"optimizations"'*'['* ]]; then
-            in_array=true
-            continue
-        fi
-
-        [[ "$in_array" != "true" ]] && continue
-
-        # Strip quoted strings before counting braces to handle braces inside string values
-        # e.g., "description": "Use {braces} here" should not affect brace counting
-        local line_for_counting
-        # shellcheck disable=SC2001
-        line_for_counting=$(echo "$line" | sed 's/"[^"]*"//g')
-
-        # Count braces to track object boundaries (using stripped line)
-        if [[ "$line_for_counting" == *'{'* ]]; then
-            ((brace_count++))
-        fi
-
-        if ((brace_count > 0)); then
-            current_item+="$line"
-        fi
-
-        if [[ "$line_for_counting" == *'}'* ]]; then
-            ((brace_count--))
-            if ((brace_count == 0)) && [[ -n "$current_item" ]]; then
-                # Extract fields from the collected item
-                local action name desc safe
-                action=$(echo "$current_item" | grep -o '"action"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"action"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-                name=$(echo "$current_item" | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-                desc=$(echo "$current_item" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-                safe=$(echo "$current_item" | grep -o '"safe"[[:space:]]*:[[:space:]]*[a-z]*' | sed 's/.*:[[:space:]]*//')
-
-                [[ -n "$action" ]] && echo "${action}|${name}|${desc}|${safe}"
-                current_item=""
-            fi
-        fi
-
-        # End of array (using stripped line)
-        [[ "$line_for_counting" == *']'* ]] && ((brace_count == 0)) && break
-    done <<< "$json"
+    awk '
+    function extract(line, key,    pat, val, start, end) {
+        pat = "\"" key "\"[ \t]*:[ \t]*\""
+        if (match(line, pat)) {
+            start = RSTART + RLENGTH
+            val = substr(line, start)
+            # Find closing quote (skip escaped quotes)
+            end = 1
+            while (end <= length(val)) {
+                if (substr(val, end, 1) == "\"" && substr(val, end-1, 1) != "\\") break
+                end++
+            }
+            return substr(val, 1, end - 1)
+        }
+        return ""
+    }
+    /"optimizations".*\[/ { in_arr=1; next }
+    !in_arr { next }
+    /\]/ && !in_obj { exit }
+    /{/ { in_obj=1; action=""; name=""; desc=""; safe="" }
+    in_obj && /"action"/ { action = extract($0, "action") }
+    in_obj && /"name"/ { name = extract($0, "name") }
+    in_obj && /"description"/ { desc = extract($0, "description") }
+    in_obj && /"safe"/ {
+        val = $0; sub(/.*"safe"[[:space:]]*:[[:space:]]*/, "", val); sub(/[^a-z].*/, "", val); safe = val
+    }
+    /}/ { if (in_obj && action != "") print action "|" name "|" desc "|" safe; in_obj=0 }
+    ' <<< "$json"
 }
 
 run_system_checks() {

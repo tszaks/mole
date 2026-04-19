@@ -228,7 +228,7 @@ normalize_paths_for_cleanup() {
     # awk can filter child paths by tracking only the last kept path.
     # Paths with embedded newlines cannot go through the newline-delimited pipeline;
     # they are output directly with null-byte delimiters and skipped by the sort pass.
-    if [[ ${#input_paths[@]} -gt 500 ]]; then
+    if [[ ${#input_paths[@]} -gt 50 ]]; then
         local -a _fast_pipeline=()
         local _fast_path
         for _fast_path in "${input_paths[@]}"; do
@@ -303,7 +303,9 @@ normalize_paths_for_cleanup() {
     done <<< "$sorted_paths"
 
     # Append passthrough paths (newline-containing; not deduplicated against others).
-    result_paths+=("${passthrough_paths[@]}")
+    if [[ ${#passthrough_paths[@]} -gt 0 ]]; then
+        result_paths+=("${passthrough_paths[@]}")
+    fi
 
     if [[ ${#result_paths[@]} -gt 0 ]]; then
         printf '%s\0' "${result_paths[@]}"
