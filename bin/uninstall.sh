@@ -1024,8 +1024,29 @@ uninstall_list_apps() {
         local uninstall_name="${cask:-$app_name}"
         local size_display
         size_display=$(uninstall_normalize_size_display "$size")
-        printf '%-36s %-30s %-30s %8s\n' \
-            "${app_name:0:34}" \
+
+        # Truncate by display columns, then adjust printf width for CJK.
+        # printf counts bytes (LC_ALL=C), but CJK chars are 3 bytes yet only
+        # 2 display columns wide, so we pad with the extra bytes to land on
+        # the correct visual column.
+        local name_trunc name_display_w name_byte_count name_printf_w
+        name_trunc=$(truncate_by_display_width "$app_name" 34)
+        name_display_w=$(get_display_width "$name_trunc")
+
+        # Get byte count in C locale for printf
+        local old_lc="${LC_ALL:-}"
+        export LC_ALL=C
+        name_byte_count=${#name_trunc}
+        if [[ -n "$old_lc" ]]; then
+            export LC_ALL="$old_lc"
+        else
+            unset LC_ALL
+        fi
+
+        name_printf_w=$((36 + name_byte_count - name_display_w))
+
+        printf "%-*s %-30s %-30s %8s\n" \
+            "$name_printf_w" "$name_trunc" \
             "${bundle_id:0:28}" \
             "${uninstall_name:0:28}" \
             "$size_display"
