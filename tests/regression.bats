@@ -231,7 +231,7 @@ print(time.time_ns())
 PY
 )
 normalized=()
-while IFS= read -r line; do
+while IFS= read -r -d '' line; do
     normalized+=("$line")
 done < <(normalize_paths_for_cleanup "${paths[@]}")
 end_ns=$(python - <<'PY'

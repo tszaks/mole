@@ -226,14 +226,28 @@ normalize_paths_for_cleanup() {
     # Fast path for large batches: O(n log n) via sort|awk instead of O(n²) bash loops.
     # Lex sort guarantees every parent path precedes its children, so a single-pass
     # awk can filter child paths by tracking only the last kept path.
+    # Paths with embedded newlines cannot go through the newline-delimited pipeline;
+    # they are output directly with null-byte delimiters and skipped by the sort pass.
     if [[ ${#input_paths[@]} -gt 500 ]]; then
-        printf '%s\n' "${input_paths[@]}" |
-            awk '{sub(/\/$/, ""); if ($0 != "") print}' |
-            LC_ALL=C sort -u |
-            awk 'BEGIN { last = "" } {
-                if (last != "" && substr($0, 1, length(last) + 1) == last "/") next
-                last = $0; print
-            }'
+        local -a _fast_pipeline=()
+        local _fast_path
+        for _fast_path in "${input_paths[@]}"; do
+            if [[ "$_fast_path" == *$'\n'* ]]; then
+                printf '%s\0' "$_fast_path"
+            else
+                _fast_pipeline+=("$_fast_path")
+            fi
+        done
+        if [[ ${#_fast_pipeline[@]} -gt 0 ]]; then
+            printf '%s\n' "${_fast_pipeline[@]}" |
+                awk '{sub(/\/$/, ""); if ($0 != "") print}' |
+                LC_ALL=C sort -u |
+                awk 'BEGIN { last = "" } {
+                    if (last != "" && substr($0, 1, length(last) + 1) == last "/") next
+                    last = $0; print
+                }' |
+                while IFS= read -r _fast_path; do printf '%s\0' "$_fast_path"; done
+        fi
         return
     fi
 
@@ -254,9 +268,21 @@ normalize_paths_for_cleanup() {
         [[ "$found" == "true" ]] || unique_paths+=("$normalized")
     done
 
+    # Paths with embedded newlines cannot safely go through the newline-delimited
+    # sort pipeline. Collect them separately and append to result as-is.
+    local -a pipeline_paths=()
+    local -a passthrough_paths=()
+    for path in "${unique_paths[@]}"; do
+        if [[ "$path" == *$'\n'* ]]; then
+            passthrough_paths+=("$path")
+        else
+            pipeline_paths+=("$path")
+        fi
+    done
+
     local sorted_paths
-    if [[ ${#unique_paths[@]} -gt 0 ]]; then
-        sorted_paths=$(printf '%s\n' "${unique_paths[@]}" | awk '{print length "|" $0}' | LC_ALL=C sort -n | cut -d'|' -f2-)
+    if [[ ${#pipeline_paths[@]} -gt 0 ]]; then
+        sorted_paths=$(printf '%s\n' "${pipeline_paths[@]}" | awk '{print length "|" $0}' | LC_ALL=C sort -n | cut -d'|' -f2-)
     else
         sorted_paths=""
     fi
@@ -276,8 +302,11 @@ normalize_paths_for_cleanup() {
         [[ "$is_child" == "true" ]] || result_paths+=("$path")
     done <<< "$sorted_paths"
 
+    # Append passthrough paths (newline-containing; not deduplicated against others).
+    result_paths+=("${passthrough_paths[@]}")
+
     if [[ ${#result_paths[@]} -gt 0 ]]; then
-        printf '%s\n' "${result_paths[@]}"
+        printf '%s\0' "${result_paths[@]}"
     fi
 }
 
@@ -474,7 +503,7 @@ safe_clean() {
 
     if [[ ${#existing_paths[@]} -gt 1 ]]; then
         local -a normalized_paths=()
-        while IFS= read -r path; do
+        while IFS= read -r -d '' path; do
             [[ -n "$path" ]] && normalized_paths+=("$path")
         done < <(normalize_paths_for_cleanup "${existing_paths[@]}")
 
