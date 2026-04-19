@@ -1265,9 +1265,19 @@ main() {
             IFS='|' read -r name_cell size_cell last_cell <<< "$row"
             local name_display_width
             name_display_width=$(get_display_width "$name_cell")
-            local name_char_count=${#name_cell}
+
+            # Get byte count for printf width calculation
+            local old_lc="${LC_ALL:-}"
+            export LC_ALL=C
+            local name_byte_count=${#name_cell}
+            if [[ -n "$old_lc" ]]; then
+                export LC_ALL="$old_lc"
+            else
+                unset LC_ALL
+            fi
+
             local padding_needed=$((max_name_display_width - name_display_width))
-            local printf_name_width=$((name_char_count + padding_needed))
+            local printf_name_width=$((name_byte_count + padding_needed))
 
             printf "%d. %-*s  %*s  |  Last: %s\n" "$index" "$printf_name_width" "$name_cell" "$max_size_width" "$size_cell" "$last_cell"
             ((index++))
