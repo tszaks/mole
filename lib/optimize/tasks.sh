@@ -1153,6 +1153,14 @@ _login_item_app_exists() {
     if [[ "$stripped" != "$nospace" ]] && mdfind "kMDItemFSName == '${stripped}.app'" 2> /dev/null | grep -q .; then
         return 0
     fi
+    # 4. Fallback: check sfltool dumpbtm for the actual on-disk path.
+    #    Nested helper apps (e.g. DBnginMenuHelper.app inside DBngin.app) are
+    #    invisible to mdfind but still have a valid URL in the BTM database.
+    local btm_path
+    btm_path=$(sfltool dumpbtm 2> /dev/null | grep -i "${name}" | grep -oE '/[^ ]+\.app' | head -1)
+    if [[ -n "$btm_path" ]] && [[ -e "$btm_path" ]]; then
+        return 0
+    fi
     return 1
 }
 
