@@ -557,6 +557,15 @@ readonly DATA_PROTECTED_BUNDLES=(
     "Firefox"
     "org.mozilla.*"
 
+    # Scientific & Professional Software
+    "com.sas.*"
+    "com.mathworks.*"
+    "com.ibm.spss.*"
+    "com.wolfram.*"
+    "com.stata.*"
+    "org.rstudio.*"
+    "com.tableausoftware.*"
+
     # License & App Stores
     "com.paddle.Paddle*"
     "com.setapp.DesktopClient"
