@@ -91,6 +91,14 @@ run_clean_dry_run() {
     [[ "$output" == *"full preview"* ]]
 }
 
+@test "cloud and office timeout path uses helper function instead of bash -c" {
+    run bash -c "grep -Eq 'run_with_shell_timeout 300 run_cloud_and_office_cleanup' '$PROJECT_ROOT/bin/clean.sh'"
+    [ "$status" -eq 0 ]
+
+    run bash -c "! grep -Eq 'run_with_timeout 300[[:space:]]+bash[[:space:]]+-c' '$PROJECT_ROOT/bin/clean.sh'"
+    [ "$status" -eq 0 ]
+}
+
 @test "mo clean --dry-run survives an unwritable TMPDIR" {
     local blocked_tmp="$HOME/blocked-tmp"
     mkdir -p "$blocked_tmp"
