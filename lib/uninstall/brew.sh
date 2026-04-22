@@ -210,8 +210,15 @@ brew_uninstall_cask() {
 
     # Run with timeout to prevent hangs from problematic cask scripts
     local brew_exit=0
+    local brew_cmd="brew uninstall --cask --zap \"$cask_name\""
+
+    # Drop sudo if running under elevated privileges (Homebrew refuses to run as root)
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        brew_cmd="sudo -u \"$SUDO_USER\" $brew_cmd"
+    fi
+
     if HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
-        run_with_timeout "$timeout" brew uninstall --cask --zap "$cask_name" 2>&1; then
+        run_with_timeout "$timeout" bash -c "$brew_cmd" 2>&1; then
         uninstall_ok=true
     else
         brew_exit=$?
