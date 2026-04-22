@@ -64,6 +64,13 @@ bundle_has_installed_app() {
         fi
     done
 
+    # For helpers that don't follow parent.helper pattern (e.g. com.microsoft.autoupdate.helper
+    # for com.microsoft.Word), also try matching against the vendor prefix (com.microsoft.*)
+    local vendor_prefix=""
+    if [[ "$bundle_id" =~ ^(com|org|net|io)\.([^.]+)\. ]]; then
+        vendor_prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}."
+    fi
+
     local app_root app info app_bundle
     for app_root in "${_MOLE_BUNDLE_RESOLVER_APP_ROOTS[@]}"; do
         [[ -d "$app_root" ]] || continue
@@ -76,6 +83,8 @@ bundle_has_installed_app() {
             app_bundle=$(plutil -extract CFBundleIdentifier raw "$info" 2> /dev/null || echo "")
             [[ "$app_bundle" == "$bundle_id" ]] && return 0
             [[ -n "$parent_id" && "$app_bundle" == "$parent_id" ]] && return 0
+            # Check vendor prefix match (e.g. com.microsoft.autoupdate.helper matches com.microsoft.Word)
+            [[ -n "$vendor_prefix" && "$app_bundle" == "$vendor_prefix"* ]] && return 0
         done < <(find "$app_root" -maxdepth 1 -name "*.app" -print0 2> /dev/null)
     done
 

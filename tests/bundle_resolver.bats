@@ -167,3 +167,28 @@ EOF
     [ "$status" -ne 0 ]
 }
 
+@test "bundle_has_installed_app finds parent app via vendor prefix (issue #776)" {
+    # Microsoft Office helpers don't follow parent.helper naming:
+    # com.microsoft.autoupdate.helper should match com.microsoft.Word
+    make_app "$FAKE_APPS/Microsoft Word.app" "com.microsoft.Word"
+
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+$(prelude)
+bundle_has_installed_app "com.microsoft.autoupdate.helper"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "bundle_has_installed_app vendor prefix match requires same vendor" {
+    # com.microsoft.autoupdate.helper should NOT match com.adobe.Reader
+    make_app "$FAKE_APPS/Adobe Reader.app" "com.adobe.Reader"
+
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+$(prelude)
+bundle_has_installed_app "com.microsoft.autoupdate.helper"
+EOF
+
+    [ "$status" -ne 0 ]
+}
+
