@@ -458,6 +458,8 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+periodic() { true; }
+export -f periodic
 tmplog="$(mktemp /tmp/mole-test-daily.XXXXXX)"
 touch "$tmplog"
 MOLE_PERIODIC_LOG="$tmplog" opt_periodic_maintenance
@@ -473,6 +475,8 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+periodic() { true; }
+export -f periodic
 tmplog="$(mktemp /tmp/mole-test-daily.XXXXXX)"
 touch -t "$(date -v-10d +%Y%m%d%H%M.%S)" "$tmplog"
 MOLE_PERIODIC_LOG="$tmplog" opt_periodic_maintenance
@@ -488,11 +492,32 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+periodic() { true; }
+export -f periodic
 MOLE_PERIODIC_LOG="/tmp/mole-test-nonexistent-daily.out" opt_periodic_maintenance
 EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Periodic maintenance triggered"* ]]
+}
+
+@test "opt_periodic_maintenance skips when periodic command missing" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+command() {
+    if [[ "$1" == "-v" && "$2" == "periodic" ]]; then
+        return 1
+    fi
+    builtin command "$@"
+}
+export -f command
+opt_periodic_maintenance
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Periodic maintenance skipped (not available on this macOS version)"* ]]
 }
 
 @test "execute_optimization dispatches periodic_maintenance" {
