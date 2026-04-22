@@ -1073,6 +1073,8 @@ perform_cleanup() {
             local ret=$?
             if [[ $ret -eq 124 ]]; then
                 log_warn "Cloud & Office cleanup timed out after 5 minutes, skipping remaining items"
+            elif [[ $ret -eq 130 ]]; then
+                return 130
             else
                 log_warn "Cloud & Office cleanup failed with exit code $ret"
             fi

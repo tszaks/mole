@@ -551,6 +551,58 @@ EOF
     [[ "$output" != *"launchctl-called"* ]]
 }
 
+@test "clean_orphaned_system_services does not count protected skips as cleaned" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false MOLE_DRY_RUN=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { :; }
+should_protect_path() { return 0; }
+safe_sudo_remove() {
+  echo "unexpected-remove"
+  return 0
+}
+
+tmp_dir="$(mktemp -d)"
+tmp_plist="$tmp_dir/com.sogou.test.plist"
+touch "$tmp_plist"
+
+sudo() {
+  if [[ "$1" == "-n" && "$2" == "true" ]]; then
+    return 0
+  fi
+  if [[ "$1" == "find" ]]; then
+    case "$2" in
+      /Library/LaunchDaemons) printf '%s\0' "$tmp_plist" ;;
+      *) : ;;
+    esac
+    return 0
+  fi
+  if [[ "$1" == "du" ]]; then
+    echo "4 $tmp_plist"
+    return 0
+  fi
+  if [[ "$1" == "launchctl" ]]; then
+    echo "unexpected-launchctl"
+    return 0
+  fi
+  command "$@"
+}
+
+clean_orphaned_system_services
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"skipped 1 protected, failed 0"* ]]
+    [[ "$output" != *"Cleaned 1 orphaned services"* ]]
+    [[ "$output" != *"unexpected-remove"* ]]
+    [[ "$output" != *"unexpected-launchctl"* ]]
+}
+
 @test "clean_orphaned_launch_agents preserves user launch agents" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

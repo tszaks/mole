@@ -866,33 +866,18 @@ check_brew_health() {
 check_nonstandard_apps() {
     if command -v is_whitelisted > /dev/null && is_whitelisted "check_nonstandard_apps"; then return; fi
 
-    if ! command -v pkgutil > /dev/null 2>&1; then
+    if ! declare -f pkg_receipt_nonstandard_app_paths > /dev/null 2>&1; then
         return
     fi
 
     local -a nonstandard_apps=()
-    while IFS= read -r pkg_id; do
-        [[ "$pkg_id" =~ ^com\.apple\. ]] && continue
-
-        local pkg_files
-        pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null | grep '\.app$' || true)
-        [[ -z "$pkg_files" ]] && continue
-
-        while IFS= read -r rel_path; do
-            [[ -z "$rel_path" ]] && continue
-            local app_path="/$rel_path"
-
-            case "$app_path" in
-                /usr/local/*.app | /opt/*.app)
-                    if [[ -d "$app_path" ]]; then
-                        local app_name="${app_path##*/}"
-                        app_name="${app_name%.app}"
-                        nonstandard_apps+=("$app_name")
-                    fi
-                    ;;
-            esac
-        done <<< "$pkg_files"
-    done < <(pkgutil --pkgs 2> /dev/null || true)
+    local app_path
+    while IFS= read -r app_path; do
+        [[ -n "$app_path" ]] || continue
+        local app_name="${app_path##*/}"
+        app_name="${app_name%.app}"
+        nonstandard_apps+=("$app_name")
+    done < <(pkg_receipt_nonstandard_app_paths)
 
     local count=${#nonstandard_apps[@]}
     if [[ $count -eq 0 ]]; then

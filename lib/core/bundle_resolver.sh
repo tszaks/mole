@@ -64,12 +64,18 @@ bundle_has_installed_app() {
         fi
     done
 
-    # For helpers that don't follow parent.helper pattern (e.g. com.microsoft.autoupdate.helper
-    # for com.microsoft.Word), also try matching against the vendor prefix (com.microsoft.*)
-    local vendor_prefix=""
-    if [[ "$bundle_id" =~ ^(com|org|net|io)\.([^.]+)\. ]]; then
-        vendor_prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}."
-    fi
+    local -a mapped_app_bundles=()
+    case "$bundle_id" in
+        com.microsoft.autoupdate.helper | com.microsoft.office.licensingV2.helper)
+            mapped_app_bundles=(
+                "com.microsoft.Word"
+                "com.microsoft.Excel"
+                "com.microsoft.Powerpoint"
+                "com.microsoft.Outlook"
+                "com.microsoft.OneNote"
+            )
+            ;;
+    esac
 
     local app_root app info app_bundle
     for app_root in "${_MOLE_BUNDLE_RESOLVER_APP_ROOTS[@]}"; do
@@ -83,8 +89,10 @@ bundle_has_installed_app() {
             app_bundle=$(plutil -extract CFBundleIdentifier raw "$info" 2> /dev/null || echo "")
             [[ "$app_bundle" == "$bundle_id" ]] && return 0
             [[ -n "$parent_id" && "$app_bundle" == "$parent_id" ]] && return 0
-            # Check vendor prefix match (e.g. com.microsoft.autoupdate.helper matches com.microsoft.Word)
-            [[ -n "$vendor_prefix" && "$app_bundle" == "$vendor_prefix"* ]] && return 0
+            local mapped_bundle
+            for mapped_bundle in "${mapped_app_bundles[@]}"; do
+                [[ "$app_bundle" == "$mapped_bundle" ]] && return 0
+            done
         done < <(find "$app_root" -maxdepth 1 -name "*.app" -print0 2> /dev/null)
     done
 

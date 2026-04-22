@@ -397,3 +397,30 @@ EOF
 
     [ "$status" -eq 0 ]
 }
+
+@test "brew_uninstall_cask passes cask token as argv without shell evaluation" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/brew.sh"
+
+debug_log() { :; }
+get_path_size_kb() { echo "100"; }
+run_with_timeout() { shift; "$@"; }
+is_brew_cask_installed() { return 1; }
+
+brew() {
+    printf '<%s>\n' "$@" >> "$HOME/brew_argv.log"
+    return 0
+}
+export -f brew
+
+cask_name='bad"; touch "$HOME/pwned"; #'
+brew_uninstall_cask "$cask_name"
+
+[[ ! -e "$HOME/pwned" ]]
+grep -Fx '<bad"; touch "$HOME/pwned"; #>' "$HOME/brew_argv.log"
+EOF
+
+    [ "$status" -eq 0 ]
+}

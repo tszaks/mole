@@ -140,3 +140,38 @@ EOF
     [ "$status" -eq 0 ]
     [[ -z "$output" ]]
 }
+
+@test "pkg receipt helper extracts app roots from nested Contents paths" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_pkg_receipt_app_root "opt/Vendor Tool.app/Contents/MacOS/tool"
+_mole_pkg_receipt_app_root "usr/local/Direct.app"
+if _mole_pkg_receipt_app_root "Applications/Standard.app/Contents/MacOS/app"; then
+  echo "bad"
+else
+  echo "rejected"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "${lines[0]}" == "/opt/Vendor Tool.app" ]]
+    [[ "${lines[1]}" == "/usr/local/Direct.app" ]]
+    [[ "${lines[2]}" == "rejected" ]]
+}
+
+@test "check_nonstandard_apps reports pkg apps from shared helper" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+pkg_receipt_nonstandard_app_paths() {
+  printf '%s\n' "/opt/Vendor Tool.app" "/usr/local/Direct.app"
+}
+check_nonstandard_apps
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Pkg Apps"* ]]
+    [[ "$output" == *"Vendor Tool, Direct"* ]]
+}

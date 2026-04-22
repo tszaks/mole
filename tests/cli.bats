@@ -186,7 +186,7 @@ EOF
 }
 
 @test "mo optimize command is recognized" {
-	run bash -c "grep -q '\"optimize\")' '$PROJECT_ROOT/mole'"
+	run bash -c "grep -Eq '\"optimi[sz]e\"[[:space:]]*\\|[[:space:]]*\"optimi[sz]e\"' '$PROJECT_ROOT/mole'"
 	[ "$status" -eq 0 ]
 }
 
