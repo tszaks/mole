@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -454,14 +455,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				invalidateCache(m.path)
 				m.status = fmt.Sprintf("Deleted %d items", msg.count)
+
+				// Selective invalidation: only mark current path and ancestors as needing refresh
+				currentPath := m.path
+				for currentPath != "/" && currentPath != "" {
+					if entry, exists := m.cache[currentPath]; exists {
+						entry.NeedsRefresh = true
+						m.cache[currentPath] = entry
+					}
+					currentPath = filepath.Dir(currentPath)
+				}
+
+				// Mark history entries for current path and ancestors as needing refresh
 				for i := range m.history {
-					m.history[i].Dirty = true
+					histPath := m.history[i].Path
+					if histPath == m.path || strings.HasPrefix(m.path, histPath+"/") {
+						m.history[i].NeedsRefresh = true
+					}
 				}
-				for path := range m.cache {
-					entry := m.cache[path]
-					entry.Dirty = true
-					m.cache[path] = entry
-				}
+
 				m.scanning = true
 				atomic.StoreInt64(m.filesScanned, 0)
 				atomic.StoreInt64(m.dirsScanned, 0)
