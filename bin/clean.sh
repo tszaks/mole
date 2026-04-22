@@ -1062,8 +1062,21 @@ perform_cleanup() {
 
         # ===== 5. Cloud & Office =====
         start_section "Cloud & Office"
-        clean_cloud_storage
-        clean_office_applications
+        # Wrap in timeout to prevent indefinite hangs on large/slow directories
+        if run_with_timeout 300 bash -c '
+            source "'"$SCRIPT_DIR"'/../lib/clean/user.sh"
+            clean_cloud_storage
+            clean_office_applications
+        '; then
+            : # completed successfully
+        else
+            local ret=$?
+            if [[ $ret -eq 124 ]]; then
+                log_warn "Cloud & Office cleanup timed out after 5 minutes, skipping remaining items"
+            else
+                log_warn "Cloud & Office cleanup failed with exit code $ret"
+            fi
+        fi
         end_section
 
         # ===== 6. Developer tools (merged CLI and GUI tooling) =====

@@ -1189,6 +1189,9 @@ clean_browsers() {
 
 # Cloud storage caches.
 clean_cloud_storage() {
+    if [[ "${MO_DEBUG:-0}" == "1" ]]; then
+        echo "[DEBUG] Cleaning cloud storage caches..." >&2
+    fi
     safe_clean ~/Library/Caches/com.dropbox.* "Dropbox cache"
     safe_clean ~/Library/Caches/com.getdropbox.dropbox "Dropbox cache"
     safe_clean ~/Library/Caches/com.google.GoogleDrive "Google Drive cache"
@@ -1200,11 +1203,20 @@ clean_cloud_storage() {
 
 # Office app caches.
 clean_office_applications() {
+    if [[ "${MO_DEBUG:-0}" == "1" ]]; then
+        echo "[DEBUG] Cleaning office application caches..." >&2
+    fi
     safe_clean ~/Library/Caches/com.microsoft.Word "Microsoft Word cache"
+    if [[ "${MO_DEBUG:-0}" == "1" ]]; then
+        echo "[DEBUG] Cleaning Word container cache..." >&2
+    fi
     safe_clean ~/Library/Containers/com.microsoft.Word/Data/Library/Caches/* "Microsoft Word container cache"
     safe_clean ~/Library/Containers/com.microsoft.Word/Data/tmp/* "Microsoft Word temp files"
     safe_clean ~/Library/Containers/com.microsoft.Word/Data/Library/Logs/* "Microsoft Word container logs"
     safe_clean ~/Library/Caches/com.microsoft.Excel "Microsoft Excel cache"
+    if [[ "${MO_DEBUG:-0}" == "1" ]]; then
+        echo "[DEBUG] Cleaning Excel container cache..." >&2
+    fi
     safe_clean ~/Library/Containers/com.microsoft.Excel/Data/Library/Caches/* "Microsoft Excel container cache"
     safe_clean ~/Library/Containers/com.microsoft.Excel/Data/tmp/* "Microsoft Excel temp files"
     safe_clean ~/Library/Containers/com.microsoft.Excel/Data/Library/Logs/* "Microsoft Excel container logs"

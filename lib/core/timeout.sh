@@ -211,12 +211,18 @@ run_with_timeout() {
     ) < /dev/null > /dev/null 2>&1 &
     local killer_pid=$!
 
+    # Set up signal handler to forward SIGINT to command
+    trap 'kill -INT "$cmd_pid" 2>/dev/null || true; kill "$killer_pid" 2>/dev/null || true' INT
+
     # Wait for command to complete
     local exit_code=0
     set +e
     wait "$cmd_pid" 2> /dev/null
     exit_code=$?
     set -e
+
+    # Restore default INT handler
+    trap - INT
 
     # Clean up killer process
     if kill -0 "$killer_pid" 2> /dev/null; then
