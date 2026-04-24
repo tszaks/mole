@@ -796,6 +796,8 @@ clean_group_container_caches() {
     for container_dir in "$group_containers_dir"/*; do
         [[ -d "$container_dir" ]] || continue
         [[ -L "$container_dir" ]] && continue
+        # Skip containers we cannot read (avoids repeated TCC/privacy prompts on macOS).
+        [[ -r "$container_dir" ]] || continue
         local container_id="${container_dir##*/}"
 
         # Skip Apple-owned shared containers entirely.
