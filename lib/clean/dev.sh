@@ -1241,7 +1241,9 @@ clean_dev_editors() {
     safe_clean ~/Library/Application\ Support/Code/GPUCache/* "VS Code GPU cache"
     safe_clean ~/Library/Application\ Support/Code/CachedExtensionVSIXs/* "VS Code extension cache"
     clean_service_worker_cache "VS Code" "$HOME/Library/Application Support/Code/Service Worker/CacheStorage"
-    safe_clean ~/Library/Application\ Support/Code/Service\ Worker/ScriptCache/* "VS Code Service Worker ScriptCache"
+    if ! pgrep -x "Code" > /dev/null 2>&1; then
+        safe_clean ~/Library/Application\ Support/Code/Service\ Worker/ScriptCache/* "VS Code Service Worker ScriptCache"
+    fi
     safe_clean ~/Library/Caches/Zed/* "Zed cache"
     safe_clean ~/Library/Caches/copilot/* "GitHub Copilot cache"
     safe_clean ~/.cache/vscode-ripgrep/* "VS Code ripgrep cache"
@@ -1252,7 +1254,9 @@ clean_dev_editors() {
     safe_clean ~/Library/Application\ Support/Cursor/DawnGraphiteCache/* "Cursor Dawn cache"
     safe_clean ~/Library/Application\ Support/Cursor/DawnWebGPUCache/* "Cursor WebGPU cache"
     clean_service_worker_cache "Cursor" "$HOME/Library/Application Support/Cursor/Service Worker/CacheStorage"
-    safe_clean ~/Library/Application\ Support/Cursor/Service\ Worker/ScriptCache/* "Cursor Service Worker ScriptCache"
+    if ! pgrep -x "Cursor" > /dev/null 2>&1; then
+        safe_clean ~/Library/Application\ Support/Cursor/Service\ Worker/ScriptCache/* "Cursor Service Worker ScriptCache"
+    fi
 }
 # Main developer tools cleanup sequence.
 clean_developer_tools() {

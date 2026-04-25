@@ -617,6 +617,37 @@ EOF
     rm -rf "$HOME/Library"
 }
 
+@test "clean_browsers skips Chrome ScriptCache when Chrome is running (#785)" {
+    mkdir -p "$HOME/Library/Application Support/Google/Chrome/Default/Service Worker/ScriptCache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { echo "$2"; }
+clean_service_worker_cache() { echo "SW-CALL $1"; }
+note_activity() { :; }
+# Stub pgrep so every browser/editor appears to be running.
+pgrep() { return 0; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ]
+    # CacheStorage cleanup still runs (it has its own protection logic).
+    [[ "$output" == *"SW-CALL Chrome"* ]]
+    # ScriptCache cleanup must NOT run while Chrome is live: wiping V8
+    # bytecode under a running Chromium breaks MV3 extension service workers.
+    [[ "$output" != *"Chrome Service Worker ScriptCache"* ]]
+    [[ "$output" != *"Arc Service Worker ScriptCache"* ]]
+    [[ "$output" != *"Brave Service Worker ScriptCache"* ]]
+    [[ "$output" != *"Vivaldi Service Worker ScriptCache"* ]]
+
+    rm -rf "$HOME/Library"
+}
+
 @test "clean_application_support_logs skips when no access" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
