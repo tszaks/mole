@@ -276,13 +276,18 @@ EOF
 @test "clean_dev_ai_agents keeps newest version and removes older ones by mtime" {
     local claude_root="$HOME/.local/share/claude/versions"
     local cursor_root="$HOME/.local/share/cursor-agent/versions"
-    mkdir -p "$claude_root" "$cursor_root"
+    local copilot_root="$HOME/.copilot/pkg/universal"
+    mkdir -p "$claude_root" "$cursor_root" "$copilot_root"
     touch -t 202604170829 "$claude_root/2.1.112"
     touch -t 202604180902 "$claude_root/2.1.113"
     touch -t 202604181002 "$claude_root/2.1.114"
     mkdir -p "$cursor_root/2026.04.08-old" "$cursor_root/2026.04.15-new"
     touch -t 202604080000 "$cursor_root/2026.04.08-old"
     touch -t 202604150000 "$cursor_root/2026.04.15-new"
+    mkdir -p "$copilot_root/1.0.5" "$copilot_root/1.0.32" "$copilot_root/1.0.34"
+    touch -t 202604010000 "$copilot_root/1.0.5"
+    touch -t 202604200000 "$copilot_root/1.0.32"
+    touch -t 202604250000 "$copilot_root/1.0.34"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -299,6 +304,9 @@ EOF
     [[ "$output" != *"/2.1.114|"* ]]
     [[ "$output" == *"/2026.04.08-old|Cursor Agent old version"* ]]
     [[ "$output" != *"/2026.04.15-new|"* ]]
+    [[ "$output" == *"/1.0.5|GitHub Copilot CLI old version"* ]]
+    [[ "$output" == *"/1.0.32|GitHub Copilot CLI old version"* ]]
+    [[ "$output" != *"/1.0.34|"* ]]
 }
 
 @test "clean_dev_ai_agents respects MOLE_AI_AGENTS_KEEP and skips missing roots" {

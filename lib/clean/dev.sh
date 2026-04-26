@@ -1069,6 +1069,7 @@ clean_dev_ai_agents() {
     local -a agent_specs=(
         "$HOME/.local/share/claude/versions|Claude Code old version"
         "$HOME/.local/share/cursor-agent/versions|Cursor Agent old version"
+        "$HOME/.copilot/pkg/universal|GitHub Copilot CLI old version"
     )
 
     local spec
