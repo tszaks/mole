@@ -679,7 +679,9 @@ install_files() {
     fi
 
     if [[ "$source_dir_abs" != "$install_dir_abs" ]]; then
-        maybe_sudo sed -i '' "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"
+        # Use absolute /usr/bin/sed (always BSD on macOS) so PATH-shadowed
+        # GNU sed from Homebrew gnu-sed does not break the -i '' syntax.
+        maybe_sudo /usr/bin/sed -i '' "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"
     fi
 
     if ! download_binary "analyze"; then
