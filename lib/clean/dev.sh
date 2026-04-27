@@ -1228,6 +1228,21 @@ clean_dev_misc() {
     safe_clean ~/.cache/prisma/* "Prisma cache"
     # OpenCode AI tool cache
     safe_clean ~/.cache/opencode/* "OpenCode cache"
+    # OpenCode CLI session state (~/.cache side above covers Electron cache)
+    safe_clean ~/.local/share/opencode/snapshot/* "OpenCode snapshots"
+    safe_clean ~/.local/share/opencode/log/* "OpenCode logs"
+    # Claude Code CLI session/plugin state
+    safe_clean ~/.claude/plugins/cache/* "Claude Code plugin cache"
+    safe_clean ~/.claude/plugins/marketplaces/* "Claude Code marketplaces cache"
+    safe_clean ~/.claude/paste-cache/* "Claude Code paste cache"
+    safe_clean ~/.claude/tmp/* "Claude Code tmp"
+    # Age-gate history dirs so recent sessions remain available for /resume
+    [[ -d "$HOME/.claude/projects" ]] && safe_find_delete "$HOME/.claude/projects" "*" "$MOLE_LOG_AGE_DAYS" "d"
+    [[ -d "$HOME/.claude/file-history" ]] && safe_find_delete "$HOME/.claude/file-history" "*" "$MOLE_LOG_AGE_DAYS" "d"
+    [[ -d "$HOME/.claude/session-env" ]] && safe_find_delete "$HOME/.claude/session-env" "*" "$MOLE_LOG_AGE_DAYS" "f"
+    [[ -d "$HOME/.claude/shell-snapshots" ]] && safe_find_delete "$HOME/.claude/shell-snapshots" "*" "$MOLE_LOG_AGE_DAYS" "f"
+    # Wondershare orphan installer payload (bundle ID differs from live app)
+    safe_clean ~/Library/Application\ Support/com.wondershare.Installer/* "Wondershare installer payload"
 }
 # Shell and VCS leftovers.
 clean_dev_shell() {
@@ -1273,6 +1288,7 @@ clean_dev_editors() {
     safe_clean ~/Library/Application\ Support/Code/DawnWebGPUCache/* "VS Code WebGPU cache"
     safe_clean ~/Library/Application\ Support/Code/GPUCache/* "VS Code GPU cache"
     safe_clean ~/Library/Application\ Support/Code/CachedExtensionVSIXs/* "VS Code extension cache"
+    safe_clean ~/Library/Application\ Support/Code/WebStorage/* "VS Code WebStorage"
     clean_service_worker_cache "VS Code" "$HOME/Library/Application Support/Code/Service Worker/CacheStorage"
     if ! pgrep -x "Code" > /dev/null 2>&1; then
         safe_clean ~/Library/Application\ Support/Code/Service\ Worker/ScriptCache/* "VS Code Service Worker ScriptCache"
@@ -1283,6 +1299,7 @@ clean_dev_editors() {
     safe_clean ~/Library/Caches/Cursor/* "Cursor cache"
     safe_clean ~/Library/Application\ Support/Cursor/CachedData/* "Cursor cached data"
     safe_clean ~/Library/Application\ Support/Cursor/CachedExtensionVSIXs/* "Cursor extension cache"
+    safe_clean ~/Library/Application\ Support/Cursor/WebStorage/* "Cursor WebStorage"
     safe_clean ~/Library/Application\ Support/Cursor/GPUCache/* "Cursor GPU cache"
     safe_clean ~/Library/Application\ Support/Cursor/DawnGraphiteCache/* "Cursor Dawn cache"
     safe_clean ~/Library/Application\ Support/Cursor/DawnWebGPUCache/* "Cursor WebGPU cache"
