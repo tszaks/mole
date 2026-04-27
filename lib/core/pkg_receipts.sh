@@ -54,16 +54,27 @@ pkg_receipt_nonstandard_app_paths() {
         [[ "$pkg_id" =~ ^com\.apple\. ]] && continue
 
         local pkg_files
-        if declare -f run_with_timeout > /dev/null 2>&1; then
-            pkg_files=$(run_with_timeout "${MOLE_PKG_RECEIPT_FILES_TIMEOUT:-1}" pkgutil --files "$pkg_id" 2> /dev/null || true)
-        else
-            pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null || true)
-        fi
+        pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null | command grep -E '^(/usr/local/|/opt/).*\.app(/|$)' || true)
         [[ -n "$pkg_files" ]] || continue
 
         local rel_path app_path duplicate
         while IFS= read -r rel_path; do
-            app_path=$(_mole_pkg_receipt_app_root "$rel_path" 2> /dev/null || true)
+            if [[ "$scan_timeout" =~ ^[0-9]+$ && $scan_timeout -gt 0 && $((SECONDS - scan_start)) -ge $scan_timeout ]]; then
+                break 2
+            fi
+
+            local stripped="${rel_path#/}"
+            [[ -n "$stripped" ]] || continue
+            local candidate="/$stripped"
+
+            case "$candidate" in
+                /usr/local/*.app) app_path="$candidate" ;;
+                /opt/*.app) app_path="$candidate" ;;
+                /usr/local/*.app/*) app_path="${candidate%%.app/*}.app" ;;
+                /opt/*.app/*) app_path="${candidate%%.app/*}.app" ;;
+                *) continue ;;
+            esac
+
             [[ -n "$app_path" && -d "$app_path" ]] || continue
 
             duplicate=false
