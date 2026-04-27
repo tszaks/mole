@@ -1059,24 +1059,53 @@ clean_dev_jetbrains_logs() {
 # AI coding agents (Claude Code, Cursor Agent, etc.) auto-update but never
 # remove previous versions, so ~/.local/share/<agent>/versions accumulates
 # hundreds of MB per release. Keep the most recently modified N entries
-# (newest mtime == currently used) and remove the rest. Entries may be
-# binaries (Claude Code) or directories (Cursor Agent), so we enumerate
-# both with -type f and -type d.
+# plus the version pointed at by the active CLI symlink (mtime alone is
+# unreliable: Claude Code pre-downloads the next version before flipping
+# the symlink, so newest mtime is not always the active version).
 clean_dev_ai_agents() {
     local keep_previous="${MOLE_AI_AGENTS_KEEP:-1}"
     [[ "$keep_previous" =~ ^[0-9]+$ ]] || keep_previous=1
 
     local -a agent_specs=(
-        "$HOME/.local/share/claude/versions|Claude Code old version"
-        "$HOME/.local/share/cursor-agent/versions|Cursor Agent old version"
-        "$HOME/.copilot/pkg/universal|GitHub Copilot CLI old version"
+        "$HOME/.local/share/claude/versions|Claude Code old version|$HOME/.local/bin/claude"
+        "$HOME/.local/share/cursor-agent/versions|Cursor Agent old version|$HOME/.local/bin/cursor-agent"
+        "$HOME/.copilot/pkg/universal|GitHub Copilot CLI old version|"
     )
 
     local spec
     for spec in "${agent_specs[@]}"; do
         local versions_root="${spec%%|*}"
-        local label="${spec#*|}"
+        local rest="${spec#*|}"
+        local label="${rest%%|*}"
+        local active_symlink="${rest#*|}"
+        [[ "$active_symlink" == "$rest" ]] && active_symlink=""
         [[ -d "$versions_root" ]] || continue
+
+        local active_path=""
+        if [[ -n "$active_symlink" && -L "$active_symlink" ]]; then
+            if [[ ! -e "$active_symlink" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label active symlink is broken · skipping cleanup"
+                continue
+            fi
+            local target
+            target=$(readlink "$active_symlink" 2> /dev/null || true)
+            if [[ -n "$target" ]]; then
+                case "$target" in
+                    /*) ;;
+                    *) target="$(cd "$(dirname "$active_symlink")" 2> /dev/null && pwd -P)/$target" ;;
+                esac
+                local entry
+                for entry in "$versions_root"/*; do
+                    [[ -e "$entry" ]] || continue
+                    case "$target/" in
+                        "$entry"/*)
+                            active_path="$entry"
+                            break
+                            ;;
+                    esac
+                done
+            fi
+        fi
 
         local -a entries=()
         while IFS= read -r -d '' entry; do
@@ -1104,6 +1133,9 @@ clean_dev_ai_agents() {
         local idx=0
         local target
         for target in "${sorted[@]}"; do
+            if [[ -n "$active_path" && "$target" == "$active_path" ]]; then
+                continue
+            fi
             if [[ $idx -lt $keep_previous ]]; then
                 idx=$((idx + 1))
                 continue

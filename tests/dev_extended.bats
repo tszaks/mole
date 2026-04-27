@@ -309,6 +309,72 @@ EOF
     [[ "$output" != *"/1.0.34|"* ]]
 }
 
+@test "clean_dev_ai_agents protects the active version pointed at by ~/.local/bin/<agent>" {
+    local claude_root="$HOME/.local/share/claude/versions"
+    local cursor_root="$HOME/.local/share/cursor-agent/versions"
+    local bin_dir="$HOME/.local/bin"
+    rm -rf "$claude_root" "$cursor_root" "$bin_dir"
+    mkdir -p "$claude_root" "$cursor_root" "$bin_dir"
+
+    mkdir -p "$claude_root/2.1.112" "$claude_root/2.1.113" "$claude_root/2.1.114"
+    touch -t 202604170000 "$claude_root/2.1.112"
+    touch -t 202604180000 "$claude_root/2.1.113"
+    touch -t 202604200000 "$claude_root/2.1.114"
+    ln -s "$claude_root/2.1.113" "$bin_dir/claude"
+
+    mkdir -p "$cursor_root/2026.04.01-old" "$cursor_root/2026.04.10-active" "$cursor_root/2026.04.20-newest"
+    touch -t 202604010000 "$cursor_root/2026.04.01-old"
+    touch -t 202604100000 "$cursor_root/2026.04.10-active"
+    touch -t 202604200000 "$cursor_root/2026.04.20-newest"
+    : > "$cursor_root/2026.04.10-active/cursor-agent"
+    ln -s "$cursor_root/2026.04.10-active/cursor-agent" "$bin_dir/cursor-agent"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() { echo "$1|$2"; }
+clean_dev_ai_agents
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/2.1.112|Claude Code old version"* ]]
+    [[ "$output" != *"/2.1.113|"* ]]
+    [[ "$output" != *"/2.1.114|"* ]]
+    [[ "$output" == *"/2026.04.01-old|Cursor Agent old version"* ]]
+    [[ "$output" != *"/2026.04.10-active|"* ]]
+    [[ "$output" != *"/2026.04.20-newest|"* ]]
+}
+
+@test "clean_dev_ai_agents skips cleanup entirely when the active symlink is broken" {
+    local claude_root="$HOME/.local/share/claude/versions"
+    local bin_dir="$HOME/.local/bin"
+    rm -rf "$claude_root" "$bin_dir"
+    mkdir -p "$claude_root" "$bin_dir"
+
+    mkdir -p "$claude_root/2.1.112" "$claude_root/2.1.113" "$claude_root/2.1.114"
+    touch -t 202604170000 "$claude_root/2.1.112"
+    touch -t 202604180000 "$claude_root/2.1.113"
+    touch -t 202604200000 "$claude_root/2.1.114"
+    ln -s "$claude_root/2.1.999-missing" "$bin_dir/claude"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() { echo "$1|$2"; }
+clean_dev_ai_agents
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"|Claude Code old version"* ]]
+    [[ "$output" == *"Claude Code old version active symlink is broken"* ]]
+
+    rm -f "$bin_dir/claude"
+}
+
 @test "clean_dev_ai_agents respects MOLE_AI_AGENTS_KEEP and skips missing roots" {
     local claude_root="$HOME/.local/share/claude/versions"
     mkdir -p "$claude_root"
