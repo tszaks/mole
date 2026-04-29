@@ -1196,41 +1196,51 @@ clean_dev_misc() {
     safe_clean ~/Library/Caches/SentryCrash/* "Sentry crash reports"
     safe_clean ~/Library/Caches/KSCrash/* "KSCrash reports"
     safe_clean ~/Library/Caches/com.crashlytics.data/* "Crashlytics data"
-    safe_clean ~/Library/Application\ Support/Antigravity/Cache/* "Antigravity cache"
-    safe_clean ~/Library/Application\ Support/Antigravity/Code\ Cache/* "Antigravity code cache"
-    safe_clean ~/Library/Application\ Support/Antigravity/GPUCache/* "Antigravity GPU cache"
-    safe_clean ~/Library/Application\ Support/Antigravity/DawnGraphiteCache/* "Antigravity Dawn cache"
-    safe_clean ~/Library/Application\ Support/Antigravity/DawnWebGPUCache/* "Antigravity WebGPU cache"
+    if [[ -d ~/Library/Application\ Support/Antigravity ]]; then
+        safe_clean ~/Library/Application\ Support/Antigravity/Cache/* "Antigravity cache"
+        safe_clean ~/Library/Application\ Support/Antigravity/Code\ Cache/* "Antigravity code cache"
+        safe_clean ~/Library/Application\ Support/Antigravity/GPUCache/* "Antigravity GPU cache"
+        safe_clean ~/Library/Application\ Support/Antigravity/DawnGraphiteCache/* "Antigravity Dawn cache"
+        safe_clean ~/Library/Application\ Support/Antigravity/DawnWebGPUCache/* "Antigravity WebGPU cache"
+    fi
     # Filo (Electron)
-    safe_clean ~/Library/Application\ Support/Filo/production/Cache/* "Filo cache"
-    safe_clean ~/Library/Application\ Support/Filo/production/Code\ Cache/* "Filo code cache"
-    safe_clean ~/Library/Application\ Support/Filo/production/GPUCache/* "Filo GPU cache"
-    safe_clean ~/Library/Application\ Support/Filo/production/DawnGraphiteCache/* "Filo Dawn cache"
-    safe_clean ~/Library/Application\ Support/Filo/production/DawnWebGPUCache/* "Filo WebGPU cache"
+    if [[ -d ~/Library/Application\ Support/Filo ]]; then
+        safe_clean ~/Library/Application\ Support/Filo/production/Cache/* "Filo cache"
+        safe_clean ~/Library/Application\ Support/Filo/production/Code\ Cache/* "Filo code cache"
+        safe_clean ~/Library/Application\ Support/Filo/production/GPUCache/* "Filo GPU cache"
+        safe_clean ~/Library/Application\ Support/Filo/production/DawnGraphiteCache/* "Filo Dawn cache"
+        safe_clean ~/Library/Application\ Support/Filo/production/DawnWebGPUCache/* "Filo WebGPU cache"
+    fi
     # Claude (Electron)
-    safe_clean ~/Library/Application\ Support/Claude/Cache/* "Claude cache"
-    safe_clean ~/Library/Application\ Support/Claude/Code\ Cache/* "Claude code cache"
-    safe_clean ~/Library/Application\ Support/Claude/GPUCache/* "Claude GPU cache"
-    safe_clean ~/Library/Application\ Support/Claude/DawnGraphiteCache/* "Claude Dawn cache"
-    safe_clean ~/Library/Application\ Support/Claude/DawnWebGPUCache/* "Claude WebGPU cache"
-    safe_clean ~/Library/Application\ Support/Claude/sentry/* "Claude sentry cache"
-    safe_clean ~/Library/Application\ Support/Claude/pending-uploads/* "Claude pending uploads"
+    if [[ -d ~/Library/Application\ Support/Claude ]]; then
+        safe_clean ~/Library/Application\ Support/Claude/Cache/* "Claude cache"
+        safe_clean ~/Library/Application\ Support/Claude/Code\ Cache/* "Claude code cache"
+        safe_clean ~/Library/Application\ Support/Claude/GPUCache/* "Claude GPU cache"
+        safe_clean ~/Library/Application\ Support/Claude/DawnGraphiteCache/* "Claude Dawn cache"
+        safe_clean ~/Library/Application\ Support/Claude/DawnWebGPUCache/* "Claude WebGPU cache"
+        safe_clean ~/Library/Application\ Support/Claude/sentry/* "Claude sentry cache"
+        safe_clean ~/Library/Application\ Support/Claude/pending-uploads/* "Claude pending uploads"
+    fi
     # Qoder (VS Code fork, Electron)
-    safe_clean ~/Library/Application\ Support/Qoder/Cache/* "Qoder cache"
-    safe_clean ~/Library/Application\ Support/Qoder/CachedData/* "Qoder cached data"
-    safe_clean ~/Library/Application\ Support/Qoder/CachedExtensionVSIXs/* "Qoder extension cache"
-    safe_clean ~/Library/Application\ Support/Qoder/Code\ Cache/* "Qoder code cache"
-    safe_clean ~/Library/Application\ Support/Qoder/GPUCache/* "Qoder GPU cache"
-    safe_clean ~/Library/Application\ Support/Qoder/DawnGraphiteCache/* "Qoder Dawn cache"
-    safe_clean ~/Library/Application\ Support/Qoder/DawnWebGPUCache/* "Qoder WebGPU cache"
-    safe_clean ~/Library/Application\ Support/Qoder/logs/* "Qoder logs"
+    if [[ -d ~/Library/Application\ Support/Qoder ]]; then
+        safe_clean ~/Library/Application\ Support/Qoder/Cache/* "Qoder cache"
+        safe_clean ~/Library/Application\ Support/Qoder/CachedData/* "Qoder cached data"
+        safe_clean ~/Library/Application\ Support/Qoder/CachedExtensionVSIXs/* "Qoder extension cache"
+        safe_clean ~/Library/Application\ Support/Qoder/Code\ Cache/* "Qoder code cache"
+        safe_clean ~/Library/Application\ Support/Qoder/GPUCache/* "Qoder GPU cache"
+        safe_clean ~/Library/Application\ Support/Qoder/DawnGraphiteCache/* "Qoder Dawn cache"
+        safe_clean ~/Library/Application\ Support/Qoder/DawnWebGPUCache/* "Qoder WebGPU cache"
+        safe_clean ~/Library/Application\ Support/Qoder/logs/* "Qoder logs"
+    fi
     # Prisma ORM engine binaries cache
     safe_clean ~/.cache/prisma/* "Prisma cache"
     # OpenCode AI tool cache
     safe_clean ~/.cache/opencode/* "OpenCode cache"
     # OpenCode CLI session state (~/.cache side above covers Electron cache)
-    safe_clean ~/.local/share/opencode/snapshot/* "OpenCode snapshots"
-    safe_clean ~/.local/share/opencode/log/* "OpenCode logs"
+    if [[ -d ~/.local/share/opencode ]]; then
+        safe_clean ~/.local/share/opencode/snapshot/* "OpenCode snapshots"
+        safe_clean ~/.local/share/opencode/log/* "OpenCode logs"
+    fi
     # Claude Code CLI session/plugin state
     safe_clean ~/.claude/plugins/cache/* "Claude Code plugin cache"
     safe_clean ~/.claude/plugins/marketplaces/* "Claude Code marketplaces cache"
@@ -1296,16 +1306,18 @@ clean_dev_editors() {
     safe_clean ~/Library/Caches/Zed/* "Zed cache"
     safe_clean ~/Library/Caches/copilot/* "GitHub Copilot cache"
     safe_clean ~/.cache/vscode-ripgrep/* "VS Code ripgrep cache"
-    safe_clean ~/Library/Caches/Cursor/* "Cursor cache"
-    safe_clean ~/Library/Application\ Support/Cursor/CachedData/* "Cursor cached data"
-    safe_clean ~/Library/Application\ Support/Cursor/CachedExtensionVSIXs/* "Cursor extension cache"
-    safe_clean ~/Library/Application\ Support/Cursor/WebStorage/* "Cursor WebStorage"
-    safe_clean ~/Library/Application\ Support/Cursor/GPUCache/* "Cursor GPU cache"
-    safe_clean ~/Library/Application\ Support/Cursor/DawnGraphiteCache/* "Cursor Dawn cache"
-    safe_clean ~/Library/Application\ Support/Cursor/DawnWebGPUCache/* "Cursor WebGPU cache"
-    clean_service_worker_cache "Cursor" "$HOME/Library/Application Support/Cursor/Service Worker/CacheStorage"
-    if ! pgrep -x "Cursor" > /dev/null 2>&1; then
-        safe_clean ~/Library/Application\ Support/Cursor/Service\ Worker/ScriptCache/* "Cursor Service Worker ScriptCache"
+    if [[ -d ~/Library/Application\ Support/Cursor ]]; then
+        safe_clean ~/Library/Caches/Cursor/* "Cursor cache"
+        safe_clean ~/Library/Application\ Support/Cursor/CachedData/* "Cursor cached data"
+        safe_clean ~/Library/Application\ Support/Cursor/CachedExtensionVSIXs/* "Cursor extension cache"
+        safe_clean ~/Library/Application\ Support/Cursor/WebStorage/* "Cursor WebStorage"
+        safe_clean ~/Library/Application\ Support/Cursor/GPUCache/* "Cursor GPU cache"
+        safe_clean ~/Library/Application\ Support/Cursor/DawnGraphiteCache/* "Cursor Dawn cache"
+        safe_clean ~/Library/Application\ Support/Cursor/DawnWebGPUCache/* "Cursor WebGPU cache"
+        clean_service_worker_cache "Cursor" "$HOME/Library/Application Support/Cursor/Service Worker/CacheStorage"
+        if ! pgrep -x "Cursor" > /dev/null 2>&1; then
+            safe_clean ~/Library/Application\ Support/Cursor/Service\ Worker/ScriptCache/* "Cursor Service Worker ScriptCache"
+        fi
     fi
 }
 # Main developer tools cleanup sequence.

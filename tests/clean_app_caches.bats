@@ -142,6 +142,7 @@ EOF
 @test "clean_dingtalk calls expected caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
+mkdir -p ~/Library/Application\ Support/iDingTalk
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
 clean_dingtalk
@@ -208,6 +209,7 @@ EOF
 @test "clean_communication_apps includes Microsoft Teams legacy caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
+mkdir -p ~/Library/Application\ Support/Microsoft/Teams
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
 clean_communication_apps
@@ -221,6 +223,9 @@ EOF
 @test "clean_gaming_platforms includes steam and minecraft related caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
+mkdir -p ~/Library/Application\ Support/Steam ~/Library/Application\ Support/Battle.net
+mkdir -p ~/Library/Application\ Support/minecraft ~/.lunarclient
+mkdir -p ~/Library/Application\ Support/PCSX2 ~/Library/Application\ Support/rpcs3
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
 clean_gaming_platforms
@@ -350,6 +355,7 @@ EOF
 @test "clean_video_players includes Stremio caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
+mkdir -p ~/Library/Application\ Support/stremio
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
