@@ -707,6 +707,26 @@ paginated_multi_select() {
                     fi
                 fi
                 ;;
+            "TOP")
+                if [[ ${#view_indices[@]} -gt 0 ]]; then
+                    cursor_pos=0
+                    top_index=0
+                    need_full_redraw=true
+                fi
+                ;;
+            "BOTTOM")
+                if [[ ${#view_indices[@]} -gt 0 ]]; then
+                    local visible_total=${#view_indices[@]}
+                    if [[ $visible_total -gt $items_per_page ]]; then
+                        top_index=$((visible_total - items_per_page))
+                        cursor_pos=$((items_per_page - 1))
+                    else
+                        top_index=0
+                        cursor_pos=$((visible_total - 1))
+                    fi
+                    need_full_redraw=true
+                fi
+                ;;
             "SPACE")
                 local idx=$((top_index + cursor_pos))
                 if [[ $idx -lt ${#view_indices[@]} ]]; then
