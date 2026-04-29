@@ -734,7 +734,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.scheduleOverviewScans(), tickCmd())
 		}
 
-		invalidateCache(m.path)
+		invalidateCacheTree(m.path)
 		m.status = "Refreshing..."
 		m.scanning = true
 		if m.totalFiles > 0 {
@@ -746,7 +746,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.currentPath != nil {
 			m.currentPath.Store("")
 		}
-		return m, tea.Batch(m.scanCmd(m.path), tickCmd())
+		return m, tea.Batch(m.scanFreshCmd(m.path), tickCmd())
 	case "t", "T":
 		if !m.inOverviewMode() {
 			m.showLargeFiles = !m.showLargeFiles

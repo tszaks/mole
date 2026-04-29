@@ -343,6 +343,22 @@ func invalidateCache(path string) {
 	removeOverviewSnapshot(path)
 }
 
+// invalidateCacheTree invalidates the cache for path and all its direct
+// child directories so that a rescan does not reuse stale subdirectory
+// sizes. See #812.
+func invalidateCacheTree(path string) {
+	invalidateCache(path)
+	children, err := os.ReadDir(path)
+	if err != nil {
+		return
+	}
+	for _, child := range children {
+		if child.IsDir() {
+			invalidateCache(filepath.Join(path, child.Name()))
+		}
+	}
+}
+
 func removeOverviewSnapshot(path string) {
 	if path == "" {
 		return
