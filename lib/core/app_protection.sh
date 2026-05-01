@@ -578,7 +578,7 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.paddle.Paddle*"
     "com.setapp.DesktopClient"
     "com.devmate.*"
-    "org.sparkle-project.Sparkle"
+    "org.sparkle-project.Sparkle*"
 )
 
 # Centralized check for critical system components (case-insensitive)

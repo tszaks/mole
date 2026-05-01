@@ -97,6 +97,7 @@ decode_file_list() {
 stop_launch_services() {
     local bundle_id="$1"
     local has_system_files="${2:-false}"
+    local app_path="${3:-}"
 
     if is_uninstall_dry_run; then
         debug_log "[DRY RUN] Would unload launch services for bundle: $bundle_id"
@@ -131,6 +132,31 @@ stop_launch_services() {
                 sudo launchctl unload "$plist" 2> /dev/null || true
                 safe_sudo_remove "$plist" 2> /dev/null || true
             done < <(find /Library/LaunchDaemons -maxdepth 1 -name "${bundle_id}*.plist" -print0 2> /dev/null)
+        fi
+    fi
+
+    # Scan for LaunchAgents whose ProgramArguments reference the app path.
+    # Catches agents with bundle IDs that don't match the app's bundle ID.
+    if [[ -n "$app_path" ]]; then
+        if [[ -d ~/Library/LaunchAgents ]]; then
+            while IFS= read -r -d '' plist; do
+                launchctl unload "$plist" 2> /dev/null || true
+                safe_remove "$plist" 2> /dev/null || true
+            done < <(grep -rlZ "$app_path" ~/Library/LaunchAgents/ 2> /dev/null || true)
+        fi
+        if [[ "$has_system_files" == "true" ]]; then
+            if [[ -d /Library/LaunchAgents ]]; then
+                while IFS= read -r -d '' plist; do
+                    sudo launchctl unload "$plist" 2> /dev/null || true
+                    safe_sudo_remove "$plist" 2> /dev/null || true
+                done < <(grep -rlZ "$app_path" /Library/LaunchAgents/ 2> /dev/null || true)
+            fi
+            if [[ -d /Library/LaunchDaemons ]]; then
+                while IFS= read -r -d '' plist; do
+                    sudo launchctl unload "$plist" 2> /dev/null || true
+                    safe_sudo_remove "$plist" 2> /dev/null || true
+                done < <(grep -rlZ "$app_path" /Library/LaunchDaemons/ 2> /dev/null || true)
+            fi
         fi
     fi
 }
@@ -579,7 +605,7 @@ batch_uninstall_applications() {
         local has_system_files="false"
         [[ -n "$system_files" ]] && has_system_files="true"
 
-        stop_launch_services "$bundle_id" "$has_system_files"
+        stop_launch_services "$bundle_id" "$has_system_files" "$app_path"
         unregister_app_bundle "$app_path"
 
         # Remove from Login Items
