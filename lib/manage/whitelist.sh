@@ -23,10 +23,10 @@ save_whitelist_patterns() {
     local mode="clean"
     if [[ $# -gt 0 ]]; then
         case "$1" in
-        clean | optimize)
-            mode="$1"
-            shift
-            ;;
+            clean | optimize)
+                mode="$1"
+                shift
+                ;;
         esac
     fi
 
@@ -46,7 +46,7 @@ save_whitelist_patterns() {
 
     ensure_user_file "$config_file"
 
-    echo -e "$header_text" >"$config_file"
+    echo -e "$header_text" > "$config_file"
 
     if [[ ${#patterns[@]} -gt 0 ]]; then
         local -a unique_patterns=()
@@ -65,9 +65,9 @@ save_whitelist_patterns() {
         done
 
         if [[ ${#unique_patterns[@]} -gt 0 ]]; then
-            printf '\n' >>"$config_file"
+            printf '\n' >> "$config_file"
             for pattern in "${unique_patterns[@]}"; do
-                echo "$pattern" >>"$config_file"
+                echo "$pattern" >> "$config_file"
             done
         fi
     fi
@@ -76,7 +76,7 @@ save_whitelist_patterns() {
 # Get all cache items with their patterns
 get_all_cache_items() {
     # Format: "display_name|pattern|category"
-    cat <<'EOF'
+    cat << 'EOF'
 Apple Mail cache|$HOME/Library/Caches/com.apple.mail/*|system_cache
 Gradle build cache (Android Studio, Gradle projects)|$HOME/.gradle/caches/*|ide_cache
 Gradle daemon processes cache|$HOME/.gradle/daemon/*|ide_cache
@@ -158,7 +158,7 @@ EOF
 # Get all optimize items with their patterns
 get_optimize_whitelist_items() {
     # Format: "display_name|pattern|category"
-    cat <<'EOF'
+    cat << 'EOF'
 macOS Firewall check|firewall|security_check
 Gatekeeper check|gatekeeper|security_check
 macOS system updates check|check_macos_updates|update_check
@@ -232,7 +232,7 @@ load_whitelist() {
             line="${line%"${line##*[![:space:]]}"}"
             [[ -z "$line" || "$line" =~ ^# ]] && continue
             patterns+=("$line")
-        done <"$config_file"
+        done < "$config_file"
     else
         if [[ "$mode" == "clean" ]]; then
             patterns=("${DEFAULT_WHITELIST_PATTERNS[@]}")
@@ -330,7 +330,7 @@ ${GRAY}Edit: ${display_config}${NC}"
         menu_options+=("$display_name")
 
         index=$((index + 1))
-    done <<<"$items_source"
+    done <<< "$items_source"
 
     # Identify custom patterns (not in predefined list)
     local -a custom_patterns=()
@@ -408,7 +408,7 @@ ${GRAY}Edit: ${display_config}${NC}"
     local -a selected_patterns=()
     if [[ -n "$MOLE_SELECTION_RESULT" ]]; then
         local -a selected_indices
-        IFS=',' read -ra selected_indices <<<"$MOLE_SELECTION_RESULT"
+        IFS=',' read -ra selected_indices <<< "$MOLE_SELECTION_RESULT"
         for idx in "${selected_indices[@]}"; do
             if [[ $idx -ge 0 && $idx -lt ${#cache_patterns[@]} ]]; then
                 local pattern="${cache_patterns[$idx]}"
