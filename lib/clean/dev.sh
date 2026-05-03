@@ -277,6 +277,18 @@ clean_dev_rust() {
     safe_clean ~/.cargo/git/* "Cargo git cache"
     safe_clean ~/.rustup/downloads/* "Rust downloads cache"
 }
+# Ruby/gem ecosystem caches (not installed versions).
+clean_dev_ruby() {
+    safe_clean ~/.rbenv/cache/* "rbenv download cache"
+    safe_clean ~/.gem/specs/* "gem spec cache"
+    safe_clean ~/.gem/ruby/*/cache/*.gem "gem package cache"
+    safe_clean ~/.bundle/cache/* "Ruby Bundler cache"
+}
+# Perl ecosystem caches (not installed modules).
+clean_dev_perl() {
+    safe_clean ~/.cpan/build/* "CPAN build artifacts"
+    safe_clean ~/.cpan/sources/* "CPAN source cache"
+}
 
 # Helper: Check for multiple versions in a directory.
 # Args: $1=directory, $2=tool_name, $3=list_command, $4=remove_command
@@ -1149,7 +1161,6 @@ clean_dev_ai_agents() {
 
 # Other language tool caches.
 clean_dev_other_langs() {
-    safe_clean ~/.bundle/cache/* "Ruby Bundler cache"
     safe_clean ~/.composer/cache/* "PHP Composer cache (legacy)"
     safe_clean ~/Library/Caches/composer/* "PHP Composer cache"
     safe_clean ~/.nuget/packages/* "NuGet packages cache"
@@ -1241,6 +1252,12 @@ clean_dev_misc() {
         safe_clean ~/.local/share/opencode/snapshot/* "OpenCode snapshots"
         safe_clean ~/.local/share/opencode/log/* "OpenCode logs"
     fi
+    # Codex CLI sandbox runtimes
+    safe_clean ~/.cache/codex-runtimes/* "Codex CLI runtimes"
+    # Cursor Agent session logs (versions cleaned separately in clean_dev_ai_agents)
+    [[ -d "$HOME/.local/share/cursor-agent" ]] && safe_find_delete "$HOME/.local/share/cursor-agent" "*.log" "$MOLE_LOG_AGE_DAYS" "f"
+    # Playwright cached browser binaries
+    safe_clean ~/Library/Caches/ms-playwright/* "Playwright browsers"
     # Claude Code CLI session/plugin state
     safe_clean ~/.claude/plugins/cache/* "Claude Code plugin cache"
     safe_clean ~/.claude/plugins/marketplaces/* "Claude Code marketplaces cache"
@@ -1332,6 +1349,8 @@ clean_developer_tools() {
     clean_dev_mise
     clean_dev_rust
     check_rust_toolchains
+    clean_dev_ruby
+    clean_dev_perl
     clean_dev_docker
     clean_dev_cloud
     clean_dev_nix

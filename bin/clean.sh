@@ -1134,6 +1134,7 @@ perform_cleanup() {
         clean_orphaned_app_data
         clean_orphaned_system_services
         show_user_launch_agent_hint_notice
+        show_orphan_dotdir_hint_notice
         end_section
 
         # ===== 11. Apple Silicon =====

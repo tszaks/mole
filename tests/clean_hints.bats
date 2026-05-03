@@ -165,3 +165,100 @@ EOT5
     [[ "$output" != *"Potential stale login item:"* ]]
     [[ "$output" != *"Review: open ~/Library/LaunchAgents"* ]]
 }
+
+# ---- Orphan dotfile hint tests ----
+
+@test "show_orphan_dotdir_hint_notice skips known-safe directories" {
+    mkdir -p "$HOME/.ssh" "$HOME/.config" "$HOME/.npm" "$HOME/.cargo"
+    touch -t 202401010000 "$HOME/.ssh" "$HOME/.config" "$HOME/.npm" "$HOME/.cargo"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { echo "100"; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Potential orphan dotfile"* ]]
+}
+
+@test "show_orphan_dotdir_hint_notice reports dir with no matching binary" {
+    mkdir -p "$HOME/.fakecli-test-orphan"
+    touch -t 202401010000 "$HOME/.fakecli-test-orphan"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { echo "1024"; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Potential orphan dotfile"* ]]
+    [[ "$output" == *".fakecli-test-orphan"* ]]
+    [[ "$output" == *"No matching binary in PATH"* ]]
+}
+
+@test "show_orphan_dotdir_hint_notice skips dir with existing binary" {
+    mkdir -p "$HOME/.bash"
+    touch -t 202401010000 "$HOME/.bash"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { echo "100"; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *".bash"* ]]
+}
+
+@test "show_orphan_dotdir_hint_notice skips dirs younger than threshold" {
+    mkdir -p "$HOME/.youngcli-test"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { echo "100"; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *".youngcli-test"* ]]
+}
+
+@test "show_orphan_dotdir_hint_notice limits output to max 5 candidates" {
+    for i in $(seq 1 8); do
+        mkdir -p "$HOME/.orphantest${i}"
+        touch -t 202401010000 "$HOME/.orphantest${i}"
+    done
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { echo "100"; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    local count
+    count=$(echo "$output" | grep -c "Potential orphan dotfile" || true)
+    [ "$count" -le 5 ]
+}

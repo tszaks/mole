@@ -435,6 +435,8 @@ clean_dev_go() { :; }
 clean_dev_mise() { echo "mise"; }
 clean_dev_rust() { :; }
 check_rust_toolchains() { :; }
+clean_dev_ruby() { :; }
+clean_dev_perl() { :; }
 check_android_ndk() { :; }
 clean_dev_docker() { :; }
 clean_dev_cloud() { :; }
@@ -466,6 +468,49 @@ EOF
     [[ "$output" == *"npm"* ]]
     [[ "$output" == *"mise"* ]]
     [[ "$output" == *"brew"* ]]
+}
+
+@test "clean_dev_ruby cleans rbenv, gem, and bundler caches" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_dev_ruby
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"rbenv download cache|"* ]]
+    [[ "$output" == *"gem spec cache|"* ]]
+    [[ "$output" == *"gem package cache|"* ]]
+    [[ "$output" == *"Ruby Bundler cache|"* ]]
+}
+
+@test "clean_dev_perl cleans CPAN build and source caches" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_dev_perl
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CPAN build artifacts|"* ]]
+    [[ "$output" == *"CPAN source cache|"* ]]
+}
+
+@test "clean_dev_other_langs no longer includes Ruby Bundler cache" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_dev_other_langs
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Ruby Bundler cache"* ]]
 }
 
 @test "clean_project_caches cleans flutter .dart_tool and build directories" {
