@@ -220,6 +220,8 @@ type Collector struct {
 	lastNetAt    time.Time
 	rxHistoryBuf *RingBuffer
 	txHistoryBuf *RingBuffer
+	lastNetIPAt  time.Time
+	cachedNetIPs map[string]string
 	lastGPUAt    time.Time
 	cachedGPU    []GPUStatus
 	prevDiskIO   disk.IOCountersStat
@@ -231,13 +233,16 @@ type Collector struct {
 }
 
 func NewCollector(options ProcessWatchOptions) *Collector {
-	return &Collector{
+	c := &Collector{
 		prevNet:        make(map[string]net.IOCountersStat),
 		rxHistoryBuf:   NewRingBuffer(NetworkHistorySize),
 		txHistoryBuf:   NewRingBuffer(NetworkHistorySize),
+		cachedNetIPs:   make(map[string]string),
 		processWatch:   options.SnapshotConfig(),
 		processWatcher: NewProcessWatcher(options),
 	}
+	c.primeNetworkCounters(time.Now())
+	return c
 }
 
 func (c *Collector) Collect() (MetricsSnapshot, error) {

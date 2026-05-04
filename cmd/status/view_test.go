@@ -658,6 +658,40 @@ func TestBatteryProgressBar(t *testing.T) {
 	}
 }
 
+func TestRenderBatteryCardShowsAdapterInputOnly(t *testing.T) {
+	card := renderBatteryCard([]BatteryStatus{{
+		Percent:    80,
+		Status:     "AC",
+		Capacity:   100,
+		CycleCount: 4,
+	}}, ThermalStatus{
+		BatteryTemp:  30.7,
+		AdapterPower: 94,
+	})
+
+	var joined []string
+	for _, line := range card.lines {
+		joined = append(joined, stripANSI(line))
+	}
+	got := strings.Join(joined, "\n")
+
+	if !strings.Contains(got, "Input") || !strings.Contains(got, "94W max") {
+		t.Fatalf("expected input line with adapter max watts, got:\n%s", got)
+	}
+	if strings.Contains(got, "Draw") || strings.Contains(got, "Charge") {
+		t.Fatalf("expected no live draw or charge watt row, got:\n%s", got)
+	}
+	if !strings.Contains(got, "AC · 94W adapter") {
+		t.Fatalf("expected AC adapter status, got:\n%s", got)
+	}
+	if strings.Contains(got, "Ac") {
+		t.Fatalf("expected AC to stay uppercase, got:\n%s", got)
+	}
+	if strings.Contains(got, "⚡") {
+		t.Fatalf("expected no charging glyph, got:\n%s", got)
+	}
+}
+
 func TestColorizeTemp(t *testing.T) {
 	tests := []struct {
 		name string

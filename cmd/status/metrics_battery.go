@@ -210,94 +210,157 @@ func collectThermal() ThermalStatus {
 
 func parseAppleSmartBatteryThermal(out string) ThermalStatus {
 	var thermal ThermalStatus
+	var (
+		voltageMV  float64
+		amperageMA float64
+	)
 
 	for line := range strings.Lines(out) {
 		line = strings.TrimSpace(line)
 
 		// AppleSmartBattery reports battery temperature in centi-degrees Celsius.
-		if _, after, found := strings.Cut(line, "\"Temperature\" = "); found {
-			valStr := strings.TrimSpace(after)
-			if tempRaw, err := strconv.Atoi(valStr); err == nil && tempRaw > 0 {
+		if tempRaw, found := parseIORegFloatValue(line, "Temperature"); found && tempRaw > 0 {
+			if tempRaw < 1000 {
+				// Some fixtures and non-Apple platforms report Celsius directly.
+				thermal.BatteryTemp = tempRaw
+			} else {
 				thermal.BatteryTemp = float64(tempRaw) / 100.0
 			}
 		}
 
-		// Adapter power (Watts) from current adapter.
-		if strings.Contains(line, "\"AdapterDetails\" = {") && !strings.Contains(line, "AppleRaw") {
-			if _, after, found := strings.Cut(line, "\"Watts\"="); found {
-				valStr := strings.TrimSpace(after)
-				valStr, _, _ = strings.Cut(valStr, ",")
-				valStr, _, _ = strings.Cut(valStr, "}")
-				valStr = strings.TrimSpace(valStr)
-				if watts, err := strconv.ParseFloat(valStr, 64); err == nil && watts > 0 {
-					thermal.AdapterPower = watts
-				}
+		// Adapter power (Watts) from current adapter. Ignore AppleRawAdapterDetails:
+		// raw entries can appear before the normalized adapter details and should
+		// not win the display value.
+		if strings.Contains(line, `"AdapterDetails"`) && !strings.Contains(line, "AppleRaw") && thermal.AdapterPower == 0 {
+			watts, found := parseIORegFloatValue(line, "Watts")
+			if found && watts > 0 {
+				thermal.AdapterPower = watts
 			}
 		}
 
 		// System power consumption (mW -> W).
-		if _, after, found := strings.Cut(line, "\"SystemPowerIn\"="); found {
-			valStr := strings.TrimSpace(after)
-			valStr, _, _ = strings.Cut(valStr, ",")
-			valStr, _, _ = strings.Cut(valStr, "}")
-			valStr = strings.TrimSpace(valStr)
-			if powerMW, err := strconv.ParseFloat(valStr, 64); err == nil {
-				// SystemPower should always be positive, reject invalid values
-				if powerMW >= 0 && powerMW < 1000000 { // 0 to 1000W
-					thermal.SystemPower = powerMW / 1000.0
-				}
+		if powerMW, found := parseIORegFloatValue(line, "SystemPowerIn"); found {
+			setSystemPowerMW(&thermal, powerMW)
+		}
+		if thermal.SystemPower == 0 {
+			if powerMW, found := parseIORegFloatValue(line, "SystemPower"); found {
+				setSystemPowerMW(&thermal, powerMW)
 			}
 		}
 
 		// Battery power (mW -> W, positive = discharging, negative = charging).
-		if _, after, found := strings.Cut(line, "\"BatteryPower\"="); found {
-			valStr := strings.TrimSpace(after)
-			valStr, _, _ = strings.Cut(valStr, ",")
-			valStr, _, _ = strings.Cut(valStr, "}")
-			valStr = strings.TrimSpace(valStr)
+		if powerMW, found := parseIORegSignedNumber(line, "BatteryPower"); found {
+			setBatteryPowerMW(&thermal, powerMW)
+		}
 
-			var powerMW float64
-			var parsed bool
-
-			// Strategy 1: Try parsing as a signed integer first.
-			// This handles standard positive values and explicit negative strings like "-12345".
-			if valInt, err := strconv.ParseInt(valStr, 10, 64); err == nil {
-				powerMW = float64(valInt)
-				parsed = true
-			} else if valUint, err := strconv.ParseUint(valStr, 10, 64); err == nil {
-				// Strategy 2: Try parsing as an unsigned integer (Two's Complement).
-				// ioreg often returns negative values as huge uint64 numbers (e.g. 2^64 - 100).
-				// Explicitly handle two's complement rather than relying on an unchecked cast.
-				var signed int64
-				if valUint <= math.MaxInt64 {
-					// Fits in positive int64 range directly.
-					signed = int64(valUint)
-				} else {
-					// Interpret as negative two's complement value.
-					// For a uint64 v > MaxInt64, the corresponding negative int64 is:
-					// -(^v + 1) where ^ is bitwise NOT in 64 bits.
-					negMag := ^valUint + 1
-					// negMag now holds the magnitude of the negative value as uint64.
-					if negMag <= math.MaxInt64 {
-						signed = -int64(negMag)
-					} else {
-						// Magnitude too large to represent; skip this parsing strategy.
-						goto skipUintParse
-					}
-				}
-				powerMW = float64(signed)
-				parsed = true
-			skipUintParse:
-			}
-
-			if parsed {
-				// Validate reasonable battery power range: -200W to 200W
-				if powerMW > -200000 && powerMW < 200000 {
-					thermal.BatteryPower = powerMW / 1000.0
-				}
-			}
+		if voltage, found := parseIORegFloatValue(line, "Voltage"); found && voltage > 0 {
+			voltageMV = voltage
+		}
+		if voltage, found := parseIORegFloatValue(line, "AppleRawBatteryVoltage"); found && voltage > 0 {
+			voltageMV = voltage
+		}
+		if amperage, found := parseIORegSignedNumber(line, "InstantAmperage"); found && amperage != 0 {
+			amperageMA = amperage
+		}
+		if amperage, found := parseIORegSignedNumber(line, "Amperage"); found && amperage != 0 && amperageMA == 0 {
+			amperageMA = amperage
 		}
 	}
 
+	if thermal.BatteryPower == 0 && voltageMV > 0 && amperageMA != 0 {
+		// AppleSmartBattery amperage is signed mA. Negative current means the
+		// battery is discharging, so keep BatteryPower positive for discharge.
+		batteryPowerW := -(voltageMV * amperageMA) / 1000000.0
+		if batteryPowerW > -200 && batteryPowerW < 200 {
+			thermal.BatteryPower = batteryPowerW
+		}
+	}
 	return thermal
+}
+
+func setSystemPowerMW(thermal *ThermalStatus, powerMW float64) {
+	// SystemPower should always be positive; reject invalid values.
+	if powerMW >= 0 && powerMW < 1000000 { // 0 to 1000W
+		thermal.SystemPower = powerMW / 1000.0
+	}
+}
+
+func setBatteryPowerMW(thermal *ThermalStatus, powerMW float64) {
+	// Validate reasonable battery power range: -200W to 200W.
+	if powerMW > -200000 && powerMW < 200000 {
+		thermal.BatteryPower = powerMW / 1000.0
+	}
+}
+
+func parseIORegFloatValue(line string, key string) (float64, bool) {
+	raw, found := ioRegValueForKey(line, key)
+	if !found {
+		return 0, false
+	}
+	val, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	return val, true
+}
+
+func parseIORegSignedNumber(line string, key string) (float64, bool) {
+	raw, found := ioRegValueForKey(line, key)
+	if !found {
+		return 0, false
+	}
+	val, ok := parseIORegSignedInteger(raw)
+	if !ok {
+		return 0, false
+	}
+	return float64(val), true
+}
+
+func parseIORegSignedInteger(raw string) (int64, bool) {
+	if valInt, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return valInt, true
+	}
+	valUint, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	if valUint <= math.MaxInt64 {
+		return int64(valUint), true
+	}
+	// ioreg sometimes prints negative int64 values as uint64 two's complement.
+	negMag := ^valUint + 1
+	if negMag > math.MaxInt64 {
+		return 0, false
+	}
+	return -int64(negMag), true
+}
+
+func ioRegValueForKey(line string, key string) (string, bool) {
+	marker := `"` + key + `"`
+	_, rest, found := strings.Cut(line, marker)
+	if !found {
+		return "", false
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	if !strings.HasPrefix(rest, "=") {
+		return "", false
+	}
+	rest = strings.TrimLeft(rest[1:], " \t")
+	if rest == "" || strings.HasPrefix(rest, ",") {
+		return "", false
+	}
+	end := len(rest)
+scan:
+	for i, r := range rest {
+		switch r {
+		case ',', '}', ')', ' ', '\t', '\n', '\r':
+			end = i
+			break scan
+		}
+	}
+	value := strings.Trim(rest[:end], `"`)
+	if value == "" {
+		return "", false
+	}
+	return value, true
 }

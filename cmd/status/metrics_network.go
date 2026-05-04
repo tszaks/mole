@@ -16,6 +16,11 @@ import (
 
 var ioCountersFunc = net.IOCounters
 
+const (
+	minNetworkSampleInterval = 100 * time.Millisecond
+	networkIPCacheTTL        = 10 * time.Second
+)
+
 func collectIOCountersSafely(pernic bool) (stats []net.IOCountersStat, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -25,7 +30,28 @@ func collectIOCountersSafely(pernic bool) (stats []net.IOCountersStat, err error
 	return ioCountersFunc(pernic)
 }
 
+func (c *Collector) primeNetworkCounters(now time.Time) {
+	stats, err := collectIOCountersSafely(true)
+	if err != nil {
+		return
+	}
+	c.lastNetAt = now
+	for _, s := range stats {
+		c.prevNet[s.Name] = s
+	}
+}
+
 func (c *Collector) collectNetwork(now time.Time) ([]NetworkStatus, error) {
+	if c.prevNet == nil {
+		c.prevNet = make(map[string]net.IOCountersStat)
+	}
+	if c.rxHistoryBuf == nil {
+		c.rxHistoryBuf = NewRingBuffer(NetworkHistorySize)
+	}
+	if c.txHistoryBuf == nil {
+		c.txHistoryBuf = NewRingBuffer(NetworkHistorySize)
+	}
+
 	stats, err := collectIOCountersSafely(true)
 	if err != nil {
 		// Some restricted environments can break netstat-backed collectors.
@@ -36,19 +62,18 @@ func (c *Collector) collectNetwork(now time.Time) ([]NetworkStatus, error) {
 	}
 
 	// Map interface IPs.
-	ifAddrs := getInterfaceIPs()
+	ifAddrs := c.getInterfaceIPsCached(now)
 
 	if c.lastNetAt.IsZero() {
 		c.lastNetAt = now
 		for _, s := range stats {
 			c.prevNet[s.Name] = s
 		}
-		return nil, nil
 	}
 
 	elapsed := now.Sub(c.lastNetAt).Seconds()
-	if elapsed <= 0 {
-		elapsed = 1
+	if elapsed < minNetworkSampleInterval.Seconds() {
+		elapsed = minNetworkSampleInterval.Seconds()
 	}
 
 	var result []NetworkStatus
@@ -99,6 +124,15 @@ func (c *Collector) collectNetwork(now time.Time) ([]NetworkStatus, error) {
 	c.txHistoryBuf.Add(totalTx)
 
 	return result, nil
+}
+
+func (c *Collector) getInterfaceIPsCached(now time.Time) map[string]string {
+	if c.cachedNetIPs != nil && now.Sub(c.lastNetIPAt) < networkIPCacheTTL {
+		return c.cachedNetIPs
+	}
+	c.cachedNetIPs = getInterfaceIPs()
+	c.lastNetIPAt = now
+	return c.cachedNetIPs
 }
 
 func getInterfaceIPs() map[string]string {
