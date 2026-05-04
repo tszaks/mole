@@ -1184,6 +1184,143 @@ EOF
     [[ "$output" != *"SUCCESS:Browser code signature caches"* ]]
 }
 
+@test "clean_deep_system cleans CleanMyMac-observed rebuildable system caches" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/rebuildable_cache_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        case "$3" in
+            /Library/Caches/com.apple.iconservices.store)
+                return 0
+                ;;
+        esac
+        return 1
+    fi
+    if [[ "$1" == "find" ]]; then
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() { return 0; }
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"safe_sudo_remove:/Library/Caches/com.apple.iconservices.store"* ]]
+    [[ "$output" == *"SUCCESS:Rebuildable system caches, 1 item"* ]]
+}
+
+@test "is_rebuildable_gpu_cache_dir only allows C GPU cache shards" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+is_rebuildable_gpu_cache_dir "/private/var/folders/test/a/C/com.example.App/com.apple.metal"
+is_rebuildable_gpu_cache_dir "/private/var/folders/test/a/C/com.example.App/com.apple.metalfe"
+is_rebuildable_gpu_cache_dir "/private/var/folders/test/a/C/com.example.App/com.apple.gpuarchiver"
+! is_rebuildable_gpu_cache_dir "/private/var/folders/test/a/T/com.example.App/com.apple.metal"
+! is_rebuildable_gpu_cache_dir "/private/var/folders/test/a/C/com.example.App/not-a-gpu-cache"
+! is_rebuildable_gpu_cache_dir "/Library/Extensions/com.example.driver/com.apple.metal"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "gpu_cache_dir_is_stale uses contained file mtimes" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+stale_dir="$HOME/gpu-stale"
+active_dir="$HOME/gpu-active"
+mkdir -p "$stale_dir" "$active_dir"
+touch "$stale_dir/functions.data" "$active_dir/functions.data"
+touch -t 202001010000 "$stale_dir/functions.data"
+
+gpu_cache_dir_is_stale "$stale_dir" 1
+! gpu_cache_dir_is_stale "$active_dir" 1
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "clean_deep_system cleans only narrow private var GPU cache shards" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/gpu_cache_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 1
+    fi
+    if [[ "$1" == "find" ]]; then
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() { return 0; }
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+is_sip_enabled() { return 1; }
+find() { return 0; }
+gpu_cache_dir_is_stale() { return 0; }
+run_with_timeout() {
+    local _timeout="$1"
+    shift
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+        printf 'find_args:%s\n' "$*" >> "$CALL_LOG"
+        printf '%s\0' \
+            "/private/var/folders/test/a/C/com.example.App/com.apple.metal" \
+            "/private/var/folders/test/a/C/com.example.App/com.apple.metalfe" \
+            "/private/var/folders/test/a/C/com.example.App/com.apple.gpuarchiver" \
+            "/private/var/folders/test/a/T/com.example.App/com.apple.metal" \
+            "/private/var/folders/test/a/C/com.example.App/not-a-gpu-cache"
+        return 0
+    fi
+    "$@"
+}
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.metal"* ]]
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.metalfe"* ]]
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.gpuarchiver"* ]]
+    [[ "$output" != *"/private/var/folders/test/a/T/com.example.App/com.apple.metal"* ]]
+    [[ "$output" != *"not-a-gpu-cache"* ]]
+    [[ "$output" != *"-mtime +1"* ]]
+    [[ "$output" == *"SUCCESS:Accessible rebuildable GPU caches, 3 items"* ]]
+}
+
 @test "opt_memory_pressure_relief skips when pressure is normal" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail

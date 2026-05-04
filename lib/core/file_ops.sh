@@ -147,7 +147,7 @@ validate_path_for_deletion() {
 
     # Check path isn't critical system directory
     case "$path" in
-        / | /bin | /bin/* | /sbin | /sbin/* | /usr | /usr/bin | /usr/bin/* | /usr/sbin | /usr/sbin/* | /usr/lib | /usr/lib/* | /System | /System/* | /Library/Extensions)
+        / | /bin | /bin/* | /sbin | /sbin/* | /usr | /usr/bin | /usr/bin/* | /usr/sbin | /usr/sbin/* | /usr/lib | /usr/lib/* | /System | /System/* | /Library/Extensions | /Library/Extensions/*)
             log_error "Path validation failed: critical system directory: $path"
             return 1
             ;;

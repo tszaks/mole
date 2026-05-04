@@ -705,6 +705,11 @@ clean_app_caches() {
     safe_clean ~/Library/Containers/com.apple.CoreDevice.CoreDeviceService/Data/Library/Caches/* "CoreDevice service cache"
     safe_clean ~/Library/Containers/com.apple.NeptuneOneExtension/Data/Library/Caches/* "Apple Intelligence extension cache"
     safe_clean ~/Library/Containers/com.apple.AppleMediaServicesUI.UtilityExtension/Data/tmp/* "Apple Media Services temp files"
+    safe_clean ~/Library/Caches/com.apple.AppleMediaServices/* "Apple Media Services cache"
+    safe_clean ~/Library/Caches/com.apple.duetexpertd/* "Duet Expert cache"
+    safe_clean ~/Library/Caches/com.apple.parsecd/* "Parsecd cache"
+    safe_clean ~/Library/Caches/com.apple.python/* "Apple Python cache"
+    safe_clean ~/Library/Caches/com.apple.e5rt.e5bundlecache/* "Apple Intelligence runtime cache"
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
     start_section_spinner "Scanning sandboxed apps..."

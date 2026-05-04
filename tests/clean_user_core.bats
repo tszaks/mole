@@ -135,6 +135,30 @@ EOF
     [[ "$output" == *"Saved application states"* ]] || [[ "$output" == *"App caches"* ]]
 }
 
+@test "clean_app_caches includes CleanMyMac-observed Apple cache families" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+stop_section_spinner() { :; }
+start_section_spinner() { :; }
+safe_clean() { echo "$2"; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_app_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Apple Media Services cache"* ]]
+    [[ "$output" == *"Duet Expert cache"* ]]
+    [[ "$output" == *"Parsecd cache"* ]]
+    [[ "$output" == *"Apple Python cache"* ]]
+    [[ "$output" == *"Apple Intelligence runtime cache"* ]]
+}
+
 @test "clean_app_caches shows spinner during initial app cache scan" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
