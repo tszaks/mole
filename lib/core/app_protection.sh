@@ -959,6 +959,133 @@ is_path_whitelisted() {
     return 1
 }
 
+_mole_uninstall_lower() {
+    printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]'
+}
+
+_mole_uninstall_is_common_app_name() {
+    local lower_name
+    lower_name=$(_mole_uninstall_lower "${1:-}")
+    case "$lower_name" in
+        music | notes | photos | finder | safari | preview | calendar | contacts | messages | \
+            reminders | clock | weather | stocks | books | news | podcasts | voice | files | \
+            store | system | helper | agent | daemon | service | update | sync | backup | \
+            cloud | manager | monitor | server | client | worker | runner | launcher | \
+            driver | plugin | extension | widget | utility)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+_mole_uninstall_vendor_product_tokens() {
+    local bundle_id="${1:-}"
+    [[ "$bundle_id" =~ ^[a-zA-Z0-9][-a-zA-Z0-9]*(\.[a-zA-Z0-9][-a-zA-Z0-9]*)+$ ]] || return 1
+
+    local product_token="${bundle_id##*.}"
+    local without_product="${bundle_id%.*}"
+    local vendor_token="${without_product##*.}"
+
+    [[ "$vendor_token" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{2,}$ ]] || return 1
+    [[ "$product_token" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{2,}$ ]] || return 1
+
+    printf '%s|%s\n' "$vendor_token" "$product_token"
+}
+
+_mole_uninstall_name_variant_matches() {
+    local candidate_lower="$1"
+    shift
+
+    local variant
+    for variant in "$@"; do
+        [[ -n "$variant" ]] || continue
+        if [[ "$candidate_lower" == "$variant" ||
+            "$candidate_lower" == "$variant "* ||
+            "$candidate_lower" == "$variant-"* ||
+            "$candidate_lower" == "${variant}_"* ||
+            "$candidate_lower" == "$variant."* ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+find_vendor_nested_app_paths() {
+    local bundle_id="$1"
+    local app_name="$2"
+    shift 2
+
+    [[ -n "$app_name" && ${#app_name} -ge 4 ]] || return 0
+    _mole_uninstall_is_common_app_name "$app_name" && return 0
+
+    local token_pair
+    token_pair=$(_mole_uninstall_vendor_product_tokens "$bundle_id" 2> /dev/null) || return 0
+    local vendor_token product_token
+    IFS='|' read -r vendor_token product_token <<< "$token_pair"
+
+    local vendor_lower product_lower app_lower nospace_lower hyphen_lower underscore_lower
+    vendor_lower=$(_mole_uninstall_lower "$vendor_token")
+    product_lower=$(_mole_uninstall_lower "$product_token")
+    app_lower=$(_mole_uninstall_lower "$app_name")
+    nospace_lower=$(_mole_uninstall_lower "${app_name// /}")
+    hyphen_lower=$(_mole_uninstall_lower "${app_name// /-}")
+    underscore_lower=$(_mole_uninstall_lower "${app_name// /_}")
+
+    local root candidate parent_dir parent_base parent_lower child_base child_lower
+    for root in "$@"; do
+        [[ -d "$root" ]] || continue
+        while IFS= read -r -d '' candidate; do
+            parent_dir="${candidate%/*}"
+            parent_base="${parent_dir##*/}"
+            parent_lower=$(_mole_uninstall_lower "$parent_base")
+            [[ "$parent_lower" == "$vendor_lower" ]] || continue
+
+            child_base="${candidate##*/}"
+            child_lower=$(_mole_uninstall_lower "$child_base")
+            if _mole_uninstall_name_variant_matches "$child_lower" \
+                "$app_lower" "$nospace_lower" "$hyphen_lower" "$underscore_lower" "$product_lower"; then
+                printf '%s\n' "$candidate"
+            fi
+        done < <(command find "$root" -mindepth 2 -maxdepth 2 -type d -print0 2> /dev/null)
+    done | sort -u
+}
+
+find_shared_app_paths() {
+    local bundle_id="$1"
+    local app_name="$2"
+    shift 2
+
+    [[ -n "$app_name" && ${#app_name} -ge 5 ]] || return 0
+    _mole_uninstall_is_common_app_name "$app_name" && return 0
+
+    local product_token=""
+    local token_pair
+    if token_pair=$(_mole_uninstall_vendor_product_tokens "$bundle_id" 2> /dev/null); then
+        IFS='|' read -r _ product_token <<< "$token_pair"
+    fi
+
+    local app_lower nospace_lower hyphen_lower underscore_lower product_lower
+    app_lower=$(_mole_uninstall_lower "$app_name")
+    nospace_lower=$(_mole_uninstall_lower "${app_name// /}")
+    hyphen_lower=$(_mole_uninstall_lower "${app_name// /-}")
+    underscore_lower=$(_mole_uninstall_lower "${app_name// /_}")
+    product_lower=$(_mole_uninstall_lower "$product_token")
+
+    local root candidate base lower_base
+    for root in "$@"; do
+        [[ -d "$root" ]] || continue
+        while IFS= read -r -d '' candidate; do
+            base="${candidate##*/}"
+            lower_base=$(_mole_uninstall_lower "$base")
+            if _mole_uninstall_name_variant_matches "$lower_base" \
+                "$app_lower" "$nospace_lower" "$hyphen_lower" "$underscore_lower" "$product_lower"; then
+                printf '%s\n' "$candidate"
+            fi
+        done < <(command find "$root" -mindepth 1 -maxdepth 1 -print0 2> /dev/null)
+    done | sort -u
+}
+
 # Locate files associated with an application
 find_app_files() {
     local bundle_id="$1"
@@ -1102,6 +1229,21 @@ find_app_files() {
 
         files_to_clean+=("$expanded_path")
     done
+
+    # Vendor-nested support directories, e.g.:
+    #   ~/Library/Application Support/Avid/Sibelius
+    # Many professional apps store the product under a vendor folder rather
+    # than directly under Application Support. Match only when the vendor token
+    # comes from the bundle id to avoid broad name-only deletion.
+    local vendor_nested_path
+    while IFS= read -r vendor_nested_path; do
+        [[ -n "$vendor_nested_path" && -e "$vendor_nested_path" ]] && files_to_clean+=("$vendor_nested_path")
+    done < <(
+        find_vendor_nested_app_paths "$bundle_id" "$app_name" \
+            "$HOME/Library/Application Support" \
+            "$HOME/Library/Caches" \
+            "$HOME/Library/Logs"
+    )
 
     # Handle Preferences and ByHost variants (only if bundle_id is valid)
     if [[ -n "$bundle_id" && "$bundle_id" != "unknown" && ${#bundle_id} -gt 3 ]]; then
@@ -1378,6 +1520,25 @@ find_app_system_files() {
 
         system_files+=("$p")
     done
+
+    # Vendor-nested system support directories, e.g.:
+    #   /Library/Application Support/Avid/Sibelius
+    local vendor_nested_system_path
+    while IFS= read -r vendor_nested_system_path; do
+        [[ -n "$vendor_nested_system_path" && -e "$vendor_nested_system_path" ]] && system_files+=("$vendor_nested_system_path")
+    done < <(
+        find_vendor_nested_app_paths "$bundle_id" "$app_name" \
+            "/Library/Application Support" \
+            "/Library/Caches" \
+            "/Library/Logs"
+    )
+
+    # Shared sample/support files are usually outside the user's Library but
+    # are app-owned data (for example /Users/Shared/Sibelius ...).
+    local shared_app_path
+    while IFS= read -r shared_app_path; do
+        [[ -n "$shared_app_path" && -e "$shared_app_path" ]] && system_files+=("$shared_app_path")
+    done < <(find_shared_app_paths "$bundle_id" "$app_name" "/Users/Shared")
 
     # System LaunchAgents/LaunchDaemons often use bundle-id-derived helper
     # labels (for example "<bundle>.ProxyConfigHelper.plist"), so scan for

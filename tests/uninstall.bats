@@ -452,6 +452,93 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "cached uninstall metadata is rejected when the current bundle is protected" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+
+app_path="$HOME/Applications/Safari.app"
+mkdir -p "$app_path/Contents"
+cat > "$app_path/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.apple.Safari</string>
+</dict>
+</plist>
+PLIST
+
+if uninstall_resolve_eligible_bundle_id "$app_path" "com.example.cached" > /dev/null; then
+    echo "protected app should not be eligible" >&2
+    exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "cached uninstall metadata is rejected when the app is background-only" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+
+app_path="$HOME/Applications/Helper.app"
+mkdir -p "$app_path/Contents"
+cat > "$app_path/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.Helper</string>
+    <key>LSBackgroundOnly</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+
+if uninstall_resolve_eligible_bundle_id "$app_path" "com.example.Helper" > /dev/null; then
+    echo "background-only app should not be eligible" >&2
+    exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "eligible uninstall metadata uses the current bundle id over stale cache" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+
+app_path="$HOME/Applications/Plain.app"
+mkdir -p "$app_path/Contents"
+cat > "$app_path/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.Plain</string>
+</dict>
+</plist>
+PLIST
+
+result=$(uninstall_resolve_eligible_bundle_id "$app_path" "com.example.Stale")
+[[ "$result" == "com.example.Plain" ]] || {
+    echo "unexpected bundle id: $result" >&2
+    exit 1
+}
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "safe_remove can remove a simple directory" {
 	mkdir -p "$HOME/test_dir"
 	touch "$HOME/test_dir/file.txt"

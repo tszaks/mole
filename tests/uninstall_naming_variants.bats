@@ -24,7 +24,7 @@ teardown_file() {
 }
 
 setup() {
-    find "$HOME" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+    find "$HOME" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2> /dev/null || true
     source "$PROJECT_ROOT/lib/core/base.sh"
     source "$PROJECT_ROOT/lib/core/log.sh"
     source "$PROJECT_ROOT/lib/core/app_protection.sh"
@@ -127,10 +127,22 @@ setup() {
     [[ ! "$result" =~ Library/Containers/com.tencent.otherapp.Helper ]]
 }
 
+@test "find_app_files detects vendor-nested Application Support directories" {
+    mkdir -p "$HOME/Library/Application Support/Avid/Sibelius"
+    mkdir -p "$HOME/Library/Application Support/OtherVendor/Sibelius"
+    echo "test" > "$HOME/Library/Application Support/Avid/Sibelius/settings.db"
+    echo "test" > "$HOME/Library/Application Support/OtherVendor/Sibelius/settings.db"
+
+    result=$(find_app_files "com.avid.sibelius" "Sibelius")
+
+    [[ "$result" =~ Library/Application\ Support/Avid/Sibelius ]]
+    [[ ! "$result" =~ Library/Application\ Support/OtherVendor/Sibelius ]]
+}
+
 @test "find_app_files does not match empty app name" {
     mkdir -p "$HOME/Library/Application Support/test"
 
-    result=$(find_app_files "com.test" "" 2>/dev/null || true)
+    result=$(find_app_files "com.test" "" 2> /dev/null || true)
 
     [[ ! "$result" =~ "Library/Application Support"$ ]]
 }
