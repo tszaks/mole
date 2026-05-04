@@ -29,11 +29,9 @@ func (m model) View() string {
 			}
 
 			if allPending {
-				fmt.Fprintf(&b, "%s%s%s%s Analyzing disk usage, please wait...%s\n",
-					colorCyan, colorBold,
-					spinnerFrames[m.spinner],
-					colorReset, colorReset)
-				return b.String()
+				fmt.Fprintf(&b, "%sSelect a location to explore:%s  ", colorGray, colorReset)
+				fmt.Fprintf(&b, "%s%s%s%s Analyzing disk usage...\n\n",
+					colorCyan, colorBold, spinnerFrames[m.spinner], colorReset)
 			} else {
 				fmt.Fprintf(&b, "%sSelect a location to explore:%s  ", colorGray, colorReset)
 				fmt.Fprintf(&b, "%s%s%s%s %s\n\n", colorCyan, colorBold, spinnerFrames[m.spinner], colorReset, m.status)

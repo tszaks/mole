@@ -169,10 +169,14 @@ func main() {
 }
 
 func runTUIMode(path string, isOverview bool) {
-	// Warm overview cache in background.
-	prefetchCtx, prefetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer prefetchCancel()
-	go prefetchOverviewCache(prefetchCtx)
+	// Warm overview cache only when the user opens a specific directory.
+	// Overview mode already schedules the same measurements for the foreground UI;
+	// running the prefetcher there doubles the du/io workload on cold start.
+	if !isOverview {
+		prefetchCtx, prefetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer prefetchCancel()
+		go prefetchOverviewCache(prefetchCtx)
+	}
 
 	p := tea.NewProgram(newModel(path, isOverview), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

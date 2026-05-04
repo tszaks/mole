@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -84,24 +85,7 @@ func performOverviewScanForJSON(path string) jsonOutput {
 
 	var totalSize int64
 	entries := make([]dirEntry, 0, len(overviewEntries))
-	for _, entry := range overviewEntries {
-		var (
-			size int64
-			err  error
-		)
-
-		if cached, cacheErr := loadOverviewCachedSize(entry.Path); cacheErr == nil && cached > 0 {
-			size = cached
-		} else if insightPaths[entry.Path] {
-			size, err = measureInsightSize(entry.Path)
-		} else {
-			size, err = measureOverviewSize(entry.Path)
-		}
-
-		if err == nil {
-			entry.Size = size
-		}
-
+	for _, entry := range measureOverviewEntriesForJSON(overviewEntries, insightPaths) {
 		// Match the TUI: omit scanned insight/tool entries that ended up empty.
 		if entry.Size == 0 {
 			continue
@@ -120,6 +104,57 @@ func performOverviewScanForJSON(path string) jsonOutput {
 		Entries:   jsonEntriesFromDirEntries(entries, true, insightPaths),
 		TotalSize: totalSize,
 	}
+}
+
+func measureOverviewEntriesForJSON(overviewEntries []dirEntry, insightPaths map[string]bool) []dirEntry {
+	if len(overviewEntries) == 0 {
+		return nil
+	}
+
+	type measurement struct {
+		index int
+		entry dirEntry
+	}
+
+	measured := make([]dirEntry, len(overviewEntries))
+	sem := make(chan struct{}, maxConcurrentOverview)
+	results := make(chan measurement, len(overviewEntries))
+
+	var wg sync.WaitGroup
+	for i, entry := range overviewEntries {
+		wg.Add(1)
+		go func(index int, item dirEntry) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			var (
+				size int64
+				err  error
+			)
+
+			if cached, cacheErr := loadOverviewCachedSize(item.Path); cacheErr == nil && cached > 0 {
+				size = cached
+			} else if insightPaths[item.Path] {
+				size, err = measureInsightSize(item.Path)
+			} else {
+				size, err = measureOverviewSize(item.Path)
+			}
+
+			if err == nil {
+				item.Size = size
+			}
+			results <- measurement{index: index, entry: item}
+		}(i, entry)
+	}
+
+	wg.Wait()
+	close(results)
+
+	for result := range results {
+		measured[result.index] = result.entry
+	}
+	return measured
 }
 
 func jsonEntriesFromDirEntries(entries []dirEntry, isOverview bool, insightPaths map[string]bool) []jsonEntry {

@@ -35,6 +35,13 @@ const (
 	openCommandTimeout = 10 * time.Second
 )
 
+var overviewDuIgnoreNames = map[string]bool{
+	// iCloud Drive's FileProvider tree can block `du` for tens of seconds even
+	// when most entries are cloud placeholders. Keep the overview responsive;
+	// users can still drill into the folder explicitly when they need it.
+	"Mobile Documents": true,
+}
+
 var foldDirs = map[string]bool{
 	// VCS.
 	".git": true,

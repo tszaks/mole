@@ -393,16 +393,31 @@ func prefetchOverviewCache(ctx context.Context) {
 		return
 	}
 
+	sem := make(chan struct{}, maxConcurrentOverview)
+	var wg sync.WaitGroup
 	for _, path := range needScan {
 		select {
 		case <-ctx.Done():
+			wg.Wait()
 			return
 		default:
 		}
 
-		size, err := measureOverviewSize(path)
-		if err == nil && size > 0 {
-			_ = storeOverviewSize(path, size)
-		}
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+
+			size, err := measureOverviewSize(path)
+			if err == nil && size > 0 {
+				_ = storeOverviewSize(path, size)
+			}
+		}(path)
 	}
+	wg.Wait()
 }

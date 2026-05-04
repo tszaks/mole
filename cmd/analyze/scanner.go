@@ -761,7 +761,7 @@ func measureOverviewSize(path string) (int64, error) {
 		excludePath = filepath.Join(home, "Library")
 	}
 
-	if duSize, err := getDirectorySizeFromDuWithExclude(path, excludePath); err == nil {
+	if duSize, err := getDirectorySizeFromDuWithExcludeAndIgnores(path, excludePath, overviewIgnoreNamesForPath(path)); err == nil {
 		_ = storeOverviewSize(path, duSize)
 		return duSize, nil
 	}
@@ -784,12 +784,21 @@ func getDirectorySizeFromDu(path string) (int64, error) {
 }
 
 func getDirectorySizeFromDuWithExclude(path string, excludePath string) (int64, error) {
+	return getDirectorySizeFromDuWithExcludeAndIgnores(path, excludePath, nil)
+}
+
+func getDirectorySizeFromDuWithExcludeAndIgnores(path string, excludePath string, ignoreNames []string) (int64, error) {
 	// Validate paths.
 	if err := validatePath(path); err != nil {
 		return 0, err
 	}
 	if excludePath != "" {
 		if err := validatePath(excludePath); err != nil {
+			return 0, err
+		}
+	}
+	for _, ignoreName := range ignoreNames {
+		if err := validateDuIgnoreName(ignoreName); err != nil {
 			return 0, err
 		}
 	}
@@ -802,29 +811,43 @@ func getDirectorySizeFromDuWithExclude(path string, excludePath string) (int64, 
 		ctx, cancel := context.WithTimeout(context.Background(), duTimeout)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, "du", "-skP", target)
+		args := []string{"-skPx"}
+		for _, ignoreName := range ignoreNames {
+			args = append(args, "-I", ignoreName)
+		}
+		args = append(args, target)
+		cmd := exec.CommandContext(ctx, "du", args...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 
-		if err := cmd.Run(); err != nil {
+		runErr := cmd.Run()
+		fields := strings.Fields(stdout.String())
+		if runErr != nil {
 			if ctx.Err() == context.DeadlineExceeded {
 				return 0, fmt.Errorf("du timeout after %v", duTimeout)
 			}
-			if stderr.Len() > 0 {
-				return 0, fmt.Errorf("du failed: %v, %s", err, stderr.String())
+			// BSD du may return non-zero for unreadable descendants while still
+			// printing a useful aggregate for the requested root. Use that best
+			// effort total instead of falling back to a much slower recursive walk.
+			if len(fields) == 0 {
+				if stderr.Len() > 0 {
+					return 0, fmt.Errorf("du failed: %v, %s", runErr, stderr.String())
+				}
+				return 0, fmt.Errorf("du failed: %v", runErr)
 			}
-			return 0, fmt.Errorf("du failed: %v", err)
 		}
-		fields := strings.Fields(stdout.String())
 		if len(fields) == 0 {
 			return 0, fmt.Errorf("du output empty")
 		}
-		kb, err := strconv.ParseInt(fields[0], 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("failed to parse du output: %v", err)
+		kb, parseErr := strconv.ParseInt(fields[0], 10, 64)
+		if parseErr != nil {
+			return 0, fmt.Errorf("failed to parse du output: %v", parseErr)
 		}
 		if kb <= 0 {
+			if runErr != nil {
+				return 0, fmt.Errorf("du failed: %v", runErr)
+			}
 			return 0, fmt.Errorf("du size invalid: %d", kb)
 		}
 		return kb * 1024, nil
@@ -832,6 +855,10 @@ func getDirectorySizeFromDuWithExclude(path string, excludePath string) (int64, 
 
 	// When excluding a path (e.g., ~/Library), subtract only that exact directory instead of ignoring every "Library"
 	if excludePath != "" {
+		if size, err := getDirectorySizeFromDuSkippingImmediateChild(path, excludePath, runDuSize); err == nil {
+			return size, nil
+		}
+
 		totalSize, err := runDuSize(path)
 		if err != nil {
 			return 0, err
@@ -850,6 +877,115 @@ func getDirectorySizeFromDuWithExclude(path string, excludePath string) (int64, 
 	}
 
 	return runDuSize(path)
+}
+
+func validateDuIgnoreName(name string) error {
+	if name == "" {
+		return fmt.Errorf("empty du ignore name")
+	}
+	if strings.Contains(name, "\x00") {
+		return fmt.Errorf("du ignore name contains null bytes")
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("du ignore name must be a basename: %s", name)
+	}
+	return nil
+}
+
+func overviewIgnoreNamesForPath(path string) []string {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil
+	}
+
+	ignoreNames := make([]string, 0, len(overviewDuIgnoreNames))
+	for _, entry := range entries {
+		name := entry.Name()
+		if overviewDuIgnoreNames[name] && entry.IsDir() {
+			ignoreNames = append(ignoreNames, name)
+		}
+	}
+	return ignoreNames
+}
+
+func getDirectorySizeFromDuSkippingImmediateChild(path string, excludePath string, runDuSize func(string) (int64, error)) (int64, error) {
+	path = filepath.Clean(path)
+	excludePath = filepath.Clean(excludePath)
+
+	rel, err := filepath.Rel(path, excludePath)
+	if err != nil {
+		return 0, err
+	}
+	if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return 0, fmt.Errorf("exclude path is outside base: %s", excludePath)
+	}
+	if strings.Contains(rel, string(os.PathSeparator)) {
+		return 0, fmt.Errorf("exclude path is not an immediate child: %s", excludePath)
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 0, err
+	}
+
+	var total int64
+	if info, err := os.Lstat(path); err == nil {
+		atomic.AddInt64(&total, getActualFileSize(path, info))
+	}
+
+	var wg sync.WaitGroup
+	var firstErr error
+	var errMu sync.Mutex
+	workerCount := min(max(runtime.NumCPU()*2, 2), 8)
+	sem := make(chan struct{}, workerCount)
+
+	recordErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		defer errMu.Unlock()
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	for _, entry := range entries {
+		fullPath := filepath.Join(path, entry.Name())
+		if filepath.Clean(fullPath) == excludePath {
+			continue
+		}
+
+		if entry.Type()&fs.ModeSymlink != 0 || !entry.IsDir() {
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			atomic.AddInt64(&total, getActualFileSize(fullPath, info))
+			continue
+		}
+
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(childPath string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			size, err := runDuSize(childPath)
+			if err != nil {
+				recordErr(err)
+				return
+			}
+			atomic.AddInt64(&total, size)
+		}(fullPath)
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return 0, firstErr
+	}
+	return total, nil
 }
 
 func getDirectoryLogicalSizeWithExclude(path string, excludePath string) (int64, error) {
