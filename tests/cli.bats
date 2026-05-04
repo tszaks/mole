@@ -76,7 +76,9 @@ setup() {
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" --help
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"mo clean"* ]]
+	[[ "$output" == *"mo optimize"* ]]
 	[[ "$output" == *"mo analyze"* ]]
+	[[ "$output" != *"mo optimise"* ]]
 }
 
 @test "mole --version reports script version" {
