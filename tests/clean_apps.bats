@@ -603,6 +603,57 @@ EOF
     [[ "$output" != *"unexpected-launchctl"* ]]
 }
 
+@test "clean_orphaned_system_services protects AmneziaWG helpers" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false MOLE_DRY_RUN=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { :; }
+bundle_has_installed_app() { return 1; }
+safe_sudo_remove() {
+  echo "unexpected-remove"
+  return 0
+}
+
+tmp_dir="$(mktemp -d)"
+tmp_helper="$tmp_dir/org.amnezia.awg"
+touch "$tmp_helper"
+
+sudo() {
+  if [[ "$1" == "-n" && "$2" == "true" ]]; then
+    return 0
+  fi
+  if [[ "$1" == "find" ]]; then
+    case "$2" in
+      /Library/PrivilegedHelperTools) printf '%s\0' "$tmp_helper" ;;
+      *) : ;;
+    esac
+    return 0
+  fi
+  if [[ "$1" == "du" ]]; then
+    echo "4 $tmp_helper"
+    return 0
+  fi
+  if [[ "$1" == "launchctl" ]]; then
+    echo "unexpected-launchctl"
+    return 0
+  fi
+  command "$@"
+}
+
+clean_orphaned_system_services
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"skipped 1 protected, failed 0"* ]]
+    [[ "$output" != *"unexpected-remove"* ]]
+    [[ "$output" != *"unexpected-launchctl"* ]]
+}
+
 @test "clean_orphaned_launch_agents preserves user launch agents" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

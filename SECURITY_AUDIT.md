@@ -115,7 +115,7 @@ Some subpaths under protected roots are explicitly allowlisted:
 In addition to path blocking, these categories are protected:
 
 - Keychains, password managers, credentials
-- VPN/proxy tools (Shadowsocks, V2Ray, Clash, Tailscale)
+- VPN/proxy tools (Shadowsocks, V2Ray, Clash, Tailscale, AmneziaWG, WireGuard, NetworkExtension preferences)
 - AI tools (Cursor, Claude, ChatGPT, Ollama)
 - Browser history and cookies
 - Time Machine data (during active backup)
@@ -141,7 +141,7 @@ Protected or conservatively handled categories include:
 
 - system components such as Control Center, System Settings, TCC, Spotlight, Finder, and Dock-related state
 - keychains, password-manager data, tokens, credentials, and similar sensitive material
-- VPN and proxy tools such as Shadowsocks, V2Ray, Clash, and Tailscale
+- VPN and proxy tools such as Shadowsocks, V2Ray, Clash, Tailscale, AmneziaWG, WireGuard, and NetworkExtension preferences
 - AI tools in generic protected-data logic, including Cursor, Claude, ChatGPT, and Ollama
 - `~/Library/Messages/Attachments`
 - browser history and cookies

@@ -1233,7 +1233,7 @@ EOF
 }
 
 @test "opt_network_stack_optimize skips when network is healthy" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -1256,8 +1256,35 @@ EOF
     [[ "$output" == *"Network stack already optimal"* ]]
 }
 
+@test "opt_network_stack_optimize skips when VPN is active" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=1 bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+route() {
+    echo "unexpected-route"
+    return 0
+}
+export -f route
+
+sudo() {
+    echo "unexpected-sudo"
+    return 0
+}
+export -f sudo
+
+opt_network_stack_optimize
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Network stack refresh skipped, active VPN detected"* ]]
+    [[ "$output" != *"unexpected-route"* ]]
+    [[ "$output" != *"unexpected-sudo"* ]]
+}
+
 @test "opt_network_stack_optimize flushes when network has issues" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"

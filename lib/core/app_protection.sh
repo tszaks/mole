@@ -330,6 +330,12 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.zerotier.*"
     "*1dot1dot1dot1*" # Cloudflare WARP
     "*cloudflare*warp*"
+    "org.amnezia.*"
+    "*amnezia*"
+    "*Amnezia*"
+    "com.wireguard.*"
+    "*wireguard*"
+    "*WireGuard*"
 
     # Commercial VPNs
     "*nordvpn*"
@@ -835,6 +841,10 @@ should_protect_path() {
             ;;
         # Bluetooth and WiFi configurations
         */ByHost/com.apple.bluetooth.* | */ByHost/com.apple.wifi.*)
+            return 0
+            ;;
+        # NetworkExtension stores VPN tunnel state and provider preferences.
+        */Library/Preferences/com.apple.networkextension*.plist | /Volumes/Data/Library/Preferences/com.apple.networkextension*.plist)
             return 0
             ;;
         # iCloud Drive - protect user's cloud synced data

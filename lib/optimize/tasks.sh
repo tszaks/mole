@@ -87,6 +87,31 @@ is_memory_pressure_high() {
     return 1
 }
 
+has_active_vpn_interface() {
+    case "${MOLE_ASSUME_VPN_ACTIVE:-}" in
+        1 | true | TRUE | yes | YES)
+            return 0
+            ;;
+        0 | false | FALSE | no | NO)
+            return 1
+            ;;
+    esac
+
+    if command -v netstat > /dev/null 2>&1; then
+        if netstat -rn -f inet 2> /dev/null | grep -Eq '[[:space:]]utun[0-9]+($|[[:space:]])'; then
+            return 0
+        fi
+    fi
+
+    if command -v ifconfig > /dev/null 2>&1; then
+        if ifconfig 2> /dev/null | grep -Eq '^utun[0-9]+:.*<[^>]*(UP|RUNNING)'; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 flush_dns_cache() {
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         MOLE_DNS_FLUSHED=1
@@ -611,6 +636,11 @@ opt_memory_pressure_relief() {
 opt_network_stack_optimize() {
     local route_flushed="false"
     local arp_flushed="false"
+
+    if has_active_vpn_interface; then
+        opt_msg "Network stack refresh skipped, active VPN detected"
+        return 0
+    fi
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         local route_ok=true

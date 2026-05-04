@@ -169,8 +169,8 @@ EOT5
 # ---- Orphan dotfile hint tests ----
 
 @test "show_orphan_dotdir_hint_notice skips known-safe directories" {
-    mkdir -p "$HOME/.ssh" "$HOME/.config" "$HOME/.npm" "$HOME/.cargo"
-    touch -t 202401010000 "$HOME/.ssh" "$HOME/.config" "$HOME/.npm" "$HOME/.cargo"
+    mkdir -p "$HOME/.ssh" "$HOME/.config" "$HOME/.npm" "$HOME/.cargo" "$HOME/.putty"
+    touch -t 202401010000 "$HOME/.ssh" "$HOME/.config" "$HOME/.npm" "$HOME/.cargo" "$HOME/.putty"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
 set -euo pipefail
@@ -183,6 +183,26 @@ show_orphan_dotdir_hint_notice
 EOTD
 
     [ "$status" -eq 0 ]
+    [[ "$output" != *"Potential orphan dotfile"* ]]
+}
+
+@test "show_orphan_dotdir_hint_notice skips whitelisted directories" {
+    mkdir -p "$HOME/.custom-orphan-keep"
+    touch -t 202401010000 "$HOME/.custom-orphan-keep"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+WHITELIST_PATTERNS=("$HOME/.custom-orphan-keep")
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { echo "100"; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *".custom-orphan-keep"* ]]
     [[ "$output" != *"Potential orphan dotfile"* ]]
 }
 

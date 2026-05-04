@@ -516,6 +516,7 @@ readonly ORPHAN_DOTDIR_KNOWN_SAFE=(
     ".android" ".cocoapods" ".fastlane" ".expo" ".react-native" ".swiftpm"
     # Terminal / misc
     ".tmux" ".screen" ".wget-hsts" ".curlrc" ".netrc" ".wgetrc"
+    ".putty"
     ".lesshst" ".python_history" ".node_repl_history"
     ".irb_history" ".pry_history"
     ".jupyter" ".ipython" ".matplotlib" ".keras" ".torch"
@@ -551,6 +552,10 @@ show_orphan_dotdir_hint_notice() {
             fi
         done
         [[ "$is_safe" == "true" ]] && continue
+
+        if declare -f is_path_whitelisted > /dev/null && is_path_whitelisted "$dotdir"; then
+            continue
+        fi
 
         local mtime
         mtime=$(get_file_mtime "$dotdir" 2> /dev/null) || continue
@@ -610,5 +615,5 @@ show_orphan_dotdir_hint_notice() {
         echo -e "  ${GREEN}${ICON_LIST}${NC} Potential orphan dotfile: ${labels[$i]}"
         echo -e "  ${GRAY}${ICON_SUBLIST}${NC} ${details[$i]}"
     done
-    echo -e "  ${GRAY}${ICON_REVIEW}${NC} Review and remove: rm -rf ~/.<dir>"
+    echo -e "  ${GRAY}${ICON_REVIEW}${NC} Review manually before removing any ~/.<dir> directory"
 }

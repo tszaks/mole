@@ -185,6 +185,12 @@ EOF
     result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'io.github.clash-verge-rev.clash-verge-rev' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
+    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.amnezia.awg' && echo 'protected' || echo 'not-protected'")
+    [ "$result" = "protected" ]
+
+    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.wireguard.macos' && echo 'protected' || echo 'not-protected'")
+    [ "$result" = "protected" ]
+
     result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.example.RegularApp' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 }
@@ -197,6 +203,15 @@ EOF
     [ "$result" = "protected" ]
 
     result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.cups.printers' && echo 'protected' || echo 'not-protected'")
+    [ "$result" = "protected" ]
+}
+
+@test "should_protect_path protects NetworkExtension VPN preferences" {
+    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_path '/Volumes/Data/Library/Preferences/com.apple.networkextension.plist' && echo 'protected' || echo 'not-protected'")
+    [ "$result" = "protected" ]
+
+    local user_network_ext_pref="$HOME/Library/Preferences/com.apple.networkextension.necp.plist"
+    result=$(HOME="$HOME" TARGET_PATH="$user_network_ext_pref" bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
     [ "$result" = "protected" ]
 }
 
