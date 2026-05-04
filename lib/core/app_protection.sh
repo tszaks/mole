@@ -844,7 +844,7 @@ should_protect_path() {
             return 0
             ;;
         # NetworkExtension stores VPN tunnel state and provider preferences.
-        */Library/Preferences/com.apple.networkextension*.plist | /Volumes/Data/Library/Preferences/com.apple.networkextension*.plist)
+        */Library/Preferences/com.apple.networkextension*.plist)
             return 0
             ;;
         # iCloud Drive - protect user's cloud synced data

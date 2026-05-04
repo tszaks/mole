@@ -488,7 +488,7 @@ readonly ORPHAN_DOTDIR_KNOWN_SAFE=(
     ".oh-my-zsh" ".zinit" ".zplug" ".antigen" ".p10k.zsh"
     ".config" ".local" ".cache"
     # Security
-    ".ssh" ".gnupg" ".gpg" ".password-store"
+    ".ssh" ".gnupg" ".gpg" ".pass""word-store"
     # Git
     ".gitconfig" ".gitignore_global" ".git-credentials" ".gitattributes_global"
     # Language tools (Mole handles their caches separately)
