@@ -116,6 +116,78 @@ EOF
 	[[ "$output" == *"mDNSResponder restarted"* ]]
 }
 
+@test "fix_broken_preferences repairs only non-Apple preference plists" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/maintenance.sh"
+
+CALL_LOG="$HOME/fix-broken-preferences.log"
+prefs="$HOME/Library/Preferences"
+mkdir -p "$prefs/ByHost"
+touch \
+    "$prefs/com.example.broken.plist" \
+    "$prefs/com.apple.broken.plist" \
+    "$prefs/loginwindow.plist" \
+    "$prefs/ByHost/com.example.byhost.plist" \
+    "$prefs/ByHost/loginwindow.plist"
+
+plutil() {
+    echo "lint:$2" >> "$CALL_LOG"
+    return 1
+}
+safe_remove() {
+    echo "remove:$1" >> "$CALL_LOG"
+}
+
+count=$(fix_broken_preferences)
+echo "count=$count"
+cat "$CALL_LOG"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=3"* ]]
+	[[ "$output" == *"remove:$HOME/Library/Preferences/com.example.broken.plist"* ]]
+	[[ "$output" == *"remove:$HOME/Library/Preferences/ByHost/com.example.byhost.plist"* ]]
+	[[ "$output" == *"remove:$HOME/Library/Preferences/ByHost/loginwindow.plist"* ]]
+	[[ "$output" != *"lint:$HOME/Library/Preferences/com.apple.broken.plist"* ]]
+	[[ "$output" != *"lint:$HOME/Library/Preferences/loginwindow.plist"* ]]
+}
+
+@test "opt_cache_refresh reuses measured cache sizes for deletion" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+CALL_LOG="$HOME/cache-refresh.log"
+cache_dir="$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
+mkdir -p "$cache_dir"
+touch "$cache_dir/test.db"
+
+get_path_size_kb() {
+    echo "size:$1" >> "$CALL_LOG"
+    echo "42"
+}
+should_protect_path() {
+    return 1
+}
+safe_remove() {
+    echo "remove:$1:${3:-missing}" >> "$CALL_LOG"
+}
+
+opt_cache_refresh
+echo "cleaned=${OPTIMIZE_CACHE_CLEANED_KB:-missing}"
+cat "$CALL_LOG"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"QuickLook thumbnails refreshed"* ]]
+	[[ "$output" == *"cleaned=42"* ]]
+	[[ "$output" == *"remove:$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache:42"* ]]
+	[ "$(grep -c "size:$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache" <<< "$output")" -eq 1 ]
+}
+
 @test "opt_quarantine_cleanup reports clean when no database" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
 set -euo pipefail

@@ -18,6 +18,21 @@ opt_msg() {
     fi
 }
 
+opt_numeric_kb() {
+    local size_kb="${1:-0}"
+    [[ "$size_kb" =~ ^[0-9]+$ ]] && echo "$size_kb" || echo "0"
+}
+
+opt_existing_path_size_kb() {
+    local path="$1"
+    [[ -e "$path" ]] || {
+        echo "0"
+        return 0
+    }
+
+    opt_numeric_kb "$(get_path_size_kb "$path" 2> /dev/null || echo "0")"
+}
+
 run_launchctl_unload() {
     local plist_file="$1"
     local need_sudo="${2:-false}"
@@ -149,32 +164,11 @@ opt_cache_refresh() {
         "$HOME/Library/Caches/com.apple.iconservices.store"
         "$HOME/Library/Caches/com.apple.iconservices"
     )
-
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
         debug_operation_start "Finder Cache Refresh" "Refresh QuickLook thumbnails and icon services"
         debug_operation_detail "Method" "Remove cache files and rebuild via qlmanage"
         debug_operation_detail "Expected outcome" "Faster Finder preview generation, fixed icon display issues"
         debug_risk_level "LOW" "Caches are automatically rebuilt"
-
-        local found_files=false
-        for target_path in "${cache_targets[@]}"; do
-            if [[ -e "$target_path" ]]; then
-                if [[ "$found_files" == "false" ]]; then
-                    debug_operation_detail "Files to be removed" ""
-                    found_files=true
-                fi
-                local size_kb
-                size_kb=$(get_path_size_kb "$target_path" 2> /dev/null || echo "0")
-                local size_human="unknown"
-                if [[ "$size_kb" -gt 0 ]]; then
-                    size_human=$(bytes_to_human "$((size_kb * 1024))")
-                fi
-                debug_file_action "  Will remove" "$target_path" "$size_human" ""
-            fi
-        done
-        if [[ "$found_files" == "false" ]]; then
-            debug_operation_detail "Files to be removed" "none"
-        fi
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
@@ -182,17 +176,40 @@ opt_cache_refresh() {
         qlmanage -r > /dev/null 2>&1 || true
     fi
 
+    local -a removable_targets=()
+    local -a removable_sizes=()
+
+    local target_path=""
     for target_path in "${cache_targets[@]}"; do
-        if [[ -e "$target_path" ]]; then
-            if ! should_protect_path "$target_path"; then
-                local size_kb
-                size_kb=$(get_path_size_kb "$target_path" 2> /dev/null || echo "0")
-                if [[ "$size_kb" =~ ^[0-9]+$ ]]; then
-                    total_cache_size=$((total_cache_size + size_kb))
+        [[ -e "$target_path" ]] || continue
+        should_protect_path "$target_path" && continue
+
+        local size_kb
+        size_kb=$(opt_existing_path_size_kb "$target_path")
+        removable_targets+=("$target_path")
+        removable_sizes+=("$size_kb")
+        total_cache_size=$((total_cache_size + size_kb))
+    done
+
+    if [[ "${MO_DEBUG:-}" == "1" ]]; then
+        if [[ ${#removable_targets[@]} -eq 0 ]]; then
+            debug_operation_detail "Files to be removed" "none"
+        else
+            debug_operation_detail "Files to be removed" ""
+            local index
+            for index in "${!removable_targets[@]}"; do
+                local size_human="unknown"
+                if [[ "${removable_sizes[$index]}" -gt 0 ]]; then
+                    size_human=$(bytes_to_human "$((removable_sizes[index] * 1024))")
                 fi
-                safe_remove "$target_path" true > /dev/null 2>&1 || true
-            fi
+                debug_file_action "  Will remove" "${removable_targets[$index]}" "$size_human" ""
+            done
         fi
+    fi
+
+    local index
+    for index in "${!removable_targets[@]}"; do
+        safe_remove "${removable_targets[$index]}" true "${removable_sizes[$index]}" > /dev/null 2>&1 || true
     done
 
     export OPTIMIZE_CACHE_CLEANED_KB="${total_cache_size}"
@@ -385,9 +402,10 @@ opt_sqlite_vacuum() {
 
             should_protect_path "$db_file" && continue
 
-            if ! file "$db_file" 2> /dev/null | grep -q "SQLite"; then
-                continue
-            fi
+            case "$(file -b "$db_file" 2> /dev/null || true)" in
+                *SQLite*) ;;
+                *) continue ;;
+            esac
 
             # Skip large DBs (>100MB).
             local file_size
@@ -402,8 +420,11 @@ opt_sqlite_vacuum() {
             page_info=$(run_with_timeout 5 sqlite3 "$db_file" "PRAGMA page_count; PRAGMA freelist_count;" 2> /dev/null || echo "")
             local page_count=""
             local freelist_count=""
-            page_count=$(echo "$page_info" | awk 'NR==1 {print $1}' 2> /dev/null || echo "")
-            freelist_count=$(echo "$page_info" | awk 'NR==2 {print $1}' 2> /dev/null || echo "")
+            page_count="${page_info%%$'\n'*}"
+            if [[ "$page_info" == *$'\n'* ]]; then
+                freelist_count="${page_info#*$'\n'}"
+                freelist_count="${freelist_count%%$'\n'*}"
+            fi
             if [[ "$page_count" =~ ^[0-9]+$ && "$freelist_count" =~ ^[0-9]+$ && "$page_count" -gt 0 ]]; then
                 if ((freelist_count * 100 < page_count * 5)); then
                     skipped=$((skipped + 1))
@@ -419,7 +440,7 @@ opt_sqlite_vacuum() {
                 local integrity_status=$?
                 set -e
 
-                if [[ $integrity_status -ne 0 ]] || ! echo "$integrity_check" | grep -q "ok"; then
+                if [[ $integrity_status -ne 0 || "$integrity_check" != "ok" ]]; then
                     skipped=$((skipped + 1))
                     continue
                 fi
@@ -1033,7 +1054,7 @@ opt_shared_file_list_repair() {
             fi
             repaired=$((repaired + 1))
         fi
-    done < <(command find "$sfl_dir" \( -name "*.sfl2" -o -name "*.sfl3" \) -type f 2> /dev/null || true)
+    done < <(command find "$sfl_dir" \( -name "*.sfl2" -o -name "*.sfl3" \) -type f ! -path "*ApplicationRecentDocuments*" 2> /dev/null || true)
 
     if [[ $repaired -gt 0 ]]; then
         opt_msg "Repaired $repaired corrupted shared file list(s)"
@@ -1054,8 +1075,7 @@ opt_notification_cleanup() {
     fi
 
     local db_size
-    db_size=$(command du -sk "$nc_db" 2> /dev/null | awk '{print $1}')
-    db_size=${db_size:-0}
+    db_size=$(opt_existing_path_size_kb "$nc_db")
 
     # Only clean if database exceeds 50MB (51200 KB)
     if [[ $db_size -lt 51200 ]]; then
@@ -1130,14 +1150,16 @@ opt_coreduet_cleanup() {
     local wal_file="$knowledge_db-wal"
     local shm_file="$knowledge_db-shm"
     local total_size=0
+    local -a knowledge_files=()
 
     for f in "$knowledge_db" "$wal_file" "$shm_file"; do
-        if [[ -f "$f" ]]; then
-            local fsize
-            fsize=$(command du -sk "$f" 2> /dev/null | awk '{print $1}')
-            total_size=$((total_size + ${fsize:-0}))
-        fi
+        [[ -f "$f" ]] && knowledge_files+=("$f")
     done
+
+    if [[ ${#knowledge_files[@]} -gt 0 ]]; then
+        total_size=$(command du -skcP "${knowledge_files[@]}" 2> /dev/null | awk 'END {print $1 + 0}' || echo "0")
+        total_size=$(opt_numeric_kb "$total_size")
+    fi
 
     # Skip if combined size < 100MB (102400 KB)
     if [[ $total_size -lt 102400 ]]; then
@@ -1198,12 +1220,17 @@ _login_item_app_exists() {
     [[ "$stripped" != "$nospace" ]] && app_names+=("${stripped}.app")
     for roots in "/Applications" "$HOME/Applications"; do
         [[ -d "$roots" ]] || continue
+        local -a name_expr=()
         for app_name in "${app_names[@]}"; do
-            candidate=$(command find "$roots" -maxdepth 6 -type d -name "$app_name" -print -quit 2> /dev/null || true)
-            if [[ -n "$candidate" && -d "$candidate" ]]; then
-                return 0
+            if [[ ${#name_expr[@]} -gt 0 ]]; then
+                name_expr+=("-o")
             fi
+            name_expr+=("-name" "$app_name")
         done
+        candidate=$(command find "$roots" -maxdepth 6 -type d \( "${name_expr[@]}" \) -print -quit 2> /dev/null || true)
+        if [[ -n "$candidate" && -d "$candidate" ]]; then
+            return 0
+        fi
     done
     # 5. Fallback: check sfltool dumpbtm for the actual on-disk path.
     #    Nested helper apps (e.g. DBnginMenuHelper.app inside DBngin.app) are
