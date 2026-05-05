@@ -206,6 +206,10 @@ ensure_sudo_session() { return 0; }
 
 get_brew_cask_name() { echo "brew-timeout-cask"; return 0; }
 brew_uninstall_cask() { return 0; }
+brew() {
+    echo "BREW_CALL:$*" >> "$HOME/timeout_calls.log"
+    return 0
+}
 
 run_with_timeout() {
     local duration="$1"

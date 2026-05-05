@@ -10,11 +10,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 var (
 	// Cache for heavy system_profiler output.
+	powerCacheMu  sync.Mutex
 	lastPowerAt   time.Time
 	cachedPower   string
 	powerCacheTTL = 30 * time.Second
@@ -153,6 +155,9 @@ func getSystemPowerOutput() string {
 	if runtime.GOOS != "darwin" {
 		return ""
 	}
+
+	powerCacheMu.Lock()
+	defer powerCacheMu.Unlock()
 
 	now := time.Now()
 	if cachedPower != "" && now.Sub(lastPowerAt) < powerCacheTTL {

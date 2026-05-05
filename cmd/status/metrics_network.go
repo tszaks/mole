@@ -21,6 +21,8 @@ const (
 	networkIPCacheTTL        = 10 * time.Second
 )
 
+var noiseInterfacePrefixes = [...]string{"lo", "awdl", "utun", "llw", "bridge", "gif", "stf", "xhc", "anpi", "ap"}
+
 func collectIOCountersSafely(pernic bool) (stats []net.IOCountersStat, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -85,14 +87,8 @@ func (c *Collector) collectNetwork(now time.Time) ([]NetworkStatus, error) {
 		if !ok {
 			continue
 		}
-		rx := float64(cur.BytesRecv-prev.BytesRecv) / 1024.0 / 1024.0 / elapsed
-		tx := float64(cur.BytesSent-prev.BytesSent) / 1024.0 / 1024.0 / elapsed
-		if rx < 0 {
-			rx = 0
-		}
-		if tx < 0 {
-			tx = 0
-		}
+		rx := float64(counterDelta(cur.BytesRecv, prev.BytesRecv)) / 1024.0 / 1024.0 / elapsed
+		tx := float64(counterDelta(cur.BytesSent, prev.BytesSent)) / 1024.0 / 1024.0 / elapsed
 		result = append(result, NetworkStatus{
 			Name:      cur.Name,
 			RxRateMBs: rx,
@@ -156,8 +152,7 @@ func getInterfaceIPs() map[string]string {
 
 func isNoiseInterface(name string) bool {
 	lower := strings.ToLower(name)
-	noiseList := []string{"lo", "awdl", "utun", "llw", "bridge", "gif", "stf", "xhc", "anpi", "ap"}
-	for _, prefix := range noiseList {
+	for _, prefix := range noiseInterfacePrefixes {
 		if strings.HasPrefix(lower, prefix) {
 			return true
 		}

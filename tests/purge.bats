@@ -618,6 +618,40 @@ EOF
 	[[ "$result" == "FOUND" ]]
 }
 
+@test "scan_purge_targets: trusts empty fd result without falling back to find" {
+	mkdir -p "$HOME/.config/mole" "$HOME/www/empty-project"
+	printf '%s\n' "$HOME/www" > "$HOME/.config/mole/purge_paths"
+
+	local mock_bin="$HOME/mock-bin"
+	mkdir -p "$mock_bin"
+	cat > "$mock_bin/fd" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+	chmod +x "$mock_bin/fd"
+	cat > "$mock_bin/find" <<'EOF'
+#!/bin/bash
+echo find-called >> "$HOME/find-called"
+exit 0
+EOF
+	chmod +x "$mock_bin/find"
+
+	local scan_output
+	scan_output="$(mktemp)"
+
+	run env HOME="$HOME" PATH="$mock_bin:$PATH" bash --noprofile --norc <<EOF
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+scan_purge_targets "$HOME/www" "$scan_output"
+[[ ! -e "$HOME/find-called" ]]
+[[ -f "$scan_output" ]]
+[[ ! -s "$scan_output" ]]
+EOF
+
+	rm -f "$scan_output"
+	[ "$status" -eq 0 ]
+}
+
 @test "is_recently_modified: detects recent projects" {
 	mkdir -p "$HOME/www/project/node_modules"
 	touch "$HOME/www/project/package.json"

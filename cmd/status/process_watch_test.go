@@ -46,6 +46,25 @@ func TestTopProcessesSortsByCPU(t *testing.T) {
 	}
 }
 
+func TestProcessNameFromCommand(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{"/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "Electron"},
+		{"/usr/local/bin/node /tmp/server.js", "server.js"},
+		{"Finder", "Finder"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			if got := processNameFromCommand(tt.command); got != tt.want {
+				t.Fatalf("processNameFromCommand(%q) = %q, want %q", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProcessWatcherTriggersAfterContinuousWindow(t *testing.T) {
 	base := time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC)
 	watcher := NewProcessWatcher(ProcessWatchOptions{

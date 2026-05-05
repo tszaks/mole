@@ -20,15 +20,7 @@ func (m model) View() string {
 		}
 		fmt.Fprintf(&b, "%sAnalyze Disk%s%s\n", colorPurpleBold, colorReset, freeLabel)
 		if m.overviewScanning {
-			allPending := true
-			for _, entry := range m.entries {
-				if entry.Size >= 0 {
-					allPending = false
-					break
-				}
-			}
-
-			if allPending {
+			if allOverviewEntriesPending(m.entries) {
 				fmt.Fprintf(&b, "%sSelect a location to explore:%s  ", colorGray, colorReset)
 				fmt.Fprintf(&b, "%s%s%s%s Analyzing disk usage...\n\n",
 					colorCyan, colorBold, spinnerFrames[m.spinner], colorReset)
@@ -37,14 +29,7 @@ func (m model) View() string {
 				fmt.Fprintf(&b, "%s%s%s%s %s\n\n", colorCyan, colorBold, spinnerFrames[m.spinner], colorReset, m.status)
 			}
 		} else {
-			hasPending := false
-			for _, entry := range m.entries {
-				if entry.Size < 0 {
-					hasPending = true
-					break
-				}
-			}
-			if hasPending {
+			if hasPendingOverviewEntries(m.entries) {
 				fmt.Fprintf(&b, "%sSelect a location to explore:%s  ", colorGray, colorReset)
 				fmt.Fprintf(&b, "%s%s%s%s %s\n\n", colorCyan, colorBold, spinnerFrames[m.spinner], colorReset, m.status)
 			} else {
@@ -119,12 +104,7 @@ func (m model) View() string {
 			viewport := calculateViewport(m.height, true)
 			start := max(m.largeOffset, 0)
 			end := min(start+viewport, len(m.largeFiles))
-			maxLargeSize := int64(1)
-			for _, file := range m.largeFiles {
-				if file.Size > maxLargeSize {
-					maxLargeSize = file.Size
-				}
-			}
+			maxLargeSize := maxLargeFileSize(m.largeFiles)
 			nameWidth := calculateNameWidth(m.width)
 			for idx := start; idx < end; idx++ {
 				file := m.largeFiles[idx]
@@ -162,12 +142,7 @@ func (m model) View() string {
 			fmt.Fprintln(&b, "  Empty directory")
 		} else {
 			if m.inOverviewMode() {
-				maxSize := int64(1)
-				for _, entry := range m.entries {
-					if entry.Size > maxSize {
-						maxSize = entry.Size
-					}
-				}
+				maxSize := maxDirEntrySize(m.entries)
 				totalSize := m.totalSize
 				// Overview paths are short; fixed width keeps layout stable.
 				nameWidth := 22
@@ -198,16 +173,7 @@ func (m model) View() string {
 					}
 					sizeColor := colorGray
 					if sizeVal >= 0 && totalSize > 0 {
-						switch {
-						case percent >= 50:
-							sizeColor = colorRed
-						case percent >= 20:
-							sizeColor = colorYellow
-						case percent >= 5:
-							sizeColor = colorBlue
-						default:
-							sizeColor = colorGray
-						}
+						sizeColor = sizeColorForPercent(percent)
 					}
 					entryPrefix := "   "
 					name := trimNameWithWidth(entry.Name, nameWidth)
@@ -225,14 +191,7 @@ func (m model) View() string {
 					displayNum++
 					displayIndex := displayNum
 
-					var hintLabel string
-					if entry.IsDir && isCleanableDir(entry.Path) {
-						hintLabel = fmt.Sprintf("%s🧹%s", colorYellow, colorReset)
-					} else {
-						if unusedTime := formatUnusedTime(entry.LastAccess); unusedTime != "" {
-							hintLabel = fmt.Sprintf("%s%s%s", colorGray, unusedTime, colorReset)
-						}
-					}
+					hintLabel := entryHintLabel(entry)
 
 					if hintLabel == "" {
 						fmt.Fprintf(&b, "%s%s%2d.%s %s %s%s%s  |  %s %s%10s%s\n",
@@ -245,12 +204,7 @@ func (m model) View() string {
 					}
 				}
 			} else {
-				maxSize := int64(1)
-				for _, entry := range m.entries {
-					if entry.Size > maxSize {
-						maxSize = entry.Size
-					}
-				}
+				maxSize := maxDirEntrySize(m.entries)
 
 				viewport := calculateViewport(m.height, false)
 				nameWidth := calculateNameWidth(m.width)
@@ -272,16 +226,7 @@ func (m model) View() string {
 
 					bar := coloredProgressBar(entry.Size, maxSize, percent)
 
-					var sizeColor string
-					if percent >= 50 {
-						sizeColor = colorRed
-					} else if percent >= 20 {
-						sizeColor = colorYellow
-					} else if percent >= 5 {
-						sizeColor = colorBlue
-					} else {
-						sizeColor = colorGray
-					}
+					sizeColor := sizeColorForPercent(percent)
 
 					isMultiSelected := m.multiSelected != nil && m.multiSelected[entry.Path]
 					selectIcon := "○"
@@ -310,14 +255,7 @@ func (m model) View() string {
 
 					displayIndex := idx + 1
 
-					var hintLabel string
-					if entry.IsDir && isCleanableDir(entry.Path) {
-						hintLabel = fmt.Sprintf("%s🧹%s", colorYellow, colorReset)
-					} else {
-						if unusedTime := formatUnusedTime(entry.LastAccess); unusedTime != "" {
-							hintLabel = fmt.Sprintf("%s%s%s", colorGray, unusedTime, colorReset)
-						}
-					}
+					hintLabel := entryHintLabel(entry)
 
 					if hintLabel == "" {
 						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  |  %s %s%10s%s\n",
@@ -403,6 +341,58 @@ func (m model) View() string {
 		}
 	}
 	return b.String()
+}
+
+func allOverviewEntriesPending(entries []dirEntry) bool {
+	for _, entry := range entries {
+		if entry.Size >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func maxLargeFileSize(files []fileEntry) int64 {
+	var maxSize int64 = 1
+	for _, file := range files {
+		if file.Size > maxSize {
+			maxSize = file.Size
+		}
+	}
+	return maxSize
+}
+
+func maxDirEntrySize(entries []dirEntry) int64 {
+	var maxSize int64 = 1
+	for _, entry := range entries {
+		if entry.Size > maxSize {
+			maxSize = entry.Size
+		}
+	}
+	return maxSize
+}
+
+func sizeColorForPercent(percent float64) string {
+	switch {
+	case percent >= 50:
+		return colorRed
+	case percent >= 20:
+		return colorYellow
+	case percent >= 5:
+		return colorBlue
+	default:
+		return colorGray
+	}
+}
+
+func entryHintLabel(entry dirEntry) string {
+	if entry.IsDir && isCleanableDir(entry.Path) {
+		return fmt.Sprintf("%s🧹%s", colorYellow, colorReset)
+	}
+	if unusedTime := formatUnusedTime(entry.LastAccess); unusedTime != "" {
+		return fmt.Sprintf("%s%s%s", colorGray, unusedTime, colorReset)
+	}
+	return ""
 }
 
 // calculateViewport returns visible rows for the current terminal height.

@@ -36,13 +36,34 @@ get_latest_version_from_github() {
     echo "$version"
 }
 
+run_brew_command() {
+    local timeout_seconds="$1"
+    shift
+
+    HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
+        run_with_timeout "$timeout_seconds" "$@"
+}
+
+run_brew_detect() {
+    run_brew_command "${MOLE_HOMEBREW_DETECT_TIMEOUT:-2}" "$@"
+}
+
+run_brew_query() {
+    run_brew_command "${MOLE_HOMEBREW_QUERY_TIMEOUT:-5}" "$@"
+}
+
+brew_mole_formula_installed() {
+    local brew_cmd="${1:-brew}"
+    run_brew_detect "$brew_cmd" list mole > /dev/null 2>&1
+}
+
 get_homebrew_latest_version() {
     command -v brew > /dev/null 2>&1 || return 1
 
     local line candidate=""
 
     # Prefer local tap outdated info to avoid notifying before formula is available.
-    line=$(HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --formula --verbose mole 2> /dev/null | head -1 || true)
+    line=$(run_brew_query brew outdated --formula --verbose mole 2> /dev/null | head -1 || true)
     if [[ "$line" == *"< "* ]]; then
         candidate="${line##*< }"
         candidate="${candidate%% *}"
@@ -50,7 +71,7 @@ get_homebrew_latest_version() {
 
     # Fallback for environments where outdated output is unavailable.
     if [[ -z "$candidate" ]]; then
-        line=$(HOMEBREW_NO_AUTO_UPDATE=1 brew info mole 2> /dev/null | awk 'NR==1 { print; exit }' || true)
+        line=$(run_brew_query brew info mole 2> /dev/null | awk 'NR==1 { print; exit }' || true)
         line="${line#==> }"
         line="${line#*: }"
         if [[ "$line" == stable* ]]; then
@@ -60,24 +81,34 @@ get_homebrew_latest_version() {
 
     [[ -n "$candidate" ]] && printf '%s\n' "$candidate"
 }
-# Install detection (Homebrew vs manual).
-# Uses variable capture + string matching to avoid SIGPIPE under pipefail.
-is_homebrew_install() {
-    local mole_path link_target has_brew=false
-    mole_path=$(command -v mole 2> /dev/null) || return 1
-
-    if command -v brew > /dev/null 2>&1; then
-        has_brew=true
+resolve_mole_source_path() {
+    local mole_path="${BASH_SOURCE[0]:-$0}"
+    if [[ "$mole_path" != /* ]]; then
+        if [[ "$mole_path" == */* ]]; then
+            mole_path="$(cd "$(dirname "$mole_path")" 2> /dev/null && pwd)/${mole_path##*/}"
+        else
+            mole_path=$(command -v "$mole_path" 2> /dev/null || true)
+        fi
     fi
+    [[ -n "$mole_path" ]] && printf '%s\n' "$mole_path"
+}
+
+is_homebrew_mole_path() {
+    local mole_path="$1"
+    local has_brew="$2"
+    local link_target=""
+    [[ -n "$mole_path" ]] || return 1
+
 
     if [[ -L "$mole_path" ]]; then
         link_target=$(readlink "$mole_path" 2> /dev/null) || true
         if [[ "$link_target" == *"Cellar/mole"* ]]; then
             if $has_brew; then
-                brew list mole > /dev/null 2>&1 && return 0
+                brew_mole_formula_installed brew && return 0
             fi
             return 1
         fi
+        return 1
     fi
 
     if [[ -f "$mole_path" ]]; then
@@ -87,7 +118,7 @@ is_homebrew_install() {
             "/opt/homebrew/bin/mole" | "/usr/local/bin/mole")
                 if [[ -d "/opt/homebrew/Cellar/mole" ]] || [[ -d "/usr/local/Cellar/mole" ]]; then
                     if $has_brew; then
-                        brew list mole > /dev/null 2>&1 && return 0
+                        brew_mole_formula_installed brew && return 0
                     else
                         return 0 # Cellar exists, probably Homebrew install
                     fi
@@ -96,11 +127,31 @@ is_homebrew_install() {
         esac
     fi
 
-    if $has_brew; then
-        local brew_prefix
-        brew_prefix=$(brew --prefix 2> /dev/null)
-        if [[ -n "$brew_prefix" && "$mole_path" == "$brew_prefix/bin/mole" && -d "$brew_prefix/Cellar/mole" ]]; then
-            brew list mole > /dev/null 2>&1 && return 0
+    return 1
+}
+
+# Install detection (Homebrew vs manual).
+# Default path checks only the active script, keeping source-tree commands fast.
+# Pass --include-path when update/remove flows intentionally need to inspect
+# an installed `mole` found through PATH.
+is_homebrew_install() {
+    local include_path_lookup="${1:-}"
+    local has_brew=false
+    if command -v brew > /dev/null 2>&1; then
+        has_brew=true
+    fi
+
+    local mole_path
+    mole_path=$(resolve_mole_source_path || true)
+    if is_homebrew_mole_path "$mole_path" "$has_brew"; then
+        return 0
+    fi
+
+    if [[ "$include_path_lookup" == "--include-path" ]]; then
+        local path_mole
+        path_mole=$(command -v mole 2> /dev/null || true)
+        if [[ -n "$path_mole" && "$path_mole" != "$mole_path" ]] && is_homebrew_mole_path "$path_mole" "$has_brew"; then
+            return 0
         fi
     fi
 
@@ -313,11 +364,11 @@ update_mole() {
     }
     trap '_update_cleanup; update_interrupted=true; echo ""; exit 130' INT TERM
 
-    if is_homebrew_install; then
+    if is_homebrew_install --include-path; then
         if [[ "$nightly_update" == "true" ]]; then
-            log_error "Nightly update is only available for script installations"
-            echo -e "${ICON_REVIEW} Homebrew installs follow stable releases."
-            echo -e "${ICON_REVIEW} Reinstall via script to use: ${GRAY}mo update --nightly${NC}"
+            local review_icon="${ICON_REVIEW:-☞}"
+            log_error "Nightly update is only available for script installations. Homebrew installs follow stable releases."
+            printf '%s Reinstall via script to use: mo update --nightly\n' "$review_icon"
             exit 1
         fi
         update_via_homebrew "$VERSION"
@@ -546,7 +597,7 @@ remove_mole() {
         fi
 
         if [[ -n "$brew_cmd" ]]; then
-            if "$brew_cmd" list mole > /dev/null 2>&1; then
+            if brew_mole_formula_installed "$brew_cmd"; then
                 brew_has_mole="true"
             fi
         fi

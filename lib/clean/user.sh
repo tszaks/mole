@@ -171,10 +171,15 @@ is_google_chrome_running() {
 }
 
 clean_chrome_old_versions() {
-    local -a app_paths=(
-        "/Applications/Google Chrome.app"
-        "$HOME/Applications/Google Chrome.app"
-    )
+    local -a app_paths
+    if [[ -n "${MOLE_CHROME_APP_PATHS:-}" ]]; then
+        IFS=':' read -ra app_paths <<< "$MOLE_CHROME_APP_PATHS"
+    else
+        app_paths=(
+            "/Applications/Google Chrome.app"
+            "$HOME/Applications/Google Chrome.app"
+        )
+    fi
 
     if is_google_chrome_running; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Google Chrome running · old versions cleanup skipped"
@@ -440,10 +445,15 @@ clean_edge_updater_old_versions() {
 
 # Remove old Brave Browser versions while keeping Current.
 clean_brave_old_versions() {
-    local -a app_paths=(
-        "/Applications/Brave Browser.app"
-        "$HOME/Applications/Brave Browser.app"
-    )
+    local -a app_paths
+    if [[ -n "${MOLE_BRAVE_APP_PATHS:-}" ]]; then
+        IFS=':' read -ra app_paths <<< "$MOLE_BRAVE_APP_PATHS"
+    else
+        app_paths=(
+            "/Applications/Brave Browser.app"
+            "$HOME/Applications/Brave Browser.app"
+        )
+    fi
 
     # Match the exact Brave process name to avoid false positives
     if pgrep -x "Brave Browser" > /dev/null 2>&1; then

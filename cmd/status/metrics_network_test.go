@@ -160,3 +160,34 @@ func TestCollectNetworkUsesPrimedCountersForInitialRates(t *testing.T) {
 		t.Fatalf("expected 0.5 MB/s up, got %v", got[0].TxRateMBs)
 	}
 }
+
+func TestCollectNetworkClampsCounterReset(t *testing.T) {
+	original := ioCountersFunc
+	ioCountersFunc = func(bool) ([]gopsutilnet.IOCountersStat, error) {
+		return []gopsutilnet.IOCountersStat{
+			{Name: "en0", BytesRecv: 10, BytesSent: 20},
+		}, nil
+	}
+	t.Cleanup(func() { ioCountersFunc = original })
+
+	base := time.Now()
+	c := &Collector{
+		prevNet: map[string]gopsutilnet.IOCountersStat{
+			"en0": {Name: "en0", BytesRecv: 1024 * 1024, BytesSent: 1024 * 1024},
+		},
+		lastNetAt:    base,
+		rxHistoryBuf: NewRingBuffer(NetworkHistorySize),
+		txHistoryBuf: NewRingBuffer(NetworkHistorySize),
+	}
+
+	got, err := c.collectNetwork(base.Add(time.Second))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one interface, got %+v", got)
+	}
+	if got[0].RxRateMBs != 0 || got[0].TxRateMBs != 0 {
+		t.Fatalf("expected reset counters to clamp to zero, got %+v", got[0])
+	}
+}

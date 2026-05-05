@@ -194,7 +194,13 @@ EOF
     run env PROJECT_ROOT="$PROJECT_ROOT" LIMIT_MS="$limit_ms" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
-python - <<'PY'
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+    PYTHON_BIN=$(command -v python3 || command -v python || true)
+fi
+[[ -n "$PYTHON_BIN" ]] || { echo "python unavailable"; exit 127; }
+
+"$PYTHON_BIN" - <<'PY'
 from pathlib import Path
 import os
 project_root = Path(os.environ["PROJECT_ROOT"])
@@ -225,7 +231,7 @@ for i in $(seq 1 6000); do
     paths+=("$HOME/Library/Containers/com.microsoft.Excel/Data/Library/Caches/item-$i")
 done
 
-start_ns=$(python - <<'PY'
+start_ns=$("$PYTHON_BIN" - <<'PY'
 import time
 print(time.time_ns())
 PY
@@ -234,7 +240,7 @@ normalized=()
 while IFS= read -r -d '' line; do
     normalized+=("$line")
 done < <(normalize_paths_for_cleanup "${paths[@]}")
-end_ns=$(python - <<'PY'
+end_ns=$("$PYTHON_BIN" - <<'PY'
 import time
 print(time.time_ns())
 PY

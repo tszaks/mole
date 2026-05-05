@@ -158,6 +158,15 @@ var (
 	finderDiskCachedAt time.Time
 	finderDiskFree     uint64
 	finderDiskTotal    uint64
+
+	// Trash size cache. ~/.Trash can contain deep trees, and status refreshes
+	// every second; a short cache prevents repeated WalkDir work without
+	// hiding changes for long.
+	trashSizeCacheMu      sync.Mutex
+	trashSizeCachedAt     time.Time
+	trashSizeCachedValue  uint64
+	trashSizeCachedApprox bool
+	trashSizeCacheTTL     = 5 * time.Second
 )
 
 func annotateDiskTypes(disks []DiskStatus) {
@@ -417,8 +426,8 @@ func (c *Collector) collectDiskIO(now time.Time) DiskIOStatus {
 		elapsed = 1
 	}
 
-	readRate := float64(total.ReadBytes-c.prevDiskIO.ReadBytes) / 1024 / 1024 / elapsed
-	writeRate := float64(total.WriteBytes-c.prevDiskIO.WriteBytes) / 1024 / 1024 / elapsed
+	readRate := float64(counterDelta(total.ReadBytes, c.prevDiskIO.ReadBytes)) / 1024 / 1024 / elapsed
+	writeRate := float64(counterDelta(total.WriteBytes, c.prevDiskIO.WriteBytes)) / 1024 / 1024 / elapsed
 
 	c.prevDiskIO = total
 	c.lastDiskAt = now
@@ -433,9 +442,37 @@ func (c *Collector) collectDiskIO(now time.Time) DiskIOStatus {
 	return DiskIOStatus{ReadRate: readRate, WriteRate: writeRate}
 }
 
+func counterDelta(current, previous uint64) uint64 {
+	if current < previous {
+		return 0
+	}
+	return current - previous
+}
+
 // collectTrashSize returns the total size in bytes of ~/.Trash and whether
 // the result is approximate (true when the 2s timeout was reached).
 func collectTrashSize() (uint64, bool) {
+	trashSizeCacheMu.Lock()
+	if !trashSizeCachedAt.IsZero() && time.Since(trashSizeCachedAt) < trashSizeCacheTTL {
+		value := trashSizeCachedValue
+		approx := trashSizeCachedApprox
+		trashSizeCacheMu.Unlock()
+		return value, approx
+	}
+	trashSizeCacheMu.Unlock()
+
+	total, approx := scanTrashSize()
+
+	trashSizeCacheMu.Lock()
+	trashSizeCachedValue = total
+	trashSizeCachedApprox = approx
+	trashSizeCachedAt = time.Now()
+	trashSizeCacheMu.Unlock()
+
+	return total, approx
+}
+
+func scanTrashSize() (uint64, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return 0, false

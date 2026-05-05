@@ -1,10 +1,11 @@
 package main
 
 import (
+	"container/heap"
 	"context"
 	"fmt"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ func collectProcesses() ([]ProcessInfo, error) {
 }
 
 func parseProcessOutput(raw string) []ProcessInfo {
-	var procs []ProcessInfo
+	procs := make([]ProcessInfo, 0, strings.Count(raw, "\n"))
 	for line := range strings.Lines(strings.TrimSpace(raw)) {
 		fields := strings.Fields(line)
 		if len(fields) < 5 {
@@ -54,15 +55,10 @@ func parseProcessOutput(raw string) []ProcessInfo {
 		if command == "" {
 			continue
 		}
-		name := command
-		// Strip path from command name.
-		if idx := strings.LastIndex(name, "/"); idx >= 0 {
-			name = name[idx+1:]
-		}
 		procs = append(procs, ProcessInfo{
 			PID:     pid,
 			PPID:    ppid,
-			Name:    name,
+			Name:    processNameFromCommand(command),
 			Command: command,
 			CPU:     cpuVal,
 			Memory:  memVal,
@@ -74,7 +70,7 @@ func parseProcessOutput(raw string) []ProcessInfo {
 // parsePsAuxOutput parses the fallback "ps aux" format.
 // Columns: USER PID %CPU %MEM VSZ RSS TT STAT STARTED TIME COMMAND
 func parsePsAuxOutput(raw string) []ProcessInfo {
-	var procs []ProcessInfo
+	procs := make([]ProcessInfo, 0, strings.Count(raw, "\n"))
 	first := true
 	for line := range strings.Lines(strings.TrimSpace(raw)) {
 		if first {
@@ -101,17 +97,10 @@ func parsePsAuxOutput(raw string) []ProcessInfo {
 		if command == "" {
 			continue
 		}
-		name := command
-		if idx := strings.LastIndex(name, "/"); idx >= 0 {
-			name = name[idx+1:]
-		}
-		if spIdx := strings.Index(name, " "); spIdx >= 0 {
-			name = name[:spIdx]
-		}
 		procs = append(procs, ProcessInfo{
 			PID:     pid,
 			PPID:    0,
-			Name:    name,
+			Name:    processNameFromCommand(command),
 			Command: command,
 			CPU:     cpuVal,
 			Memory:  memVal,
@@ -120,27 +109,40 @@ func parsePsAuxOutput(raw string) []ProcessInfo {
 	return procs
 }
 
+func processNameFromCommand(command string) string {
+	name := command
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+	}
+	if spIdx := strings.Index(name, " "); spIdx >= 0 {
+		name = name[:spIdx]
+	}
+	return name
+}
+
 func topProcesses(processes []ProcessInfo, limit int) []ProcessInfo {
 	if limit <= 0 || len(processes) == 0 {
 		return nil
 	}
 
-	procs := make([]ProcessInfo, len(processes))
-	copy(procs, processes)
-	sort.Slice(procs, func(i, j int) bool {
-		if procs[i].CPU != procs[j].CPU {
-			return procs[i].CPU > procs[j].CPU
+	h := &processHeap{}
+	heap.Init(h)
+	for _, proc := range processes {
+		if h.Len() < limit {
+			heap.Push(h, proc)
+			continue
 		}
-		if procs[i].Memory != procs[j].Memory {
-			return procs[i].Memory > procs[j].Memory
+		if processRanksBefore(proc, (*h)[0]) {
+			heap.Pop(h)
+			heap.Push(h, proc)
 		}
-		return procs[i].PID < procs[j].PID
-	})
-
-	if len(procs) > limit {
-		procs = procs[:limit]
 	}
-	return procs
+
+	top := make([]ProcessInfo, h.Len())
+	for i := range slices.Backward(top) {
+		top[i] = heap.Pop(h).(ProcessInfo)
+	}
+	return top
 }
 
 func formatProcessLabel(proc ProcessInfo) string {
@@ -148,4 +150,38 @@ func formatProcessLabel(proc ProcessInfo) string {
 		return fmt.Sprintf("%s (%d)", proc.Name, proc.PID)
 	}
 	return fmt.Sprintf("pid %d", proc.PID)
+}
+
+func processRanksBefore(a, b ProcessInfo) bool {
+	if a.CPU != b.CPU {
+		return a.CPU > b.CPU
+	}
+	if a.Memory != b.Memory {
+		return a.Memory > b.Memory
+	}
+	return a.PID < b.PID
+}
+
+type processHeap []ProcessInfo
+
+func (h processHeap) Len() int { return len(h) }
+
+func (h processHeap) Less(i, j int) bool {
+	return processRanksBefore(h[j], h[i])
+}
+
+func (h processHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *processHeap) Push(x any) {
+	*h = append(*h, x.(ProcessInfo))
+}
+
+func (h *processHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[:n-1]
+	return x
 }

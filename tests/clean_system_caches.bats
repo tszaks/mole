@@ -263,6 +263,28 @@ EOF
     rm -rf "$HOME/Projects"
 }
 
+@test "pycache_has_bytecode checks direct bytecode files without spawning find" {
+    mkdir -p "$HOME/Projects/python-app/pkg/__pycache__"
+
+    run bash -c "
+source '$PROJECT_ROOT/lib/clean/caches.sh'
+if pycache_has_bytecode '$HOME/Projects/python-app/pkg/__pycache__'; then
+    echo has-bytecode
+else
+    echo empty
+fi
+touch '$HOME/Projects/python-app/pkg/__pycache__/module.pyc'
+if pycache_has_bytecode '$HOME/Projects/python-app/pkg/__pycache__'; then
+    echo has-bytecode
+else
+    echo empty
+fi
+"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == $'empty\nhas-bytecode' ]]
+}
+
 @test "clean_project_caches pycache dry-run exports grouped targets and counts skips" {
     mkdir -p "$HOME/Projects/python-app/pkg/__pycache__"
     mkdir -p "$HOME/Projects/python-app/protected/__pycache__"

@@ -244,6 +244,10 @@ func newModel(path string, isOverview bool) model {
 }
 
 func createOverviewEntries() []dirEntry {
+	return createOverviewEntriesWithInsights(createInsightEntries())
+}
+
+func createOverviewEntriesWithInsights(insightEntries []dirEntry) []dirEntry {
 	home := os.Getenv("HOME")
 	entries := []dirEntry{}
 
@@ -263,7 +267,7 @@ func createOverviewEntries() []dirEntry {
 	)
 
 	// Hidden space insights — paths that silently accumulate disk usage.
-	entries = append(entries, createInsightEntries()...)
+	entries = append(entries, insightEntries...)
 
 	return entries
 }
@@ -432,7 +436,7 @@ func (m model) scanFreshCmd(path string) tea.Cmd {
 }
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+	return tea.Tick(uiTickInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }

@@ -78,6 +78,7 @@ export -f pgrep
 CHROME_APP="$HOME/Applications/Google Chrome.app"
 VERSIONS_DIR="$CHROME_APP/Contents/Frameworks/Google Chrome Framework.framework/Versions"
 mkdir -p "$VERSIONS_DIR"/{128.0.0.0,129.0.0.0,130.0.0.0}
+export MOLE_CHROME_APP_PATHS="$CHROME_APP"
 
 # Create Current symlink pointing to 130.0.0.0
 ln -s "130.0.0.0" "$VERSIONS_DIR/Current"
@@ -120,6 +121,7 @@ export -f pgrep
 CHROME_APP="$HOME/Applications/Google Chrome.app"
 VERSIONS_DIR="$CHROME_APP/Contents/Frameworks/Google Chrome Framework.framework/Versions"
 mkdir -p "$VERSIONS_DIR"/{128.0.0.0,129.0.0.0,130.0.0.0}
+export MOLE_CHROME_APP_PATHS="$CHROME_APP"
 
 # Create Current symlink pointing to 130.0.0.0
 ln -s "130.0.0.0" "$VERSIONS_DIR/Current"
@@ -163,6 +165,7 @@ export -f pgrep
 CHROME_APP="$HOME/Applications/Google Chrome.app"
 VERSIONS_DIR="$CHROME_APP/Contents/Frameworks/Google Chrome Framework.framework/Versions"
 mkdir -p "$VERSIONS_DIR"/{128.0.0.0,129.0.0.0,130.0.0.0}
+export MOLE_CHROME_APP_PATHS="$CHROME_APP"
 touch -t 202601010000 "$VERSIONS_DIR/128.0.0.0"
 touch -t 202602010000 "$VERSIONS_DIR/129.0.0.0"
 touch -t 202603010000 "$VERSIONS_DIR/130.0.0.0"
@@ -224,6 +227,7 @@ EOF
 	CHROME_APP="$HOME/Applications/Google Chrome.app"
 	VERSIONS_DIR="$CHROME_APP/Contents/Frameworks/Google Chrome Framework.framework/Versions"
 	mkdir -p "$VERSIONS_DIR"/{128.0.0.0,130.0.0.0}
+	export MOLE_CHROME_APP_PATHS="$CHROME_APP"
 
 	# Remove Current if it exists as a directory, then create symlink
 	rm -rf "$VERSIONS_DIR/Current"
@@ -282,6 +286,7 @@ total_items=0
 CHROME_APP="$HOME/Applications/Google Chrome.app"
 VERSIONS_DIR="$CHROME_APP/Contents/Frameworks/Google Chrome Framework.framework/Versions"
 mkdir -p "$VERSIONS_DIR"/{128.0.0.0,129.0.0.0}
+export MOLE_CHROME_APP_PATHS="$CHROME_APP"
 # No Current symlink created
 
 clean_chrome_old_versions

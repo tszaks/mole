@@ -88,6 +88,22 @@ setup() {
 	[[ "$output" == *"$expected_version"* ]]
 }
 
+@test "mole --version does not hang on slow Homebrew detection" {
+	local fake_bin
+	fake_bin="$(mktemp -d "${BATS_TEST_TMPDIR}/fake-bin.XXXXXX")"
+	ln -s "$PROJECT_ROOT/mole" "$fake_bin/mole"
+	cat > "$fake_bin/brew" <<'SCRIPT'
+#!/usr/bin/env bash
+sleep 5
+exit 1
+SCRIPT
+	chmod +x "$fake_bin/brew"
+
+	run env HOME="$HOME" PATH="$fake_bin:$PATH" MOLE_HOMEBREW_DETECT_TIMEOUT=1 "$PROJECT_ROOT/mole" --version
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Install: Manual"* ]]
+}
+
 @test "mole --version shows nightly channel metadata" {
 	expected_version="$(grep '^VERSION=' "$PROJECT_ROOT/mole" | head -1 | sed 's/VERSION=\"\(.*\)\"/\1/')"
 	mkdir -p "$HOME/.config/mole"

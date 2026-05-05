@@ -30,21 +30,21 @@ func isCleanableDir(path string) bool {
 
 // isHandledByMoClean checks if a path is cleaned by mo clean.
 func isHandledByMoClean(path string) bool {
-	cleanPaths := []string{
-		"/Library/Caches/",
-		"/Library/Logs/",
-		"/Library/Saved Application State/",
-		"/.Trash/",
-		"/Library/DiagnosticReports/",
-	}
-
-	for _, p := range cleanPaths {
-		if strings.Contains(path, p) {
+	for _, fragment := range moCleanHandledPathFragments {
+		if strings.Contains(path, fragment) {
 			return true
 		}
 	}
 
 	return false
+}
+
+var moCleanHandledPathFragments = []string{
+	"/Library/Caches/",
+	"/Library/Logs/",
+	"/Library/Saved Application State/",
+	"/.Trash/",
+	"/Library/DiagnosticReports/",
 }
 
 // Project dependency and build directories.

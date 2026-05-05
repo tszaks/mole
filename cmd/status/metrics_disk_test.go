@@ -148,3 +148,12 @@ func TestCorrectDiskTotalBytes(t *testing.T) {
 		}
 	})
 }
+
+func TestCounterDeltaClampsCounterReset(t *testing.T) {
+	if got := counterDelta(150, 100); got != 50 {
+		t.Fatalf("counterDelta increasing = %d, want 50", got)
+	}
+	if got := counterDelta(10, 100); got != 0 {
+		t.Fatalf("counterDelta reset = %d, want 0", got)
+	}
+}

@@ -215,7 +215,7 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 				Size:       size,
 				IsDir:      isDir,
 				LastAccess: getLastAccessTimeFromInfo(info),
-			}, 100*time.Millisecond)
+			}, scanSendTimeout)
 			continue
 
 		}
@@ -251,7 +251,7 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 						Size:       result.TotalSize,
 						IsDir:      true,
 						LastAccess: time.Time{},
-					}, 100*time.Millisecond)
+					}, scanSendTimeout)
 				}
 				if limiter.tryAcquireEntry() {
 					wg.Add(1)
@@ -291,7 +291,7 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 						Size:       size,
 						IsDir:      true,
 						LastAccess: time.Time{},
-					}, 100*time.Millisecond)
+					}, scanSendTimeout)
 				}(child.Name(), fullPath)
 				continue
 			}
@@ -310,7 +310,7 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 					Size:       result.TotalSize,
 					IsDir:      true,
 					LastAccess: time.Time{},
-				}, 100*time.Millisecond)
+				}, scanSendTimeout)
 			}
 			if limiter.tryAcquireEntry() {
 				wg.Add(1)
@@ -341,13 +341,13 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 			Size:       size,
 			IsDir:      false,
 			LastAccess: getLastAccessTimeFromInfo(info),
-		}, 100*time.Millisecond)
+		}, scanSendTimeout)
 
 		// Track large files only.
 		if !shouldSkipFileForLargeTracking(fullPath) {
 			minSize := atomic.LoadInt64(&largeFileMinSize)
 			if size >= minSize {
-				trySend(largeFileChan, fileEntry{Name: child.Name(), Path: fullPath, Size: size}, 100*time.Millisecond)
+				trySend(largeFileChan, fileEntry{Name: child.Name(), Path: fullPath, Size: size}, scanSendTimeout)
 			}
 		}
 	}
@@ -402,7 +402,7 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 
 func publishLargeFiles(files []fileEntry, largeFileChan chan<- fileEntry) {
 	for _, file := range files {
-		trySend(largeFileChan, file, 100*time.Millisecond)
+		trySend(largeFileChan, file, scanSendTimeout)
 	}
 }
 
@@ -473,7 +473,7 @@ func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *
 }
 
 func calculateDirSizeFastWithLimiter(root string, limiter *scanLimiter, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value) int64 {
-	var total int64
+	var total atomic.Int64
 	var wg sync.WaitGroup
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -532,7 +532,7 @@ func calculateDirSizeFastWithLimiter(root string, limiter *scanLimiter, filesSca
 		}
 
 		if localBytes > 0 {
-			atomic.AddInt64(&total, localBytes)
+			total.Add(localBytes)
 			atomic.AddInt64(bytesScanned, localBytes)
 		}
 		if localFiles > 0 {
@@ -543,7 +543,7 @@ func calculateDirSizeFastWithLimiter(root string, limiter *scanLimiter, filesSca
 	walk(root)
 	wg.Wait()
 
-	return total
+	return total.Load()
 }
 
 // Use Spotlight (mdfind) to quickly find large files.
@@ -637,7 +637,8 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 		return 0
 	}
 
-	var total int64
+	var total atomic.Int64
+	var localTotal int64
 	var localFilesScanned int64
 	var localDirsScanned int64
 	var localBytesScanned int64
@@ -652,7 +653,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 				continue
 			}
 			size := getActualFileSize(fullPath, info)
-			total += size
+			localTotal += size
 			localFilesScanned++
 			localBytesScanned += size
 			continue
@@ -678,7 +679,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 					} else {
 						atomic.AddInt64(bytesScanned, size)
 					}
-					atomic.AddInt64(&total, size)
+					total.Add(size)
 				}(fullPath)
 				continue
 			}
@@ -691,11 +692,11 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 					defer func() { <-dirSem }()
 
 					size := calculateDirSizeConcurrent(path, largeFileChan, largeFileMinSize, limiter, dirSem, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath)
-					atomic.AddInt64(&total, size)
+					total.Add(size)
 				}(fullPath)
 			default:
 				size := calculateDirSizeConcurrent(fullPath, largeFileChan, largeFileMinSize, limiter, dirSem, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath)
-				atomic.AddInt64(&total, size)
+				localTotal += size
 			}
 			continue
 		}
@@ -706,14 +707,14 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 		}
 
 		size := getActualFileSize(fullPath, info)
-		total += size
+		localTotal += size
 		localFilesScanned++
 		localBytesScanned += size
 
 		if !shouldSkipFileForLargeTracking(fullPath) && largeFileMinSize != nil {
 			minSize := atomic.LoadInt64(largeFileMinSize)
 			if size >= minSize {
-				trySend(largeFileChan, fileEntry{Name: child.Name(), Path: fullPath, Size: size}, 100*time.Millisecond)
+				trySend(largeFileChan, fileEntry{Name: child.Name(), Path: fullPath, Size: size}, scanSendTimeout)
 			}
 		}
 
@@ -721,6 +722,10 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 		if currentPath != nil && localFilesScanned%int64(batchUpdateSize) == 0 {
 			currentPath.Store(fullPath)
 		}
+	}
+
+	if localTotal > 0 {
+		total.Add(localTotal)
 	}
 
 	wg.Wait()
@@ -735,7 +740,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 		atomic.AddInt64(dirsScanned, localDirsScanned)
 	}
 
-	return total
+	return total.Load()
 }
 
 // measureOverviewSize calculates the size of a directory using multiple strategies.

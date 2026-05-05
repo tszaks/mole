@@ -33,6 +33,11 @@ setup() {
 
     export MOCK_BIN_DIR="$BATS_TMPDIR/mole-mocks-$$"
     mkdir -p "$MOCK_BIN_DIR"
+    cat > "$MOCK_BIN_DIR/brew" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 1
+SCRIPT
+    chmod +x "$MOCK_BIN_DIR/brew"
     export PATH="$MOCK_BIN_DIR:$PATH"
 }
 
@@ -233,16 +238,19 @@ set -euo pipefail
 MOLE_TEST_BREW_UPDATE_OUTPUT="Updated 0 formulae"
 MOLE_TEST_BREW_UPGRADE_OUTPUT="Warning: mole 1.7.9 already installed"
 MOLE_TEST_BREW_LIST_OUTPUT="mole 1.7.9"
+export MOLE_TEST_BREW_UPDATE_OUTPUT MOLE_TEST_BREW_UPGRADE_OUTPUT MOLE_TEST_BREW_LIST_OUTPUT
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }
-brew() {
+cat > "$MOCK_BIN_DIR/brew" <<'SCRIPT'
+#!/usr/bin/env bash
   case "$1" in
-    update) echo "$MOLE_TEST_BREW_UPDATE_OUTPUT";;
-    upgrade) echo "$MOLE_TEST_BREW_UPGRADE_OUTPUT";;
-    list) if [[ "$2" == "--versions" ]]; then echo "$MOLE_TEST_BREW_LIST_OUTPUT"; fi ;;
+    update) echo "${MOLE_TEST_BREW_UPDATE_OUTPUT:-}";;
+    upgrade) echo "${MOLE_TEST_BREW_UPGRADE_OUTPUT:-}";;
+    list) if [[ "$2" == "--versions" ]]; then echo "${MOLE_TEST_BREW_LIST_OUTPUT:-}"; fi ;;
   esac
-}
-export -f brew start_inline_spinner stop_inline_spinner
+SCRIPT
+chmod +x "$MOCK_BIN_DIR/brew"
+export -f start_inline_spinner stop_inline_spinner
 source "$PROJECT_ROOT/lib/core/common.sh"
 update_via_homebrew "1.7.9"
 EOF
@@ -571,30 +579,30 @@ EOF
     local fake_path_bin="$HOME/fake-brew-bin"
     mkdir -p "$fake_cellar_bin" "$fake_path_bin"
     touch "$fake_cellar_bin/mole"
+    chmod +x "$fake_cellar_bin/mole"
     ln -sf "$fake_cellar_bin/mole" "$fake_path_bin/mole"
+    cat > "$fake_path_bin/brew" <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "list" ]]; then
+  echo "mole"
+  exit 0
+fi
+if [[ "${1:-}" == "--prefix" ]]; then
+  echo "/opt/homebrew"
+  exit 0
+fi
+exit 0
+SCRIPT
+    chmod +x "$fake_path_bin/brew"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_path_bin:/usr/bin:/bin" TERM="dumb" bash --noprofile --norc << 'EOF'
 set -euo pipefail
-brew() {
-  if [[ "${1:-}" == "list" && "${2:-}" == "--formula" ]]; then
-    echo "mole"
-    return 0
-  fi
-  if [[ "${1:-}" == "--prefix" ]]; then
-    echo "/opt/homebrew"
-    return 0
-  fi
-  return 0
-}
-export -f brew
-
 "$PROJECT_ROOT/mole" update --nightly
 EOF
 
     [ "$status" -eq 1 ]
     [[ "$output" == *"Nightly update is only available for script installations"* ]]
     [[ "$output" == *"Homebrew installs follow stable releases."* ]]
-    [[ "$output" == *"mo update --nightly"* ]]
 }
 
 @test "get_homebrew_latest_version prefers brew outdated verbose target version" {
@@ -602,18 +610,19 @@ EOF
 set -euo pipefail
 MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 source "$PROJECT_ROOT/mole"
 
-brew() {
+cat > "$MOCK_BIN_DIR/brew" <<'SCRIPT'
+#!/usr/bin/env bash
   if [[ "${1:-}" == "outdated" ]]; then
     echo "tw93/tap/mole (1.29.0) < 1.31.0"
-    return 0
+    exit 0
   fi
   if [[ "${1:-}" == "info" ]]; then
     echo "==> tw93/tap/mole: stable 9.9.9 (bottled)"
-    return 0
+    exit 0
   fi
-  return 0
-}
-export -f brew
+  exit 0
+SCRIPT
+chmod +x "$MOCK_BIN_DIR/brew"
 
 get_homebrew_latest_version
 EOF
@@ -627,17 +636,18 @@ EOF
 set -euo pipefail
 MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 source "$PROJECT_ROOT/mole"
 
-brew() {
+cat > "$MOCK_BIN_DIR/brew" <<'SCRIPT'
+#!/usr/bin/env bash
   if [[ "${1:-}" == "outdated" ]]; then
-    return 0
+    exit 0
   fi
   if [[ "${1:-}" == "info" ]]; then
     echo "==> tw93/tap/mole: stable 1.31.1 (bottled), HEAD"
-    return 0
+    exit 0
   fi
-  return 0
-}
-export -f brew
+  exit 0
+SCRIPT
+chmod +x "$MOCK_BIN_DIR/brew"
 
 get_homebrew_latest_version
 EOF
