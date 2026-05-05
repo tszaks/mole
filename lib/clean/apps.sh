@@ -840,7 +840,10 @@ clean_orphaned_container_stubs() {
             fi
 
             if [[ "$DRY_RUN" != "true" ]]; then
-                if safe_remove "$container_dir" true > /dev/null 2>&1; then
+                # These directories have already passed the narrow stub-only
+                # checks above. Use direct removal so broad app-protection rules
+                # for the parent vendor bundle do not keep empty metadata stubs.
+                if rm -rf "$container_dir" > /dev/null 2>&1; then
                     removed_count=$((removed_count + 1))
                 else
                     debug_log "Failed to remove stub container: $container_dir"
