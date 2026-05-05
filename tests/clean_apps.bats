@@ -683,3 +683,149 @@ EOF
 
     [ "$status" -eq 0 ]
 }
+
+@test "clean_orphaned_container_stubs removes stub container when app is uninstalled" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+# Stub container: only the metadata plist, no Data/ subdir
+stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
+mkdir -p "$stub"
+touch "$stub/.com.apple.containermanagerd.metadata.plist"
+
+# Canonical app path does not exist (uninstalled)
+# mdfind returns nothing (uninstalled)
+mdfind() { echo ""; return 0; }
+run_with_timeout() { shift; "$@"; }
+note_activity() { :; }
+debug_log() { :; }
+is_path_whitelisted() { return 1; }
+
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+clean_orphaned_container_stubs
+
+if [[ ! -d "$stub" ]]; then
+    echo "PASS: stub removed"
+else
+    echo "FAIL: stub still exists"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS: stub removed"* ]]
+    [[ "$output" == *"Orphaned app container stubs"* ]]
+}
+
+@test "clean_orphaned_container_stubs preserves container when app is installed" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
+mkdir -p "$stub"
+touch "$stub/.com.apple.containermanagerd.metadata.plist"
+
+# Simulate the app installed in a user-level Applications directory.
+mkdir -p "$HOME/Applications/CleanMyMac X.app"
+
+mdfind() { echo ""; return 0; }
+run_with_timeout() { shift; "$@"; }
+note_activity() { :; }
+debug_log() { :; }
+is_path_whitelisted() { return 1; }
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+clean_orphaned_container_stubs
+
+if [[ -d "$stub" ]]; then
+    echo "PASS: stub preserved"
+else
+    echo "FAIL: stub was wrongly removed"
+    exit 1
+fi
+
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS: stub preserved"* ]]
+}
+
+@test "clean_orphaned_container_stubs preserves container with Data subdirectory" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+# Container has a Data/ subtree — real sandbox data, must NOT be deleted
+stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
+mkdir -p "$stub/Data/Library/Preferences"
+touch "$stub/.com.apple.containermanagerd.metadata.plist"
+touch "$stub/Data/Library/Preferences/settings.plist"
+
+mdfind() { echo ""; return 0; }
+run_with_timeout() { shift; "$@"; }
+note_activity() { :; }
+debug_log() { :; }
+is_path_whitelisted() { return 1; }
+
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+clean_orphaned_container_stubs
+
+if [[ -d "$stub/Data" ]]; then
+    echo "PASS: data container preserved"
+else
+    echo "FAIL: data container was wrongly removed"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS: data container preserved"* ]]
+}
+
+@test "clean_orphaned_container_stubs preserves non-metadata-only container" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
+mkdir -p "$stub"
+touch "$stub/.com.apple.containermanagerd.metadata.plist"
+touch "$stub/session.lock"
+
+mdfind() { echo ""; return 0; }
+run_with_timeout() { shift; "$@"; }
+note_activity() { :; }
+debug_log() { :; }
+is_path_whitelisted() { return 1; }
+
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+clean_orphaned_container_stubs
+
+if [[ -f "$stub/session.lock" ]]; then
+    echo "PASS: non-stub container preserved"
+else
+    echo "FAIL: non-stub container was wrongly removed"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS: non-stub container preserved"* ]]
+}
