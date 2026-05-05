@@ -530,9 +530,9 @@ clean_orphaned_system_services() {
     _plist_binary_path() {
         local plist="$1"
         local binary=""
-        binary=$(/usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2>/dev/null || true)
+        binary=$(/usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2> /dev/null || true)
         if [[ -z "$binary" ]]; then
-            binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2>/dev/null || true)
+            binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2> /dev/null || true)
         fi
         [[ -z "$binary" ]] && return 1
         printf '%s\n' "$binary"
@@ -544,10 +544,10 @@ clean_orphaned_system_services() {
         local binary="$1"
         case "$binary" in
             /usr/local/bin/* | /usr/local/sbin/* | \
-            /opt/homebrew/bin/* | /opt/homebrew/sbin/* | \
-            /opt/homebrew/opt/*/bin/* | /opt/homebrew/opt/*/sbin/* | \
-            /usr/bin/* | /usr/sbin/* | /bin/* | /sbin/* | \
-            /usr/libexec/*)
+                /opt/homebrew/bin/* | /opt/homebrew/sbin/* | \
+                /opt/homebrew/opt/*/bin/* | /opt/homebrew/opt/*/sbin/* | \
+                /usr/bin/* | /usr/sbin/* | /bin/* | /sbin/* | \
+                /usr/libexec/*)
                 return 0
                 ;;
         esac
@@ -565,7 +565,7 @@ clean_orphaned_system_services() {
 
         # Read the binary the plist points to.
         local binary
-        binary=$(_plist_binary_path "$plist") || return 1  # no Program key → skip
+        binary=$(_plist_binary_path "$plist") || return 1 # no Program key → skip
 
         # If the binary still exists, the service is healthy.
         [[ -e "$binary" ]] && return 1
@@ -586,7 +586,7 @@ clean_orphaned_system_services() {
             break
         done
 
-        return 0  # orphaned
+        return 0 # orphaned
     }
 
     # Scan system LaunchDaemons
@@ -605,7 +605,7 @@ clean_orphaned_system_services() {
                 orphaned_files+=("$plist")
                 orphaned_count=$((orphaned_count + 1))
             fi
-        done < <(sudo find /Library/LaunchDaemons -maxdepth 1 -name "*.plist" -print0 2>/dev/null)
+        done < <(sudo find /Library/LaunchDaemons -maxdepth 1 -name "*.plist" -print0 2> /dev/null)
     fi
 
     # Scan system LaunchAgents
@@ -624,7 +624,7 @@ clean_orphaned_system_services() {
                 orphaned_files+=("$plist")
                 orphaned_count=$((orphaned_count + 1))
             fi
-        done < <(sudo find /Library/LaunchAgents -maxdepth 1 -name "*.plist" -print0 2>/dev/null)
+        done < <(sudo find /Library/LaunchAgents -maxdepth 1 -name "*.plist" -print0 2> /dev/null)
     fi
 
     # Scan PrivilegedHelperTools
@@ -676,7 +676,7 @@ clean_orphaned_system_services() {
                     orphaned_count=$((orphaned_count + 1))
                 fi
             fi
-        done < <(sudo find /Library/PrivilegedHelperTools -maxdepth 1 -type f -print0 2>/dev/null)
+        done < <(sudo find /Library/PrivilegedHelperTools -maxdepth 1 -type f -print0 2> /dev/null)
     fi
 
     stop_section_spinner
@@ -834,13 +834,13 @@ clean_orphaned_container_stubs() {
 
             _container_stub_app_exists "$bundle_id" "$app_path" && continue
 
-            if is_path_whitelisted "$container_dir" 2>/dev/null; then
+            if is_path_whitelisted "$container_dir" 2> /dev/null; then
                 debug_log "Skipping whitelisted stub container: $container_dir"
                 continue
             fi
 
             if [[ "$DRY_RUN" != "true" ]]; then
-                if safe_remove "$container_dir" true >/dev/null 2>&1; then
+                if safe_remove "$container_dir" true > /dev/null 2>&1; then
                     removed_count=$((removed_count + 1))
                 else
                     debug_log "Failed to remove stub container: $container_dir"
