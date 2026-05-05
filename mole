@@ -99,7 +99,6 @@ is_homebrew_mole_path() {
     local link_target=""
     [[ -n "$mole_path" ]] || return 1
 
-
     if [[ -L "$mole_path" ]]; then
         link_target=$(readlink "$mole_path" 2> /dev/null) || true
         if [[ "$link_target" == *"Cellar/mole"* ]]; then
