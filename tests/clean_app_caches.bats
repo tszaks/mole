@@ -113,6 +113,83 @@ EOF
     [[ "$output" == *"ai"* ]]
 }
 
+@test "clean_final_cut_pro_generated_caches targets only safe generated media in Movies libraries" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+mkdir -p "$HOME/Movies/Project.fcpbundle/Event/Render Files/High Quality Media"
+mkdir -p "$HOME/Movies/Project.fcpbundle/Event/Transcoded Media/Proxy Media"
+mkdir -p "$HOME/Movies/Project.fcpbundle/Event/Transcoded Media/High Quality Media"
+mkdir -p "$HOME/Movies/Project.fcpbundle/Event/Analysis Files/Stabilization"
+mkdir -p "$HOME/Movies/Project.fcpbundle/Event/Original Media/Render Files/High Quality Media"
+mkdir -p "$HOME/Documents/Other.fcpbundle/Event/Render Files/High Quality Media"
+
+touch "$HOME/Movies/Project.fcpbundle/Event/Render Files/High Quality Media/render.mov"
+touch "$HOME/Movies/Project.fcpbundle/Event/Transcoded Media/Proxy Media/proxy.mov"
+
+pgrep() { return 1; }
+safe_clean() {
+    local arg
+    for arg in "$@"; do
+        printf 'CLEAN:%s\n' "$arg"
+    done
+}
+
+clean_final_cut_pro_generated_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CLEAN:$HOME/Movies/Project.fcpbundle/Event/Render Files/High Quality Media"* ]]
+    [[ "$output" == *"CLEAN:$HOME/Movies/Project.fcpbundle/Event/Transcoded Media/Proxy Media"* ]]
+    [[ "$output" == *"CLEAN:Final Cut Pro generated cache"* ]]
+    [[ "$output" != *"Transcoded Media/High Quality Media"* ]]
+    [[ "$output" != *"Analysis Files"* ]]
+    [[ "$output" != *"Original Media"* ]]
+    [[ "$output" != *"Documents/Other.fcpbundle"* ]]
+}
+
+@test "clean_final_cut_pro_generated_caches skips while Final Cut Pro is running" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+mkdir -p "$HOME/Movies/Project.fcpbundle/Event/Render Files/High Quality Media"
+pgrep() { return 0; }
+safe_clean() {
+    echo "unexpected safe_clean"
+    return 1
+}
+
+clean_final_cut_pro_generated_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Final Cut Pro is running"* ]]
+    [[ "$output" != *"unexpected safe_clean"* ]]
+}
+
+@test "is_final_cut_pro_generated_cache_target rejects protected sibling paths" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+library="$HOME/Movies/Project.fcpbundle"
+mkdir -p "$library/Event/Render Files/High Quality Media"
+mkdir -p "$library/Event/Original Media/Render Files/High Quality Media"
+mkdir -p "$library/Event/Transcoded Media/High Quality Media"
+
+is_final_cut_pro_generated_cache_target "$library" "$library/Event/Render Files/High Quality Media"
+! is_final_cut_pro_generated_cache_target "$library" "$library/Event/Original Media/Render Files/High Quality Media"
+! is_final_cut_pro_generated_cache_target "$library" "$library/Event/Transcoded Media/High Quality Media"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "clean_ai_apps calls expected caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
