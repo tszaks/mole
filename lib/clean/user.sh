@@ -183,8 +183,7 @@ _darwin_user_runtime_dir_is_safe() {
     resolved=$(_darwin_user_runtime_realpath "$runtime_dir") || return 1
 
     case "$kind:$resolved" in
-        temp:/private/var/folders/*/*/T | cache:/private/var/folders/*/*/C)
-            ;;
+        temp:/private/var/folders/*/*/T | cache:/private/var/folders/*/*/C) ;;
         *)
             debug_log "Skipping unexpected Darwin user runtime dir: $runtime_dir -> $resolved"
             return 1
