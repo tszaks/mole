@@ -37,11 +37,10 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Xcode is running"* ]]
     [[ "$output" != *"derived data"* ]]
-    [[ "$output" != *"archives"* ]]
     [[ "$output" != *"documentation cache"* ]]
 }
 
-@test "clean_xcode_tools cleans documentation caches when Xcode is not running" {
+@test "clean_xcode_tools cleans documentation caches but not archives when Xcode is not running" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -53,7 +52,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Xcode derived data"* ]]
-    [[ "$output" == *"Xcode archives"* ]]
+    [[ "$output" != *"Xcode archives"* ]]
     [[ "$output" == *"Xcode documentation cache"* ]]
     [[ "$output" == *"Xcode documentation index"* ]]
 }

@@ -123,11 +123,10 @@ clean_xcode_tools() {
     safe_clean ~/Library/Developer/Xcode/Products/* "Xcode build products"
     if [[ "$xcode_running" == "false" ]]; then
         clean_xcode_derived_data
-        safe_clean ~/Library/Developer/Xcode/Archives/* "Xcode archives"
         safe_clean ~/Library/Developer/Xcode/DocumentationCache/* "Xcode documentation cache"
         safe_clean ~/Library/Developer/Xcode/DocumentationIndex/* "Xcode documentation index"
     else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData/Archives/Documentation cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData/Documentation cleanup"
     fi
 }
 # Code editors.

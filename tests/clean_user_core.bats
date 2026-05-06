@@ -135,6 +135,27 @@ EOF
     [[ "$output" == *"Saved application states"* ]] || [[ "$output" == *"App caches"* ]]
 }
 
+@test "clean_app_caches does not clean Autosave Information" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+stop_section_spinner() { :; }
+start_section_spinner() { :; }
+safe_clean() { echo "$2|$1"; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_app_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Autosave information"* ]]
+    [[ "$output" != *"Library/Autosave Information"* ]]
+}
+
 @test "clean_app_caches includes CleanMyMac-observed Apple cache families" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -300,8 +321,8 @@ files_cleaned=0
 total_size_cleaned=0
 total_items=0
 
-mkdir -p "$HOME/Library/Application Support/TestApp/logs/nested"
-dd if=/dev/zero of="$HOME/Library/Application Support/TestApp/logs/nested/data.bin" bs=1024 count=2 2> /dev/null
+mkdir -p "$HOME/Library/Application Support/TestApp/Code Cache/nested"
+dd if=/dev/zero of="$HOME/Library/Application Support/TestApp/Code Cache/nested/data.bin" bs=1024 count=2 2> /dev/null
 
 clean_application_support_logs
 echo "TOTAL_KB=$total_size_cleaned"
@@ -335,9 +356,9 @@ files_cleaned=0
 total_size_cleaned=0
 total_items=0
 
-mkdir -p "$HOME/Library/Application Support/adspower_global/logs"
+mkdir -p "$HOME/Library/Application Support/adspower_global/Crashpad/completed"
 for i in $(seq 1 101); do
-    touch "$HOME/Library/Application Support/adspower_global/logs/file-$i.log"
+    touch "$HOME/Library/Application Support/adspower_global/Crashpad/completed/file-$i.dmp"
 done
 
 clean_application_support_logs
@@ -348,6 +369,36 @@ EOF
     [[ "$output" == *"SPIN:Scanning Application Support... 1/1 [adspower_global, bulk clean]"* ]]
     [[ "$output" == *"Application Support logs/caches"* ]]
     [[ "$output" != *"151250 items"* ]]
+    [[ "$output" != *"REMOVE:"* ]]
+}
+
+@test "clean_application_support_logs does not clean generic Application Support logs" {
+    local support_home="$HOME/support-appsupport-generic-logs"
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+mkdir -p "$HOME"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+safe_remove() { echo "REMOVE:$1"; }
+update_progress_if_needed() { return 1; }
+should_protect_data() { return 1; }
+is_critical_system_component() { return 1; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Application Support/TestApp/logs"
+touch "$HOME/Library/Application Support/TestApp/logs/runtime.log"
+
+clean_application_support_logs
+test -f "$HOME/Library/Application Support/TestApp/logs/runtime.log"
+rm -rf "$HOME/Library/Application Support"
+EOF
+
+    [ "$status" -eq 0 ]
     [[ "$output" != *"REMOVE:"* ]]
 }
 
@@ -370,16 +421,46 @@ files_cleaned=0
 total_size_cleaned=0
 total_items=0
 
-mkdir -p "$HOME/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/logs"
-touch "$HOME/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/logs/runtime.log"
+mkdir -p "$HOME/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/Code Cache"
+touch "$HOME/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/Code Cache/runtime.bin"
 
 clean_application_support_logs
-test -f "$HOME/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/logs/runtime.log"
+test -f "$HOME/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/Code Cache/runtime.bin"
 rm -rf "$HOME/Library/Application Support"
 EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"REMOVE:"* ]]
+}
+
+@test "_clean_darwin_user_runtime_dir removes only old non-state files" {
+    local runtime_home="$HOME/darwin-runtime"
+    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+mkdir -p "$HOME/runtime/T"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+_darwin_user_runtime_dir_is_safe() { return 0; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+echo "old" > "$HOME/runtime/T/old.tmp"
+echo "new" > "$HOME/runtime/T/new.tmp"
+echo "state" > "$HOME/runtime/T/state.sqlite"
+touch -t 202301010000 "$HOME/runtime/T/old.tmp" "$HOME/runtime/T/state.sqlite"
+
+_clean_darwin_user_runtime_dir "$HOME/runtime/T" "temp" "Darwin user temp files"
+
+[[ ! -e "$HOME/runtime/T/old.tmp" ]]
+[[ -e "$HOME/runtime/T/new.tmp" ]]
+[[ -e "$HOME/runtime/T/state.sqlite" ]]
+echo "PASS"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
 }
 
 @test "app_support_entry_count_capped stops at cap without failing under pipefail" {

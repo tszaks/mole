@@ -40,6 +40,86 @@ clean_tool_cache() {
     fi
     return 0
 }
+
+clean_corepack_cache() {
+    local corepack_home="${COREPACK_HOME:-$HOME/.cache/node/corepack}"
+    [[ -n "$corepack_home" && "$corepack_home" == /* ]] || return 0
+    case "$corepack_home" in
+        / | "$HOME" | "$HOME/" | "$HOME/Library" | "$HOME/Library/")
+            debug_log "Skipping unsafe Corepack cache path: $corepack_home"
+            return 0
+            ;;
+    esac
+    if command -v corepack > /dev/null 2>&1 && run_with_timeout 2 corepack --version > /dev/null 2>&1; then
+        clean_tool_cache "Corepack cache" "$corepack_home" run_with_timeout 20 corepack cache clean
+    else
+        safe_clean "$corepack_home"/* "Corepack cache"
+    fi
+}
+
+clean_uv_cache() {
+    local uv_cache_path="$HOME/.cache/uv"
+    if command -v uv > /dev/null 2>&1 && run_with_timeout 2 uv --version > /dev/null 2>&1; then
+        local detected_cache
+        detected_cache=$(run_with_timeout 2 uv cache dir 2> /dev/null || true)
+        if [[ -n "$detected_cache" && "$detected_cache" == /* ]]; then
+            uv_cache_path="$detected_cache"
+        fi
+        clean_tool_cache "uv cache" "$uv_cache_path" run_with_timeout 20 uv cache prune
+    else
+        safe_clean "$uv_cache_path"/* "uv cache"
+    fi
+}
+
+conda_cache_whitelisted() {
+    local root
+    for root in "$@"; do
+        [[ -n "$root" ]] || continue
+        if is_path_whitelisted "$root" 2> /dev/null || is_path_whitelisted "$root/.mole-cache-guard" 2> /dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+clean_conda_metadata_caches() {
+    local -a conda_pkg_roots=(
+        "$HOME/.conda/pkgs"
+        "$HOME/anaconda3/pkgs"
+        "$HOME/miniconda3/pkgs"
+        "$HOME/miniforge3/pkgs"
+        "$HOME/mambaforge/pkgs"
+    )
+    if conda_cache_whitelisted "${conda_pkg_roots[@]}"; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} conda index/tarball/log caches · would skip (whitelist)"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} conda index/tarball/log caches · skipped (whitelist)"
+        fi
+        return 0
+    fi
+
+    local conda_cache_hint="$HOME/.conda/pkgs"
+    if command -v conda > /dev/null 2>&1 && run_with_timeout 2 conda --version > /dev/null 2>&1; then
+        clean_tool_cache "conda index/tarball/log caches" "$conda_cache_hint" \
+            run_with_timeout 30 conda clean --yes --index-cache --tarballs --logfiles
+        note_activity
+        return 0
+    fi
+
+    local root
+    for root in "${conda_pkg_roots[@]}"; do
+        [[ -d "$root" ]] || continue
+        debug_log "Conda package cache present but conda is unavailable, leaving for manual review: $root"
+    done
+}
+
+gradle_daemon_running() {
+    pgrep -f "org.gradle.launcher.daemon" > /dev/null 2>&1 && return 0
+    pgrep -f "GradleDaemon" > /dev/null 2>&1 && return 0
+    return 1
+}
+
 # npm/pnpm/yarn/bun caches.
 clean_dev_npm() {
     local npm_default_cache="$HOME/.npm"
@@ -98,15 +178,11 @@ clean_dev_npm() {
         if [[ -n "$pnpm_store_path" && "$pnpm_store_path" == /* ]]; then
             pnpm_cache_check="$pnpm_store_path"
         fi
-        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "pnpm cache" "$pnpm_cache_check" pnpm store prune
-
-        if [[ -n "$pnpm_store_path" && "$pnpm_store_path" != "$pnpm_default_store" ]]; then
-            safe_clean "$pnpm_default_store"/* "Orphaned pnpm store"
-        fi
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "pnpm cache" "$pnpm_cache_check" run_with_timeout 20 pnpm store prune
     else
-        # pnpm not installed or not usable, just clean the default store directory
-        safe_clean "$pnpm_default_store"/* "pnpm store"
+        debug_log "pnpm is unavailable, leaving global pnpm store for manual review: $pnpm_default_store"
     fi
+    clean_corepack_cache
     local bun_default_cache="$HOME/.bun/install/cache"
     local bun_cache_path="$bun_default_cache"
     local bun_cache_cleaned=false
@@ -189,7 +265,7 @@ clean_dev_python() {
     fi
     safe_clean ~/.pyenv/cache/* "pyenv cache"
     safe_clean ~/.cache/poetry/* "Poetry cache"
-    safe_clean ~/.cache/uv/* "uv cache"
+    clean_uv_cache
     safe_clean ~/.cache/ruff/* "Ruff cache"
     safe_clean ~/.cache/mypy/* "MyPy cache"
     safe_clean ~/.pytest_cache/* "Pytest cache"
@@ -197,8 +273,7 @@ clean_dev_python() {
     safe_clean ~/.cache/huggingface/* "Hugging Face cache"
     safe_clean ~/.cache/torch/* "PyTorch cache"
     safe_clean ~/.cache/tensorflow/* "TensorFlow cache"
-    safe_clean ~/.conda/pkgs/* "Conda packages cache"
-    safe_clean ~/anaconda3/pkgs/* "Anaconda packages cache"
+    clean_conda_metadata_caches
     safe_clean ~/.cache/wandb/* "Weights & Biases cache"
 }
 # Go build/module caches.
@@ -951,10 +1026,17 @@ clean_dev_jvm() {
     if declare -f clean_maven_repository > /dev/null 2>&1; then
         clean_maven_repository
     fi
-    safe_clean ~/.sbt/* "SBT cache"
+    safe_clean ~/.sbt/boot/* "SBT boot cache"
+    safe_clean ~/.sbt/launchers/* "SBT launcher cache"
     safe_clean ~/.ivy2/cache/* "Ivy cache"
-    safe_clean ~/.gradle/caches/* "Gradle cache"
-    safe_clean ~/.gradle/daemon/* "Gradle daemon"
+    safe_clean ~/.gradle/caches/build-cache-*/* "Gradle build cache"
+    safe_clean ~/.gradle/notifications/* "Gradle notifications cache"
+    if gradle_daemon_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Gradle daemon is running · daemon/workers cleanup skipped"
+    else
+        safe_clean ~/.gradle/daemon/* "Gradle daemon"
+        safe_clean ~/.gradle/workers/* "Gradle workers"
+    fi
 }
 # JetBrains Toolbox old IDE versions (keep current + recent backup).
 clean_dev_jetbrains_toolbox() {

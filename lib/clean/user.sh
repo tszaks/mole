@@ -8,6 +8,8 @@ clean_user_essentials() {
 
     safe_clean ~/Library/Logs/* "User app logs"
 
+    _clean_darwin_user_runtime_dirs
+
     if ! is_path_whitelisted "$HOME/.Trash"; then
         local trash_count
         local trash_count_status=0
@@ -114,6 +116,12 @@ _clean_mail_downloads() {
     if ! [[ "$mail_age_days" =~ ^[0-9]+$ ]]; then
         mail_age_days=30
     fi
+
+    if pgrep -x "Mail" > /dev/null 2>&1; then
+        debug_log "Mail is running, skipping Mail Downloads cleanup"
+        return 0
+    fi
+
     local -a mail_dirs=(
         "$HOME/Library/Mail Downloads"
         "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
@@ -160,6 +168,142 @@ _clean_mail_downloads() {
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $count mail attachments older than ${mail_age_days}d, about ${cleaned_mb}MB"
         note_activity
     fi
+}
+
+_darwin_user_runtime_realpath() {
+    local runtime_dir="$1"
+    [[ -n "$runtime_dir" && -d "$runtime_dir" && ! -L "$runtime_dir" ]] || return 1
+    (cd "$runtime_dir" 2> /dev/null && pwd -P)
+}
+
+_darwin_user_runtime_dir_is_safe() {
+    local runtime_dir="$1"
+    local kind="$2"
+    local resolved=""
+    resolved=$(_darwin_user_runtime_realpath "$runtime_dir") || return 1
+
+    case "$kind:$resolved" in
+        temp:/private/var/folders/*/*/T | cache:/private/var/folders/*/*/C)
+            ;;
+        *)
+            debug_log "Skipping unexpected Darwin user runtime dir: $runtime_dir -> $resolved"
+            return 1
+            ;;
+    esac
+
+    local owner_uid current_uid
+    owner_uid=$(stat -f%u "$resolved" 2> /dev/null || echo "")
+    current_uid=$(id -u 2> /dev/null || echo "")
+    [[ -n "$owner_uid" && "$owner_uid" == "$current_uid" ]]
+}
+
+_clean_darwin_user_runtime_dir() {
+    local runtime_dir="$1"
+    local kind="$2"
+    local label="$3"
+    local age_days="${MOLE_DARWIN_USER_RUNTIME_AGE_DAYS:-7}"
+    local max_items="${MOLE_DARWIN_USER_RUNTIME_MAX_ITEMS:-1500}"
+    local scan_timeout="${MOLE_DARWIN_USER_RUNTIME_SCAN_TIMEOUT:-8}"
+
+    [[ "$age_days" =~ ^[0-9]+$ ]] || age_days=7
+    [[ "$max_items" =~ ^[0-9]+$ ]] || max_items=1500
+    [[ "$scan_timeout" =~ ^[0-9]+$ ]] || scan_timeout=8
+    [[ -d "$runtime_dir" ]] || return 0
+    _darwin_user_runtime_dir_is_safe "$runtime_dir" "$kind" || return 0
+
+    local current_uid
+    current_uid=$(id -u 2> /dev/null || echo "")
+    [[ -n "$current_uid" ]] || return 0
+
+    local count=0
+    local total_size_kb=0
+    local hit_cap=false
+    local found_any=false
+    local item
+
+    while IFS= read -r -d '' item; do
+        [[ -e "$item" && ! -L "$item" ]] || continue
+        case "$item" in
+            *.sqlite | *.sqlite-shm | *.sqlite-wal | *.db | *.plist)
+                continue
+                ;;
+        esac
+        if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
+            continue
+        fi
+
+        local item_size_kb=0
+        item_size_kb=$(get_path_size_kb "$item" 2> /dev/null || echo "0")
+        [[ "$item_size_kb" =~ ^[0-9]+$ ]] || item_size_kb=0
+
+        if [[ "${DRY_RUN:-false}" == "true" ]] || safe_remove "$item" true "$item_size_kb" > /dev/null 2>&1; then
+            found_any=true
+            count=$((count + 1))
+            total_size_kb=$((total_size_kb + item_size_kb))
+        fi
+
+        if [[ "$count" -ge "$max_items" ]]; then
+            hit_cap=true
+            break
+        fi
+    done < <(
+        run_with_timeout "$scan_timeout" \
+            find -P "$runtime_dir" -xdev -mindepth 1 -user "$current_uid" -type f -mtime +"$age_days" \
+            ! -name "*.sqlite" ! -name "*.sqlite-shm" ! -name "*.sqlite-wal" ! -name "*.db" ! -name "*.plist" \
+            -print0 2> /dev/null || true
+    )
+
+    if [[ "$count" -lt "$max_items" ]]; then
+        while IFS= read -r -d '' item; do
+            [[ -d "$item" && ! -L "$item" ]] || continue
+            if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
+                continue
+            fi
+            if [[ "${DRY_RUN:-false}" == "true" ]] || safe_remove "$item" true "0" > /dev/null 2>&1; then
+                found_any=true
+                count=$((count + 1))
+            fi
+            if [[ "$count" -ge "$max_items" ]]; then
+                hit_cap=true
+                break
+            fi
+        done < <(
+            run_with_timeout "$scan_timeout" \
+                find -P "$runtime_dir" -xdev -mindepth 1 -user "$current_uid" -type d -empty -mtime +"$age_days" -print0 2> /dev/null || true
+        )
+    fi
+
+    if [[ "$found_any" == "true" ]]; then
+        local size_human
+        size_human=$(bytes_to_human "$((total_size_kb * 1024))")
+        local cap_note=""
+        [[ "$hit_cap" == "true" ]] && cap_note=", capped"
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} ${label}${NC}, ${YELLOW}${count} old items, ${size_human} dry${cap_note}${NC}"
+        else
+            local line_color
+            line_color=$(cleanup_result_color_kb "$total_size_kb")
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} ${label}${NC}, ${line_color}${count} old items, ${size_human}${cap_note}${NC}"
+        fi
+        files_cleaned=$((files_cleaned + count))
+        total_size_cleaned=$((total_size_cleaned + total_size_kb))
+        total_items=$((total_items + 1))
+        note_activity
+    fi
+}
+
+_clean_darwin_user_runtime_dirs() {
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        [[ "${MOLE_ENABLE_DARWIN_RUNTIME_CLEANUP_IN_TESTS:-0}" == "1" ]] || return 0
+    fi
+
+    local temp_dir=""
+    local cache_dir=""
+    temp_dir=$(getconf DARWIN_USER_TEMP_DIR 2> /dev/null || true)
+    cache_dir=$(getconf DARWIN_USER_CACHE_DIR 2> /dev/null || true)
+
+    _clean_darwin_user_runtime_dir "$temp_dir" "temp" "Darwin user temp files"
+    _clean_darwin_user_runtime_dir "$cache_dir" "cache" "Darwin user cache files"
 }
 
 # Remove old Google Chrome versions while keeping Current.
@@ -688,7 +832,8 @@ clean_app_caches() {
     safe_clean ~/Library/Caches/Quick\ Look/* "QuickLook cache" || true
     safe_clean ~/Library/Caches/com.apple.iconservices* "Icon services cache" || true
     _clean_incomplete_downloads
-    safe_clean ~/Library/Autosave\ Information/* "Autosave information" || true
+    # Do not clean ~/Library/Autosave Information by default: it can contain
+    # recoverable user documents, not only disposable cache data.
     safe_clean ~/Library/IdentityCaches/* "Identity caches" || true
     safe_clean ~/Library/Suggestions/* "Siri suggestions cache" || true
     safe_clean ~/Library/Calendars/Calendar\ Cache "Calendar cache" || true
@@ -1076,8 +1221,6 @@ clean_external_volume_target() {
     local -a top_level_targets=(
         "$volume/.TemporaryItems"
         "$volume/.Trashes"
-        "$volume/.Spotlight-V100"
-        "$volume/.fseventsd"
     )
     local cleaned_count=0
     local total_size=0
@@ -1113,6 +1256,8 @@ clean_external_volume_target() {
         clean_ds_store_tree "$volume" "${volume_name} volume, .DS_Store"
     fi
 
+    local metadata_scan_timeout="${MOLE_EXTERNAL_VOLUME_SCAN_TIMEOUT:-15}"
+    [[ "$metadata_scan_timeout" =~ ^[0-9]+$ ]] || metadata_scan_timeout=15
     while IFS= read -r -d '' metadata_file; do
         [[ -e "$metadata_file" ]] || continue
         if should_protect_path "$metadata_file" 2> /dev/null || is_path_whitelisted "$metadata_file" 2> /dev/null; then
@@ -1132,7 +1277,7 @@ clean_external_volume_target() {
             cleaned_count=$((cleaned_count + 1))
             total_size=$((total_size + size_kb))
         fi
-    done < <(command find "$volume" -type f -name "._*" -print0 2> /dev/null || true)
+    done < <(run_with_timeout "$metadata_scan_timeout" find -P "$volume" -xdev -type f -name "._*" -print0 2> /dev/null || true)
 
     stop_section_spinner
 
@@ -1160,18 +1305,27 @@ clean_browsers() {
     safe_clean ~/Library/Caches/com.apple.Safari/* "Safari cache"
     # Chrome/Chromium.
     safe_clean ~/Library/Caches/Google/Chrome/* "Chrome cache"
-    safe_clean ~/Library/Application\ Support/Google/Chrome/*/Application\ Cache/* "Chrome app cache"
-    safe_clean ~/Library/Application\ Support/Google/Chrome/*/GPUCache/* "Chrome GPU cache"
-    safe_clean ~/Library/Application\ Support/Google/Chrome/component_crx_cache/* "Chrome component CRX cache"
-    safe_clean ~/Library/Application\ Support/Google/Chrome/ShaderCache/* "Chrome shader cache"
-    safe_clean ~/Library/Application\ Support/Google/Chrome/GrShaderCache/* "Chrome GR shader cache"
-    safe_clean ~/Library/Application\ Support/Google/Chrome/GraphiteDawnCache/* "Chrome Dawn cache"
-    local _chrome_profile
     # Skip ScriptCache wipe while the browser is running: removing V8 bytecode
     # under a live Chromium process breaks loaded MV3 extension service workers
     # until the user toggles them in chrome://extensions. See #785.
     local _chrome_running=false
     pgrep -x "Google Chrome" > /dev/null 2>&1 && _chrome_running=true
+    if [[ "$_chrome_running" != "true" ]]; then
+        safe_clean ~/Library/Application\ Support/Google/Chrome/*/Application\ Cache/* "Chrome app cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/*/Code\ Cache/* "Chrome code cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/*/GPUCache/* "Chrome GPU cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/*/DawnCache/* "Chrome Dawn cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/*/GrShaderCache/* "Chrome GR shader cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/*/GraphiteDawnCache/* "Chrome Graphite Dawn cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/component_crx_cache/* "Chrome component CRX cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/ShaderCache/* "Chrome shader cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/GrShaderCache/* "Chrome GR shader cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/GraphiteDawnCache/* "Chrome Dawn cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/Crashpad/completed/* "Chrome crash reports"
+    else
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome is running · Application Support cache cleanup skipped"
+    fi
+    local _chrome_profile
     for _chrome_profile in "$HOME/Library/Application Support/Google/Chrome"/*/; do
         clean_service_worker_cache "Chrome" "$_chrome_profile/Service Worker/CacheStorage"
         if [[ "$_chrome_running" != "true" ]]; then
@@ -1186,13 +1340,20 @@ clean_browsers() {
     # Arc Browser.
     if [[ -d ~/Library/Application\ Support/Arc ]]; then
         safe_clean ~/Library/Caches/company.thebrowser.Browser/* "Arc cache"
-        safe_clean ~/Library/Application\ Support/Arc/*/GPUCache/* "Arc GPU cache"
-        safe_clean ~/Library/Application\ Support/Arc/ShaderCache/* "Arc shader cache"
-        safe_clean ~/Library/Application\ Support/Arc/GrShaderCache/* "Arc GR shader cache"
-        safe_clean ~/Library/Application\ Support/Arc/GraphiteDawnCache/* "Arc Dawn cache"
         local _arc_profile
         local _arc_running=false
         pgrep -x "Arc" > /dev/null 2>&1 && _arc_running=true
+        if [[ "$_arc_running" != "true" ]]; then
+            safe_clean ~/Library/Application\ Support/Arc/*/Code\ Cache/* "Arc code cache"
+            safe_clean ~/Library/Application\ Support/Arc/*/GPUCache/* "Arc GPU cache"
+            safe_clean ~/Library/Application\ Support/Arc/*/DawnCache/* "Arc Dawn cache"
+            safe_clean ~/Library/Application\ Support/Arc/*/GrShaderCache/* "Arc GR shader cache"
+            safe_clean ~/Library/Application\ Support/Arc/*/GraphiteDawnCache/* "Arc Graphite Dawn cache"
+            safe_clean ~/Library/Application\ Support/Arc/ShaderCache/* "Arc shader cache"
+            safe_clean ~/Library/Application\ Support/Arc/GrShaderCache/* "Arc GR shader cache"
+            safe_clean ~/Library/Application\ Support/Arc/GraphiteDawnCache/* "Arc Dawn cache"
+            safe_clean ~/Library/Application\ Support/Arc/Crashpad/completed/* "Arc crash reports"
+        fi
         for _arc_profile in "$HOME/Library/Application Support/Arc"/*/; do
             clean_service_worker_cache "Arc" "$_arc_profile/Service Worker/CacheStorage"
             if [[ "$_arc_running" != "true" ]]; then
@@ -1203,15 +1364,22 @@ clean_browsers() {
     safe_clean ~/Library/Caches/company.thebrowser.dia/* "Dia cache"
     if [[ -d ~/Library/Application\ Support/BraveSoftware ]]; then
         safe_clean ~/Library/Caches/BraveSoftware/Brave-Browser/* "Brave cache"
-        safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/*/Application\ Cache/* "Brave app cache"
-        safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/*/GPUCache/* "Brave GPU cache"
-        safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/component_crx_cache/* "Brave component CRX cache"
-        safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/ShaderCache/* "Brave shader cache"
-        safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/GrShaderCache/* "Brave GR shader cache"
-        safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/GraphiteDawnCache/* "Brave Dawn cache"
         local _brave_profile
         local _brave_running=false
         pgrep -x "Brave Browser" > /dev/null 2>&1 && _brave_running=true
+        if [[ "$_brave_running" != "true" ]]; then
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/*/Application\ Cache/* "Brave app cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/*/Code\ Cache/* "Brave code cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/*/GPUCache/* "Brave GPU cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/*/DawnCache/* "Brave Dawn cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/*/GrShaderCache/* "Brave GR shader cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/*/GraphiteDawnCache/* "Brave Graphite Dawn cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/component_crx_cache/* "Brave component CRX cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/ShaderCache/* "Brave shader cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/GrShaderCache/* "Brave GR shader cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/GraphiteDawnCache/* "Brave Dawn cache"
+            safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/Crashpad/completed/* "Brave crash reports"
+        fi
         for _brave_profile in "$HOME/Library/Application Support/BraveSoftware/Brave-Browser"/*/; do
             clean_service_worker_cache "Brave" "$_brave_profile/Service Worker/CacheStorage"
             if [[ "$_brave_running" != "true" ]]; then
@@ -1251,13 +1419,20 @@ clean_browsers() {
     # Vivaldi Browser.
     if [[ -d ~/Library/Application\ Support/Vivaldi ]]; then
         safe_clean ~/Library/Caches/com.vivaldi.Vivaldi/* "Vivaldi cache"
-        safe_clean ~/Library/Application\ Support/Vivaldi/*/GPUCache/* "Vivaldi GPU cache"
-        safe_clean ~/Library/Application\ Support/Vivaldi/ShaderCache/* "Vivaldi shader cache"
-        safe_clean ~/Library/Application\ Support/Vivaldi/GrShaderCache/* "Vivaldi GR shader cache"
-        safe_clean ~/Library/Application\ Support/Vivaldi/GraphiteDawnCache/* "Vivaldi Dawn cache"
         local _vivaldi_profile
         local _vivaldi_running=false
         pgrep -x "Vivaldi" > /dev/null 2>&1 && _vivaldi_running=true
+        if [[ "$_vivaldi_running" != "true" ]]; then
+            safe_clean ~/Library/Application\ Support/Vivaldi/*/Code\ Cache/* "Vivaldi code cache"
+            safe_clean ~/Library/Application\ Support/Vivaldi/*/GPUCache/* "Vivaldi GPU cache"
+            safe_clean ~/Library/Application\ Support/Vivaldi/*/DawnCache/* "Vivaldi Dawn cache"
+            safe_clean ~/Library/Application\ Support/Vivaldi/*/GrShaderCache/* "Vivaldi GR shader cache"
+            safe_clean ~/Library/Application\ Support/Vivaldi/*/GraphiteDawnCache/* "Vivaldi Graphite Dawn cache"
+            safe_clean ~/Library/Application\ Support/Vivaldi/ShaderCache/* "Vivaldi shader cache"
+            safe_clean ~/Library/Application\ Support/Vivaldi/GrShaderCache/* "Vivaldi GR shader cache"
+            safe_clean ~/Library/Application\ Support/Vivaldi/GraphiteDawnCache/* "Vivaldi Dawn cache"
+            safe_clean ~/Library/Application\ Support/Vivaldi/Crashpad/completed/* "Vivaldi crash reports"
+        fi
         for _vivaldi_profile in "$HOME/Library/Application Support/Vivaldi"/*/; do
             clean_service_worker_cache "Vivaldi" "$_vivaldi_profile/Service Worker/CacheStorage"
             if [[ "$_vivaldi_running" != "true" ]]; then
@@ -1284,13 +1459,25 @@ clean_cloud_storage() {
     if [[ "${MO_DEBUG:-0}" == "1" ]]; then
         echo "[DEBUG] Cleaning cloud storage caches..." >&2
     fi
-    safe_clean ~/Library/Caches/com.dropbox.* "Dropbox cache"
-    safe_clean ~/Library/Caches/com.getdropbox.dropbox "Dropbox cache"
-    safe_clean ~/Library/Caches/com.google.GoogleDrive "Google Drive cache"
+    if pgrep -x "Dropbox" > /dev/null 2>&1; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Dropbox is running · cache cleanup skipped"
+    else
+        safe_clean ~/Library/Caches/com.dropbox.* "Dropbox cache"
+        safe_clean ~/Library/Caches/com.getdropbox.dropbox "Dropbox cache"
+    fi
+    if pgrep -x "Google Drive" > /dev/null 2>&1; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Google Drive is running · cache cleanup skipped"
+    else
+        safe_clean ~/Library/Caches/com.google.GoogleDrive "Google Drive cache"
+    fi
     safe_clean ~/Library/Caches/com.baidu.netdisk "Baidu Netdisk cache"
     safe_clean ~/Library/Caches/com.alibaba.teambitiondisk "Alibaba Cloud cache"
     safe_clean ~/Library/Caches/com.box.desktop "Box cache"
-    safe_clean ~/Library/Caches/com.microsoft.OneDrive "OneDrive cache"
+    if pgrep -x "OneDrive" > /dev/null 2>&1; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} OneDrive is running · cache cleanup skipped"
+    else
+        safe_clean ~/Library/Caches/com.microsoft.OneDrive "OneDrive cache"
+    fi
 }
 
 # Office app caches.
@@ -1444,7 +1631,18 @@ clean_application_support_logs() {
         if is_critical_system_component "$app_name"; then
             continue
         fi
-        local -a start_candidates=("$app_dir/log" "$app_dir/logs" "$app_dir/activitylog" "$app_dir/Cache/Cache_Data" "$app_dir/Crashpad/completed")
+        # Application Support can hold licenses, databases, offline assets and
+        # session state. Keep this generic pass to explicit, regenerable cache
+        # subtrees only; app-specific log/cache cleanup belongs in allowlisted
+        # app modules above.
+        local -a start_candidates=(
+            "$app_dir/Code Cache"
+            "$app_dir/GPUCache"
+            "$app_dir/DawnCache"
+            "$app_dir/GrShaderCache"
+            "$app_dir/GraphiteDawnCache"
+            "$app_dir/Crashpad/completed"
+        )
         for candidate in "${start_candidates[@]}"; do
             if [[ -d "$candidate" ]]; then
                 if should_protect_path "$candidate" 2> /dev/null || is_path_whitelisted "$candidate" 2> /dev/null; then
@@ -1730,6 +1928,30 @@ check_large_file_candidates() {
     local threshold_kb=$((1024 * 1024)) # 1GB
     local found_any=false
 
+    _large_candidate_size_kb() {
+        local path="$1"
+        local timeout_seconds="${MOLE_LARGE_CANDIDATE_SIZE_TIMEOUT:-3}"
+        [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || timeout_seconds=3
+        local du_output=""
+        du_output=$(run_with_timeout "$timeout_seconds" du -skP "$path" 2> /dev/null || true)
+        local size_kb="${du_output%%[^0-9]*}"
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || return 1
+        printf '%s\n' "$size_kb"
+    }
+
+    _report_large_review_dir() {
+        local label="$1"
+        local path="$2"
+        [[ -d "$path" ]] || return 0
+        local size_kb=""
+        size_kb=$(_large_candidate_size_kb "$path") || return 0
+        [[ "$size_kb" -ge "$threshold_kb" ]] || return 0
+        local size_human
+        size_human=$(bytes_to_human "$((size_kb * 1024))")
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} ${label}: ${GREEN}${size_human}${NC}${GRAY}, Path: $path${NC}"
+        found_any=true
+    }
+
     local mail_dir="$HOME/Library/Mail"
     if [[ -d "$mail_dir" ]]; then
         local mail_kb
@@ -1814,9 +2036,21 @@ check_large_file_candidates() {
         fi
     fi
 
+    _report_large_review_dir "Xcode archives (review only)" "$HOME/Library/Developer/Xcode/Archives"
+    _report_large_review_dir "iOS backups (review only)" "$HOME/Library/Application Support/MobileSync/Backup"
+    _report_large_review_dir "LM Studio models (review only)" "$HOME/.lmstudio/models"
+    _report_large_review_dir "OrbStack data (review only)" "$HOME/OrbStack"
+    _report_large_review_dir "Lima data (review only)" "$HOME/.lima"
+    _report_large_review_dir "Maven local repository (review only)" "$HOME/.m2/repository"
+    _report_large_review_dir "pnpm store (review only)" "$HOME/Library/pnpm/store"
+    _report_large_review_dir "Conda packages (review only)" "$HOME/.conda/pkgs"
+    _report_large_review_dir "Anaconda packages (review only)" "$HOME/anaconda3/pkgs"
+
     if [[ "$found_any" == "false" ]]; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No large items detected in common locations"
     fi
+
+    unset -f _large_candidate_size_kb _report_large_review_dir
 
     note_activity
     return 0

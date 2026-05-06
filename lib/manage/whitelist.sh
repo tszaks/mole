@@ -78,10 +78,10 @@ get_all_cache_items() {
     # Format: "display_name|pattern|category"
     cat << 'EOF'
 Apple Mail cache|$HOME/Library/Caches/com.apple.mail/*|system_cache
-Gradle build cache (Android Studio, Gradle projects)|$HOME/.gradle/caches/*|ide_cache
+Gradle build cache (Android Studio, Gradle projects)|$HOME/.gradle/caches/build-cache-*/*|ide_cache
 Gradle daemon processes cache|$HOME/.gradle/daemon/*|ide_cache
+Gradle worker cache|$HOME/.gradle/workers/*|ide_cache
 Xcode DerivedData (build outputs, indexes)|$HOME/Library/Developer/Xcode/DerivedData/*|ide_cache
-Xcode archives (built app packages)|$HOME/Library/Developer/Xcode/Archives/*|ide_cache
 Xcode internal cache files|$HOME/Library/Caches/com.apple.dt.Xcode/*|ide_cache
 Xcode iOS device support symbols|$HOME/Library/Developer/Xcode/iOS DeviceSupport/*/Symbols/System/Library/Caches/*|ide_cache
 Maven local repository (Java dependencies)|$HOME/.m2/repository/*|ide_cache
@@ -127,8 +127,8 @@ pnpm package store|$HOME/Library/pnpm/store/*|package_manager
 Composer PHP dependencies cache (legacy)|$HOME/.composer/cache/*|package_manager
 Composer PHP dependencies cache|$HOME/Library/Caches/composer/*|package_manager
 RubyGems cache|$HOME/.gem/cache/*|package_manager
-Conda packages cache|$HOME/.conda/pkgs/*|package_manager
-Anaconda packages cache|$HOME/anaconda3/pkgs/*|package_manager
+Conda package metadata/tarball cache|$HOME/.conda/pkgs|package_manager
+Anaconda package metadata/tarball cache|$HOME/anaconda3/pkgs|package_manager
 PyTorch model cache|$HOME/.cache/torch/*|ai_ml_cache
 TensorFlow model and dataset cache|$HOME/.cache/tensorflow/*|ai_ml_cache
 HuggingFace models and datasets|$HOME/.cache/huggingface/*|ai_ml_cache

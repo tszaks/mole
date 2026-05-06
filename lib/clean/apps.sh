@@ -347,11 +347,6 @@ clean_orphaned_app_data() {
         "$HOME/Library/Caches|Caches|com.*:org.*:net.*:io.*"
         "$HOME/Library/Logs|Logs|com.*:org.*:net.*:io.*"
         "$HOME/Library/Saved Application State|States|*.savedState"
-        "$HOME/Library/WebKit|WebKit|com.*:org.*:net.*:io.*"
-        "$HOME/Library/HTTPStorages|HTTP|com.*:org.*:net.*:io.*"
-        "$HOME/Library/Cookies|Cookies|*.binarycookies"
-        "$HOME/Library/Application Support|AppSupport|com.*:org.*:net.*:io.*"
-        "$HOME/Library/Preferences|Prefs|com.*:org.*:net.*:io.*"
     )
     for resource_type in "${resource_types[@]}"; do
         IFS='|' read -r base_path label patterns <<< "$resource_type"

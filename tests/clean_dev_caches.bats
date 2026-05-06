@@ -20,7 +20,7 @@ teardown_file() {
     fi
 }
 
-@test "clean_dev_npm cleans orphaned pnpm store" {
+@test "clean_dev_npm prunes pnpm store without deleting orphaned global store" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -47,7 +47,9 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Orphaned pnpm store"* ]]
+    [[ "$output" == *"pnpm cache"* ]]
+    [[ "$output" != *"Orphaned pnpm store"* ]]
+    [[ "$output" != *"pnpm store"* ]]
 }
 
 @test "clean_dev_npm cleans default npm residual directories" {
@@ -76,6 +78,25 @@ EOF
     [[ "$output" == *"npm npx cache|$HOME/.npm/_npx/*"* ]]
     [[ "$output" == *"npm logs|$HOME/.npm/_logs/*"* ]]
     [[ "$output" == *"npm prebuilds|$HOME/.npm/_prebuilds/*"* ]]
+}
+
+@test "clean_conda_metadata_caches honors package cache whitelist before conda clean" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+WHITELIST_PATTERNS=("$HOME/anaconda3/pkgs")
+conda() { echo "conda called"; return 0; }
+export -f conda
+clean_conda_metadata_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"conda index/tarball/log caches · skipped (whitelist)"* ]]
+    [[ "$output" != *"conda called"* ]]
 }
 
 @test "clean_dev_npm cleans custom npm cache path when detected" {
