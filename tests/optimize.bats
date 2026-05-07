@@ -855,3 +855,56 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"found"* ]]
 }
+
+@test "_login_item_app_exists finds nested helper apps by bundle display name" {
+	local helper="$HOME/Applications/Adobe Acrobat DC.app/Contents/Helpers/AdobeResourceSynchronizer.app"
+	mkdir -p "$helper/Contents"
+	cat > "$helper/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>Acrobat Collaboration Synchronizer</string>
+    <key>CFBundleName</key>
+    <string>AdobeResourceSynchronizer</string>
+</dict>
+</plist>
+PLIST
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+mdfind() { return 1; }
+sfltool() { return 1; }
+export -f mdfind sfltool
+if _login_item_app_exists "Acrobat Collaboration Synchronizer"; then
+    echo "found"
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"found"* ]]
+}
+
+@test "_login_item_app_exists trusts an existing System Events login item path" {
+	local helper="$HOME/Applications/Adobe Acrobat DC.app/Contents/Helpers/AdobeResourceSynchronizer.app"
+	mkdir -p "$helper"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=1 HELPER_PATH="$helper" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+mdfind() { return 1; }
+sfltool() { return 1; }
+export -f mdfind sfltool
+if _login_item_app_exists "Acrobat Collaboration Synchronizer" "$HELPER_PATH" 2>&1; then
+    echo "found"
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"found"* ]]
+	[[ "$output" == *"resolved by login item path"* ]]
+}

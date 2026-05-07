@@ -1192,29 +1192,124 @@ opt_coreduet_cleanup() {
 }
 
 # Audit login items for broken entries referencing missing apps.
+# Return a tab-separated snapshot: login item display name, then best-effort
+# POSIX path. Display names can differ from the on-disk bundle name, so the
+# audit needs both pieces before deciding an item is broken.
+_login_items_snapshot() {
+    osascript << 'APPLESCRIPT'
+set oldDelimiters to AppleScript's text item delimiters
+set tabChar to ASCII character 9
+set linefeedChar to ASCII character 10
+set outputLines to {}
+
+tell application "System Events"
+    repeat with loginItem in login items
+        set itemName to ""
+        set itemPath to ""
+
+        try
+            set itemName to name of loginItem as text
+        end try
+
+        try
+            set itemPath to POSIX path of (path of loginItem as alias)
+        on error
+            try
+                set itemPath to path of loginItem as text
+            end try
+        end try
+
+        set end of outputLines to itemName & tabChar & itemPath
+    end repeat
+end tell
+
+set AppleScript's text item delimiters to linefeedChar
+set outputText to outputLines as text
+set AppleScript's text item delimiters to oldDelimiters
+return outputText
+APPLESCRIPT
+}
+
+_login_item_debug() {
+    if [[ "${MO_DEBUG:-}" == "1" ]] && declare -f debug_log > /dev/null 2>&1; then
+        debug_log "Login item audit: $*"
+    fi
+}
+
+_login_item_name_matches() {
+    local actual="$1"
+    local expected="$2"
+    local expected_nospace="$3"
+    local expected_stripped="$4"
+
+    [[ -z "$actual" ]] && return 1
+
+    local actual_nospace="${actual// /}"
+    [[ "$actual" == "$expected" ]] && return 0
+    [[ "$actual_nospace" == "$expected_nospace" ]] && return 0
+    [[ -n "$expected_stripped" && "$actual_nospace" == "$expected_stripped" ]] && return 0
+
+    return 1
+}
+
+_login_item_bundle_metadata_matches() {
+    local app_path="$1"
+    local name="$2"
+    local nospace="$3"
+    local stripped="$4"
+    local info="$app_path/Contents/Info.plist"
+    [[ -f "$info" ]] || return 1
+
+    local key value
+    for key in CFBundleDisplayName CFBundleName CFBundleExecutable; do
+        value=$(plutil -extract "$key" raw "$info" 2> /dev/null || echo "")
+        if _login_item_name_matches "$value" "$name" "$nospace" "$stripped"; then
+            _login_item_debug "'$name' matched $key '$value' at $app_path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Check if a login item name corresponds to an installed app.
 # Login item names often differ from .app bundle names (e.g. "AliLangClient" -> "AliLang.app",
 # "Top Calendar" -> "TopCalendar.app"), so we try multiple matching strategies.
 _login_item_app_exists() {
     local name="$1"
+    local item_path="${2:-}"
+
+    if [[ -n "$item_path" ]]; then
+        if [[ -e "$item_path" || -L "$item_path" ]]; then
+            _login_item_debug "'$name' resolved by login item path: $item_path"
+            return 0
+        fi
+        _login_item_debug "'$name' login item path is missing: $item_path"
+    else
+        _login_item_debug "'$name' has no login item path from System Events"
+    fi
+
     # 1. Exact match
-    if mdfind "kMDItemFSName == '${name}.app'" 2> /dev/null | grep -q .; then
+    if [[ "$name" != *"'"* ]] && mdfind "kMDItemFSName == '${name}.app'" 2> /dev/null | grep -q .; then
+        _login_item_debug "'$name' resolved by Spotlight exact app name"
         return 0
     fi
     # 2. Try without spaces (e.g. "Top Calendar" -> "TopCalendar")
     local nospace="${name// /}"
-    if [[ "$nospace" != "$name" ]] && mdfind "kMDItemFSName == '${nospace}.app'" 2> /dev/null | grep -q .; then
+    if [[ "$name" != *"'"* && "$nospace" != "$name" ]] && mdfind "kMDItemFSName == '${nospace}.app'" 2> /dev/null | grep -q .; then
+        _login_item_debug "'$name' resolved by Spotlight no-space app name"
         return 0
     fi
     # 3. Strip common helper suffixes (e.g. "AliLangClient" -> "AliLang")
     local stripped
     stripped=$(echo "$nospace" | sed -E 's/(Client|Helper|Agent|Launcher|Service)$//')
-    if [[ "$stripped" != "$nospace" ]] && mdfind "kMDItemFSName == '${stripped}.app'" 2> /dev/null | grep -q .; then
+    if [[ "$name" != *"'"* && "$stripped" != "$nospace" ]] && mdfind "kMDItemFSName == '${stripped}.app'" 2> /dev/null | grep -q .; then
+        _login_item_debug "'$name' resolved by Spotlight stripped helper name"
         return 0
     fi
     # 4. Recursive filesystem fallback for nested helper apps inside parent
     #    bundles. Spotlight often misses helpers under Contents/.
-    local candidate roots app_name
+    local candidate roots app_name app_path
     local -a app_names=("${name}.app")
     [[ "$nospace" != "$name" ]] && app_names+=("${nospace}.app")
     [[ "$stripped" != "$nospace" ]] && app_names+=("${stripped}.app")
@@ -1229,8 +1324,15 @@ _login_item_app_exists() {
         done
         candidate=$(command find "$roots" -maxdepth 6 -type d \( "${name_expr[@]}" \) -print -quit 2> /dev/null || true)
         if [[ -n "$candidate" && -d "$candidate" ]]; then
+            _login_item_debug "'$name' resolved by filesystem app name: $candidate"
             return 0
         fi
+
+        while IFS= read -r -d '' app_path; do
+            if _login_item_bundle_metadata_matches "$app_path" "$name" "$nospace" "$stripped"; then
+                return 0
+            fi
+        done < <(command find "$roots" -maxdepth 6 -type d -name "*.app" -print0 2> /dev/null)
     done
     # 5. Fallback: check sfltool dumpbtm for the actual on-disk path.
     #    Nested helper apps (e.g. DBnginMenuHelper.app inside DBngin.app) are
@@ -1246,8 +1348,10 @@ _login_item_app_exists() {
         }
     ')
     if [[ -n "$btm_path" ]] && [[ -e "$btm_path" ]]; then
+        _login_item_debug "'$name' resolved by sfltool BTM path: $btm_path"
         return 0
     fi
+    _login_item_debug "'$name' unresolved after path, Spotlight, filesystem, and BTM checks"
     return 1
 }
 
@@ -1258,7 +1362,7 @@ opt_login_items_audit() {
     fi
 
     local items_output
-    items_output=$(osascript -e 'tell application "System Events" to get the name of every login item' 2> /dev/null || true)
+    items_output=$(_login_items_snapshot 2> /dev/null || true)
 
     if [[ -z "$items_output" ]]; then
         opt_msg "No login items found"
@@ -1267,24 +1371,16 @@ opt_login_items_audit() {
 
     local broken=0
     local checked=0
-    # Split on ", " (comma-space) to preserve multi-word names like "Top Calendar" and "mihomo-party"
-    local old_ifs="$IFS"
-    IFS=',' read -ra items_list <<< "$items_output"
-    IFS="$old_ifs"
-    for item in "${items_list[@]}"; do
-        # Strip leading/trailing spaces from each token
-        item="${item# }"
-        item="${item% }"
+    local item item_path
+    while IFS=$'\t' read -r item item_path; do
         [[ -z "$item" ]] && continue
-        # Skip items with single quotes to avoid breaking the mdfind query string
-        [[ "$item" == *"'"* ]] && continue
         checked=$((checked + 1))
-        if _login_item_app_exists "$item"; then
+        if _login_item_app_exists "$item" "$item_path"; then
             continue
         fi
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Broken login item: $item (app not found)"
         broken=$((broken + 1))
-    done
+    done <<< "$items_output"
 
     if [[ $broken -eq 0 ]]; then
         opt_msg "Login items all healthy ($checked checked)"
