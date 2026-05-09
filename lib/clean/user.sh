@@ -1,6 +1,60 @@
 #!/bin/bash
 # User Data Cleanup Module
 set -euo pipefail
+
+clean_trash() {
+    if is_path_whitelisted "$HOME/.Trash"; then
+        return 0
+    fi
+
+    local trash_count
+    local trash_count_status=0
+    # Skip AppleScript during tests to avoid permission dialogs
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
+            tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
+    else
+        trash_count=$(run_with_timeout 3 osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null) || trash_count_status=$?
+    fi
+    if [[ $trash_count_status -eq 124 ]]; then
+        debug_log "Finder trash count timed out, using direct .Trash scan"
+        trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
+            tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
+    fi
+    [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count="0"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        [[ $trash_count -gt 0 ]] && echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $trash_count items" || echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
+    elif [[ $trash_count -gt 0 ]]; then
+        local emptied_via_finder=false
+        # Skip AppleScript during tests to avoid permission dialogs
+        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+            debug_log "Skipping Finder AppleScript in test mode"
+        else
+            if run_with_timeout 5 osascript -e 'tell application "Finder" to empty trash' > /dev/null 2>&1; then
+                emptied_via_finder=true
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $trash_count items"
+                note_activity
+            fi
+        fi
+        if [[ "$emptied_via_finder" != "true" ]]; then
+            debug_log "Finder trash empty failed or timed out, falling back to direct deletion"
+            local cleaned_count=0
+            while IFS= read -r -d '' item; do
+                if safe_remove "$item" true; then
+                    cleaned_count=$((cleaned_count + 1))
+                fi
+            done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+            if [[ $cleaned_count -gt 0 ]]; then
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $cleaned_count items"
+                note_activity
+            fi
+        fi
+    else
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
+    fi
+}
+
 clean_user_essentials() {
     start_section_spinner "Scanning caches..."
     safe_clean ~/Library/Caches/* "User app cache"
@@ -10,53 +64,8 @@ clean_user_essentials() {
 
     _clean_darwin_user_runtime_dirs
 
-    if ! is_path_whitelisted "$HOME/.Trash"; then
-        local trash_count
-        local trash_count_status=0
-        # Skip AppleScript during tests to avoid permission dialogs
-        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-            trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
-                tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
-        else
-            trash_count=$(run_with_timeout 3 osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null) || trash_count_status=$?
-        fi
-        if [[ $trash_count_status -eq 124 ]]; then
-            debug_log "Finder trash count timed out, using direct .Trash scan"
-            trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
-                tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
-        fi
-        [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count="0"
-
-        if [[ "$DRY_RUN" == "true" ]]; then
-            [[ $trash_count -gt 0 ]] && echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $trash_count items" || echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
-        elif [[ $trash_count -gt 0 ]]; then
-            local emptied_via_finder=false
-            # Skip AppleScript during tests to avoid permission dialogs
-            if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-                debug_log "Skipping Finder AppleScript in test mode"
-            else
-                if run_with_timeout 5 osascript -e 'tell application "Finder" to empty trash' > /dev/null 2>&1; then
-                    emptied_via_finder=true
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $trash_count items"
-                    note_activity
-                fi
-            fi
-            if [[ "$emptied_via_finder" != "true" ]]; then
-                debug_log "Finder trash empty failed or timed out, falling back to direct deletion"
-                local cleaned_count=0
-                while IFS= read -r -d '' item; do
-                    if safe_remove "$item" true; then
-                        cleaned_count=$((cleaned_count + 1))
-                    fi
-                done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
-                if [[ $cleaned_count -gt 0 ]]; then
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $cleaned_count items"
-                    note_activity
-                fi
-            fi
-        else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
-        fi
+    if [[ "${MOLE_SKIP_TRASH_CLEANUP:-0}" != "1" ]]; then
+        clean_trash
     fi
 
     # Recent items

@@ -166,6 +166,37 @@ EOT5
     [[ "$output" != *"Review: open ~/Library/LaunchAgents"* ]]
 }
 
+@test "show_user_launch_agent_hint_notice skips MachServices-only plists" {
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$HOME/Library/LaunchAgents/com.google.keystone.agent.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.google.keystone.agent</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.google.Keystone.Agent</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
+PLIST
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOT6'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+show_user_launch_agent_hint_notice
+EOT6
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Potential stale login item:"* ]]
+    [[ "$output" != *"Associated app not found"* ]]
+}
+
 # ---- Orphan dotfile hint tests ----
 
 @test "show_orphan_dotdir_hint_notice skips known-safe directories" {

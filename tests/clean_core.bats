@@ -130,6 +130,28 @@ run_clean_dry_run() {
     [ -f "$HOME/Library/Caches/TestApp/cache.tmp" ]
 }
 
+@test "mo clean --select fails in non-interactive mode" {
+    run env HOME="$HOME" MOLE_TEST_MODE=0 "$PROJECT_ROOT/mole" clean --select < /dev/null
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"--select requires an interactive terminal"* ]]
+    [[ "$output" == *"--categories"* ]]
+}
+
+@test "mo clean --categories limits dry-run to selected sections" {
+    run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 "$PROJECT_ROOT/mole" clean --categories browsers --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Browsers"* ]]
+    [[ "$output" != *"Developer tools"* ]]
+    [[ "$output" != *"Cloud & Office"* ]]
+}
+
+@test "mo clean rejects unknown category ids" {
+    run env HOME="$HOME" MOLE_TEST_MODE=0 "$PROJECT_ROOT/mole" clean --categories browsers,nope --dry-run
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Unknown clean category 'nope'"* ]]
+    [[ "$output" == *"Valid categories:"* ]]
+}
+
 @test "mo clean --dry-run reports stale login item without deleting it" {
     mkdir -p "$HOME/Library/LaunchAgents"
     cat > "$HOME/Library/LaunchAgents/com.example.stale.plist" <<'PLIST'

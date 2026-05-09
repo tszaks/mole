@@ -123,6 +123,36 @@ EOF
     [[ "$output" == *"None orphaned"* ]]
 }
 
+@test "check_orphan_launch_agents skips MachServices-only plists" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/check/all.sh"
+LA="$HOME/Library/LaunchAgents"
+rm -rf "$LA" && mkdir -p "$LA"
+export MOLE_LAUNCH_AGENT_DIRS="$LA"
+cat > "$LA/com.google.keystone.agent.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.google.keystone.agent</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.google.Keystone.Agent</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
+PLIST
+check_orphan_launch_agents
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"None orphaned"* ]]
+}
+
 @test "check_orphan_launch_agents respects whitelist" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

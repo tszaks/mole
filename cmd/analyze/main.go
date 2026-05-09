@@ -140,6 +140,21 @@ func (m model) inOverviewMode() bool {
 func main() {
 	flag.Parse()
 
+	if *manageAnalyzeExcludePathsFlag {
+		if err := manageAnalyzeExcludePaths(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to open analyze exclude paths: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	excludePaths, err := loadAnalyzeExcludePaths(analyzeExcludeFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load analyze exclude paths: %v\n", err)
+		os.Exit(1)
+	}
+	activeAnalyzeExcludePaths = excludePaths
+
 	target := os.Getenv("MO_ANALYZE_PATH")
 	if target == "" && len(flag.Args()) > 0 {
 		target = flag.Args()[0]
@@ -172,7 +187,7 @@ func runTUIMode(path string, isOverview bool) {
 	// Warm overview cache only when the user opens a specific directory.
 	// Overview mode already schedules the same measurements for the foreground UI;
 	// running the prefetcher there doubles the du/io workload on cold start.
-	if !isOverview {
+	if !isOverview && !hasAnalyzeExcludes() {
 		prefetchCtx, prefetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer prefetchCancel()
 		go prefetchOverviewCache(prefetchCtx)
@@ -269,7 +284,7 @@ func createOverviewEntriesWithInsights(insightEntries []dirEntry) []dirEntry {
 	// Hidden space insights — paths that silently accumulate disk usage.
 	entries = append(entries, insightEntries...)
 
-	return entries
+	return filterAnalyzeExcludedDirEntries(entries)
 }
 
 func (m *model) hydrateOverviewEntries() {
@@ -282,9 +297,11 @@ func (m *model) hydrateOverviewEntries() {
 			m.entries[i].Size = size
 			continue
 		}
-		if size, err := loadOverviewCachedSize(m.entries[i].Path); err == nil {
-			m.entries[i].Size = size
-			m.overviewSizeCache[m.entries[i].Path] = size
+		if !hasAnalyzeExcludes() {
+			if size, err := loadOverviewCachedSize(m.entries[i].Path); err == nil {
+				m.entries[i].Size = size
+				m.overviewSizeCache[m.entries[i].Path] = size
+			}
 		}
 	}
 	m.totalSize = sumKnownEntrySizes(m.entries)
@@ -371,27 +388,29 @@ func (m model) Init() tea.Cmd {
 
 func (m model) scanCmd(path string) tea.Cmd {
 	return func() tea.Msg {
-		if cached, err := loadCacheFromDisk(path); err == nil {
-			result := scanResult{
-				Entries:    cached.Entries,
-				LargeFiles: cached.LargeFiles,
-				TotalSize:  cached.TotalSize,
-				TotalFiles: cached.TotalFiles,
+		if !hasAnalyzeExcludes() {
+			if cached, err := loadCacheFromDisk(path); err == nil {
+				result := scanResult{
+					Entries:    cached.Entries,
+					LargeFiles: cached.LargeFiles,
+					TotalSize:  cached.TotalSize,
+					TotalFiles: cached.TotalFiles,
+				}
+				if cached.NeedsRefresh {
+					return scanResultMsg{path: path, result: result, err: nil, stale: true}
+				}
+				return scanResultMsg{path: path, result: result, err: nil}
 			}
-			if cached.NeedsRefresh {
+
+			if stale, err := loadStaleCacheFromDisk(path); err == nil {
+				result := scanResult{
+					Entries:    stale.Entries,
+					LargeFiles: stale.LargeFiles,
+					TotalSize:  stale.TotalSize,
+					TotalFiles: stale.TotalFiles,
+				}
 				return scanResultMsg{path: path, result: result, err: nil, stale: true}
 			}
-			return scanResultMsg{path: path, result: result, err: nil}
-		}
-
-		if stale, err := loadStaleCacheFromDisk(path); err == nil {
-			result := scanResult{
-				Entries:    stale.Entries,
-				LargeFiles: stale.LargeFiles,
-				TotalSize:  stale.TotalSize,
-				TotalFiles: stale.TotalFiles,
-			}
-			return scanResultMsg{path: path, result: result, err: nil, stale: true}
 		}
 
 		v, err, _ := scanGroup.Do(path, func() (any, error) {
@@ -404,11 +423,13 @@ func (m model) scanCmd(path string) tea.Cmd {
 
 		result := v.(scanResult)
 
-		go func(p string, r scanResult) {
-			if err := saveCacheToDisk(p, r); err != nil {
-				_ = err // Cache save failure is not critical
-			}
-		}(path, result)
+		if !hasAnalyzeExcludes() {
+			go func(p string, r scanResult) {
+				if err := saveCacheToDisk(p, r); err != nil {
+					_ = err // Cache save failure is not critical
+				}
+			}(path, result)
+		}
 
 		return scanResultMsg{path: path, result: result, err: nil}
 	}
@@ -425,11 +446,13 @@ func (m model) scanFreshCmd(path string) tea.Cmd {
 		}
 
 		result := v.(scanResult)
-		go func(p string, r scanResult) {
-			if err := saveCacheToDisk(p, r); err != nil {
-				_ = err
-			}
-		}(path, result)
+		if !hasAnalyzeExcludes() {
+			go func(p string, r scanResult) {
+				if err := saveCacheToDisk(p, r); err != nil {
+					_ = err
+				}
+			}(path, result)
+		}
 
 		return scanResultMsg{path: path, result: result}
 	}
@@ -519,7 +542,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampEntrySelection()
 		m.clampLargeSelection()
 		m.cache[m.path] = historyEntryFromScanResult(m.path, result, m.cache[m.path], msg.stale)
-		if m.totalSize > 0 {
+		if !hasAnalyzeExcludes() && m.totalSize > 0 {
 			if m.overviewSizeCache == nil {
 				m.overviewSizeCache = make(map[string]int64)
 			}
@@ -549,7 +572,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case overviewSizeMsg:
 		delete(m.overviewScanningSet, msg.Path)
 
-		if msg.Err == nil {
+		if msg.Err == nil && !hasAnalyzeExcludes() {
 			if m.overviewSizeCache == nil {
 				m.overviewSizeCache = make(map[string]int64)
 			}

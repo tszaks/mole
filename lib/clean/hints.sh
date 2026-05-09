@@ -68,6 +68,12 @@ hint_extract_launch_agent_program_path() {
 }
 
 # shellcheck disable=SC2329
+hint_launch_agent_has_mach_services() {
+    local plist="$1"
+    plutil -extract MachServices raw "$plist" > /dev/null 2>&1
+}
+
+# shellcheck disable=SC2329
 hint_extract_launch_agent_associated_bundle() {
     local plist="$1"
     local associated=""
@@ -444,6 +450,9 @@ show_user_launch_agent_hint_notice() {
         local associated=""
 
         program=$(hint_extract_launch_agent_program_path "$plist")
+        if [[ -z "$program" ]] && hint_launch_agent_has_mach_services "$plist"; then
+            continue
+        fi
         if [[ -n "$program" ]] && hint_is_system_binary "$program"; then
             continue
         fi

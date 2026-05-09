@@ -20,9 +20,11 @@ source "$SCRIPT_DIR/../lib/clean/app_caches.sh"
 source "$SCRIPT_DIR/../lib/clean/hints.sh"
 source "$SCRIPT_DIR/../lib/clean/system.sh"
 source "$SCRIPT_DIR/../lib/clean/user.sh"
+source "$SCRIPT_DIR/../lib/ui/menu_paginated.sh"
 
 SYSTEM_CLEAN=false
 DRY_RUN=false
+CLEAN_SELECT=false
 PROTECT_FINDER_METADATA=false
 EXTERNAL_VOLUME_TARGET=""
 IS_M_SERIES=$([[ "$(uname -m)" == "arm64" ]] && echo "true" || echo "false")
@@ -55,6 +57,8 @@ readonly PROTECTED_SW_DOMAINS=(
 )
 
 declare -a WHITELIST_PATTERNS=()
+declare -a CLEAN_CATEGORY_INCLUDE=()
+declare -a CLEAN_CATEGORY_EXCLUDE=()
 WHITELIST_WARNINGS=()
 if [[ -f "$HOME/.config/mole/whitelist" ]]; then
     while IFS= read -r line; do
@@ -873,7 +877,9 @@ start_cleanup() {
 EOF
 
         # Preview system section when sudo is already cached (no password prompt).
-        if has_sudo_session; then
+        if ! clean_wants_system_category; then
+            SYSTEM_CLEAN=false
+        elif has_sudo_session; then
             SYSTEM_CLEAN=true
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access available, system preview included"
             echo ""
@@ -885,7 +891,9 @@ EOF
         return
     fi
 
-    if [[ -t 0 ]]; then
+    if ! clean_wants_system_category; then
+        SYSTEM_CLEAN=false
+    elif [[ -t 0 ]]; then
         if has_sudo_session; then
             SYSTEM_CLEAN=true
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access already available"
@@ -926,7 +934,10 @@ EOF
     else
         echo ""
         echo "Running in non-interactive mode"
-        if has_sudo_session; then
+        if ! clean_wants_system_category; then
+            SYSTEM_CLEAN=false
+            echo "  ${ICON_LIST} System-level cleanup not selected"
+        elif has_sudo_session; then
             SYSTEM_CLEAN=true
             echo "  ${ICON_LIST} System-level cleanup enabled, sudo session active"
         else
@@ -1063,6 +1074,8 @@ perform_cleanup() {
         start_section "External volume"
         clean_external_volume_target "$EXTERNAL_VOLUME_TARGET"
         end_section
+    elif clean_category_mode_active; then
+        perform_category_cleanup_sections
     else
         # ===== 1. System =====
         if [[ "$SYSTEM_CLEAN" == "true" ]]; then
@@ -1274,6 +1287,364 @@ run_cloud_and_office_cleanup() {
     clean_office_applications
 }
 
+clean_category_ids() {
+    printf '%s\n' \
+        system \
+        trash \
+        user-essentials \
+        app-caches \
+        browsers \
+        cloud-office \
+        developer-tools \
+        applications \
+        virtualization \
+        application-support \
+        app-leftovers \
+        apple-silicon \
+        device-backups \
+        time-machine \
+        large-files \
+        system-data \
+        project-artifacts
+}
+
+clean_category_label() {
+    case "$1" in
+        system) echo "System" ;;
+        trash) echo "Trash" ;;
+        user-essentials) echo "User essentials" ;;
+        app-caches) echo "App caches" ;;
+        browsers) echo "Browsers" ;;
+        cloud-office) echo "Cloud & Office" ;;
+        developer-tools) echo "Developer tools" ;;
+        applications) echo "Applications" ;;
+        virtualization) echo "Virtualization" ;;
+        application-support) echo "Application Support" ;;
+        app-leftovers) echo "App leftovers" ;;
+        apple-silicon) echo "Apple Silicon" ;;
+        device-backups) echo "Device backups & firmware" ;;
+        time-machine) echo "Time Machine" ;;
+        large-files) echo "Large files" ;;
+        system-data) echo "System Data clues" ;;
+        project-artifacts) echo "Project artifacts" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+clean_trim() {
+    local value="$1"
+    # shellcheck disable=SC2295
+    value="${value#"${value%%[![:space:]]*}"}"
+    # shellcheck disable=SC2295
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s\n' "$value"
+}
+
+normalize_clean_category_id() {
+    local id
+    id=$(clean_trim "$1" | tr '[:upper:]_' '[:lower:]-')
+    case "$id" in
+        developer | dev | dev-tools) id="developer-tools" ;;
+        cloud | office | cloud-and-office | cloud-office-apps) id="cloud-office" ;;
+        app-support | application-support-logs) id="application-support" ;;
+        leftovers | app-data-leftovers) id="app-leftovers" ;;
+        apple | silicon | apple-silicon-caches) id="apple-silicon" ;;
+        backups | device-backups-and-firmware | device-firmware) id="device-backups" ;;
+        timemachine | time-machine-backups) id="time-machine" ;;
+        large | large-file | large-file-candidates) id="large-files" ;;
+        system-data-clues | system-clues) id="system-data" ;;
+        projects | project | purge-hints) id="project-artifacts" ;;
+        user | user-cache | user-caches) id="user-essentials" ;;
+        app-cache | caches) id="app-caches" ;;
+    esac
+    printf '%s\n' "$id"
+}
+
+is_clean_category_id() {
+    local candidate="$1"
+    local id
+    while IFS= read -r id; do
+        [[ "$candidate" == "$id" ]] && return 0
+    done < <(clean_category_ids)
+    return 1
+}
+
+clean_category_in_list() {
+    local needle="$1"
+    shift || true
+    local item
+    for item in "$@"; do
+        [[ "$item" == "$needle" ]] && return 0
+    done
+    return 1
+}
+
+add_clean_category_once() {
+    local target="$1"
+    local id="$2"
+    if [[ "$target" == "include" ]]; then
+        if [[ ${#CLEAN_CATEGORY_INCLUDE[@]} -eq 0 ]] || ! clean_category_in_list "$id" "${CLEAN_CATEGORY_INCLUDE[@]}"; then
+            CLEAN_CATEGORY_INCLUDE+=("$id")
+        fi
+    else
+        if [[ ${#CLEAN_CATEGORY_EXCLUDE[@]} -eq 0 ]] || ! clean_category_in_list "$id" "${CLEAN_CATEGORY_EXCLUDE[@]}"; then
+            CLEAN_CATEGORY_EXCLUDE+=("$id")
+        fi
+    fi
+}
+
+parse_clean_category_csv() {
+    local option_name="$1"
+    local csv="$2"
+    local target="$3"
+    local before_count=0
+    if [[ "$target" == "include" ]]; then
+        before_count=${#CLEAN_CATEGORY_INCLUDE[@]}
+    else
+        before_count=${#CLEAN_CATEGORY_EXCLUDE[@]}
+    fi
+
+    local IFS=','
+    local token
+    for token in $csv; do
+        local id
+        id=$(normalize_clean_category_id "$token")
+        if [[ -z "$id" ]]; then
+            continue
+        fi
+        if ! is_clean_category_id "$id"; then
+            echo "Unknown clean category '$token' for $option_name" >&2
+            echo "Valid categories: $(clean_category_ids | paste -sd, -)" >&2
+            exit 1
+        fi
+        add_clean_category_once "$target" "$id"
+    done
+
+    local after_count=0
+    if [[ "$target" == "include" ]]; then
+        after_count=${#CLEAN_CATEGORY_INCLUDE[@]}
+    else
+        after_count=${#CLEAN_CATEGORY_EXCLUDE[@]}
+    fi
+    if [[ $after_count -eq $before_count ]]; then
+        echo "Missing category list for $option_name" >&2
+        exit 1
+    fi
+}
+
+clean_category_mode_active() {
+    [[ "$CLEAN_SELECT" == "true" || ${#CLEAN_CATEGORY_INCLUDE[@]} -gt 0 || ${#CLEAN_CATEGORY_EXCLUDE[@]} -gt 0 ]]
+}
+
+should_run_clean_category() {
+    local id="$1"
+    if [[ ${#CLEAN_CATEGORY_EXCLUDE[@]} -gt 0 ]] && clean_category_in_list "$id" "${CLEAN_CATEGORY_EXCLUDE[@]}"; then
+        return 1
+    fi
+    if [[ ${#CLEAN_CATEGORY_INCLUDE[@]} -gt 0 ]]; then
+        clean_category_in_list "$id" "${CLEAN_CATEGORY_INCLUDE[@]}"
+        return $?
+    fi
+    return 0
+}
+
+clean_wants_system_category() {
+    if [[ -n "$EXTERNAL_VOLUME_TARGET" ]]; then
+        return 1
+    fi
+    should_run_clean_category system
+}
+
+select_clean_categories() {
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        echo "--select requires an interactive terminal; use --categories id1,id2 or --exclude id1,id2." >&2
+        exit 1
+    fi
+
+    local -a ids=()
+    local -a menu_options=()
+    local -a preselected=()
+    local id
+    local index=0
+    while IFS= read -r id; do
+        ids+=("$id")
+        menu_options+=("$(clean_category_label "$id")  ${GRAY}$id${NC}")
+        preselected+=("$index")
+        index=$((index + 1))
+    done < <(clean_category_ids)
+
+    local previous_preselected="${MOLE_PRESELECTED_INDICES:-}"
+    local previous_sort="${MOLE_MENU_SORT_DEFAULT:-}"
+    local IFS=','
+    export MOLE_PRESELECTED_INDICES="${preselected[*]}"
+    export MOLE_MENU_SORT_DEFAULT=name
+    unset IFS
+
+    local exit_code=0
+    paginated_multi_select "Select Cleanup Categories" "${menu_options[@]}" || exit_code=$?
+
+    if [[ -n "$previous_preselected" ]]; then
+        export MOLE_PRESELECTED_INDICES="$previous_preselected"
+    else
+        unset MOLE_PRESELECTED_INDICES
+    fi
+    if [[ -n "$previous_sort" ]]; then
+        export MOLE_MENU_SORT_DEFAULT="$previous_sort"
+    else
+        unset MOLE_MENU_SORT_DEFAULT
+    fi
+
+    if [[ $exit_code -ne 0 ]]; then
+        echo "Canceled"
+        exit 0
+    fi
+
+    CLEAN_CATEGORY_INCLUDE=()
+    local result="${MOLE_SELECTION_RESULT:-}"
+    unset MOLE_SELECTION_RESULT
+    if [[ -z "$result" ]]; then
+        echo "No cleanup categories selected"
+        exit 0
+    fi
+
+    IFS=',' read -ra selected_indices <<< "$result"
+    unset IFS
+    local selected
+    for selected in "${selected_indices[@]}"; do
+        if [[ "$selected" =~ ^[0-9]+$ && $selected -ge 0 && $selected -lt ${#ids[@]} ]]; then
+            add_clean_category_once include "${ids[$selected]}"
+        fi
+    done
+}
+
+perform_category_cleanup_sections() {
+    local previous_skip_trash="${MOLE_SKIP_TRASH_CLEANUP:-}"
+
+    if should_run_clean_category system && [[ "$SYSTEM_CLEAN" == "true" ]]; then
+        start_section "System"
+        clean_deep_system
+        clean_local_snapshots
+        end_section
+    fi
+
+    if should_run_clean_category trash; then
+        start_section "Trash"
+        clean_trash
+        end_section
+    fi
+
+    if should_run_clean_category user-essentials; then
+        start_section "User essentials"
+        export MOLE_SKIP_TRASH_CLEANUP=1
+        clean_user_essentials
+        clean_finder_metadata
+        if [[ -n "$previous_skip_trash" ]]; then
+            export MOLE_SKIP_TRASH_CLEANUP="$previous_skip_trash"
+        else
+            unset MOLE_SKIP_TRASH_CLEANUP
+        fi
+        end_section
+    fi
+
+    if should_run_clean_category app-caches; then
+        start_section "App caches"
+        clean_app_caches
+        end_section
+    fi
+
+    if should_run_clean_category browsers; then
+        start_section "Browsers"
+        clean_browsers
+        end_section
+    fi
+
+    if should_run_clean_category cloud-office; then
+        start_section "Cloud & Office"
+        if run_with_shell_timeout 300 run_cloud_and_office_cleanup; then
+            :
+        else
+            local ret=$?
+            if [[ $ret -eq 124 ]]; then
+                log_warning "Cloud & Office cleanup timed out after 5 minutes, skipping remaining items"
+            elif [[ $ret -eq 130 ]]; then
+                return 130
+            else
+                log_warning "Cloud & Office cleanup failed with exit code $ret"
+            fi
+        fi
+        end_section
+    fi
+
+    if should_run_clean_category developer-tools; then
+        start_section "Developer tools"
+        clean_developer_tools
+        end_section
+    fi
+
+    if should_run_clean_category applications; then
+        start_section "Applications"
+        clean_user_gui_applications
+        end_section
+    fi
+
+    if should_run_clean_category virtualization; then
+        start_section "Virtualization"
+        clean_virtualization_tools
+        end_section
+    fi
+
+    if should_run_clean_category application-support; then
+        start_section "Application Support"
+        clean_application_support_logs
+        end_section
+    fi
+
+    if should_run_clean_category app-leftovers; then
+        start_section "App leftovers"
+        clean_orphaned_app_data
+        clean_orphaned_system_services
+        clean_orphaned_container_stubs
+        show_user_launch_agent_hint_notice
+        show_orphan_dotdir_hint_notice
+        end_section
+    fi
+
+    if should_run_clean_category apple-silicon; then
+        clean_apple_silicon_caches
+    fi
+
+    if should_run_clean_category device-backups; then
+        start_section "Device backups & firmware"
+        clean_cached_device_firmware
+        check_ios_device_backups
+        end_section
+    fi
+
+    if should_run_clean_category time-machine; then
+        start_section "Time Machine"
+        clean_time_machine_failed_backups
+        end_section
+    fi
+
+    if should_run_clean_category large-files; then
+        start_section "Large files"
+        check_large_file_candidates
+        end_section
+    fi
+
+    if should_run_clean_category system-data; then
+        start_section "System Data clues"
+        show_system_data_hint_notice
+        end_section
+    fi
+
+    if should_run_clean_category project-artifacts; then
+        start_section "Project artifacts"
+        show_project_artifact_hint_notice
+        end_section
+    fi
+}
+
 main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1287,6 +1658,25 @@ main() {
             "--dry-run" | "-n")
                 DRY_RUN=true
                 export MOLE_DRY_RUN=1
+                ;;
+            "--select")
+                CLEAN_SELECT=true
+                ;;
+            "--categories" | "--category")
+                shift
+                if [[ $# -eq 0 ]]; then
+                    echo "Missing category list for --categories" >&2
+                    exit 1
+                fi
+                parse_clean_category_csv "--categories" "$1" include
+                ;;
+            "--exclude")
+                shift
+                if [[ $# -eq 0 ]]; then
+                    echo "Missing category list for --exclude" >&2
+                    exit 1
+                fi
+                parse_clean_category_csv "--exclude" "$1" exclude
                 ;;
             "--external")
                 shift
@@ -1304,6 +1694,14 @@ main() {
         esac
         shift
     done
+
+    if [[ "$CLEAN_SELECT" == "true" ]]; then
+        if [[ ${#CLEAN_CATEGORY_INCLUDE[@]} -gt 0 || ${#CLEAN_CATEGORY_EXCLUDE[@]} -gt 0 ]]; then
+            echo "--select cannot be combined with --categories or --exclude" >&2
+            exit 1
+        fi
+        select_clean_categories
+    fi
 
     start_cleanup
     hide_cursor

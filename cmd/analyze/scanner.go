@@ -115,6 +115,10 @@ func scanPathConcurrentWithOptions(root string, filesScanned, dirsScanned, bytes
 }
 
 func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value, useSpotlight bool, entryLimit int, limiter *scanLimiter) (scanResult, error) {
+	if isAnalyzePathExcluded(root) {
+		return scanResult{}, nil
+	}
+
 	children, err := os.ReadDir(root)
 	if err != nil {
 		return scanResult{}, err
@@ -192,6 +196,9 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 
 	for _, child := range children {
 		fullPath := filepath.Join(root, child.Name())
+		if isAnalyzePathExcluded(fullPath) {
+			continue
+		}
 
 		// Skip symlinks to avoid following unexpected targets.
 		if child.Type()&fs.ModeSymlink != 0 {
@@ -407,6 +414,10 @@ func publishLargeFiles(files []fileEntry, largeFileChan chan<- fileEntry) {
 }
 
 func loadCachedSubdirResult(path string, largeFileChan chan<- fileEntry) (scanResult, bool) {
+	if hasAnalyzeExcludes() {
+		return scanResult{}, false
+	}
+
 	cached, err := loadCacheFromDisk(path)
 	if err != nil {
 		return scanResult{}, false
@@ -436,7 +447,9 @@ func scanSubdirWithCache(root string, largeFileChan chan<- fileEntry, largeFileM
 	result, err := scanPathConcurrentWithLimiter(root, filesScanned, dirsScanned, bytesScanned, currentPath, false, maxEntries, limiter)
 	if err == nil {
 		publishLargeFiles(result.LargeFiles, largeFileChan)
-		_ = saveCacheToDiskWithOptions(root, result, true)
+		if !hasAnalyzeExcludes() {
+			_ = saveCacheToDiskWithOptions(root, result, true)
+		}
 		return result
 	}
 
@@ -473,6 +486,10 @@ func calculateDirSizeFast(root string, filesScanned, dirsScanned, bytesScanned *
 }
 
 func calculateDirSizeFastWithLimiter(root string, limiter *scanLimiter, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value) int64 {
+	if isAnalyzePathExcluded(root) {
+		return 0
+	}
+
 	var total atomic.Int64
 	var wg sync.WaitGroup
 
@@ -487,6 +504,10 @@ func calculateDirSizeFastWithLimiter(root string, limiter *scanLimiter, filesSca
 
 	var walk func(string)
 	walk = func(dirPath string) {
+		if isAnalyzePathExcluded(dirPath) {
+			return
+		}
+
 		select {
 		case <-ctx.Done():
 			return
@@ -505,8 +526,13 @@ func calculateDirSizeFastWithLimiter(root string, limiter *scanLimiter, filesSca
 		var localBytes, localFiles int64
 
 		for _, entry := range entries {
+			fullPath := filepath.Join(dirPath, entry.Name())
+			if isAnalyzePathExcluded(fullPath) {
+				continue
+			}
+
 			if entry.IsDir() {
-				subDir := filepath.Join(dirPath, entry.Name())
+				subDir := fullPath
 				atomic.AddInt64(dirsScanned, 1)
 
 				select {
@@ -524,7 +550,7 @@ func calculateDirSizeFastWithLimiter(root string, limiter *scanLimiter, filesSca
 			} else {
 				info, err := entry.Info()
 				if err == nil {
-					size := getActualFileSize(filepath.Join(dirPath, entry.Name()), info)
+					size := getActualFileSize(fullPath, info)
 					localBytes += size
 					localFiles++
 				}
@@ -574,6 +600,9 @@ func findLargeFilesWithSpotlight(root string, minSize int64) []fileEntry {
 
 	for line := range strings.Lines(strings.TrimSpace(string(output))) {
 		if line == "" {
+			continue
+		}
+		if isAnalyzePathExcluded(line) {
 			continue
 		}
 
@@ -632,6 +661,10 @@ func isInFoldedDir(path string) bool {
 }
 
 func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, largeFileMinSize *int64, limiter *scanLimiter, dirSem, duSem, duQueueSem chan struct{}, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value) int64 {
+	if isAnalyzePathExcluded(root) {
+		return 0
+	}
+
 	children, err := os.ReadDir(root)
 	if err != nil {
 		return 0
@@ -646,6 +679,9 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 
 	for _, child := range children {
 		fullPath := filepath.Join(root, child.Name())
+		if isAnalyzePathExcluded(fullPath) {
+			continue
+		}
 
 		if child.Type()&fs.ModeSymlink != 0 {
 			info, err := child.Info()
@@ -751,6 +787,9 @@ func measureOverviewSize(path string) (int64, error) {
 	}
 
 	path = filepath.Clean(path)
+	if isAnalyzePathExcluded(path) {
+		return 0, nil
+	}
 	if !filepath.IsAbs(path) {
 		return 0, fmt.Errorf("path must be absolute: %s", path)
 	}
@@ -764,6 +803,10 @@ func measureOverviewSize(path string) (int64, error) {
 	excludePath := ""
 	if home != "" && path == home {
 		excludePath = filepath.Join(home, "Library")
+	}
+
+	if hasAnalyzeExcludes() {
+		return getDirectoryLogicalSizeWithExclude(path, excludePath)
 	}
 
 	if duSize, err := getDirectorySizeFromDuWithExcludeAndIgnores(path, excludePath, overviewIgnoreNamesForPath(path)); err == nil {
@@ -806,6 +849,9 @@ func getDirectorySizeFromDuWithExcludeAndIgnores(path string, excludePath string
 		if err := validateDuIgnoreName(ignoreName); err != nil {
 			return 0, err
 		}
+	}
+	if hasAnalyzeExcludes() {
+		return getDirectoryLogicalSizeWithExclude(path, excludePath)
 	}
 
 	runDuSize := func(target string) (int64, error) {
@@ -1004,7 +1050,16 @@ func getDirectoryLogicalSizeWithExclude(path string, excludePath string) (int64,
 		}
 		// Skip excluded path
 		if excludePath != "" && p == excludePath {
-			return filepath.SkipDir
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isAnalyzePathExcluded(p) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			return nil

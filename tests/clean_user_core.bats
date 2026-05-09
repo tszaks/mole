@@ -562,6 +562,37 @@ EOF
     [[ "$output" == *"PASS"* ]]
 }
 
+@test "clean_group_container_caches skips Apple Notes group container" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+notes_cache="$HOME/Library/Group Containers/group.com.apple.notes/Library/Caches"
+mkdir -p "$notes_cache"
+echo "notes" > "$notes_cache/NoteStore.sqlite"
+
+clean_group_container_caches
+
+if [[ -e "$notes_cache/NoteStore.sqlite" ]]; then
+    echo "PASS"
+else
+    echo "FAIL"
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
+}
+
 @test "clean_group_container_caches respects whitelist entries" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
