@@ -444,6 +444,7 @@ readonly DATA_PROTECTED_BUNDLES=(
 
     # Design & Creative
     "com.adobe.*"
+    "com.avid.mediacomposer*"
     "com.bohemiancoding.*"
     "com.figma.*"
     "com.framerx.*"
@@ -459,6 +460,13 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.maxon.cinema4d"
     "com.autodesk.*"
     "com.sketchup.*"
+    "com.native-instruments.*"
+    "com.fabfilter.*"
+    "com.paceap.*"
+    "com.izotope.*"
+    "iZotope"
+    "com.lasersoft-imaging.*"
+    "app.cotypist.Cotypist"
 
     # Communication
     "com.tencent.xinWeChat"
@@ -575,6 +583,8 @@ readonly DATA_PROTECTED_BUNDLES=(
     "org.mozilla.*"
 
     # Scientific & Professional Software
+    "com.crowdstrike.*"
+    "com.kolide.*"
     "com.sas.*"
     "com.mathworks.*"
     "com.ibm.spss.*"
@@ -585,6 +595,7 @@ readonly DATA_PROTECTED_BUNDLES=(
 
     # License & App Stores
     "com.paddle.Paddle*"
+    "com.quicken.*"
     "com.setapp.DesktopClient"
     "com.devmate.*"
     "org.sparkle-project.Sparkle*"
@@ -852,6 +863,53 @@ should_protect_path() {
             ;;
         # iCloud Drive - protect user's cloud synced data
         */Library/Mobile\ Documents* | */Mobile\ Documents*)
+            return 0
+            ;;
+        # High-risk cleanup denylist: these cache/preferences paths are known
+        # to contain license, account, plugin, MDM, or system-service state
+        # despite cache-like names. Keep this as a protection overlay only; it
+        # is not a cleanup allowlist.
+        */Library/Accounts | */Library/Accounts/* | \
+            */Library/Keychains | */Library/Keychains/* | \
+            */Library/Mail | */Library/Mail/* | \
+            */Library/Calendars | \
+            */Library/Contacts | */Library/Contacts/*)
+            return 0
+            ;;
+        /Library/Audio/Plug-Ins/Components | /Library/Audio/Plug-Ins/Components/* | \
+            /Library/Audio/Plug-Ins/VST | /Library/Audio/Plug-Ins/VST/* | \
+            /Library/Audio/Plug-Ins/VST3 | /Library/Audio/Plug-Ins/VST3/* | \
+            /Library/Application\ Support/iZotope | /Library/Application\ Support/iZotope/* | \
+            */Library/Application\ Support/iZotope | */Library/Application\ Support/iZotope/* | \
+            /Library/Application\ Support/LaserSoft\ Imaging | /Library/Application\ Support/LaserSoft\ Imaging/*)
+            return 0
+            ;;
+        */Library/Preferences/com.native-instruments* | \
+            */Library/Preferences/com.avid.mediacomposer*.plist | \
+            */Library/Preferences/com.fabfilter.*.[0-9].plist | \
+            */Library/Preferences/com.fabfilter.*.[0-9][0-9].plist | \
+            */Library/Preferences/com.paceap.*.plist)
+            return 0
+            ;;
+        /private/var/folders/*/C/com.native-instruments* | \
+            /private/var/folders/*/C/com.avid.mediacomposer* | \
+            /private/var/folders/*/C/com.paceap.eden.iLokLicenseManager*)
+            return 0
+            ;;
+        */Library/Caches/ms-playwright | */Library/Caches/ms-playwright/* | \
+            */Library/Caches/app.cotypist.Cotypist | */Library/Caches/app.cotypist.Cotypist/* | \
+            */Library/Caches/com.displaylink.DisplayLinkUserAgent | */Library/Caches/com.displaylink.DisplayLinkUserAgent/* | \
+            */Library/Caches/com.lasersoft-imaging.SilverFast9 | */Library/Caches/com.lasersoft-imaging.SilverFast9/* | \
+            */Library/Caches/com.lasersoft-imaging.SilverFast-9-Installer | */Library/Caches/com.lasersoft-imaging.SilverFast-9-Installer/* | \
+            */Library/Caches/Adobe\ * | \
+            */Library/Caches/*\ Adobe* | \
+            */Library/Caches/com.apple.containermanagerd | */Library/Caches/com.apple.containermanagerd/* | \
+            */Library/Caches/com.apple.homed | */Library/Caches/com.apple.homed/* | \
+            */Library/Caches/com.apple.ap.adprivacyd | */Library/Caches/com.apple.ap.adprivacyd/* | \
+            */Library/Caches/FamilyCircle | */Library/Caches/FamilyCircle/* | \
+            */Library/Caches/com.apple.HomeKit | */Library/Caches/com.apple.HomeKit/* | \
+            */Library/Caches/com.apple.WorkflowKit.BackgroundShortcutRunner.ShortcutsSandboxCache | */Library/Caches/com.apple.WorkflowKit.BackgroundShortcutRunner.ShortcutsSandboxCache/* | \
+            */Library/Caches/com.apple.siriactionsd.ShortcutsSandboxCache | */Library/Caches/com.apple.siriactionsd.ShortcutsSandboxCache/*)
             return 0
             ;;
         # CoreAudio and audio subsystem caches (issue #553)

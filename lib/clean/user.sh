@@ -1571,6 +1571,25 @@ app_support_item_size_bytes() {
     return 1
 }
 
+app_support_dir_has_regenerable_cache_markers() {
+    local app_dir="$1"
+    local marker
+
+    for marker in \
+        "$app_dir/Code Cache" \
+        "$app_dir/GPUCache" \
+        "$app_dir/DawnCache" \
+        "$app_dir/GrShaderCache" \
+        "$app_dir/GraphiteDawnCache" \
+        "$app_dir/DawnGraphiteCache" \
+        "$app_dir/DawnWebGPUCache" \
+        "$app_dir/Crashpad"; do
+        [[ -e "$marker" ]] && return 0
+    done
+
+    return 1
+}
+
 # Application Support logs/caches.
 clean_application_support_logs() {
     if [[ ! -d "$HOME/Library/Application Support" ]] || ! ls "$HOME/Library/Application Support" > /dev/null 2>&1; then
@@ -1640,8 +1659,16 @@ clean_application_support_logs() {
             "$app_dir/DawnCache"
             "$app_dir/GrShaderCache"
             "$app_dir/GraphiteDawnCache"
+            "$app_dir/DawnGraphiteCache"
+            "$app_dir/DawnWebGPUCache"
             "$app_dir/Crashpad/completed"
         )
+        if app_support_dir_has_regenerable_cache_markers "$app_dir"; then
+            start_candidates+=(
+                "$app_dir/Cache"
+                "$app_dir/CachedData"
+            )
+        fi
         for candidate in "${start_candidates[@]}"; do
             if [[ -d "$candidate" ]]; then
                 if should_protect_path "$candidate" 2> /dev/null || is_path_whitelisted "$candidate" 2> /dev/null; then

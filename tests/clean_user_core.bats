@@ -156,7 +156,7 @@ EOF
     [[ "$output" != *"Library/Autosave Information"* ]]
 }
 
-@test "clean_app_caches includes CleanMyMac-observed Apple cache families" {
+@test "clean_app_caches includes additional Apple cache families" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -400,6 +400,46 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"REMOVE:"* ]]
+}
+
+@test "clean_application_support_logs cleans Electron-style Cache only when cache markers exist" {
+    local support_home="$HOME/support-appsupport-electron-cache"
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+mkdir -p "$HOME"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+update_progress_if_needed() { return 1; }
+should_protect_data() { return 1; }
+is_critical_system_component() { return 1; }
+WHITELIST_PATTERNS=()
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+mkdir -p "$HOME/Library/Application Support/ElectronLike/Code Cache"
+mkdir -p "$HOME/Library/Application Support/ElectronLike/Cache"
+mkdir -p "$HOME/Library/Application Support/ElectronLike/CachedData"
+touch "$HOME/Library/Application Support/ElectronLike/Code Cache/runtime.bin"
+touch "$HOME/Library/Application Support/ElectronLike/Cache/http-cache"
+touch "$HOME/Library/Application Support/ElectronLike/CachedData/v8-data"
+
+mkdir -p "$HOME/Library/Application Support/PlainApp/Cache"
+touch "$HOME/Library/Application Support/PlainApp/Cache/keep.db"
+
+clean_application_support_logs
+
+test ! -e "$HOME/Library/Application Support/ElectronLike/Code Cache/runtime.bin"
+test ! -e "$HOME/Library/Application Support/ElectronLike/Cache/http-cache"
+test ! -e "$HOME/Library/Application Support/ElectronLike/CachedData/v8-data"
+test -e "$HOME/Library/Application Support/PlainApp/Cache/keep.db"
+rm -rf "$HOME/Library/Application Support"
+EOF
+
+    [ "$status" -eq 0 ]
 }
 
 @test "clean_application_support_logs skips whitelisted application support directories" {
