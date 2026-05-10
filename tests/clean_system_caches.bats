@@ -439,14 +439,14 @@ for arg in "\$@"; do
 done
 if [[ "\$root" == "$HOME/SlowProjects" ]]; then
     trap "" TERM
-    sleep 30
+    sleep 5
     exit 0
 fi
 exit 0
 EOF
     chmod +x "$fake_bin/find"
 
-    run /usr/bin/perl -e 'alarm 8; exec @ARGV' env -i HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_bin:$PATH:/usr/bin:/bin:/usr/sbin:/sbin" TERM="${TERM:-xterm-256color}" bash --noprofile --norc <<'EOF'
+    run /usr/bin/perl -e 'alarm 5; exec @ARGV' env -i HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_bin:$PATH:/usr/bin:/bin:/usr/sbin:/sbin" TERM="${TERM:-xterm-256color}" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
