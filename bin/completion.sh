@@ -11,9 +11,8 @@ for entry in "${MOLE_COMMANDS[@]}"; do
     command_names+=("${entry%%:*}")
 done
 command_words="${command_names[*]}"
-clean_option_words="--dry-run -n --external --select --categories --exclude --whitelist --debug --help -h"
-analyze_option_words="--json --exclude --exclude-paths --help -h"
-clean_category_words="system trash user-essentials app-caches browsers cloud-office developer-tools applications virtualization application-support app-leftovers apple-silicon device-backups time-machine large-files system-data project-artifacts"
+clean_option_words="--dry-run -n --external --whitelist --debug --help -h"
+analyze_option_words="--json --help -h"
 
 emit_zsh_subcommands() {
     for entry in "${MOLE_COMMANDS[@]}"; do
@@ -31,17 +30,13 @@ emit_fish_completions() {
 
     printf '\n'
     printf 'complete -f -c %s -n "__fish_seen_subcommand_from clean" -l dry-run -s n -d "Preview cleanup without making changes"\n' "$cmd"
-    printf 'complete -f -c %s -n "__fish_seen_subcommand_from clean" -l external -r -d "Clean OS metadata from an external volume"\n' "$cmd"
-    printf 'complete -f -c %s -n "__fish_seen_subcommand_from clean" -l select -d "Interactively choose cleanup categories"\n' "$cmd"
-    printf 'complete -f -c %s -n "__fish_seen_subcommand_from clean" -l categories -r -a "%s" -d "Clean only category ids"\n' "$cmd" "$clean_category_words"
-    printf 'complete -f -c %s -n "__fish_seen_subcommand_from clean" -l exclude -r -a "%s" -d "Skip category ids"\n' "$cmd" "$clean_category_words"
+    printf 'complete -c %s -n "__fish_seen_subcommand_from clean" -l external -r -a "(__fish_complete_directories)" -d "Clean OS metadata from an external volume"\n' "$cmd"
     printf 'complete -f -c %s -n "__fish_seen_subcommand_from clean" -l whitelist -d "Manage protected paths"\n' "$cmd"
     printf 'complete -f -c %s -n "__fish_seen_subcommand_from clean" -l debug -d "Show detailed logs"\n' "$cmd"
     printf 'complete -f -c %s -n "__fish_seen_subcommand_from clean" -l help -s h -d "Show help"\n' "$cmd"
     printf 'complete -f -c %s -n "__fish_seen_subcommand_from analyze analyse" -l json -d "Output analysis as JSON"\n' "$cmd"
-    printf 'complete -f -c %s -n "__fish_seen_subcommand_from analyze analyse" -l exclude -r -d "Exclude path from analysis"\n' "$cmd"
-    printf 'complete -f -c %s -n "__fish_seen_subcommand_from analyze analyse" -l exclude-paths -d "Edit analyze exclude paths"\n' "$cmd"
     printf 'complete -f -c %s -n "__fish_seen_subcommand_from analyze analyse" -l help -s h -d "Show help"\n' "$cmd"
+    printf 'complete -c %s -n "__fish_seen_subcommand_from analyze analyse; and not __fish_seen_argument -l json -l help -s h" -a "(__fish_complete_directories)" -d "Path to analyze"\n' "$cmd"
     printf '\n'
     printf 'complete -f -c %s -n "not __fish_mole_no_subcommand" -a bash -d "generate bash completion" -n "__fish_see_subcommand_path completion"\n' "$cmd"
     printf 'complete -f -c %s -n "not __fish_mole_no_subcommand" -a zsh -d "generate zsh completion" -n "__fish_see_subcommand_path completion"\n' "$cmd"
@@ -319,9 +314,6 @@ _mole_completions()
         case "\$subcommand" in
             clean)
                 case "\$prev_word" in
-                    --categories|--exclude)
-                        COMPREPLY=( \$(compgen -W "$clean_category_words" -- "\$cur_word") )
-                        ;;
                     --external)
                         COMPREPLY=( \$(compgen -d -- "\$cur_word") )
                         ;;
@@ -331,14 +323,11 @@ _mole_completions()
                 esac
                 ;;
             analyze|analyse)
-                case "\$prev_word" in
-                    --exclude)
-                        COMPREPLY=( \$(compgen -f -- "\$cur_word") )
-                        ;;
-                    *)
-                        COMPREPLY=( \$(compgen -W "$analyze_option_words" -- "\$cur_word") )
-                        ;;
-                esac
+                if [[ "\$cur_word" == -* ]]; then
+                    COMPREPLY=( \$(compgen -W "$analyze_option_words" -- "\$cur_word") )
+                else
+                    COMPREPLY=( \$(compgen -f -- "\$cur_word") )
+                fi
                 ;;
             completion)
                 COMPREPLY=( \$(compgen -W "bash zsh fish" -- "\$cur_word") )
@@ -356,11 +345,10 @@ EOF
     zsh)
         printf '#compdef mole mo\n\n'
         printf '_mole() {\n'
-        printf '    local -a subcommands clean_categories\n'
+        printf '    local -a subcommands\n'
         printf '    subcommands=(\n'
         emit_zsh_subcommands
         printf '    )\n'
-        printf '    clean_categories=(%s)\n' "$clean_category_words"
         printf '    if (( CURRENT == 2 )); then\n'
         printf "        _describe 'subcommand' subcommands\n"
         printf '        return\n'
@@ -371,9 +359,6 @@ EOF
         printf "                '--dry-run[Preview cleanup without making changes]' \\\\\n"
         printf "                '-n[Preview cleanup without making changes]' \\\\\n"
         printf "                '--external[Clean OS metadata from an external volume]:path:_files -/' \\\\\n"
-        printf "                '--select[Interactively choose cleanup categories]' \\\\\n"
-        printf "                '--categories[Clean only category ids]:category:($clean_category_words)' \\\\\n"
-        printf "                '--exclude[Skip category ids]:category:($clean_category_words)' \\\\\n"
         printf "                '--whitelist[Manage protected paths]' \\\\\n"
         printf "                '--debug[Show detailed logs]' \\\\\n"
         printf "                '(-h --help)'{-h,--help}'[Show help]'\n"
@@ -381,13 +366,14 @@ EOF
         printf '        analyze|analyse)\n'
         printf '            _arguments \\\n'
         printf "                '--json[Output analysis as JSON]' \\\\\n"
-        printf "                '--exclude[Exclude path from analysis]:path:_files' \\\\\n"
-        printf "                '--exclude-paths[Edit analyze exclude paths]' \\\\\n"
         printf "                '(-h --help)'{-h,--help}'[Show help]' \\\\\n"
         printf "                '*:path:_files'\n"
         printf '            ;;\n'
         printf '        completion)\n'
         printf "            _arguments '1:shell:(bash zsh fish)'\n"
+        printf '            ;;\n'
+        printf '        *)\n'
+        printf "            _describe 'subcommand' subcommands\n"
         printf '            ;;\n'
         printf '    esac\n'
         printf '}\n\n'

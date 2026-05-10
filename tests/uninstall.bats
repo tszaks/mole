@@ -218,6 +218,38 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "stop_launch_services unloads launch agents without deleting plists" {
+	mkdir -p "$HOME/Library/LaunchAgents"
+	touch "$HOME/Library/LaunchAgents/com.example.TestApp.plist"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+trace="$HOME/trace.log"
+launchctl() {
+	printf 'launchctl %s\n' "$*" >> "$trace"
+}
+safe_remove() {
+	printf 'safe_remove %s\n' "$*" >> "$trace"
+	return 0
+}
+safe_sudo_remove() {
+	printf 'safe_sudo_remove %s\n' "$*" >> "$trace"
+	return 0
+}
+
+stop_launch_services "com.example.TestApp" "false" ""
+
+grep -q "launchctl unload" "$trace"
+! grep -q "safe_remove" "$trace"
+[[ -f "$HOME/Library/LaunchAgents/com.example.TestApp.plist" ]]
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "batch_uninstall_applications warns when removed app declares Local Network usage" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

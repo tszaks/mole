@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -51,45 +50,6 @@ func TestPerformScanForJSONIncludesAllEntriesAndLargeFiles(t *testing.T) {
 	}
 	if !foundHuge {
 		t.Fatalf("expected huge.bin in large_files, got %#v", result.LargeFiles)
-	}
-}
-
-func TestPerformScanForJSONExcludesConfiguredPaths(t *testing.T) {
-	root := t.TempDir()
-	includedDir := filepath.Join(root, "included")
-	excludedDir := filepath.Join(root, "excluded")
-	if err := os.MkdirAll(includedDir, 0o755); err != nil {
-		t.Fatalf("mkdir included: %v", err)
-	}
-	if err := os.MkdirAll(excludedDir, 0o755); err != nil {
-		t.Fatalf("mkdir excluded: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(includedDir, "keep.bin"), []byte("keep"), 0o644); err != nil {
-		t.Fatalf("write included: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(excludedDir, "drop.bin"), []byte("drop"), 0o644); err != nil {
-		t.Fatalf("write excluded: %v", err)
-	}
-
-	oldExcludes := activeAnalyzeExcludePaths
-	activeAnalyzeExcludePaths = []string{excludedDir}
-	t.Cleanup(func() {
-		activeAnalyzeExcludePaths = oldExcludes
-	})
-
-	result := performScanForJSON(root, false)
-	if result.TotalFiles != 1 {
-		t.Fatalf("expected one included file, got %d", result.TotalFiles)
-	}
-	for _, entry := range result.Entries {
-		if strings.HasPrefix(entry.Path, excludedDir) {
-			t.Fatalf("excluded path appeared in JSON entries: %#v", entry)
-		}
-	}
-	for _, file := range result.LargeFiles {
-		if strings.HasPrefix(file.Path, excludedDir) {
-			t.Fatalf("excluded path appeared in JSON large files: %#v", file)
-		}
 	}
 }
 

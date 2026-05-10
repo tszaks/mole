@@ -114,9 +114,6 @@ declare -a DEFAULT_WHITELIST_PATTERNS=(
 )
 
 declare -a DEFAULT_OPTIMIZE_WHITELIST_PATTERNS=(
-    "check_brew_health"
-    "check_touchid"
-    "check_git_config"
 )
 
 # ============================================================================

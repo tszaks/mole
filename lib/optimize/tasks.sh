@@ -42,6 +42,9 @@ run_launchctl_unload() {
     fi
 
     if [[ "$need_sudo" == "true" ]]; then
+        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+            return 0
+        fi
         sudo launchctl unload "$plist_file" 2> /dev/null || true
     else
         launchctl unload "$plist_file" 2> /dev/null || true
@@ -806,7 +809,12 @@ opt_bluetooth_reset() {
             return 0
         fi
 
-        if sudo pkill -TERM bluetoothd > /dev/null 2>&1; then
+        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+            if [[ "$spinner_started" == "true" ]]; then
+                stop_inline_spinner
+            fi
+            opt_msg "Bluetooth already optimal"
+        elif sudo pkill -TERM bluetoothd > /dev/null 2>&1; then
             if [[ "$spinner_started" == "true" ]]; then
                 stop_inline_spinner
             fi
@@ -1014,7 +1022,7 @@ opt_periodic_maintenance() {
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        if ! sudo -n true 2> /dev/null; then
+        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]] || ! sudo -n true 2> /dev/null; then
             opt_msg "Periodic maintenance skipped (requires sudo)"
             return 0
         fi

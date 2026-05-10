@@ -50,7 +50,6 @@ mo uninstall                 # Remove installed apps + their leftovers
 mo optimize                  # Refresh caches & services
 mo analyze                   # Visual disk explorer (or 'mo analyse')
 mo status                    # Live system health dashboard
-mo check                     # Run system diagnostics (alias: mo doctor)
 mo purge                     # Clean project build artifacts
 mo installer                 # Find and remove installer files
 
@@ -74,13 +73,8 @@ mo purge --dry-run
 mo clean --dry-run --debug   # Preview + detailed logs
 mo optimize --whitelist      # Manage protected optimization rules
 mo clean --whitelist         # Manage protected caches
-mo clean --select            # Choose cleanup categories interactively
-mo clean --categories browsers,developer-tools
-mo clean --exclude trash,cloud-office
 mo purge --paths             # Configure project scan directories
 mo analyze /Volumes          # Analyze external drives only
-mo analyze --exclude ~/Library/CloudStorage --exclude ~/Movies
-mo analyze --exclude-paths   # Edit persistent analyzer excludes
 ```
 
 ## Security & Safety Design
@@ -122,8 +116,6 @@ Space freed: 95.5GB | Free space now: 223.5GB
 ```
 
 Note: In `mo clean` -> Developer tools, Mole removes unused CoreSimulator `Volumes/Cryptex` entries and skips `IN_USE` items.
-
-Use `mo clean --select` to choose cleanup categories interactively. For scripts, use `mo clean --categories browsers,developer-tools` or `mo clean --exclude trash,cloud-office`.
 
 ### Smart App Uninstaller
 
@@ -175,7 +167,6 @@ Use `mo optimize --whitelist` to exclude specific optimizations.
 ### Disk Space Analyzer
 
 > Note: By default, Mole skips external drives under `/Volumes` for faster startup. To inspect them, run `mo analyze /Volumes` or a specific mount path.
-> Use `--exclude PATH` for one-off analyzer exclusions, or `mo analyze --exclude-paths` to edit `~/.config/mole/analyze_exclude` with one path per line.
 
 ```bash
 $ mo analyze

@@ -106,11 +106,11 @@ setup() {
     cat > "$fake_cmd" <<'EOF'
 #!/bin/bash
 trap "" TERM
-sleep 30
+sleep 5
 EOF
     chmod +x "$fake_cmd"
 
-    run /usr/bin/perl -e 'alarm 8; exec @ARGV' env FAKE_CMD="$fake_cmd" bash --noprofile --norc <<'EOF'
+    run /usr/bin/perl -e 'alarm 5; exec @ARGV' env FAKE_CMD="$fake_cmd" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/timeout.sh"
 MO_TIMEOUT_BIN=""

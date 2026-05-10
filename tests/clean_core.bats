@@ -76,11 +76,29 @@ run_clean_dry_run() {
     [[ "$output" != *"system preview included"* ]]
 }
 
-@test "mo clean --dry-run includes system preview when sudo is cached" {
+@test "mo clean --dry-run does not probe sudo in test mode" {
     set_mock_sudo_cached
+    cat > "$TEST_MOCK_BIN/sudo" << 'MOCK'
+#!/bin/bash
+echo "sudo should not be called" >&2
+exit 99
+MOCK
+    chmod +x "$TEST_MOCK_BIN/sudo"
+
     run_clean_dry_run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"system preview included"* ]]
+    [[ "$output" == *"sudo -v && mo clean --dry-run"* ]]
+    [[ "$output" != *"sudo should not be called"* ]]
+}
+
+@test "mo clean rejects removed cleanup selection flags" {
+    local removed_flag
+    for removed_flag in "--select" "--categories" "--exclude"; do
+        run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean "$removed_flag"
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"was removed in this release"* ]]
+        [[ "$output" == *"mo clean --dry-run"* ]]
+    done
 }
 
 @test "mo clean --dry-run shows hint when sudo is not cached" {
@@ -128,28 +146,6 @@ run_clean_dry_run() {
     [[ "$output" == *"User app cache"* ]]
     [[ "$output" == *"Potential space"* ]]
     [ -f "$HOME/Library/Caches/TestApp/cache.tmp" ]
-}
-
-@test "mo clean --select fails in non-interactive mode" {
-    run env HOME="$HOME" MOLE_TEST_MODE=0 "$PROJECT_ROOT/mole" clean --select < /dev/null
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"--select requires an interactive terminal"* ]]
-    [[ "$output" == *"--categories"* ]]
-}
-
-@test "mo clean --categories limits dry-run to selected sections" {
-    run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 "$PROJECT_ROOT/mole" clean --categories browsers --dry-run
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Browsers"* ]]
-    [[ "$output" != *"Developer tools"* ]]
-    [[ "$output" != *"Cloud & Office"* ]]
-}
-
-@test "mo clean rejects unknown category ids" {
-    run env HOME="$HOME" MOLE_TEST_MODE=0 "$PROJECT_ROOT/mole" clean --categories browsers,nope --dry-run
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"Unknown clean category 'nope'"* ]]
-    [[ "$output" == *"Valid categories:"* ]]
 }
 
 @test "mo clean --dry-run reports stale login item without deleting it" {
@@ -305,7 +301,11 @@ EOF
     touch "$HOME/Library/Mail Downloads/old.pdf"
     touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"
 
-    dd if=/dev/zero of="$HOME/Library/Mail Downloads/dummy.dat" bs=1024 count=6000 2>/dev/null
+    if command -v mkfile > /dev/null 2>&1; then
+        mkfile -n 6000k "$HOME/Library/Mail Downloads/dummy.dat"
+    else
+        truncate -s 6000k "$HOME/Library/Mail Downloads/dummy.dat"
+    fi
 
     [ -f "$HOME/Library/Mail Downloads/old.pdf" ]
 
