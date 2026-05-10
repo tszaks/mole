@@ -223,10 +223,18 @@ load_whitelist() {
             patterns+=("$line")
         done < "$config_file"
     else
+        # bash 3.2 (default on macOS) raises "unbound variable" under set -u
+        # when expanding "${arr[@]}" on an empty array, so gate each branch
+        # on the array length. patterns stays the local empty default when a
+        # default list is empty, which the downstream dedupe loop handles.
         if [[ "$mode" == "clean" ]]; then
-            patterns=("${DEFAULT_WHITELIST_PATTERNS[@]}")
+            if [[ ${#DEFAULT_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+                patterns=("${DEFAULT_WHITELIST_PATTERNS[@]}")
+            fi
         elif [[ "$mode" == "optimize" ]]; then
-            patterns=("${DEFAULT_OPTIMIZE_WHITELIST_PATTERNS[@]}")
+            if [[ ${#DEFAULT_OPTIMIZE_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+                patterns=("${DEFAULT_OPTIMIZE_WHITELIST_PATTERNS[@]}")
+            fi
         fi
     fi
 

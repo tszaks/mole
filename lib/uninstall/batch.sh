@@ -576,6 +576,11 @@ batch_uninstall_applications() {
     local -a success_items=()
     local -a local_network_warning_apps=()
     local -a system_extension_warning_apps=()
+    # Apps whose process was still running after the kill ladder. We do not
+    # abort the uninstall for these — macOS allows deleting a running bundle
+    # (the process keeps using its mmap'd code) — but we warn the user so they
+    # know to quit/relaunch the lingering process.
+    local -a running_at_uninstall_apps=()
     local current_index=0
     for detail in "${app_details[@]}"; do
         current_index=$((current_index + 1))
@@ -607,8 +612,12 @@ batch_uninstall_applications() {
         # Remove from Login Items
         remove_login_item "$app_name" "$bundle_id"
 
+        # Best-effort termination. macOS allows removing a running app bundle
+        # (the running process keeps using its mmap'd code), so a stuck app
+        # process must NOT block the uninstall. Track it so we can surface a
+        # warning at the end without scaring the user with a "failed" status.
         if ! force_kill_app "$app_name" "$app_path"; then
-            reason="still running"
+            running_at_uninstall_apps+=("$app_name")
         fi
 
         # Keep the spinner alive through the heavy work. For large apps the
@@ -968,6 +977,18 @@ batch_uninstall_applications() {
 
         summary_details+=("${ICON_REVIEW} System extensions may remain after removal: ${YELLOW}${ext_list}${NC}")
         summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Check ${GRAY}System Settings > General > Login Items & Extensions${NC} to remove leftover extensions")
+    fi
+
+    if [[ ${#running_at_uninstall_apps[@]} -gt 0 ]]; then
+        local running_list=""
+        local idx
+        for ((idx = 0; idx < ${#running_at_uninstall_apps[@]}; idx++)); do
+            [[ $idx -gt 0 ]] && running_list+=", "
+            running_list+="${running_at_uninstall_apps[idx]}"
+        done
+
+        summary_details+=("${ICON_REVIEW} Still running during uninstall, files removed but process kept alive: ${YELLOW}${running_list}${NC}")
+        summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Quit the app to free its in-memory copy; reinstalling before quitting may behave oddly")
     fi
 
     local title="Uninstall complete"

@@ -1840,16 +1840,53 @@ force_kill_app() {
         return 0
     fi
 
-    # Get the executable name from bundle if app_path is provided
+    # Get the executable name and bundle id from Info.plist when available.
+    # bundle id is preferred for the AppleScript Quit step because it is more
+    # precise than the display name (which may be localized).
     local exec_name=""
+    local bundle_id=""
     if [[ -n "$app_path" && -e "$app_path/Contents/Info.plist" ]]; then
         exec_name=$(defaults read "$app_path/Contents/Info.plist" CFBundleExecutable 2> /dev/null || echo "")
+        bundle_id=$(defaults read "$app_path/Contents/Info.plist" CFBundleIdentifier 2> /dev/null || echo "")
     fi
 
     # Use executable name for precise matching, fallback to app name
     local match_pattern="${exec_name:-$app_name}"
 
     # Check if process is running using exact match only
+    if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
+        return 0
+    fi
+
+    # Send a graceful Quit Apple Event first. Many Tauri/Electron/SwiftUI GUI
+    # apps install an event loop that ignores SIGTERM but responds to the
+    # standard "quit" Apple Event by going through their normal terminate
+    # flow (including unsaved-state prompts). osascript is best-effort: we
+    # cap the wait so a hung app, an automation-permission dialog, or a
+    # missing osascript binary can never stall the uninstall.
+    if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]] &&
+        command -v osascript > /dev/null 2>&1; then
+        local quit_target=""
+        if [[ "$bundle_id" =~ ^[A-Za-z0-9][-A-Za-z0-9]*(\.[A-Za-z0-9][-A-Za-z0-9]*)+$ ]]; then
+            quit_target="id \"$bundle_id\""
+        else
+            # Escape embedded double quotes in app_name before passing into
+            # the AppleScript literal.
+            local escaped_name="${app_name//\\/\\\\}"
+            escaped_name="${escaped_name//\"/\\\"}"
+            quit_target="\"$escaped_name\""
+        fi
+        run_with_timeout 3 osascript -e "tell application $quit_target to quit" > /dev/null 2>&1 &
+        local quit_pid=$!
+        # Poll briefly so the kill ladder skips when the app exits cleanly.
+        local quit_wait=20
+        while [[ $quit_wait -gt 0 ]] && pgrep -x "$match_pattern" > /dev/null 2>&1; do
+            sleep 0.1
+            ((quit_wait--))
+        done
+        wait "$quit_pid" 2> /dev/null || true
+    fi
+
     if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
         return 0
     fi

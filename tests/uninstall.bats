@@ -218,6 +218,198 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "force_kill_app sends AppleScript Quit before SIGTERM" {
+	# run_with_timeout invokes its argv via gtimeout/timeout, which exec the
+	# real binary and bypass bash functions, so we shadow osascript via a
+	# real script on PATH and read the trace it writes.
+	stubdir="$HOME/stubs"
+	mkdir -p "$stubdir"
+	trace="$HOME/kill_trace.log"
+	: > "$trace"
+
+	cat > "$stubdir/osascript" <<STUB
+#!/bin/bash
+printf 'osascript %s\n' "\$*" >> "$trace"
+exit 0
+STUB
+	chmod +x "$stubdir/osascript"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$stubdir:$PATH" \
+		TRACE_PATH="$trace" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+# Bundle with a known id so the Quit step uses the precise `id "..."` form
+# rather than the by-name fallback.
+app_path="$HOME/Applications/TestApp.app"
+mkdir -p "$app_path/Contents"
+cat > "$app_path/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>TestApp</string>
+  <key>CFBundleIdentifier</key><string>com.example.TestApp</string>
+</dict></plist>
+PLIST
+
+# First pgrep finds the process (so we enter the kill flow); subsequent
+# pgrep calls find nothing (so the function returns 0 once Quit "lands").
+pgrep_count=0
+pgrep() {
+	pgrep_count=$((pgrep_count + 1))
+	if [[ $pgrep_count -eq 1 ]]; then
+		echo 12345
+		return 0
+	fi
+	return 1
+}
+export -f pgrep
+
+pkill() {
+	printf 'pkill %s\n' "$*" >> "$TRACE_PATH"
+	return 0
+}
+export -f pkill
+
+sleep() { :; }
+export -f sleep
+
+# Allow the osascript branch to run (the upfront guard skips it under test mode).
+unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
+
+force_kill_app "TestApp" "$app_path"
+EOF
+
+	[ "$status" -eq 0 ]
+	grep -q 'osascript .*tell application id .*com\.example\.TestApp.* to quit' "$trace" \
+		|| { echo "WRONG: missing AppleScript Quit"; cat "$trace"; return 1; }
+	if grep -q '^pkill ' "$trace"; then
+		echo "WRONG: pkill ran even though Quit succeeded"; cat "$trace"; return 1
+	fi
+}
+
+@test "force_kill_app rejects unsafe bundle id in AppleScript Quit target" {
+	stubdir="$HOME/stubs"
+	mkdir -p "$stubdir"
+	trace="$HOME/unsafe_kill_trace.log"
+	: > "$trace"
+
+	cat > "$stubdir/osascript" <<STUB
+#!/bin/bash
+printf 'osascript %s\n' "\$*" >> "$trace"
+exit 0
+STUB
+	chmod +x "$stubdir/osascript"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$stubdir:$PATH" \
+		TRACE_PATH="$trace" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+app_path="$HOME/Applications/TestApp.app"
+mkdir -p "$app_path/Contents"
+cat > "$app_path/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>TestApp</string>
+  <key>CFBundleIdentifier</key><string>com.example.TestApp&quot; to display dialog &quot;mole</string>
+</dict></plist>
+PLIST
+
+pgrep_count=0
+pgrep() {
+	pgrep_count=$((pgrep_count + 1))
+	if [[ $pgrep_count -eq 1 ]]; then
+		echo 12345
+		return 0
+	fi
+	return 1
+}
+export -f pgrep
+
+pkill() {
+	printf 'pkill %s\n' "$*" >> "$TRACE_PATH"
+	return 0
+}
+export -f pkill
+
+sleep() { :; }
+export -f sleep
+
+unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
+
+force_kill_app "TestApp" "$app_path"
+EOF
+
+	[ "$status" -eq 0 ]
+	if grep -q 'display dialog' "$trace"; then
+		echo "WRONG: unsafe bundle id reached AppleScript"; cat "$trace"; return 1
+	fi
+	grep -q 'osascript .*tell application "TestApp" to quit' "$trace" \
+		|| { echo "WRONG: unsafe id did not fall back to app name"; cat "$trace"; return 1; }
+}
+
+@test "batch_uninstall_applications proceeds with deletion when force_kill_app fails" {
+	# Reproduces the issue where uninstalling a still-running app (e.g. Mole.app
+	# with a watchdog or XPC helper that ignores SIGKILL) used to abort with
+	# "still running" and leave the bundle on disk. macOS allows deleting a
+	# running app's bundle; we should warn the user but proceed.
+	create_app_artifacts
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+# Pretend the kill ladder exhausted itself: process is still there.
+force_kill_app() { return 1; }
+sudo() { return 0; }
+
+app_bundle="$HOME/Applications/TestApp.app"
+mkdir -p "$app_bundle"
+
+related="$(find_app_files "com.example.TestApp" "TestApp")"
+encoded_related=$(printf '%s' "$related" | base64 | tr -d '\n')
+
+selected_apps=()
+selected_apps+=("0|$app_bundle|TestApp|com.example.TestApp|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+# Send batch_uninstall_applications its own /dev/null stdin so the inline
+# `read -r -s -n1 key` does not steal a byte from the heredoc script source
+# (which would silently corrupt the next bash command into 127).
+output_file="$HOME/batch_output.log"
+batch_uninstall_applications < /dev/null > "$output_file" 2>&1
+output=$(cat "$output_file")
+
+# Bundle and leftovers must be gone even though kill failed.
+[[ ! -d "$app_bundle" ]] || { echo "WRONG: bundle preserved despite running flag"; cat "$output_file"; exit 1; }
+[[ ! -d "$HOME/Library/Caches/TestApp" ]] || { echo "WRONG: cache preserved"; exit 1; }
+[[ ! -f "$HOME/Library/Preferences/com.example.TestApp.plist" ]] || { echo "WRONG: prefs preserved"; exit 1; }
+
+# The legacy "still running" failure summary must NOT fire.
+[[ "$output" != *"is still running"* ]] || { echo "WRONG: legacy still-running failure surfaced"; exit 1; }
+[[ "$output" != *Failed:*TestApp* ]] || { echo "WRONG: app counted as failed"; exit 1; }
+
+# A friendlier warning should appear so the user knows to quit the lingering process.
+[[ "$output" == *"Still running during uninstall"* ]] || { echo "WRONG: missing running-process warning"; cat "$output_file"; exit 1; }
+[[ "$output" == *TestApp* ]] || { echo "WRONG: warning omits app name"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "stop_launch_services unloads launch agents without deleting plists" {
 	mkdir -p "$HOME/Library/LaunchAgents"
 	touch "$HOME/Library/LaunchAgents/com.example.TestApp.plist"
