@@ -369,9 +369,15 @@ write_install_channel_metadata() {
     mkdir -p "$CONFIG_DIR" 2> /dev/null || return 1
     local tmp_file
     tmp_file=$(mktemp "${CONFIG_DIR}/install_channel.XXXXXX") || return 1
+    # Use a plain if/fi so the block's exit code reflects only I/O failure.
+    # The previous form `[[ -n "$h" ]] && printf ...` returned 1 whenever the
+    # commit hash was empty (the stable channel always omits it), which made
+    # the redirect look like it had failed and tripped the warning.
     {
         printf 'CHANNEL=%s\n' "$channel"
-        [[ -n "$commit_hash" ]] && printf 'COMMIT_HASH=%s\n' "$commit_hash"
+        if [[ -n "$commit_hash" ]]; then
+            printf 'COMMIT_HASH=%s\n' "$commit_hash"
+        fi
     } > "$tmp_file" || {
         rm -f "$tmp_file" 2> /dev/null || true
         return 1

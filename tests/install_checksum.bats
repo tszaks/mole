@@ -280,3 +280,38 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"SUCCESS:Downloaded status from V1.2.2"* ]]
 }
+
+
+@test "write_install_channel_metadata succeeds for stable channel with empty commit hash" {
+	# Regression: the previous `[[ -n "$h" ]] && printf` form returned 1
+	# whenever the commit hash was empty (always the case on stable), making
+	# the block redirect look like an I/O failure and tripping the warning.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+CONFIG_DIR="$HOME/config"
+mkdir -p "$CONFIG_DIR"
+
+eval "$(sed -n '/^write_install_channel_metadata()/,/^}/p' "$PROJECT_ROOT/install.sh")"
+
+if ! write_install_channel_metadata "stable" ""; then
+	echo "WRONG: stable write reported failure"; exit 1
+fi
+[[ -f "$CONFIG_DIR/install_channel" ]] || { echo "WRONG: file not created"; exit 1; }
+grep -q '^CHANNEL=stable$' "$CONFIG_DIR/install_channel" || { echo "WRONG: channel value missing"; cat "$CONFIG_DIR/install_channel"; exit 1; }
+grep -q '^COMMIT_HASH=' "$CONFIG_DIR/install_channel" && { echo "WRONG: commit hash leaked"; exit 1; }
+
+# Nightly path with a commit hash should still work.
+if ! write_install_channel_metadata "nightly" "deadbeef"; then
+	echo "WRONG: nightly write failed"; exit 1
+fi
+grep -q '^CHANNEL=nightly$' "$CONFIG_DIR/install_channel" || { echo "WRONG: nightly channel"; exit 1; }
+grep -q '^COMMIT_HASH=deadbeef$' "$CONFIG_DIR/install_channel" || { echo "WRONG: nightly commit"; exit 1; }
+
+# No leftover temp files.
+if ls "$CONFIG_DIR"/install_channel.?????? 2>/dev/null | grep -q .; then
+	echo "WRONG: tmp file leaked"; ls "$CONFIG_DIR"; exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+}
