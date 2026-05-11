@@ -16,7 +16,7 @@
   <img src="https://gw.alipayobjects.com/zos/k/ro/ZzF8e8.png" alt="Mole - 95.50GB freed" width="1000" />
 </p>
 
-> The CLI stays free and open source. Prefer a GUI? Try [Mole Mac App](https://mole.fit) with code **MOLEMAC** for 20% off through May 23.
+> The CLI stays free and open source. Prefer a GUI? Try [Mole Mac App](https://mole.fit), $9 lifetime, code **MOLEMAC** for 20% off through May 23.
 
 ## Features
 
