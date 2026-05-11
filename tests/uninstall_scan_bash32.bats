@@ -119,5 +119,9 @@ EOF
 		cat "$HOME/scan.err" >&2 2> /dev/null || true
 		false
 	}
-	! grep -q 'unbound variable' "$HOME/scan.err" 2> /dev/null
+	# Use `run` + status check rather than bare `! grep`: bats SC2314 rejects
+	# a trailing `!` because earlier bats versions ignored it. `run` records
+	# the inverted status explicitly so the assertion is portable.
+	run grep -q 'unbound variable' "$HOME/scan.err"
+	[ "$status" -ne 0 ]
 }
