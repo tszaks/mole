@@ -510,6 +510,19 @@ uninstall_resolve_eligible_bundle_id() {
     printf '%s\n' "$bundle_id"
 }
 
+uninstall_print_app_paths_with_mtime() {
+    local app_dir="$1"
+    local app_path app_mtime
+
+    [[ -d "$app_dir" ]] || return 0
+
+    while IFS= read -r -d '' app_path; do
+        [[ -n "$app_path" ]] || continue
+        app_mtime=$(get_file_mtime "$app_path")
+        printf '%s\t%s\n' "${app_mtime:-0}" "$app_path"
+    done < <(command find "$app_dir" -maxdepth 3 -name "*.app" -print0 2> /dev/null)
+}
+
 uninstall_app_inventory_fingerprint() {
     local app_dir app_path app_mtime pkg_app_path
 
@@ -526,7 +539,7 @@ uninstall_app_inventory_fingerprint() {
                 [[ -n "$app_path" ]] || continue
                 uninstall_should_skip_app_path "$app_path" && continue
                 printf '%s|%s\n' "$app_path" "${app_mtime:-0}"
-            done < <(command find "$app_dir" -maxdepth 3 -name "*.app" -exec stat -f $'%m\t%N' {} + 2> /dev/null)
+            done < <(uninstall_print_app_paths_with_mtime "$app_dir")
         done < <(uninstall_print_app_search_dirs)
     } | sort -u
 }
@@ -666,7 +679,7 @@ scan_applications() {
             uninstall_should_skip_app_path "$app_path" && continue
 
             printf "%s|%s|%s\n" "$app_path" "$app_name" "${app_mtime:-0}" >> "$discovered_file"
-        done < <(command find "$app_dir" -maxdepth 3 -name "*.app" -exec stat -f $'%m\t%N' {} + 2> /dev/null)
+        done < <(uninstall_print_app_paths_with_mtime "$app_dir")
     done
 
     if [[ -s "$discovered_file" ]]; then
