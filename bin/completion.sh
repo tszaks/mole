@@ -13,6 +13,7 @@ done
 command_words="${command_names[*]}"
 clean_option_words="--dry-run -n --external --whitelist --debug --help -h"
 analyze_option_words="--json --help -h"
+purge_option_words="--paths --dry-run -n --include-empty --debug --help -h"
 
 emit_zsh_subcommands() {
     for entry in "${MOLE_COMMANDS[@]}"; do
@@ -37,6 +38,11 @@ emit_fish_completions() {
     printf 'complete -f -c %s -n "__fish_seen_subcommand_from analyze analyse" -l json -d "Output analysis as JSON"\n' "$cmd"
     printf 'complete -f -c %s -n "__fish_seen_subcommand_from analyze analyse" -l help -s h -d "Show help"\n' "$cmd"
     printf 'complete -c %s -n "__fish_seen_subcommand_from analyze analyse; and not __fish_seen_argument -l json -l help -s h" -a "(__fish_complete_directories)" -d "Path to analyze"\n' "$cmd"
+    printf 'complete -f -c %s -n "__fish_seen_subcommand_from purge" -l paths -d "Edit custom scan directories"\n' "$cmd"
+    printf 'complete -f -c %s -n "__fish_seen_subcommand_from purge" -l dry-run -s n -d "Preview purge actions without making changes"\n' "$cmd"
+    printf 'complete -f -c %s -n "__fish_seen_subcommand_from purge" -l include-empty -d "Show zero-size project artifact directories"\n' "$cmd"
+    printf 'complete -f -c %s -n "__fish_seen_subcommand_from purge" -l debug -d "Show detailed logs"\n' "$cmd"
+    printf 'complete -f -c %s -n "__fish_seen_subcommand_from purge" -l help -s h -d "Show help"\n' "$cmd"
     printf '\n'
     printf 'complete -f -c %s -n "not __fish_mole_no_subcommand" -a bash -d "generate bash completion" -n "__fish_see_subcommand_path completion"\n' "$cmd"
     printf 'complete -f -c %s -n "not __fish_mole_no_subcommand" -a zsh -d "generate zsh completion" -n "__fish_see_subcommand_path completion"\n' "$cmd"
@@ -329,6 +335,9 @@ _mole_completions()
                     COMPREPLY=( \$(compgen -f -- "\$cur_word") )
                 fi
                 ;;
+            purge)
+                COMPREPLY=( \$(compgen -W "$purge_option_words" -- "\$cur_word") )
+                ;;
             completion)
                 COMPREPLY=( \$(compgen -W "bash zsh fish" -- "\$cur_word") )
                 ;;
@@ -368,6 +377,15 @@ EOF
         printf "                '--json[Output analysis as JSON]' \\\\\n"
         printf "                '(-h --help)'{-h,--help}'[Show help]' \\\\\n"
         printf "                '*:path:_files'\n"
+        printf '            ;;\n'
+        printf '        purge)\n'
+        printf '            _arguments \\\n'
+        printf "                '--paths[Edit custom scan directories]' \\\\\n"
+        printf "                '--dry-run[Preview purge actions without making changes]' \\\\\n"
+        printf "                '-n[Preview purge actions without making changes]' \\\\\n"
+        printf "                '--include-empty[Show zero-size project artifact directories]' \\\\\n"
+        printf "                '--debug[Show detailed logs]' \\\\\n"
+        printf "                '(-h --help)'{-h,--help}'[Show help]'\n"
         printf '            ;;\n'
         printf '        completion)\n'
         printf "            _arguments '1:shell:(bash zsh fish)'\n"

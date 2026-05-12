@@ -78,11 +78,12 @@ setup() {
 	[[ "$output" == *"complete -F _mole_completions mole mo"* ]]
 }
 
-@test "completion bash includes current clean and analyze options only" {
+@test "completion bash includes current clean, analyze, and purge options only" {
 	run "$PROJECT_ROOT/bin/completion.sh" bash
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"--dry-run -n --external --whitelist --debug --help -h"* ]]
 	[[ "$output" == *"--json --help -h"* ]]
+	[[ "$output" == *"--paths --dry-run -n --include-empty --debug --help -h"* ]]
 	[[ "$output" != *"--select"* ]]
 	[[ "$output" != *"--categories"* ]]
 	[[ "$output" != *"--exclude-paths"* ]]
@@ -108,13 +109,14 @@ setup() {
 	[[ "$output" == *"clean:Free up disk space"* ]]
 }
 
-@test "completion zsh includes current clean and analyze options only" {
+@test "completion zsh includes current clean, analyze, and purge options only" {
 	run "$PROJECT_ROOT/bin/completion.sh" zsh
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"--dry-run"* ]]
 	[[ "$output" == *"--external"* ]]
 	[[ "$output" == *"--whitelist"* ]]
 	[[ "$output" == *"--json"* ]]
+	[[ "$output" == *"--include-empty"* ]]
 	[[ "$output" != *"--select"* ]]
 	[[ "$output" != *"--categories"* ]]
 	[[ "$output" != *"--exclude-paths"* ]]
@@ -136,13 +138,14 @@ setup() {
 	[ "$mo_count" -gt 0 ]
 }
 
-@test "completion fish includes current clean and analyze options only" {
+@test "completion fish includes current clean, analyze, and purge options only" {
 	run "$PROJECT_ROOT/bin/completion.sh" fish
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"-l dry-run"* ]]
 	[[ "$output" == *"-l external"* ]]
 	[[ "$output" == *"-l whitelist"* ]]
 	[[ "$output" == *"-l json"* ]]
+	[[ "$output" == *"-l include-empty"* ]]
 	[[ "$output" != *"-l select"* ]]
 	[[ "$output" != *"-l categories"* ]]
 	[[ "$output" != *"-l exclude-paths"* ]]

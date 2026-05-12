@@ -139,6 +139,99 @@ hint_launch_agent_bundle_exists() {
 }
 
 # shellcheck disable=SC2329
+hint_normalize_app_match_text() {
+    printf '%s' "${1:-}" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -cd '[:alnum:]'
+}
+
+# shellcheck disable=SC2329
+hint_dotdir_candidate_matches_text() {
+    local text="$1"
+    shift || true
+    [[ $# -gt 0 ]] || return 1
+
+    local normalized_text
+    normalized_text=$(hint_normalize_app_match_text "$text")
+    [[ -n "$normalized_text" ]] || return 1
+
+    local candidate normalized_candidate
+    for candidate in "$@"; do
+        normalized_candidate=$(hint_normalize_app_match_text "$candidate")
+        [[ ${#normalized_candidate} -ge 4 ]] || continue
+        if [[ "$normalized_text" == "$normalized_candidate" || "$normalized_text" == *"$normalized_candidate"* ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# shellcheck disable=SC2329
+hint_collect_installed_gui_app_match_texts() {
+    local -a app_roots=(
+        "/Applications"
+        "/Applications/Setapp"
+        "/Applications/Utilities"
+        "$HOME/Applications"
+        "/Library/Input Methods"
+        "$HOME/Library/Input Methods"
+        "$HOME/Library/Application Support/Setapp/Applications"
+    )
+
+    local app_root app_path app_name info value
+    for app_root in "${app_roots[@]}"; do
+        [[ -d "$app_root" ]] || continue
+        while IFS= read -r -d '' app_path; do
+            [[ -n "$app_path" ]] || continue
+
+            app_name="${app_path##*/}"
+            app_name="${app_name%.app}"
+            printf '%s\n' "$app_name"
+
+            info="$app_path/Contents/Info.plist"
+            [[ -f "$info" ]] || continue
+            for value in \
+                "$(plutil -extract CFBundleIdentifier raw "$info" 2> /dev/null || echo "")" \
+                "$(plutil -extract CFBundleName raw "$info" 2> /dev/null || echo "")" \
+                "$(plutil -extract CFBundleDisplayName raw "$info" 2> /dev/null || echo "")"; do
+                [[ -n "$value" && "$value" != "(null)" ]] && printf '%s\n' "$value"
+            done
+        done < <(run_with_timeout 2 find "$app_root" -maxdepth 2 -name "*.app" -print0 2> /dev/null || true)
+    done
+
+    local -a cask_roots=(
+        "/opt/homebrew/Caskroom"
+        "/usr/local/Caskroom"
+    )
+
+    local cask_root cask_dir cask_name
+    for cask_root in "${cask_roots[@]}"; do
+        [[ -d "$cask_root" ]] || continue
+        while IFS= read -r -d '' cask_dir; do
+            [[ -n "$cask_dir" ]] || continue
+            cask_name="${cask_dir##*/}"
+            printf '%s\n' "$cask_name"
+        done < <(run_with_timeout 1 find "$cask_root" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null || true)
+    done
+}
+
+# shellcheck disable=SC2329
+hint_dotdir_owned_by_installed_gui_app() {
+    local installed_app_texts="$1"
+    shift || true
+    [[ -n "$installed_app_texts" && $# -gt 0 ]] || return 1
+
+    local value
+    while IFS= read -r value; do
+        [[ -n "$value" ]] || continue
+        if hint_dotdir_candidate_matches_text "$value" "$@"; then
+            return 0
+        fi
+    done <<< "$installed_app_texts"
+
+    return 1
+}
+
+# shellcheck disable=SC2329
 record_project_artifact_hint() {
     local path="$1"
 
@@ -433,7 +526,11 @@ show_project_artifact_hint_notice() {
     if [[ -n "$example_text" ]]; then
         echo -e "  ${GRAY}${ICON_SUBLIST}${NC} Examples: ${GRAY}${example_text}${NC}"
     fi
-    echo -e "  ${GRAY}${ICON_REVIEW}${NC} Review: mo purge"
+    local review_command="mo purge"
+    if [[ $PROJECT_ARTIFACT_HINT_ESTIMATE_SAMPLES -gt 0 && $PROJECT_ARTIFACT_HINT_ESTIMATED_KB -eq 0 ]]; then
+        review_command="mo purge --include-empty"
+    fi
+    echo -e "  ${GRAY}${ICON_REVIEW}${NC} Review: ${review_command}"
 }
 
 # shellcheck disable=SC2329
@@ -554,6 +651,8 @@ show_orphan_dotdir_hint_notice() {
 
     local -a labels=()
     local -a details=()
+    local installed_gui_app_texts=""
+    local installed_gui_app_texts_loaded=false
 
     while IFS= read -r dotdir; do
         [[ -d "$dotdir" ]] || continue
@@ -601,6 +700,14 @@ show_orphan_dotdir_hint_notice() {
             fi
         done
         [[ "$has_binary" == "true" ]] && continue
+
+        if [[ "$installed_gui_app_texts_loaded" != "true" ]]; then
+            installed_gui_app_texts=$(hint_collect_installed_gui_app_match_texts)
+            installed_gui_app_texts_loaded=true
+        fi
+        if hint_dotdir_owned_by_installed_gui_app "$installed_gui_app_texts" "${candidates[@]}"; then
+            continue
+        fi
 
         if [[ -d "$HOME/Library/LaunchAgents" ]]; then
             if run_with_timeout 2 grep -rlq "$basename" "$HOME/Library/LaunchAgents/" 2> /dev/null; then

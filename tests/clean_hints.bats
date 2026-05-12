@@ -76,6 +76,30 @@ EOT2
     [[ "$output" == *"Review: mo purge"* ]]
 }
 
+@test "show_project_artifact_hint_notice points zero-size samples to include-empty (#869)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOT2B'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+probe_project_artifact_hints() {
+    PROJECT_ARTIFACT_HINT_DETECTED=true
+    PROJECT_ARTIFACT_HINT_COUNT=1
+    PROJECT_ARTIFACT_HINT_TRUNCATED=false
+    PROJECT_ARTIFACT_HINT_EXAMPLES=("~/www/demo/node_modules")
+    PROJECT_ARTIFACT_HINT_ESTIMATED_KB=0
+    PROJECT_ARTIFACT_HINT_ESTIMATE_SAMPLES=1
+    PROJECT_ARTIFACT_HINT_ESTIMATE_PARTIAL=false
+}
+bytes_to_human() { echo "0B"; }
+note_activity() { :; }
+show_project_artifact_hint_notice
+EOT2B
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"sampled 0B"* ]]
+    [[ "$output" == *"Review: mo purge --include-empty"* ]]
+}
+
 @test "show_system_data_hint_notice reports large clue paths" {
     mkdir -p "$HOME/Library/Developer/Xcode/DerivedData"
 
@@ -255,6 +279,39 @@ EOTD
     [[ "$output" == *"Potential orphan dotfile"* ]]
     [[ "$output" == *".fakecli-test-orphan"* ]]
     [[ "$output" == *"No matching binary in PATH"* ]]
+}
+
+@test "show_orphan_dotdir_hint_notice skips dotdir owned by installed GUI app (#872)" {
+    mkdir -p "$HOME/.bridge"
+    touch -t 202401010000 "$HOME/.bridge"
+
+    local app_path="$HOME/Applications/Proton Mail Bridge.app"
+    mkdir -p "$app_path/Contents"
+    cat > "$app_path/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>ch.protonmail.bridge</string>
+    <key>CFBundleName</key>
+    <string>Proton Mail Bridge</string>
+</dict>
+</plist>
+PLIST
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { echo "1024"; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *".bridge"* ]]
 }
 
 @test "show_orphan_dotdir_hint_notice skips dir with existing binary" {

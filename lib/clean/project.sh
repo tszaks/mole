@@ -629,7 +629,8 @@ get_dir_size_kb() {
     fi
 
     if [[ $du_exit -ne 0 ]]; then
-        echo "0"
+        debug_log "Size calculation failed (exit $du_exit): $path"
+        echo "ERROR"
         return
     fi
 
@@ -638,7 +639,8 @@ get_dir_size_kb() {
     if [[ "$size_kb" =~ ^[0-9]+$ ]]; then
         echo "$size_kb"
     else
-        echo "0"
+        debug_log "Size calculation returned invalid output: $path"
+        echo "ERROR"
     fi
 }
 # Purge category selector.
@@ -1381,14 +1383,17 @@ clean_project_artifacts() {
         if [[ "$size_raw" == "TIMEOUT" ]]; then
             size_unknown=true
             size_human="unknown"
+        elif [[ "$size_raw" == "ERROR" ]]; then
+            debug_log "Skipping purge target with unknown size: $item"
+            continue
         elif [[ "$size_raw" =~ ^[0-9]+$ ]]; then
             size_kb="$size_raw"
-            # Skip empty directories (0 bytes)
-            if [[ $size_kb -eq 0 ]]; then
+            if [[ $size_kb -eq 0 && "${MOLE_PURGE_INCLUDE_EMPTY:-0}" != "1" ]]; then
                 continue
             fi
             size_human=$(bytes_to_human "$((size_kb * 1024))")
         else
+            debug_log "Skipping purge target with invalid size result '$size_raw': $item"
             continue
         fi
 
