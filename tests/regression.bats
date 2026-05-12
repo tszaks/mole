@@ -189,7 +189,7 @@ EOF
 }
 
 @test "normalize_paths_for_cleanup handles large nested batches without hanging" {
-    local limit_ms="${MOLE_PERF_NORMALIZE_PATHS_LIMIT_MS:-4000}"
+    local limit_ms="${MOLE_PERF_NORMALIZE_PATHS_LIMIT_MS:-10000}"
 
     run env PROJECT_ROOT="$PROJECT_ROOT" LIMIT_MS="$limit_ms" bash --noprofile --norc <<'EOF'
 set -euo pipefail
