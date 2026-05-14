@@ -90,7 +90,7 @@ decode_file_list() {
     echo "$decoded"
     return 0
 }
-# Note: find_app_files() and calculate_total_size() are in lib/core/common.sh.
+# Note: find_app_files() is in lib/core/app_protection.sh, calculate_total_size() is in lib/core/file_ops.sh.
 
 # Unload Launch Agents/Daemons for an app.
 # Plist deletion is owned by remove_file_list so every removal goes through the
@@ -773,7 +773,7 @@ batch_uninstall_applications() {
             fi
 
             # Defaults writes are side effects that should never run in dry-run mode.
-            if [[ -n "$bundle_id" && "$bundle_id" != "unknown" ]]; then
+            if [[ -n "$bundle_id" && "$bundle_id" != "unknown" && "$bundle_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
                 if is_uninstall_dry_run; then
                     debug_log "[DRY RUN] Would clear defaults domain: $bundle_id"
                 else
