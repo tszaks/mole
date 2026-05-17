@@ -718,6 +718,40 @@ dotdir_has_owning_gui_app() {
     return 1
 }
 
+# Collect Claude Code plugin name tokens (the segment before '@' in a
+# "plugin@marketplace" identifier) from the user's plugin config. Plugins own
+# state directories such as ~/.cc-safety-net without installing a matching PATH
+# binary or GUI app, so their dotdirs must not be flagged as orphans.
+hint_collect_claude_plugin_tokens() {
+    local settings="$HOME/.claude/settings.json"
+    local installed="$HOME/.claude/plugins/installed_plugins.json"
+    {
+        if [[ -f "$settings" ]]; then
+            plutil -extract enabledPlugins json -o - "$settings" 2> /dev/null |
+                LC_ALL=C grep -oE '"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+"'
+        fi
+        if [[ -f "$installed" ]]; then
+            LC_ALL=C grep -oE '"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+"' "$installed" 2> /dev/null
+        fi
+    } | sed -E 's/^"//; s/@.*$//' | LC_ALL=C sort -u
+}
+
+# Return 0 when a dotdir name embeds an enabled Claude Code plugin token.
+# e.g. dotdir "cc-safety-net" embeds plugin token "safety-net".
+hint_dotdir_owned_by_claude_plugin() {
+    local dotdir_name="$1"
+    local tokens="$2"
+    [[ -n "$tokens" ]] || return 1
+    local token
+    while IFS= read -r token; do
+        [[ ${#token} -ge 4 ]] || continue
+        if [[ "$dotdir_name" == *"$token"* ]]; then
+            return 0
+        fi
+    done <<< "$tokens"
+    return 1
+}
+
 # Detect ~/.<dir> directories that may belong to uninstalled CLI tools.
 # shellcheck disable=SC2329
 show_orphan_dotdir_hint_notice() {
@@ -730,6 +764,8 @@ show_orphan_dotdir_hint_notice() {
     local -a details=()
     local installed_gui_app_texts=""
     local installed_gui_app_texts_loaded=false
+    local claude_plugin_tokens=""
+    local claude_plugin_tokens_loaded=false
 
     while IFS= read -r dotdir; do
         [[ -d "$dotdir" ]] || continue
@@ -777,6 +813,14 @@ show_orphan_dotdir_hint_notice() {
             fi
         done
         [[ "$has_binary" == "true" ]] && continue
+
+        if [[ "$claude_plugin_tokens_loaded" != "true" ]]; then
+            claude_plugin_tokens=$(hint_collect_claude_plugin_tokens)
+            claude_plugin_tokens_loaded=true
+        fi
+        if hint_dotdir_owned_by_claude_plugin "$name" "$claude_plugin_tokens"; then
+            continue
+        fi
 
         if [[ "$installed_gui_app_texts_loaded" != "true" ]]; then
             installed_gui_app_texts=$(hint_collect_installed_gui_app_match_texts)
