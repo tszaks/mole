@@ -442,3 +442,49 @@ EOF
     [[ "$output" == *"Stremio cache"* ]]
     [[ "$output" == *"Stremio server cache"* ]]
 }
+
+@test "clean_editor_obsolete_extensions removes only dirs listed in .obsolete (#910)" {
+    local ext_root="$HOME/.vscode/extensions"
+    mkdir -p "$ext_root/pub.ext-old-1.0.0" "$ext_root/pub.ext-new-1.1.0"
+    cat > "$ext_root/.obsolete" << 'JSON'
+{
+  "pub.ext-old-1.0.0": true
+}
+JSON
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "CLEAN:$1"; }
+clean_editor_obsolete_extensions
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CLEAN:$HOME/.vscode/extensions/pub.ext-old-1.0.0"* ]]
+    [[ "$output" != *"pub.ext-new-1.1.0"* ]]
+}
+
+@test "clean_editor_obsolete_extensions rejects path-traversal keys in .obsolete (#910)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor"
+    local ext_root="$HOME/.cursor/extensions"
+    mkdir -p "$ext_root"
+    mkdir -p "$HOME/obsolete-victim"
+    cat > "$ext_root/.obsolete" << 'JSON'
+{
+  "../../obsolete-victim": true,
+  "..": true
+}
+JSON
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "CLEAN:$1"; }
+clean_editor_obsolete_extensions
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"CLEAN:"* ]]
+}

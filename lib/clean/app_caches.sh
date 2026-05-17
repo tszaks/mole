@@ -129,6 +129,35 @@ clean_xcode_tools() {
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData/Documentation cleanup"
     fi
 }
+# Remove extension directories that VS Code / Cursor have marked obsolete.
+# Each editor writes a .obsolete JSON file under its extensions root whose keys
+# are stale extension directory names left behind after an extension update.
+clean_editor_obsolete_extensions() {
+    local -a editor_roots=(
+        "$HOME/.vscode/extensions|VS Code"
+        "$HOME/.vscode-insiders/extensions|VS Code Insiders"
+        "$HOME/.cursor/extensions|Cursor"
+    )
+    local entry ext_root editor_label obsolete_file key target
+    for entry in "${editor_roots[@]}"; do
+        ext_root="${entry%%|*}"
+        editor_label="${entry##*|}"
+        obsolete_file="$ext_root/.obsolete"
+        [[ -f "$obsolete_file" ]] || continue
+
+        while IFS= read -r key; do
+            # Each key must be a plain direct-child directory name; reject
+            # anything that could escape the extensions root.
+            case "$key" in
+                "" | "." | ".." | */*) continue ;;
+            esac
+            target="$ext_root/$key"
+            [[ -d "$target" ]] || continue
+            safe_clean "$target" "Obsolete $editor_label extension"
+        done < <(plutil -p "$obsolete_file" 2> /dev/null |
+            sed -nE 's/^[[:space:]]*"([^"]+)"[[:space:]]*=>.*/\1/p')
+    done
+}
 # Code editors.
 clean_code_editors() {
     safe_clean ~/Library/Application\ Support/Code/logs/* "VS Code logs"
@@ -138,6 +167,7 @@ clean_code_editors() {
     safe_clean ~/Library/Caches/com.sublimetext.*/* "Sublime Text cache"
     safe_clean ~/Library/Caches/Zed/* "Zed cache"
     safe_clean ~/Library/Logs/Zed/* "Zed logs"
+    clean_editor_obsolete_extensions
 }
 # Communication apps.
 clean_communication_apps() {
