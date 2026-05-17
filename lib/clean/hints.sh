@@ -725,13 +725,15 @@ dotdir_has_owning_gui_app() {
 hint_collect_claude_plugin_tokens() {
     local settings="$HOME/.claude/settings.json"
     local installed="$HOME/.claude/plugins/installed_plugins.json"
+    # `|| true` keeps a no-match grep (the common case: Claude Code installed
+    # but no plugins) from aborting under `set -euo pipefail`.
     {
         if [[ -f "$settings" ]]; then
             plutil -extract enabledPlugins json -o - "$settings" 2> /dev/null |
-                LC_ALL=C grep -oE '"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+"'
+                LC_ALL=C grep -oE '"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+"' || true
         fi
         if [[ -f "$installed" ]]; then
-            LC_ALL=C grep -oE '"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+"' "$installed" 2> /dev/null
+            LC_ALL=C grep -oE '"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+"' "$installed" 2> /dev/null || true
         fi
     } | sed -E 's/^"//; s/@.*$//' | LC_ALL=C sort -u
 }
