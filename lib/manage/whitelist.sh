@@ -172,7 +172,6 @@ Prevent Finder .DS_Store|prevent_network_dsstore|optimize_task
 Memory Optimization|memory_pressure_relief|optimize_task
 Network Stack Refresh|network_stack_optimize|optimize_task
 Permission Repair|disk_permissions_repair|optimize_task
-Bluetooth Refresh|bluetooth_reset|optimize_task
 Spotlight Optimization|spotlight_index_optimize|optimize_task
 Periodic Maintenance|periodic_maintenance|optimize_task
 Shared File Lists|shared_file_list_repair|optimize_task

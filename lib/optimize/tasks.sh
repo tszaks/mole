@@ -88,20 +88,6 @@ needs_permissions_repair() {
     return 1
 }
 
-has_bluetooth_hid_connected() {
-    local bt_report
-    bt_report=$(system_profiler SPBluetoothDataType 2> /dev/null || echo "")
-    if ! echo "$bt_report" | grep -q "Connected: Yes"; then
-        return 1
-    fi
-
-    if echo "$bt_report" | grep -Eiq "Keyboard|Trackpad|Mouse|HID"; then
-        return 0
-    fi
-
-    return 1
-}
-
 is_ac_power() {
     pmset -g batt 2> /dev/null | grep -q "AC Power"
 }
@@ -801,101 +787,6 @@ opt_disk_permissions_repair() {
     fi
 }
 
-# Bluetooth reset (skip if HID/audio active).
-opt_bluetooth_reset() {
-    if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        debug_operation_start "Bluetooth Reset" "Restart Bluetooth daemon"
-        debug_operation_detail "Method" "Kill bluetoothd daemon (auto-restarts)"
-        debug_operation_detail "Safety" "Skips if active Bluetooth keyboard/mouse/audio detected"
-        debug_operation_detail "Expected outcome" "Fixed Bluetooth connectivity issues"
-        debug_risk_level "LOW" "Daemon auto-restarts, connections auto-reconnect"
-    fi
-
-    local spinner_started="false"
-    local disconnect_notice="Bluetooth devices may disconnect briefly during refresh"
-    if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking Bluetooth..."
-        spinner_started="true"
-    fi
-
-    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        if has_bluetooth_hid_connected; then
-            if [[ "$spinner_started" == "true" ]]; then
-                stop_inline_spinner
-            fi
-            opt_msg "Bluetooth already optimal"
-            return 0
-        fi
-
-        local bt_audio_active=false
-
-        local audio_info
-        audio_info=$(system_profiler SPAudioDataType 2> /dev/null || echo "")
-
-        local default_output
-        default_output=$(echo "$audio_info" | awk '/Default Output Device: Yes/,/^$/' 2> /dev/null || echo "")
-
-        if echo "$default_output" | grep -qi "Transport:.*Bluetooth"; then
-            bt_audio_active=true
-        fi
-
-        if [[ "$bt_audio_active" == "false" ]]; then
-            if system_profiler SPBluetoothDataType 2> /dev/null | grep -q "Connected: Yes"; then
-                local -a media_apps=("Music" "Spotify" "VLC" "QuickTime Player" "TV" "Podcasts" "Safari" "Google Chrome" "Chrome" "Firefox" "Arc" "IINA" "mpv")
-                for app in "${media_apps[@]}"; do
-                    if pgrep -x "$app" > /dev/null 2>&1; then
-                        bt_audio_active=true
-                        break
-                    fi
-                done
-            fi
-        fi
-
-        if [[ "$bt_audio_active" == "true" ]]; then
-            if [[ "$spinner_started" == "true" ]]; then
-                stop_inline_spinner
-            fi
-            opt_msg "Bluetooth already optimal"
-            return 0
-        fi
-
-        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-            if [[ "$spinner_started" == "true" ]]; then
-                stop_inline_spinner
-            fi
-            opt_msg "Bluetooth already optimal"
-        elif ! optimize_sudo_available; then
-            if [[ "$spinner_started" == "true" ]]; then
-                stop_inline_spinner
-            fi
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Bluetooth reset skipped · admin access required"
-        elif sudo pkill -TERM bluetoothd > /dev/null 2>&1; then
-            if [[ "$spinner_started" == "true" ]]; then
-                stop_inline_spinner
-            fi
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${GRAY}${disconnect_notice}${NC}"
-            sleep 1
-            if pgrep -x bluetoothd > /dev/null 2>&1; then
-                sudo pkill -KILL bluetoothd > /dev/null 2>&1 || true
-            fi
-            opt_msg "Bluetooth module restarted"
-            opt_msg "Connectivity issues resolved"
-        else
-            if [[ "$spinner_started" == "true" ]]; then
-                stop_inline_spinner
-            fi
-            opt_msg "Bluetooth already optimal"
-        fi
-    else
-        if [[ "$spinner_started" == "true" ]]; then
-            stop_inline_spinner
-        fi
-        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} ${disconnect_notice}"
-        opt_msg "Bluetooth module restarted"
-        opt_msg "Connectivity issues resolved"
-    fi
-}
-
 # Spotlight index check/rebuild (only if slow).
 opt_spotlight_index_optimize() {
     local spotlight_status
@@ -1015,6 +906,21 @@ opt_prevent_network_dsstore() {
     fi
 }
 
+# True unless the path lives on an unmounted /Volumes/<disk>. A LaunchAgent
+# program on an external or network volume is not broken while that volume is
+# simply unplugged, so it must not be deleted.
+launch_agent_volume_mounted() {
+    local path="$1"
+    case "$path" in
+        /Volumes/*)
+            local vol="${path#/Volumes/}"
+            vol="${vol%%/*}"
+            [[ -n "$vol" && -d "/Volumes/$vol" ]]
+            ;;
+        *) return 0 ;;
+    esac
+}
+
 # Broken LaunchAgent cleanup.
 opt_launch_agents_cleanup() {
     local agents_dir="$HOME/Library/LaunchAgents"
@@ -1036,7 +942,12 @@ opt_launch_agents_cleanup() {
             binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2> /dev/null || true)
         fi
 
-        if [[ -n "$binary" && ! -e "$binary" ]]; then
+        # Only an absolute path that is genuinely missing counts as broken.
+        # Bare names (node, python3) resolve via PATH at launch time, and a
+        # path on an unmounted /Volumes/<disk> just means the drive is
+        # unplugged -- neither is a broken agent.
+        if [[ -n "$binary" && "$binary" == /* && ! -e "$binary" ]] \
+            && launch_agent_volume_mounted "$binary"; then
             broken_count=$((broken_count + 1))
             broken_plists+=("$plist")
         fi
@@ -1481,7 +1392,6 @@ execute_optimization() {
         memory_pressure_relief) opt_memory_pressure_relief ;;
         network_stack_optimize) opt_network_stack_optimize ;;
         disk_permissions_repair) opt_disk_permissions_repair ;;
-        bluetooth_reset) opt_bluetooth_reset ;;
         spotlight_index_optimize) opt_spotlight_index_optimize ;;
         launch_agents_cleanup) opt_launch_agents_cleanup ;;
         periodic_maintenance) opt_periodic_maintenance ;;

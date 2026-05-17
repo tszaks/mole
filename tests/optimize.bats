@@ -35,28 +35,6 @@ EOF
 	[[ "$output" == *"needs"* ]]
 }
 
-@test "has_bluetooth_hid_connected detects HID" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-system_profiler() {
-    cat << 'OUT'
-Bluetooth:
-  Apple Magic Mouse:
-    Connected: Yes
-    Type: Mouse
-OUT
-}
-export -f system_profiler
-if has_bluetooth_hid_connected; then
-    echo "hid"
-fi
-EOF
-
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"hid"* ]]
-}
-
 @test "is_ac_power detects AC power" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -749,7 +727,6 @@ EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Permission Repair|disk_permissions_repair|optimize_task"* ]]
-	[[ "$output" == *"Bluetooth Refresh|bluetooth_reset|optimize_task"* ]]
 	[[ "$output" == *"Login Items Audit|login_items_audit|optimize_task"* ]]
 }
 
