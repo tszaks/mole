@@ -946,8 +946,8 @@ opt_launch_agents_cleanup() {
         # Bare names (node, python3) resolve via PATH at launch time, and a
         # path on an unmounted /Volumes/<disk> just means the drive is
         # unplugged -- neither is a broken agent.
-        if [[ -n "$binary" && "$binary" == /* && ! -e "$binary" ]] \
-            && launch_agent_volume_mounted "$binary"; then
+        if [[ -n "$binary" && "$binary" == /* && ! -e "$binary" ]] &&
+            launch_agent_volume_mounted "$binary"; then
             broken_count=$((broken_count + 1))
             broken_plists+=("$plist")
         fi
