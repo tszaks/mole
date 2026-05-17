@@ -120,6 +120,66 @@ func TestScanPathConcurrentBasic(t *testing.T) {
 	}
 }
 
+// TestScanPathConcurrentDedupsHardlinks guards #906: a file with multiple
+// hardlinks (e.g. Final Cut Pro managed media) must be counted once, the way
+// `du` does, instead of once per link.
+func TestScanPathConcurrentDedupsHardlinks(t *testing.T) {
+	root := t.TempDir()
+
+	nested := filepath.Join(root, "nested")
+	other := filepath.Join(root, "other")
+	for _, d := range []string{nested, other} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	original := filepath.Join(nested, "media.bin")
+	if err := os.WriteFile(original, []byte(strings.Repeat("x", 4096)), 0o644); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+	// Two more hardlinks to the same inode, one in this dir and one in a
+	// sibling dir, so the shared scan-wide dedup set is exercised.
+	for _, link := range []string{
+		filepath.Join(nested, "media-copy.bin"),
+		filepath.Join(other, "media-link.bin"),
+	} {
+		if err := os.Link(original, link); err != nil {
+			t.Fatalf("hardlink %s: %v", link, err)
+		}
+	}
+	// An unrelated plain file that must still be counted in full.
+	plain := filepath.Join(other, "plain.bin")
+	if err := os.WriteFile(plain, []byte("plaindata"), 0o644); err != nil {
+		t.Fatalf("write plain: %v", err)
+	}
+
+	var filesScanned, dirsScanned, bytesScanned int64
+	current := &atomic.Value{}
+	current.Store("")
+
+	result, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current)
+	if err != nil {
+		t.Fatalf("scanPathConcurrent returned error: %v", err)
+	}
+
+	mediaInfo, err := os.Lstat(original)
+	if err != nil {
+		t.Fatalf("stat original: %v", err)
+	}
+	plainInfo, err := os.Lstat(plain)
+	if err != nil {
+		t.Fatalf("stat plain: %v", err)
+	}
+	want := getActualFileSize(original, mediaInfo) + getActualFileSize(plain, plainInfo)
+	if result.TotalSize != want {
+		t.Fatalf("expected hardlinked media counted once (total %d), got %d", want, result.TotalSize)
+	}
+	if !result.dedupedHardlink {
+		t.Fatalf("expected dedupedHardlink flag to be set when a hardlink is deduped")
+	}
+}
+
 func TestPerformScanForJSONCountsTopLevelFiles(t *testing.T) {
 	root := t.TempDir()
 

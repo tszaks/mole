@@ -32,6 +32,9 @@ type scanLimiter struct {
 	duSem      chan struct{}
 	duQueueSem chan struct{}
 	fastSem    chan struct{}
+	// seen tracks (dev, ino) of hardlinked files counted so far in this
+	// scan so a file with multiple links is counted once, matching `du`.
+	seen sync.Map
 }
 
 func newScanLimiter(childCount int) *scanLimiter {
@@ -127,6 +130,7 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 	var localFilesScanned int64
 	var localBytesScanned int64
 	var subtreeFilesScanned atomic.Int64
+	var dedupedHardlink atomic.Bool
 
 	collectAllEntries := entryLimit <= 0
 	var collectedEntries []dirEntry
@@ -243,6 +247,9 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 					if result.TotalFiles > 0 {
 						subtreeFilesScanned.Add(result.TotalFiles)
 					}
+					if result.dedupedHardlink {
+						dedupedHardlink.Store(true)
+					}
 					atomic.AddInt64(dirsScanned, 1)
 
 					trySend(entryChan, dirEntry{
@@ -302,6 +309,9 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 				if result.TotalFiles > 0 {
 					subtreeFilesScanned.Add(result.TotalFiles)
 				}
+				if result.dedupedHardlink {
+					dedupedHardlink.Store(true)
+				}
 				atomic.AddInt64(dirsScanned, 1)
 
 				trySend(entryChan, dirEntry{
@@ -329,8 +339,11 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 		if err != nil {
 			continue
 		}
-		// Actual disk usage for sparse/cloud files.
-		size := getActualFileSize(fullPath, info)
+		// Actual disk usage for sparse/cloud files, deduping hardlinks.
+		size, deduped := countableFileSize(info, &limiter.seen)
+		if deduped {
+			dedupedHardlink.Store(true)
+		}
 		atomic.AddInt64(&total, size)
 		localFilesScanned++
 		localBytesScanned += size
@@ -393,10 +406,11 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 	}
 
 	return scanResult{
-		Entries:    entries,
-		LargeFiles: largeFiles,
-		TotalSize:  total,
-		TotalFiles: localFilesScanned + subtreeFilesScanned.Load(),
+		Entries:         entries,
+		LargeFiles:      largeFiles,
+		TotalSize:       total,
+		TotalFiles:      localFilesScanned + subtreeFilesScanned.Load(),
+		dedupedHardlink: dedupedHardlink.Load(),
 	}, nil
 }
 
@@ -436,7 +450,11 @@ func scanSubdirWithCache(root string, largeFileChan chan<- fileEntry, largeFileM
 	result, err := scanPathConcurrentWithLimiter(root, filesScanned, dirsScanned, bytesScanned, currentPath, false, maxEntries, limiter)
 	if err == nil {
 		publishLargeFiles(result.LargeFiles, largeFileChan)
-		_ = saveCacheToDiskWithOptions(root, result, true)
+		// A subtree whose size depended on hardlink dedup is scan-order
+		// dependent; caching it would poison standalone re-scans.
+		if !result.dedupedHardlink {
+			_ = saveCacheToDiskWithOptions(root, result, true)
+		}
 		return result
 	}
 
@@ -1020,6 +1038,27 @@ func getDirectoryLogicalSizeWithExclude(path string, excludePath string) (int64,
 		return 0, err
 	}
 	return total, nil
+}
+
+// countableFileSize returns the on-disk size to attribute to a regular file.
+// Hardlinked files are deduplicated the way `du` does: the first link counts
+// its full size and subsequent links seen in the same scan count zero. The
+// bool reports whether this call was a deduplicated (zero-counted) hardlink.
+// A nil seen map disables deduplication.
+func countableFileSize(info fs.FileInfo, seen *sync.Map) (int64, bool) {
+	size := getActualFileSize("", info)
+	if seen == nil {
+		return size, false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Nlink <= 1 {
+		return size, false
+	}
+	key := [2]uint64{uint64(uint32(stat.Dev)), stat.Ino}
+	if _, loaded := seen.LoadOrStore(key, struct{}{}); loaded {
+		return 0, true
+	}
+	return size, false
 }
 
 func getActualFileSize(_ string, info fs.FileInfo) int64 {

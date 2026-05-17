@@ -16,6 +16,11 @@ import (
 	"github.com/cespare/xxhash/v2"
 )
 
+// cacheSchemaVersion is bumped whenever directory-size semantics change so
+// stale on-disk cache entries are rejected instead of silently reused.
+// v2: analyze deduplicates hardlinked files to match `du`.
+const cacheSchemaVersion = 2
+
 type overviewSizeSnapshot struct {
 	Size    int64     `json:"size"`
 	Updated time.Time `json:"updated"`
@@ -225,6 +230,10 @@ func loadRawCacheFromDisk(path string) (*cacheEntry, error) {
 		return nil, err
 	}
 
+	if entry.SchemaVersion != cacheSchemaVersion {
+		return nil, fmt.Errorf("cache schema mismatch: got %d, want %d", entry.SchemaVersion, cacheSchemaVersion)
+	}
+
 	return &entry, nil
 }
 
@@ -293,13 +302,14 @@ func saveCacheToDiskWithOptions(path string, result scanResult, needsRefresh boo
 	}
 
 	entry := cacheEntry{
-		Entries:      result.Entries,
-		LargeFiles:   result.LargeFiles,
-		TotalSize:    result.TotalSize,
-		TotalFiles:   result.TotalFiles,
-		ModTime:      info.ModTime(),
-		ScanTime:     time.Now(),
-		NeedsRefresh: needsRefresh,
+		Entries:       result.Entries,
+		LargeFiles:    result.LargeFiles,
+		TotalSize:     result.TotalSize,
+		TotalFiles:    result.TotalFiles,
+		ModTime:       info.ModTime(),
+		ScanTime:      time.Now(),
+		NeedsRefresh:  needsRefresh,
+		SchemaVersion: cacheSchemaVersion,
 	}
 
 	file, err := os.Create(cachePath)

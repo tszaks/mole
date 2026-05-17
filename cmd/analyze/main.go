@@ -42,6 +42,11 @@ type scanResult struct {
 	LargeFiles []fileEntry
 	TotalSize  int64
 	TotalFiles int64
+	// dedupedHardlink is true when a hardlinked file in this subtree was
+	// counted as zero because another link was seen earlier in the same
+	// scan. Such a result is scan-order dependent and must not be written
+	// to the on-disk cache. In-memory only; never serialized to cacheEntry.
+	dedupedHardlink bool
 }
 
 type cacheEntry struct {
@@ -52,6 +57,10 @@ type cacheEntry struct {
 	ModTime      time.Time
 	ScanTime     time.Time
 	NeedsRefresh bool
+	// SchemaVersion guards against reusing cache written by an older binary
+	// with different sizing semantics. Entries not at cacheSchemaVersion are
+	// rejected on load. Old caches decode this as 0.
+	SchemaVersion int
 }
 
 type historyEntry struct {
