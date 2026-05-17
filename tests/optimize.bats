@@ -490,6 +490,37 @@ EOF
 	[[ "$output" == *"Launch Agents all healthy"* ]]
 }
 
+@test "opt_launch_agents_cleanup spares agents on unmounted volumes" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+# Clean up any leftover plists from previous tests.
+rm -f "$HOME/Library/LaunchAgents"/*.plist 2>/dev/null || true
+# A program on an unplugged /Volumes/<disk> is missing but not broken;
+# the volume is simply unmounted, so the agent must be left alone.
+mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$HOME/Library/LaunchAgents/com.test.external.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.test.external</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Volumes/MoleNonexistentDisk/tool</string>
+    </array>
+</dict>
+</plist>
+PLIST
+opt_launch_agents_cleanup
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Launch Agents all healthy"* ]]
+}
+
 @test "execute_optimization dispatches launch_agents_cleanup" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
