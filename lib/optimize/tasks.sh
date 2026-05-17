@@ -274,6 +274,13 @@ opt_saved_state_cleanup() {
 # Removed: opt_local_snapshots - Deletes user Time Machine recovery points, breaks backup continuity
 
 opt_fix_broken_configs() {
+    if [[ "${MO_DEBUG:-}" == "1" ]]; then
+        debug_operation_start "Broken Config Repair" "Detect and reset corrupted preference files"
+        debug_operation_detail "Method" "Lint third-party plists in ~/Library/Preferences via plutil and remove corrupted ones"
+        debug_operation_detail "Expected outcome" "Apps reload with fresh preferences instead of failing on a corrupt plist"
+        debug_risk_level "LOW" "Apps regenerate their preference files on next launch"
+    fi
+
     local spinner_started="false"
     if [[ -t 1 ]]; then
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking preferences..."
@@ -284,6 +291,10 @@ opt_fix_broken_configs() {
 
     if [[ "$spinner_started" == "true" ]]; then
         stop_inline_spinner
+    fi
+
+    if [[ "${MO_DEBUG:-}" == "1" ]]; then
+        debug_operation_detail "Files repaired" "$broken_prefs"
     fi
 
     export OPTIMIZE_CONFIGS_REPAIRED="${broken_prefs}"
