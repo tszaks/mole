@@ -170,6 +170,7 @@ func main() {
 		isOverview = false
 	}
 
+	go pruneAnalyzerCache()
 	if *jsonMode {
 		runJSONMode(abs, isOverview)
 	} else {
