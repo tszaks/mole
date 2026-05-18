@@ -17,13 +17,18 @@ setup_file() {
 }
 
 teardown_file() {
-    if [[ -d "$HOME" && "$HOME" =~ tmp-naming ]]; then
+    if [[ "$HOME" == "${BATS_TEST_DIRNAME}/tmp-"* ]]; then
         rm -rf "$HOME"
     fi
     export HOME="$ORIGINAL_HOME"
 }
 
 setup() {
+    # Safety: refuse to operate on a real home directory.
+    if [[ "$HOME" != "${BATS_TEST_DIRNAME}/tmp-"* ]]; then
+        printf 'FATAL: HOME is not a test temp dir: %s\n' "$HOME" >&2
+        return 1
+    fi
     find "$HOME" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2> /dev/null || true
     source "$PROJECT_ROOT/lib/core/base.sh"
     source "$PROJECT_ROOT/lib/core/log.sh"

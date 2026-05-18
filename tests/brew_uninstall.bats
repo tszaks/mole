@@ -16,11 +16,20 @@ setup_file() {
 }
 
 teardown_file() {
-    rm -rf "$HOME"
-    export HOME="$ORIGINAL_HOME"
+    if [[ "$HOME" == "${BATS_TEST_DIRNAME}/tmp-"* ]]; then
+        rm -rf "$HOME"
+    fi
+    if [[ -n "${ORIGINAL_HOME:-}" ]]; then
+        export HOME="$ORIGINAL_HOME"
+    fi
 }
 
 setup() {
+    # Safety: refuse to operate on a real home directory.
+    if [[ "$HOME" != "${BATS_TEST_DIRNAME}/tmp-"* ]]; then
+        printf 'FATAL: HOME is not a test temp dir: %s\n' "$HOME" >&2
+        return 1
+    fi
     mkdir -p "$HOME/Applications"
     mkdir -p "$HOME/Library/Caches"
     # Create fake Caskroom
