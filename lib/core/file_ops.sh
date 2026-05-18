@@ -434,7 +434,7 @@ safe_sudo_remove() {
 # Usage: mole_delete <path> [needs_sudo=false]
 #
 # Environment:
-#   MOLE_DELETE_MODE      "permanent" (default) or "trash"
+#   MOLE_DELETE_MODE      "permanent" (default) or "trash"; other values fail
 #   MOLE_DRY_RUN=1        Log intent, do not delete
 #   MOLE_TEST_TRASH_DIR   Test-only override; Trash moves go here via `mv`
 #                         instead of Finder/trash CLI. Required for bats.
@@ -452,6 +452,19 @@ mole_delete() {
     local mode="${MOLE_DELETE_MODE:-permanent}"
 
     [[ -z "$path" ]] && return 1
+
+    case "$mode" in
+        permanent | trash) ;;
+        *)
+            _mole_delete_log "$mode" "unknown" "invalid-mode" "$path"
+            if [[ -z "${_MOLE_INVALID_MODE_WARNED:-}" ]]; then
+                _MOLE_INVALID_MODE_WARNED=1
+                export _MOLE_INVALID_MODE_WARNED
+                printf 'Error: invalid MOLE_DELETE_MODE: %s (expected "permanent" or "trash")\n' "$mode" >&2
+            fi
+            return 1
+            ;;
+    esac
 
     # Nothing to do if path does not exist (but a broken symlink still counts).
     if [[ ! -e "$path" && ! -L "$path" ]]; then
@@ -504,22 +517,23 @@ mole_delete() {
         fi
     fi
 
-    # Trash mode: attempt Trash move first, fall through to permanent removal
-    # on failure so destructive operations never get silently skipped.
+    # Trash mode is a recoverable-delete contract. If Trash is unavailable,
+    # fail closed instead of silently switching to permanent removal.
     if [[ "$mode" == "trash" ]]; then
         if _mole_move_to_trash "$path" "$needs_sudo"; then
             _mole_delete_log "trash" "$size_kb" "ok" "$path"
             log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "TRASHED" "$path" "${size_kb}KB"
             return 0
         fi
-        # User explicitly chose Trash for recoverability. Surface the fallback
-        # to permanent rm once per session so they know an "undo" isn't there.
-        if [[ -z "${_MOLE_TRASH_FALLBACK_WARNED:-}" ]]; then
-            _MOLE_TRASH_FALLBACK_WARNED=1
-            export _MOLE_TRASH_FALLBACK_WARNED
-            printf 'Warning: Trash unavailable, removing permanently. Subsequent files this session also bypass Trash.\n' >&2
+        _mole_delete_log "trash" "$size_kb" "trash-failed" "$path"
+        log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "trash-failed"
+        if [[ -z "${_MOLE_TRASH_UNAVAILABLE_WARNED:-}" ]]; then
+            _MOLE_TRASH_UNAVAILABLE_WARNED=1
+            export _MOLE_TRASH_UNAVAILABLE_WARNED
+            printf 'Error: Trash unavailable; refusing permanent delete. Use --permanent to delete immediately.\n' >&2
         fi
-        debug_log "Trash move failed, falling back to permanent delete: $path"
+        debug_log "Trash move failed, refusing permanent delete: $path"
+        return 1
     fi
 
     # Permanent path. Delegate to the existing safe_* helpers so path
@@ -536,10 +550,6 @@ mole_delete() {
 
     local status_label="ok"
     [[ $rc -ne 0 ]] && status_label="error"
-    # Mark the trash-mode fallback so forensics can tell why rm was used.
-    if [[ "$mode" == "trash" && "$status_label" == "ok" ]]; then
-        status_label="trash-fallback-rm"
-    fi
     _mole_delete_log "$mode" "$size_kb" "$status_label" "$path"
     return "$rc"
 }

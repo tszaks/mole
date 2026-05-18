@@ -301,8 +301,8 @@ remove_file_list() {
             count=$((count + ${#trash_batch[@]}))
         else
             # Batch failed wholesale: route each path through mole_delete so
-            # the per-file fallback (Trash retry, then permanent rm) runs and
-            # forensic logging stays intact.
+            # per-file Trash handling fails closed and forensic logging stays
+            # intact.
             fallback_paths+=("${trash_batch[@]}")
         fi
     fi
@@ -311,8 +311,8 @@ remove_file_list() {
         local fb
         for fb in "${fallback_paths[@]}"; do
             # mole_delete routes through Trash when MOLE_DELETE_MODE=trash
-            # (uninstall default), falls back to the underlying safe_* helpers
-            # in permanent mode or when Trash is unavailable. See #723.
+            # (uninstall default) and only uses safe_* permanent removal when
+            # the caller explicitly selected permanent mode. See #723.
             mole_delete "$fb" "$use_sudo" && ((++count)) || true
         done
     fi
