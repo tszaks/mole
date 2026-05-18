@@ -1837,9 +1837,12 @@ find_app_receipt_files() {
     fi
 }
 
-# Terminate a running application
+# Politely ask a running application to quit (Mole Mac app parity).
+# NOTE: despite the legacy name, this no longer force-kills. It sends the
+# graceful Quit Apple Event and reports (return 1) when the app stays open;
+# the caller surfaces a warning instead of escalating to a kill signal.
 force_kill_app() {
-    # Gracefully terminates or force-kills an application
+    # Sends only a graceful Quit; never SIGTERM/SIGKILL or sudo.
     local app_name="$1"
     local app_path="${2:-""}"
 
@@ -1895,43 +1898,15 @@ force_kill_app() {
         wait "$quit_pid" 2> /dev/null || true
     fi
 
-    if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
-        return 0
-    fi
-
-    # Try graceful termination first
-    pkill -x "$match_pattern" 2> /dev/null || true
-    sleep 2
-
-    # Check again after graceful kill
-    if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
-        return 0
-    fi
-
-    # Force kill if still running
-    pkill -9 -x "$match_pattern" 2> /dev/null || true
-    sleep 2
-
-    # If still running and sudo is available, try with sudo
+    # Mole Mac app parity: after the graceful Quit Apple Event, Mole does not
+    # escalate to SIGTERM, SIGKILL, or sudo. Force-killing risks losing the
+    # app's unsaved work and can leave half-written state on disk. A still-
+    # running app is reported so the caller warns the user; macOS allows
+    # removing a running app bundle, so the uninstall itself still proceeds.
     if pgrep -x "$match_pattern" > /dev/null 2>&1; then
-        if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]] && sudo -n true 2> /dev/null; then
-            sudo pkill -9 -x "$match_pattern" 2> /dev/null || true
-            sleep 2
-        fi
+        return 1
     fi
-
-    # Final check with longer timeout for stubborn processes
-    local retries=3
-    while [[ $retries -gt 0 ]]; do
-        if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
-            return 0
-        fi
-        sleep 1
-        ((retries--))
-    done
-
-    # Still running after all attempts
-    pgrep -x "$match_pattern" > /dev/null 2>&1 && return 1 || return 0
+    return 0
 }
 
 # Note: calculate_total_size() is defined in lib/core/file_ops.sh

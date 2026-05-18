@@ -225,7 +225,7 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
-@test "force_kill_app sends AppleScript Quit before SIGTERM" {
+@test "force_kill_app sends only an AppleScript Quit, never a kill signal" {
 	# run_with_timeout invokes its argv via gtimeout/timeout, which exec the
 	# real binary and bypass bash functions, so we shadow osascript via a
 	# real script on PATH and read the trace it writes.
