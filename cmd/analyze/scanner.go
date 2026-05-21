@@ -26,12 +26,40 @@ import (
 
 var scanGroup singleflight.Group
 
+// scanLimiter bundles the concurrency budgets used by a single scan pass.
+//
+// There are five separate semaphores on purpose: each protects a different
+// scarce resource. Collapsing two of them changes scaling behavior in ways
+// that are easy to get wrong; see the per-field notes before adjusting.
 type scanLimiter struct {
-	entrySem   chan struct{}
-	dirSem     chan struct{}
-	duSem      chan struct{}
+	// entrySem caps the number of in-flight top-level entry workers (one per
+	// child of the root being scanned). Acquired with tryAcquireEntry so the
+	// caller can fall back to inline scanning when the budget is saturated.
+	entrySem chan struct{}
+
+	// dirSem caps the number of concurrent recursive directory walkers
+	// inside calculateDirSizeConcurrent. Independent of entrySem because a
+	// single entry can fan out into many directory walkers.
+	dirSem chan struct{}
+
+	// duSem caps how many `du` subprocesses execute concurrently. Tuned
+	// low (NumCPU capped at 4) because each du process is itself heavily
+	// I/O parallel and saturating the disk hurts wall-clock latency.
+	duSem chan struct{}
+
+	// duQueueSem caps how many goroutines are *queued* to run du.
+	// Distinct from duSem so we don't spawn one goroutine per pending
+	// directory and grow memory linearly with the input set; without
+	// this bound, large home dirs allocate thousands of stacks waiting
+	// on duSem. Sized at 2x duSem to keep the worker side warm without
+	// unbounded queueing.
 	duQueueSem chan struct{}
-	fastSem    chan struct{}
+
+	// fastSem caps the workers used by the fallback fast-sizing path
+	// when du is unavailable or rejected. Same scale as entrySem because
+	// the fast path replaces a single du subprocess with one walker.
+	fastSem chan struct{}
+
 	// seen tracks (dev, ino) of hardlinked files counted so far in this
 	// scan so a file with multiple links is counted once, matching `du`.
 	seen sync.Map
