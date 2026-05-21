@@ -218,11 +218,11 @@ func pruneAnalyzerCache() {
 		return
 	}
 	// Pruning is best-effort; errors are intentionally ignored to avoid blocking startup.
-	_ = pruneAnalyzerCacheDir(cacheDir, time.Now(), analyzerCacheTTL)
+	_ = pruneAnalyzerCacheDir(cacheDir, time.Now())
 }
 
-func pruneAnalyzerCacheDir(cacheDir string, now time.Time, maxAge time.Duration) error {
-	if cacheDir == "" || maxAge <= 0 {
+func pruneAnalyzerCacheDir(cacheDir string, now time.Time) error {
+	if cacheDir == "" || analyzerCacheTTL <= 0 {
 		return nil
 	}
 
@@ -234,7 +234,7 @@ func pruneAnalyzerCacheDir(cacheDir string, now time.Time, maxAge time.Duration)
 		return err
 	}
 
-	cutoff := now.Add(-maxAge)
+	cutoff := now.Add(-analyzerCacheTTL)
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 || filepath.Ext(entry.Name()) != ".cache" {
 			continue

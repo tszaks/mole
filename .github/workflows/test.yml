@@ -109,18 +109,11 @@ jobs:
           fi
           '
 
-      - name: Check for secrets
-        run: |
-          echo "Checking for hardcoded secrets..."
-          matches=$(grep -r "password\|secret\|api_key" --include="*.sh" . \
-            | grep -v "# \|test" \
-            | grep -v -E "lib/core/sudo\.sh|lib/core/app_protection\.sh|lib/clean/user\.sh|lib/clean/brew\.sh|bin/optimize\.sh|lib/clean/apps\.sh|lib/uninstall/batch\.sh" || true)
-          if [[ -n "$matches" ]]; then
-            echo "$matches"
-            echo "✗ Potential secrets found"
-            exit 1
-          fi
-          echo "✓ No secrets found"
+      - name: Scan for secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
 
       - name: Run high-risk path regression tests
         env:

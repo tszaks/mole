@@ -432,7 +432,7 @@ func TestPruneAnalyzerCacheDirRemovesOnlyExpiredCacheFiles(t *testing.T) {
 		t.Fatalf("chtimes fresh cache: %v", err)
 	}
 
-	if err := pruneAnalyzerCacheDir(cacheDir, now, analyzerCacheTTL); err != nil {
+	if err := pruneAnalyzerCacheDir(cacheDir, now); err != nil {
 		t.Fatalf("pruneAnalyzerCacheDir: %v", err)
 	}
 
@@ -448,7 +448,7 @@ func TestPruneAnalyzerCacheDirRemovesOnlyExpiredCacheFiles(t *testing.T) {
 
 func TestPruneAnalyzerCacheDirMissingDirectory(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
-	if err := pruneAnalyzerCacheDir(missing, time.Now(), analyzerCacheTTL); err != nil {
+	if err := pruneAnalyzerCacheDir(missing, time.Now()); err != nil {
 		t.Fatalf("expected missing cache dir to be ignored, got: %v", err)
 	}
 }
@@ -475,7 +475,7 @@ func TestPruneAnalyzerCacheDirIgnoresRemoveFailures(t *testing.T) {
 		_ = os.Chmod(cacheDir, 0o755)
 	}()
 
-	if err := pruneAnalyzerCacheDir(cacheDir, time.Now(), analyzerCacheTTL); err != nil {
+	if err := pruneAnalyzerCacheDir(cacheDir, time.Now()); err != nil {
 		t.Fatalf("expected remove failure to be ignored, got: %v", err)
 	}
 	if _, err := os.Stat(oldCache); err != nil {
