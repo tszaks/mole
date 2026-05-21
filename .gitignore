@@ -42,9 +42,10 @@ tests/tmp-*
 *.lock
 
 # Local AI Assistant Instructions
-CLAUDE.md
+# CLAUDE.md is a symlink to AGENTS.md (shared source of truth, tracked).
+# Personal overrides go in *.local.md, which stay gitignored.
 CLAUDE.local.md
-AGENTS.md
+AGENTS.local.md
 AGENTS.override.md
 .claude/
 .agents/settings.local.json
