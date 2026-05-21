@@ -72,7 +72,7 @@ opt_diag_get_hdiutil_info() {
         return 0
     fi
 
-    run_with_timeout 8 hdiutil info 2> /dev/null || true
+    run_with_timeout 8 hdiutil info 2> /dev/null || true # 8s: hdiutil info, see lib/core/timeouts.sh
 }
 
 opt_diag_family_totals() {
@@ -281,7 +281,7 @@ opt_diag_detach_candidates() {
 
     while IFS=$'\t' read -r image_path mount_path; do
         [[ -z "$mount_path" ]] && continue
-        if run_with_timeout 15 hdiutil detach "$mount_path" > /dev/null 2>&1; then
+        if run_with_timeout 15 hdiutil detach "$mount_path" > /dev/null 2>&1; then # 15s: hdiutil detach, see lib/core/timeouts.sh
             detached=$((detached + 1))
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Detached ${mount_path}"
         else
