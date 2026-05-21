@@ -47,7 +47,12 @@ tests/tmp-*
 CLAUDE.local.md
 AGENTS.local.md
 AGENTS.override.md
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/hooks/
+!.claude/skills/
+!.claude/settings.json
+.claude/settings.local.json
 .agents/settings.local.json
 .gemini/
 .kiro/
