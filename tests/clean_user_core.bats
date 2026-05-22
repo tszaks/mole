@@ -795,6 +795,33 @@ EOF
     rm -rf "$HOME/Library"
 }
 
+@test "clean_browsers covers Arc User Data layout" {
+    mkdir -p "$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { echo "$2|$1"; }
+clean_service_worker_cache() { echo "Arc SW $2"; }
+note_activity() { :; }
+pgrep() { return 1; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Arc code cache|$HOME/Library/Application Support/Arc/User Data/"* ]]
+    [[ "$output" == *"Arc component CRX cache|$HOME/Library/Application Support/Arc/User Data/component_crx_cache/"* ]]
+    [[ "$output" == *"Arc extensions CRX cache|$HOME/Library/Application Support/Arc/User Data/extensions_crx_cache/"* ]]
+    [[ "$output" == *"Arc SW $HOME/Library/Application Support/Arc/User Data/Default/Service Worker/CacheStorage"* ]]
+    [[ "$output" == *"Arc Service Worker ScriptCache|$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache/"* ]]
+
+    rm -rf "$HOME/Library"
+}
+
 @test "clean_browsers skips Chrome ScriptCache when Chrome is running (#785)" {
     mkdir -p "$HOME/Library/Application Support/Google/Chrome/Default/Service Worker/ScriptCache"
 
@@ -822,6 +849,84 @@ EOF
     [[ "$output" != *"Arc Service Worker ScriptCache"* ]]
     [[ "$output" != *"Brave Service Worker ScriptCache"* ]]
     [[ "$output" != *"Vivaldi Service Worker ScriptCache"* ]]
+
+    rm -rf "$HOME/Library"
+}
+
+@test "clean_browsers skips Arc User Data ScriptCache when Arc is running" {
+    mkdir -p "$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { echo "$2|$1"; }
+clean_service_worker_cache() { echo "Arc SW $2"; }
+note_activity() { :; }
+pgrep() {
+    [[ "${2:-}" == "Arc" ]]
+}
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Arc SW $HOME/Library/Application Support/Arc/User Data/Default/Service Worker/CacheStorage"* ]]
+    [[ "$output" != *"Arc Service Worker ScriptCache|$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache/"* ]]
+
+    rm -rf "$HOME/Library"
+}
+
+@test "clean_browsers covers QQ Browser 3 caches when not running" {
+    mkdir -p "$HOME/Library/Application Support/QQBrowser3/Default/Code Cache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { echo "$2|$1"; }
+clean_service_worker_cache() { :; }
+note_activity() { :; }
+pgrep() { return 1; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"QQ Browser cache|$HOME/Library/Caches/com.tencent.QQBrowser3/"* ]]
+    [[ "$output" == *"QQ Browser code cache|$HOME/Library/Application Support/QQBrowser3/"* ]]
+    [[ "$output" == *"QQ Browser component cache|$HOME/Library/Application Support/QQBrowser3/component_crx_cache/"* ]]
+
+    rm -rf "$HOME/Library"
+}
+
+@test "clean_browsers skips QQ Browser 3 profile caches while running" {
+    mkdir -p "$HOME/Library/Application Support/QQBrowser3/Default/Code Cache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { echo "$2|$1"; }
+clean_service_worker_cache() { :; }
+note_activity() { :; }
+pgrep() {
+    [[ "${2:-}" == "QQBrowser3" ]]
+}
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"QQ Browser cache|$HOME/Library/Caches/com.tencent.QQBrowser3/"* ]]
+    [[ "$output" != *"QQ Browser code cache"* ]]
+    [[ "$output" != *"QQ Browser GPU cache"* ]]
 
     rm -rf "$HOME/Library"
 }

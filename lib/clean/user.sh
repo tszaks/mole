@@ -1372,8 +1372,26 @@ clean_browsers() {
             safe_clean ~/Library/Application\ Support/Arc/GrShaderCache/* "Arc GR shader cache"
             safe_clean ~/Library/Application\ Support/Arc/GraphiteDawnCache/* "Arc Dawn cache"
             safe_clean ~/Library/Application\ Support/Arc/Crashpad/completed/* "Arc crash reports"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/*/Code\ Cache/* "Arc code cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/*/GPUCache/* "Arc GPU cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/*/DawnCache/* "Arc Dawn cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/*/GrShaderCache/* "Arc GR shader cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/*/GraphiteDawnCache/* "Arc Graphite Dawn cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/ShaderCache/* "Arc shader cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/GrShaderCache/* "Arc GR shader cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/GraphiteDawnCache/* "Arc Dawn cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/component_crx_cache/* "Arc component CRX cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/extensions_crx_cache/* "Arc extensions CRX cache"
+            safe_clean ~/Library/Application\ Support/Arc/User\ Data/Crashpad/completed/* "Arc crash reports"
         fi
         for _arc_profile in "$HOME/Library/Application Support/Arc"/*/; do
+            clean_service_worker_cache "Arc" "$_arc_profile/Service Worker/CacheStorage"
+            if [[ "$_arc_running" != "true" ]]; then
+                safe_clean "$_arc_profile"/Service\ Worker/ScriptCache/* "Arc Service Worker ScriptCache"
+            fi
+        done
+        for _arc_profile in "$HOME/Library/Application Support/Arc/User Data"/*/; do
+            [[ -d "$_arc_profile" ]] || continue
             clean_service_worker_cache "Arc" "$_arc_profile/Service Worker/CacheStorage"
             if [[ "$_arc_running" != "true" ]]; then
                 safe_clean "$_arc_profile"/Service\ Worker/ScriptCache/* "Arc Service Worker ScriptCache"
@@ -1471,6 +1489,21 @@ clean_browsers() {
     clean_edge_old_versions
     clean_edge_updater_old_versions
     clean_brave_old_versions
+    # QQ Browser 3 (Chromium-based).
+    if [[ -d ~/Library/Application\ Support/QQBrowser3 ]]; then
+        safe_clean ~/Library/Caches/com.tencent.QQBrowser3/* "QQ Browser cache"
+        local _qqbrowser_running=false
+        pgrep -x "QQBrowser3" > /dev/null 2>&1 && _qqbrowser_running=true
+        if [[ "$_qqbrowser_running" != "true" ]]; then
+            safe_clean ~/Library/Application\ Support/QQBrowser3/*/Code\ Cache/* "QQ Browser code cache"
+            safe_clean ~/Library/Application\ Support/QQBrowser3/*/GPUCache/* "QQ Browser GPU cache"
+            safe_clean ~/Library/Application\ Support/QQBrowser3/ShaderCache/* "QQ Browser shader cache"
+            safe_clean ~/Library/Application\ Support/QQBrowser3/GrShaderCache/* "QQ Browser GR shader cache"
+            safe_clean ~/Library/Application\ Support/QQBrowser3/GraphiteDawnCache/* "QQ Browser Dawn cache"
+            safe_clean ~/Library/Application\ Support/QQBrowser3/component_crx_cache/* "QQ Browser component cache"
+            safe_clean ~/Library/Application\ Support/QQBrowser3/Crashpad/completed/* "QQ Browser crash reports"
+        fi
+    fi
 }
 
 # Cloud storage caches.
