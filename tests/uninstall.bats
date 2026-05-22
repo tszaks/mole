@@ -225,6 +225,56 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "batch_uninstall_applications dry-run does not report expected leftovers as failures" {
+	create_app_artifacts
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+sudo() { return 0; }
+
+export MOLE_DRY_RUN=1
+export MOLE_DELETE_MODE=trash
+
+app_bundle="$HOME/Applications/TestApp.app"
+mkdir -p "$app_bundle"
+
+selected_apps=()
+selected_apps+=("0|$app_bundle|TestApp|com.example.TestApp|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+output_file="$HOME/dry_run_uninstall.log"
+printf '\n' | batch_uninstall_applications > "$output_file" 2>&1
+output=$(cat "$output_file")
+
+[[ -d "$app_bundle" ]] || { echo "WRONG: dry-run removed app bundle"; cat "$output_file"; exit 1; }
+[[ -d "$HOME/Library/Application Support/TestApp" ]] || { echo "WRONG: dry-run removed app support"; cat "$output_file"; exit 1; }
+[[ -d "$HOME/Library/Caches/TestApp" ]] || { echo "WRONG: dry-run removed cache"; cat "$output_file"; exit 1; }
+[[ -f "$HOME/Library/Preferences/com.example.TestApp.plist" ]] || { echo "WRONG: dry-run removed prefs"; cat "$output_file"; exit 1; }
+
+[[ "$output" == *"Uninstall dry run complete"* ]] || { echo "WRONG: missing dry-run summary"; cat "$output_file"; exit 1; }
+[[ "$output" == *"Would remove 1 app"* ]] || { echo "WRONG: missing would-remove summary"; cat "$output_file"; exit 1; }
+[[ "$output" != *"Could not remove"* ]] || { echo "WRONG: dry-run reported expected leftovers"; cat "$output_file"; exit 1; }
+[[ "$output" != *"Uninstall incomplete"* ]] || { echo "WRONG: dry-run marked incomplete"; cat "$output_file"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "force_kill_app sends only an AppleScript Quit, never a kill signal" {
 	# run_with_timeout invokes its argv via gtimeout/timeout, which exec the
 	# real binary and bypass bash functions, so we shadow osascript via a

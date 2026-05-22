@@ -739,22 +739,24 @@ batch_uninstall_applications() {
             # and would just produce stderr noise we discard.
             local leftover_kb=0
             local -a leftover_paths=()
-            while IFS= read -r _lf; do
-                [[ -n "$_lf" && -e "$_lf" ]] || continue
-                # Skip macOS-managed container stubs: containermanagerd protects
-                # these directories via com.apple.provenance xattr; rm -rf always
-                # fails on them by design. User data is already gone at this point.
-                if [[ "$_lf" == */Library/Containers/* && -f "$_lf/.com.apple.containermanagerd.metadata.plist" ]]; then
-                    continue
-                fi
-                leftover_paths+=("$_lf")
-            done <<< "$related_files"
+            if ! is_uninstall_dry_run; then
+                while IFS= read -r _lf; do
+                    [[ -n "$_lf" && -e "$_lf" ]] || continue
+                    # Skip macOS-managed container stubs: containermanagerd protects
+                    # these directories via com.apple.provenance xattr; rm -rf always
+                    # fails on them by design. User data is already gone at this point.
+                    if [[ "$_lf" == */Library/Containers/* && -f "$_lf/.com.apple.containermanagerd.metadata.plist" ]]; then
+                        continue
+                    fi
+                    leftover_paths+=("$_lf")
+                done <<< "$related_files"
 
-            if [[ ${#leftover_paths[@]} -gt 0 ]]; then
-                local _du_total
-                _du_total=$(command du -skcP "${leftover_paths[@]}" 2> /dev/null | awk 'END {print $1}')
-                if [[ "$_du_total" =~ ^[0-9]+$ ]]; then
-                    leftover_kb=$_du_total
+                if [[ ${#leftover_paths[@]} -gt 0 ]]; then
+                    local _du_total
+                    _du_total=$(command du -skcP "${leftover_paths[@]}" 2> /dev/null | awk 'END {print $1}')
+                    if [[ "$_du_total" =~ ^[0-9]+$ ]]; then
+                        leftover_kb=$_du_total
+                    fi
                 fi
             fi
 
