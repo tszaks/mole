@@ -13,8 +13,13 @@ export LANG=C
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/core/common.sh"
 
-# Set up cleanup trap for temporary files
-trap cleanup_temp_files EXIT INT TERM
+# Restores cursor and clears temp files even when set -e aborts (#915).
+cleanup() {
+    show_cursor 2> /dev/null || true
+    cleanup_temp_files
+}
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT TERM
 source "$SCRIPT_DIR/../lib/core/log.sh"
 source "$SCRIPT_DIR/../lib/clean/project.sh"
 
@@ -299,9 +304,6 @@ show_help() {
 
 # Main entry point
 main() {
-    # Set up signal handling
-    trap 'show_cursor; exit 130' INT TERM
-
     # Parse arguments
     for arg in "$@"; do
         case "$arg" in
@@ -338,7 +340,6 @@ main() {
     fi
     hide_cursor
     perform_purge
-    show_cursor
 }
 
 if [[ "${MOLE_SKIP_MAIN:-0}" == "1" ]]; then
