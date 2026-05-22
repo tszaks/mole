@@ -981,7 +981,7 @@ opt_periodic_maintenance() {
 
     if [[ -f "$daily_log" ]]; then
         local last_mod now age_days
-        last_mod=$(stat -f %m "$daily_log" 2> /dev/null || echo "0")
+        last_mod=$(get_file_mtime "$daily_log")
         now=$(get_epoch_seconds)
         age_days=$(((now - last_mod) / 86400))
 

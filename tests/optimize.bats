@@ -553,6 +553,31 @@ EOF
 	[[ "$output" == *"already current"* ]]
 }
 
+@test "opt_periodic_maintenance ignores non-BSD stat earlier in PATH" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+periodic() { true; }
+export -f periodic
+tmpdir="$(mktemp -d /tmp/mole-test-stat-path.XXXXXX)"
+mkdir -p "$tmpdir/bin"
+cat > "$tmpdir/bin/stat" <<'STAT'
+#!/usr/bin/env bash
+echo "  File: /var/log/daily.out"
+STAT
+chmod +x "$tmpdir/bin/stat"
+tmplog="$tmpdir/daily.out"
+touch "$tmplog"
+PATH="$tmpdir/bin:$PATH" MOLE_PERIODIC_LOG="$tmplog" opt_periodic_maintenance
+rm -rf "$tmpdir"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"already current"* ]]
+	[[ "$output" != *"unbound variable"* ]]
+}
+
 @test "opt_periodic_maintenance triggers in dry-run when log is stale" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
 set -euo pipefail
