@@ -1259,12 +1259,14 @@ find_app_receipt_files() {
     fi
 }
 
-# Politely ask a running application to quit (Mole Mac app parity).
-# NOTE: despite the legacy name, this no longer force-kills. It sends the
-# graceful Quit Apple Event and reports (return 1) when the app stays open;
-# the caller surfaces a warning instead of escalating to a kill signal.
+# Terminate a running application during uninstall.
+# The user has already confirmed removal, so after the graceful Quit Apple
+# Event we escalate through SIGTERM and SIGKILL (and one sudo retry when
+# non-interactive sudo is already cached) to avoid leaving a zombie process
+# after "Uninstall complete". Apps that need to flush state get the graceful
+# Quit window first; apps that stall past it lose unsaved work, which the
+# user has implicitly accepted by confirming.
 force_kill_app() {
-    # Sends only a graceful Quit; never SIGTERM/SIGKILL or sudo.
     local app_name="$1"
     local app_path="${2:-""}"
 
@@ -1320,15 +1322,45 @@ force_kill_app() {
         wait "$quit_pid" 2> /dev/null || true
     fi
 
-    # Mole Mac app parity: after the graceful Quit Apple Event, Mole does not
-    # escalate to SIGTERM, SIGKILL, or sudo. Force-killing risks losing the
-    # app's unsaved work and can leave half-written state on disk. A still-
-    # running app is reported so the caller warns the user; macOS allows
-    # removing a running app bundle, so the uninstall itself still proceeds.
-    if pgrep -x "$match_pattern" > /dev/null 2>&1; then
-        return 1
+    # Graceful Quit landed: skip the kill ladder entirely.
+    if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
+        return 0
     fi
-    return 0
+
+    # Escalate: SIGTERM, then SIGKILL, then one sudo SIGKILL retry when a
+    # cached sudo session is already available (no new prompt). The user
+    # confirmed uninstall, so a still-running process at this point is
+    # blocking a clean result and we trade unsaved state for that.
+    pkill -x "$match_pattern" 2> /dev/null || true
+    sleep 2
+    if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
+        return 0
+    fi
+
+    pkill -9 -x "$match_pattern" 2> /dev/null || true
+    sleep 2
+    if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
+        return 0
+    fi
+
+    if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]] &&
+        sudo -n true 2> /dev/null; then
+        sudo pkill -9 -x "$match_pattern" 2> /dev/null || true
+        sleep 2
+    fi
+
+    # Final retries for stubborn processes (e.g. apps mid-fsync that need a
+    # moment to fully exit after SIGKILL).
+    local retries=3
+    while [[ $retries -gt 0 ]]; do
+        if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        ((retries--))
+    done
+
+    pgrep -x "$match_pattern" > /dev/null 2>&1 && return 1 || return 0
 }
 
 # Note: calculate_total_size() is defined in lib/core/file_ops.sh

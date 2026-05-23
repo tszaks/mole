@@ -275,7 +275,7 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
-@test "force_kill_app sends only an AppleScript Quit, never a kill signal" {
+@test "force_kill_app skips the kill ladder when Quit succeeds" {
 	# run_with_timeout invokes its argv via gtimeout/timeout, which exec the
 	# real binary and bypass bash functions, so we shadow osascript via a
 	# real script on PATH and read the trace it writes.
@@ -343,6 +343,78 @@ EOF
 	if grep -q '^pkill ' "$trace"; then
 		echo "WRONG: pkill ran even though Quit succeeded"; cat "$trace"; return 1
 	fi
+}
+
+@test "force_kill_app escalates to pkill when Quit does not land" {
+	# Process keeps showing up in pgrep until pkill -9 fires, exercising the
+	# SIGTERM and SIGKILL rungs of the escalation ladder.
+	stubdir="$HOME/stubs"
+	mkdir -p "$stubdir"
+	trace="$HOME/kill_escalate_trace.log"
+	: > "$trace"
+
+	cat > "$stubdir/osascript" <<STUB
+#!/bin/bash
+printf 'osascript %s\n' "\$*" >> "$trace"
+exit 0
+STUB
+	chmod +x "$stubdir/osascript"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$stubdir:$PATH" \
+		TRACE_PATH="$trace" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+app_path="$HOME/Applications/StubbornApp.app"
+mkdir -p "$app_path/Contents"
+cat > "$app_path/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>StubbornApp</string>
+  <key>CFBundleIdentifier</key><string>com.example.StubbornApp</string>
+</dict></plist>
+PLIST
+
+# Stays alive until SIGKILL lands, then disappears.
+sigkill_seen=0
+pgrep() {
+	if [[ $sigkill_seen -eq 1 ]]; then
+		return 1
+	fi
+	echo 12345
+	return 0
+}
+export -f pgrep
+
+pkill() {
+	printf 'pkill %s\n' "$*" >> "$TRACE_PATH"
+	for arg in "$@"; do
+		if [[ "$arg" == "-9" ]]; then
+			sigkill_seen=1
+		fi
+	done
+	return 0
+}
+export -f pkill
+export sigkill_seen
+
+sudo() { return 1; }
+export -f sudo
+
+sleep() { :; }
+export -f sleep
+
+unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
+
+force_kill_app "StubbornApp" "$app_path"
+EOF
+
+	[ "$status" -eq 0 ]
+	grep -q '^pkill -x StubbornApp' "$trace" \
+		|| { echo "WRONG: SIGTERM rung did not fire"; cat "$trace"; return 1; }
+	grep -q '^pkill -9 -x StubbornApp' "$trace" \
+		|| { echo "WRONG: SIGKILL rung did not fire"; cat "$trace"; return 1; }
 }
 
 @test "force_kill_app rejects unsafe bundle id in AppleScript Quit target" {
