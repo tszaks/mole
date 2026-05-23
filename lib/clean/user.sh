@@ -8,51 +8,46 @@ clean_trash() {
     fi
     stop_section_spinner
 
+    # Always count and delete directly. The previous Finder AppleScript path
+    # triggered macOS's "Show warning before emptying the Trash" dialog and
+    # blocked mo clean on user confirmation. Volume Trashes
+    # (/Volumes/*/.Trashes/<uid>/) are not handled here; mo clean only manages
+    # the user's home Trash.
     local trash_count
-    local trash_count_status=0
-    # Skip AppleScript during tests to avoid permission dialogs
-    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-        trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
-            tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
-    else
-        trash_count=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" osascript -e 'tell application "Finder" to count items in trash' 2> /dev/null) || trash_count_status=$?
-    fi
-    if [[ $trash_count_status -eq 124 ]]; then
-        debug_log "Finder trash count timed out, using direct .Trash scan"
-        trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
-            tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
-    fi
+    trash_count=$(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null |
+        tr -dc '\0' | wc -c | tr -d ' ' || echo "0")
     [[ "$trash_count" =~ ^[0-9]+$ ]] || trash_count="0"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        [[ $trash_count -gt 0 ]] && echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $trash_count items" || echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
-    elif [[ $trash_count -gt 0 ]]; then
-        local emptied_via_finder=false
-        # Skip AppleScript during tests to avoid permission dialogs
-        if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
-            debug_log "Skipping Finder AppleScript in test mode"
+        if [[ $trash_count -gt 0 ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $trash_count items"
         else
-            if run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" osascript -e 'tell application "Finder" to empty trash' > /dev/null 2>&1; then
-                emptied_via_finder=true
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $trash_count items"
-                note_activity
-            fi
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
         fi
-        if [[ "$emptied_via_finder" != "true" ]]; then
-            debug_log "Finder trash empty failed or timed out, falling back to direct deletion"
-            local cleaned_count=0
-            while IFS= read -r -d '' item; do
-                if safe_remove "$item" true; then
-                    cleaned_count=$((cleaned_count + 1))
-                fi
-            done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
-            if [[ $cleaned_count -gt 0 ]]; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $cleaned_count items"
-                note_activity
-            fi
-        fi
-    else
+        return 0
+    fi
+
+    if [[ $trash_count -eq 0 ]]; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
+        return 0
+    fi
+
+    if [[ -t 1 ]]; then
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Emptying trash, ${trash_count} items..."
+    fi
+
+    local cleaned_count=0
+    while IFS= read -r -d '' item; do
+        if safe_remove "$item" true; then
+            cleaned_count=$((cleaned_count + 1))
+        fi
+    done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+
+    [[ -t 1 ]] && stop_inline_spinner
+
+    if [[ $cleaned_count -gt 0 ]]; then
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · emptied, $cleaned_count items"
+        note_activity
     fi
 }
 
@@ -317,7 +312,12 @@ _clean_darwin_user_runtime_dirs() {
     cache_dir=$(getconf DARWIN_USER_CACHE_DIR 2> /dev/null || true)
 
     _clean_darwin_user_runtime_dir "$temp_dir" "temp" "Darwin user temp files"
+    # _clean_darwin_user_runtime_dir stops the section spinner before printing
+    # its result line; restart it so the user does not see a silent gap while
+    # the cache scan and subsequent trash empty are running.
+    start_section_spinner "Cleaning runtime files..."
     _clean_darwin_user_runtime_dir "$cache_dir" "cache" "Darwin user cache files"
+    start_section_spinner "Cleaning runtime files..."
 }
 
 # Remove old Google Chrome versions while keeping Current.

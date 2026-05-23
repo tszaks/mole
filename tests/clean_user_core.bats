@@ -44,7 +44,7 @@ EOF
     [[ "$output" != *"Trash"* ]]
 }
 
-@test "clean_user_essentials falls back when Finder trash operations time out" {
+@test "clean_user_essentials empties trash directly without Finder prompt" {
     mkdir -p "$HOME/.Trash"
     touch "$HOME/.Trash/one.tmp" "$HOME/.Trash/two.tmp"
 
@@ -55,18 +55,17 @@ source "$PROJECT_ROOT/lib/clean/user.sh"
 DRY_RUN=false
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
 safe_clean() { :; }
 note_activity() { :; }
 is_path_whitelisted() { return 1; }
 debug_log() { :; }
-run_with_timeout() {
-    local _duration="$1"
-    shift
-    if [[ "$1" == "osascript" ]]; then
-        return 124
-    fi
-    "$@"
+osascript() {
+    echo "FAIL: osascript called, should be direct delete" >&2
+    return 1
 }
+export -f osascript
 safe_remove() {
     local target="$1"
     /bin/rm -rf "$target"
@@ -80,6 +79,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Trash · emptied, 2 items"* ]]
+    [[ "$output" != *"osascript called"* ]]
 }
 
 @test "clean_user_essentials keeps Mole runtime logs while cleaning other user logs" {
