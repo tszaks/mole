@@ -21,6 +21,11 @@ fi
 # Never allow the scripted test run to trigger real sudo or Touch ID prompts.
 export MOLE_TEST_NO_AUTH=1
 
+# Tests assert deterministic ANSI escape output. Strip any NO_COLOR the
+# developer has set in their shell so the test color-escape assertions
+# match regardless of the host environment.
+unset NO_COLOR
+
 TEST_SYSTEM_STUB_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mole-test-stubs.XXXXXX")"
 TEST_GO_HELPER_DIR=""
 # shellcheck disable=SC2329  # Invoked by trap.

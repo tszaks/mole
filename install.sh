@@ -5,11 +5,20 @@
 
 set -euo pipefail
 
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+# Honor https://no-color.org: any non-empty NO_COLOR disables ANSI escapes.
+if [[ -n "${NO_COLOR:-}" ]]; then
+    GREEN=''
+    BLUE=''
+    YELLOW=''
+    RED=''
+    NC=''
+else
+    GREEN='\033[0;32m'
+    BLUE='\033[0;34m'
+    YELLOW='\033[1;33m'
+    RED='\033[0;31m'
+    NC='\033[0m'
+fi
 
 _SPINNER_PID=""
 start_line_spinner() {
