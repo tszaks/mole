@@ -183,6 +183,17 @@ readonly APPLE_UNINSTALLABLE_APPS=(
     "com.apple.Playgrounds" # Swift Playgrounds
 )
 
+# Vendor-managed security / MDM apps must use their official uninstallers.
+# Shape: vendor|bundle-prefixes-comma-separated|name-fragments-comma-separated
+readonly OFFICIAL_UNINSTALLER_RULES=(
+    "ESET|com.eset.|eset management agent,eset remote administrator agent,eset endpoint security,eset endpoint antivirus"
+    "Jamf|com.jamf.,com.jamfsoftware.|jamf connect,jamf protect,jamf self service"
+    "CrowdStrike|com.crowdstrike.|crowdstrike,falcon"
+    "SentinelOne|com.sentinelone.,com.sentinel-labs.|sentinelone,sentinel agent"
+    "GlobalProtect|com.paloaltonetworks.|globalprotect"
+    "Cisco|com.cisco.anyconnect,com.cisco.secureclient|cisco secure client,cisco anyconnect"
+)
+
 # Applications with sensitive data; protected during cleanup but removable
 readonly DATA_PROTECTED_BUNDLES=(
     # Input Methods (protected during cleanup, uninstall allowed)

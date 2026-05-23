@@ -135,6 +135,74 @@ _uninstall_match_btm_leftovers() {
     done
 }
 
+append_line() {
+    local current="$1"
+    local addition="$2"
+    [[ -z "$addition" ]] && {
+        printf '%s' "$current"
+        return 0
+    }
+    if [[ -n "$current" ]]; then
+        printf '%s\n%s' "$current" "$addition"
+    else
+        printf '%s' "$addition"
+    fi
+}
+
+discover_login_item_helper_bundle_ids() {
+    local app_path="$1"
+    local login_items_root="$app_path/Contents/Library/LoginItems"
+    [[ -d "$login_items_root" ]] || return 0
+
+    local helper info bundle_id
+    while IFS= read -r -d '' helper; do
+        info="$helper/Contents/Info.plist"
+        [[ -f "$info" ]] || continue
+        bundle_id=$(plutil -extract CFBundleIdentifier raw "$info" 2> /dev/null || true)
+        if mole_is_reverse_dns_bundle_id "$bundle_id"; then
+            printf '%s\n' "$bundle_id"
+        fi
+    done < <(find "$login_items_root" -maxdepth 1 -name "*.app" -print0 2> /dev/null || true)
+}
+
+bootout_login_item_helpers() {
+    local helper_ids="$1"
+    [[ -n "$helper_ids" ]] || return 0
+    if is_uninstall_dry_run || [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        debug_log "[DRY RUN] Would bootout login item helpers"
+        return 0
+    fi
+
+    local uid helper_id
+    uid=$(id -u)
+    while IFS= read -r helper_id; do
+        [[ -n "$helper_id" ]] || continue
+        mole_is_reverse_dns_bundle_id "$helper_id" || continue
+        run_with_timeout 5 launchctl bootout "gui/$uid/$helper_id" > /dev/null 2>&1 || true
+    done <<< "$helper_ids"
+}
+
+can_unload_launch_plist() {
+    local plist="$1"
+    [[ "$plist" == *.plist ]] || return 1
+    case "$plist" in
+        "$HOME"/Library/LaunchAgents/*.plist | /Library/LaunchAgents/*.plist | /Library/LaunchDaemons/*.plist) ;;
+        *) return 1 ;;
+    esac
+    validate_path_for_deletion "$plist" > /dev/null 2>&1
+}
+
+unload_launch_plist() {
+    local plist="$1"
+    local needs_sudo="${2:-false}"
+    can_unload_launch_plist "$plist" || return 0
+    if [[ "$needs_sudo" == "true" ]]; then
+        run_with_timeout 5 sudo launchctl unload "$plist" > /dev/null 2>&1 || true
+    else
+        run_with_timeout 5 launchctl unload "$plist" > /dev/null 2>&1 || true
+    fi
+}
+
 # Unload Launch Agents/Daemons for an app.
 # Plist deletion is owned by remove_file_list so every removal goes through the
 # same validated path list and Trash/permanent deletion mode.
@@ -160,19 +228,19 @@ stop_launch_services() {
 
     if [[ -d ~/Library/LaunchAgents ]]; then
         while IFS= read -r -d '' plist; do
-            launchctl unload "$plist" 2> /dev/null || true
+            unload_launch_plist "$plist" "false"
         done < <(find ~/Library/LaunchAgents -maxdepth 1 \( -name "${bundle_id}.plist" -o -name "${bundle_id}.*.plist" \) -print0 2> /dev/null)
     fi
 
     if [[ "$has_system_files" == "true" && "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
         if [[ -d /Library/LaunchAgents ]]; then
             while IFS= read -r -d '' plist; do
-                sudo launchctl unload "$plist" 2> /dev/null || true
+                unload_launch_plist "$plist" "true"
             done < <(find /Library/LaunchAgents -maxdepth 1 \( -name "${bundle_id}.plist" -o -name "${bundle_id}.*.plist" \) -print0 2> /dev/null)
         fi
         if [[ -d /Library/LaunchDaemons ]]; then
             while IFS= read -r -d '' plist; do
-                sudo launchctl unload "$plist" 2> /dev/null || true
+                unload_launch_plist "$plist" "true"
             done < <(find /Library/LaunchDaemons -maxdepth 1 \( -name "${bundle_id}.plist" -o -name "${bundle_id}.*.plist" \) -print0 2> /dev/null)
         fi
     fi
@@ -182,18 +250,18 @@ stop_launch_services() {
     if [[ -n "$app_path" ]]; then
         if [[ -d ~/Library/LaunchAgents ]]; then
             while IFS= read -r -d '' plist; do
-                launchctl unload "$plist" 2> /dev/null || true
+                unload_launch_plist "$plist" "false"
             done < <(grep -rlZ "$app_path" ~/Library/LaunchAgents/ 2> /dev/null || true)
         fi
         if [[ "$has_system_files" == "true" && "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
             if [[ -d /Library/LaunchAgents ]]; then
                 while IFS= read -r -d '' plist; do
-                    sudo launchctl unload "$plist" 2> /dev/null || true
+                    unload_launch_plist "$plist" "true"
                 done < <(grep -rlZ "$app_path" /Library/LaunchAgents/ 2> /dev/null || true)
             fi
             if [[ -d /Library/LaunchDaemons ]]; then
                 while IFS= read -r -d '' plist; do
-                    sudo launchctl unload "$plist" 2> /dev/null || true
+                    unload_launch_plist "$plist" "true"
                 done < <(grep -rlZ "$app_path" /Library/LaunchDaemons/ 2> /dev/null || true)
             fi
         fi
@@ -406,6 +474,7 @@ batch_uninstall_applications() {
     local -a running_apps=()
     local -a sudo_apps=()
     local -a brew_cask_apps=()
+    local -a blocked_apps=()
     local total_estimated_size=0
     local -a app_details=()
 
@@ -416,6 +485,12 @@ batch_uninstall_applications() {
     for selected_app in "${selected_apps[@]}"; do
         [[ -z "$selected_app" ]] && continue
         IFS='|' read -r _ app_path app_name bundle_id _ _ <<< "$selected_app"
+
+        local official_vendor=""
+        if official_vendor=$(official_uninstaller_vendor "$bundle_id" "$app_name" "$app_path" 2> /dev/null); then
+            blocked_apps+=("$app_name|$official_vendor")
+            continue
+        fi
 
         # Check running app by bundle executable if available
         local exec_name=""
@@ -470,6 +545,12 @@ batch_uninstall_applications() {
         local system_files=$(find_app_system_files "$bundle_id" "$app_name" || true)
         local diag_system
         diag_system=$(get_diagnostic_report_paths_for_app "$app_path" "$app_name" "/Library/Logs/DiagnosticReports" || true)
+        local review_only_system_files="$system_files"
+        review_only_system_files=$(append_line "$review_only_system_files" "$diag_system")
+        # System-level remnants are review-only in the CLI preview. The regular
+        # confirmation removes the app bundle and user-owned leftovers only.
+        system_files=""
+        diag_system=""
         # shellcheck disable=SC2128
         local system_size_kb=$(calculate_total_size "$system_files" || echo "0")
         local diag_system_size_kb=$(calculate_total_size "$diag_system" || echo "0")
@@ -503,9 +584,28 @@ batch_uninstall_applications() {
         encoded_system_files=$(printf '%s' "$system_files" | base64 | tr -d '\n' || echo "")
         local encoded_diag_system
         encoded_diag_system=$(printf '%s' "$diag_system" | base64 | tr -d '\n' || echo "")
-        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system|$has_local_network_usage")
+        local encoded_review_system
+        encoded_review_system=$(printf '%s' "$review_only_system_files" | base64 | tr -d '\n' || echo "")
+        local login_item_helpers
+        login_item_helpers=$(discover_login_item_helper_bundle_ids "$app_path" || true)
+        local encoded_login_item_helpers
+        encoded_login_item_helpers=$(printf '%s' "$login_item_helpers" | base64 | tr -d '\n' || echo "")
+        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system|$has_local_network_usage|$encoded_review_system|$encoded_login_item_helpers")
     done
     if [[ -t 1 ]]; then stop_inline_spinner; fi
+
+    if [[ ${#blocked_apps[@]} -gt 0 ]]; then
+        local blocked_detail blocked_name blocked_vendor
+        for blocked_detail in "${blocked_apps[@]}"; do
+            IFS='|' read -r blocked_name blocked_vendor <<< "$blocked_detail"
+            log_warning "$blocked_name requires the official $blocked_vendor uninstaller"
+        done
+    fi
+
+    if [[ ${#app_details[@]} -eq 0 ]]; then
+        _restore_uninstall_traps
+        return 1
+    fi
 
     local size_display=$(bytes_to_human "$((total_estimated_size * 1024))")
 
@@ -522,7 +622,7 @@ batch_uninstall_applications() {
     echo ""
 
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system has_local_network_usage <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system has_local_network_usage encoded_review_system encoded_login_item_helpers <<< "$detail"
         local app_size_display=$(bytes_to_human "$((total_kb * 1024))")
 
         local brew_tag=""
@@ -534,6 +634,8 @@ batch_uninstall_applications() {
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local diag_system_display
         diag_system_display=$(decode_file_list "$encoded_diag_system" "$app_name")
+        local review_system_display
+        review_system_display=$(decode_file_list "$encoded_review_system" "$app_name")
         [[ -n "$diag_system_display" ]] && system_files=$(
             [[ -n "$system_files" ]] && echo "$system_files"
             echo "$diag_system_display"
@@ -554,10 +656,16 @@ batch_uninstall_applications() {
                 echo -e "  ${BLUE}${ICON_WARNING}${NC} System: $file"
             fi
         done <<< "$system_files"
+
+        while IFS= read -r file; do
+            if [[ -n "$file" && -e "$file" ]]; then
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Review only: $file"
+            fi
+        done <<< "$review_system_display"
     done
 
     # Confirmation before requesting sudo.
-    local app_total=${#selected_apps[@]}
+    local app_total=${#app_details[@]}
     local app_text="app"
     [[ $app_total -gt 1 ]] && app_text="apps"
 
@@ -619,6 +727,7 @@ batch_uninstall_applications() {
     local brew_apps_removed=0 # Track successful brew uninstalls for silent autoremove
     local -a failed_items=()
     local -a success_items=()
+    local -a success_dock_targets=()
     local -a local_network_warning_apps=()
     local -a system_extension_warning_apps=()
     # Apps whose process was still running after the kill ladder. We do not
@@ -629,10 +738,11 @@ batch_uninstall_applications() {
     local current_index=0
     for detail in "${app_details[@]}"; do
         current_index=$((current_index + 1))
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system has_local_network_usage <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system has_local_network_usage encoded_review_system encoded_login_item_helpers <<< "$detail"
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local diag_system=$(decode_file_list "$encoded_diag_system" "$app_name")
+        local login_item_helpers=$(decode_file_list "$encoded_login_item_helpers" "$app_name")
         local reason=""
         local suggestion=""
 
@@ -839,6 +949,8 @@ batch_uninstall_applications() {
                 fi
             fi
 
+            bootout_login_item_helpers "$login_item_helpers"
+
             # All per-app side effects done; tear the spinner down before
             # any echo so the success line does not collide with the spinner.
             [[ -t 1 ]] && stop_inline_spinner
@@ -867,6 +979,7 @@ batch_uninstall_applications() {
             files_cleaned=$((files_cleaned + 1))
             total_items=$((total_items + 1))
             success_items+=("$app_path")
+            success_dock_targets+=("$app_path|$bundle_id")
             if [[ "$has_local_network_usage" == "true" ]]; then
                 local_network_warning_apps+=("$app_name")
             fi
@@ -1096,12 +1209,12 @@ batch_uninstall_applications() {
     fi
 
     # Clean up Dock entries for uninstalled apps.
-    if [[ $success_count -gt 0 && ${#success_items[@]} -gt 0 ]]; then
+    if [[ $success_count -gt 0 && ${#success_dock_targets[@]} -gt 0 ]]; then
         if is_uninstall_dry_run; then
             log_info "[DRY RUN] Would refresh LaunchServices and update Dock entries"
         else
             (
-                remove_apps_from_dock "${success_items[@]}" > /dev/null 2>&1 || true
+                remove_apps_from_dock "${success_dock_targets[@]}" > /dev/null 2>&1 || true
                 refresh_launch_services_after_uninstall > /dev/null 2>&1 || true
             ) &
             disown $! 2> /dev/null || true

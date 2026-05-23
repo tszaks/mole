@@ -225,6 +225,83 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "batch_uninstall_applications blocks official-uninstaller apps" {
+	mkdir -p "$HOME/Applications/Falcon.app"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+mole_delete() { echo "MOLE_DELETE:$1"; return 0; }
+
+selected_apps=("0|$HOME/Applications/Falcon.app|Falcon|com.crowdstrike.falcon.UserAgent|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+if batch_uninstall_applications; then
+	exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"requires the official CrowdStrike uninstaller"* ]]
+	[[ "$output" != *"MOLE_DELETE"* ]]
+}
+
+@test "batch_uninstall_applications keeps system remnants review-only" {
+	mkdir -p "$HOME/Applications/ReviewOnly.app" "$HOME/system"
+	touch "$HOME/system/com.example.review.helper"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+get_file_owner() { whoami; }
+get_path_size_kb() { echo "1"; }
+calculate_total_size() { echo "1"; }
+find_app_files() { :; }
+find_app_system_files() { printf '%s\n' "$HOME/system/com.example.review.helper"; }
+get_diagnostic_report_paths_for_app() { :; }
+remove_file_list() {
+	printf 'REMOVE_LIST:%s:%s\n' "${2:-false}" "$1" >> "$HOME/remove.log"
+	return 0
+}
+mole_delete() {
+	printf 'MOLE_DELETE:%s:%s\n' "$2" "$1" >> "$HOME/remove.log"
+	rm -rf "$1"
+	return 0
+}
+
+selected_apps=("0|$HOME/Applications/ReviewOnly.app|ReviewOnly|com.example.review|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications > "$HOME/output.log" 2>&1
+
+grep -q "Review only: $HOME/system/com.example.review.helper" "$HOME/output.log"
+! grep -q "$HOME/system/com.example.review.helper" "$HOME/remove.log"
+[[ -e "$HOME/system/com.example.review.helper" ]]
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "batch_uninstall_applications dry-run does not report expected leftovers as failures" {
 	create_app_artifacts
 
@@ -553,6 +630,10 @@ source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 trace="$HOME/trace.log"
 launchctl() {
 	printf 'launchctl %s\n' "$*" >> "$trace"
+}
+run_with_timeout() {
+	shift
+	"$@"
 }
 safe_remove() {
 	printf 'safe_remove %s\n' "$*" >> "$trace"

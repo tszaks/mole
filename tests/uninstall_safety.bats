@@ -89,6 +89,83 @@ EOF
 	[[ "$result" == *"/.docker/buildx"* ]] || { echo "missed safe buildx cache"; exit 1; }
 }
 
+@test "official uninstaller vendor blocks managed security apps" {
+	result="$(
+		HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+official_uninstaller_vendor "com.crowdstrike.falcon.UserAgent" "Falcon" "/Applications/Falcon.app"
+official_uninstaller_vendor "com.jamf.management.Jamf" "Jamf Connect" "/Applications/Jamf Connect.app"
+EOF
+	)"
+
+	[[ "$result" == *"CrowdStrike"* ]] || { echo "missed CrowdStrike"; exit 1; }
+	[[ "$result" == *"Jamf"* ]] || { echo "missed Jamf"; exit 1; }
+}
+
+@test "receipt payload allowlist rejects broad system roots" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+receipt_payload_path_is_allowlisted "/Library/LaunchAgents/com.example.foo.helper.plist" "com.example.foo"
+receipt_payload_path_is_allowlisted "/Library/PrivilegedHelperTools/com.example.foo.helper" "com.example.foo"
+! receipt_payload_path_is_allowlisted "/Library/Application Support/Foo" "com.example.foo"
+! receipt_payload_path_is_allowlisted "/Applications/Foo.app" "com.example.foo"
+! receipt_payload_path_is_allowlisted "/usr/local/bin/foo" "com.example.foo"
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "launch plist unload validates path and uses timeout" {
+	mkdir -p "$HOME/Library/LaunchAgents"
+	touch "$HOME/Library/LaunchAgents/com.example.foo.plist"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+run_with_timeout() {
+	printf '%s\n' "$*" > "$HOME/launchctl-call.log"
+	return 0
+}
+
+unload_launch_plist "$HOME/Library/LaunchAgents/com.example.foo.plist" "false"
+grep -q "5 launchctl unload $HOME/Library/LaunchAgents/com.example.foo.plist" "$HOME/launchctl-call.log"
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "login item helper discovery reads embedded helper bundle ids" {
+	app="$HOME/Applications/Carrier.app"
+	helper="$app/Contents/Library/LoginItems/Carrier Helper.app/Contents"
+	mkdir -p "$helper"
+	cat > "$helper/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.carrier.helper</string>
+</dict>
+</plist>
+PLIST
+
+	result="$(
+		HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+discover_login_item_helper_bundle_ids "$HOME/Applications/Carrier.app"
+EOF
+	)"
+
+	[[ "$result" == "com.example.carrier.helper" ]]
+}
+
 @test "find_app_files preserves Xcode user data and only collects regenerable caches" {
 	mkdir -p "$HOME/Library/Developer/Xcode/DerivedData/MyApp-abc/Build"
 	mkdir -p "$HOME/Library/Developer/Xcode/iOS DeviceSupport/17.0"

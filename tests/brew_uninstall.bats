@@ -87,6 +87,37 @@ EOF
     [[ "$result" == "not_found" ]]
 }
 
+@test "brew list fallback requires brew info to mention the app" {
+    mkdir -p "$HOME/Applications/Owned.app" "$HOME/Applications/Other.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/brew.sh"
+
+brew() {
+    case "$*" in
+        "list --cask")
+            printf '%s\n' "owned"
+            ;;
+        "info --cask owned")
+            printf '%s\n' "app \"/Applications/Owned.app\""
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+export -f brew
+
+owned=$(_detect_cask_via_brew_list "$HOME/Applications/Owned.app" "Owned.app")
+[[ "$owned" == "owned" ]]
+! _detect_cask_via_brew_list "$HOME/Applications/Other.app" "Other.app"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "batch_uninstall_applications uses brew uninstall for casks (mocked)" {
     # Setup fake app
     local app_bundle="$HOME/Applications/BrewApp.app"

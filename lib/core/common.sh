@@ -173,7 +173,13 @@ remove_apps_from_dock() {
     local changed=false
     for target in "${targets[@]}"; do
         local app_path="$target"
+        local bundle_id=""
         local full_path=""
+
+        if [[ "$target" == *"|"* ]]; then
+            app_path="${target%%|*}"
+            bundle_id="${target#*|}"
+        fi
 
         if [[ "$app_path" =~ [[:cntrl:]] ]]; then
             debug_log "Skipping dock removal for path with control chars: $app_path"
@@ -197,30 +203,31 @@ remove_apps_from_dock() {
         [[ -z "$full_path" ]] && continue
 
         local encoded_path="${full_path// /%20}"
+        local raw_path="$full_path"
 
-        # Find the index of the app in persistent-apps
-        local i=0
-        while true; do
-            local label
-            label=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-label" "$plist" 2> /dev/null || echo "")
-            [[ -z "$label" ]] && break
+        local dock_array
+        for dock_array in persistent-apps persistent-others recent-apps; do
+            local i=0
+            while true; do
+                local tile_type
+                tile_type=$(/usr/libexec/PlistBuddy -c "Print :$dock_array:$i:tile-type" "$plist" 2> /dev/null || echo "")
+                [[ -z "$tile_type" ]] && break
 
-            local url
-            url=$(/usr/libexec/PlistBuddy -c "Print :persistent-apps:$i:tile-data:file-data:_CFURLString" "$plist" 2> /dev/null || echo "")
-            [[ -z "$url" ]] && {
-                i=$((i + 1))
-                continue
-            }
+                local url dock_bundle_id
+                url=$(/usr/libexec/PlistBuddy -c "Print :$dock_array:$i:tile-data:file-data:_CFURLString" "$plist" 2> /dev/null || echo "")
+                dock_bundle_id=$(/usr/libexec/PlistBuddy -c "Print :$dock_array:$i:tile-data:bundle-identifier" "$plist" 2> /dev/null || echo "")
 
-            # Match by URL-encoded path to handle spaces in app names
-            if [[ -n "$encoded_path" && "$url" == *"$encoded_path"* ]]; then
-                if /usr/libexec/PlistBuddy -c "Delete :persistent-apps:$i" "$plist" 2> /dev/null; then
-                    changed=true
-                    # After deletion, current index i now points to the next item
-                    continue
+                if { [[ -n "$bundle_id" && "$dock_bundle_id" == "$bundle_id" ]] ||
+                    [[ -n "$encoded_path" && "$url" == *"$encoded_path"* ]] ||
+                    [[ -n "$raw_path" && "$url" == *"$raw_path"* ]]; }; then
+                    if /usr/libexec/PlistBuddy -c "Delete :$dock_array:$i" "$plist" 2> /dev/null; then
+                        changed=true
+                        # After deletion, current index i now points to the next item.
+                        continue
+                    fi
                 fi
-            fi
-            i=$((i + 1))
+                i=$((i + 1))
+            done
         done
     done
 

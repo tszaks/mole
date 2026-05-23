@@ -121,6 +121,42 @@ should_protect_from_uninstall() {
     return 1
 }
 
+# Print the vendor name when an app must be removed through its official
+# uninstaller instead of Mole's generic Trash/delete path.
+official_uninstaller_vendor() {
+    local bundle_id="${1:-}"
+    local display_name="${2:-}"
+    local app_path="${3:-}"
+    local normalized_bundle normalized_name normalized_path
+    normalized_bundle=$(printf '%s' "$bundle_id" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+    normalized_name=$(printf '%s' "$display_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+    normalized_path=$(basename "${app_path:-}" .app | LC_ALL=C tr '[:upper:]' '[:lower:]')
+
+    local rule vendor prefixes fragments prefix fragment
+    local -a _prefixes _fragments
+    for rule in "${OFFICIAL_UNINSTALLER_RULES[@]}"; do
+        IFS='|' read -r vendor prefixes fragments <<< "$rule"
+        IFS=',' read -r -a _prefixes <<< "$prefixes"
+        for prefix in "${_prefixes[@]}"; do
+            [[ -n "$prefix" && "$normalized_bundle" == "$prefix"* ]] && {
+                printf '%s\n' "$vendor"
+                return 0
+            }
+        done
+
+        IFS=',' read -r -a _fragments <<< "$fragments"
+        for fragment in "${_fragments[@]}"; do
+            if [[ -n "$fragment" ]] &&
+                { [[ "$normalized_name" == *"$fragment"* ]] || [[ "$normalized_path" == *"$fragment"* ]]; }; then
+                printf '%s\n' "$vendor"
+                return 0
+            fi
+        done
+    done
+
+    return 1
+}
+
 # Check if application data should be protected during cleanup
 should_protect_data() {
     local bundle_id="$1"
@@ -1212,31 +1248,7 @@ find_app_receipt_files() {
                 # Normalize path (remove duplicate slashes)
                 clean_path=$(tr -s "/" <<< "$clean_path")
 
-                # ------------------------------------------------------------------------
-                # Safety check: restrict removal to trusted paths
-                # ------------------------------------------------------------------------
-                local is_safe=false
-
-                # Whitelisted prefixes (exclude /Users, /usr, /opt)
-                case "$clean_path" in
-                    /Applications/*) is_safe=true ;;
-                    /Library/Application\ Support/*) is_safe=true ;;
-                    /Library/Caches/*) is_safe=true ;;
-                    /Library/Logs/*) is_safe=true ;;
-                    /Library/Preferences/*) is_safe=true ;;
-                    /Library/LaunchAgents/*) is_safe=true ;;
-                    /Library/LaunchDaemons/*) is_safe=true ;;
-                    /Library/PrivilegedHelperTools/*) is_safe=true ;;
-                    /Library/Extensions/*) is_safe=false ;;
-                    *) is_safe=false ;;
-                esac
-
-                # Hard blocks
-                case "$clean_path" in
-                    /System/* | /usr/bin/* | /usr/lib/* | /bin/* | /sbin/* | /private/*) is_safe=false ;;
-                esac
-
-                if [[ "$is_safe" == "true" && -e "$clean_path" ]]; then
+                if receipt_payload_path_is_allowlisted "$clean_path" "$bundle_id" && [[ -e "$clean_path" ]]; then
                     # Skip top-level directories
                     if [[ "$clean_path" == "/Applications" || "$clean_path" == "/Library" ]]; then
                         continue
@@ -1257,6 +1269,33 @@ find_app_receipt_files() {
     if [[ ${#receipt_files[@]} -gt 0 ]]; then
         printf '%s\n' "${receipt_files[@]}"
     fi
+}
+
+receipt_payload_path_is_allowlisted() {
+    local clean_path="$1"
+    local bundle_id="$2"
+    local base
+    base=$(basename "$clean_path")
+
+    [[ -n "$clean_path" && -n "$bundle_id" ]] || return 1
+    mole_is_reverse_dns_bundle_id "$bundle_id" || return 1
+
+    case "$clean_path" in
+        /Library/LaunchAgents/*.plist | /Library/LaunchDaemons/*.plist)
+            [[ "$base" == "$bundle_id.plist" || "$base" == "$bundle_id."*.plist ]]
+            return
+            ;;
+        /Library/PrivilegedHelperTools/*)
+            mole_name_starts_with_bundle_id_boundary "$base" "$bundle_id"
+            return
+            ;;
+        /private/var/db/receipts/*)
+            [[ "$base" == "$bundle_id.bom" || "$base" == "$bundle_id.plist" || "$base" == "$bundle_id."* ]]
+            return
+            ;;
+    esac
+
+    return 1
 }
 
 # Terminate a running application during uninstall.
