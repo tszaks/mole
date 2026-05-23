@@ -314,8 +314,8 @@ echo "3. Running Go tests..."
 if command -v go > /dev/null 2>&1; then
     mkdir -p "$GO_TEST_CACHE"
     if GOCACHE="$GO_TEST_CACHE" go build ./... > /dev/null 2>&1 &&
-        GOCACHE="$GO_TEST_CACHE" go vet ./cmd/... > /dev/null 2>&1 &&
-        GOCACHE="$GO_TEST_CACHE" go test ./cmd/... > /dev/null 2>&1; then
+        GOCACHE="$GO_TEST_CACHE" go vet ./... > /dev/null 2>&1 &&
+        GOCACHE="$GO_TEST_CACHE" go test ./... > /dev/null 2>&1; then
         printf "${GREEN}${ICON_SUCCESS} Go tests passed${NC}\n"
     else
         printf "${RED}${ICON_ERROR} Go tests failed${NC}\n"

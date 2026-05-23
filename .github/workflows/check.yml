@@ -30,7 +30,7 @@ jobs:
             ${{ runner.os }}-brew-quality-v2-
 
       - name: Install tools
-        run: brew install shfmt shellcheck golangci-lint
+        run: brew install shfmt shellcheck
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v5
@@ -55,7 +55,7 @@ jobs:
       - name: Check Go formatting (goimports -l)
         run: |
           export PATH=$(go env GOPATH)/bin:$PATH
-          UNFORMATTED=$(goimports -l -local github.com/tw93/Mole ./cmd)
+          UNFORMATTED=$(goimports -l -local github.com/tw93/mole ./cmd ./internal)
           if [[ -n "$UNFORMATTED" ]]; then
             echo "::error::Go files are not formatted:"
             echo "$UNFORMATTED"
@@ -87,12 +87,17 @@ jobs:
             ${{ runner.os }}-brew-quality-v2-
 
       - name: Install tools
-        run: brew install shfmt shellcheck golangci-lint
+        run: brew install shfmt shellcheck
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v5
         with:
           go-version-file: go.mod
+
+      - name: Install golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Run check script
         run: ./scripts/check.sh --no-format

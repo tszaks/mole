@@ -52,7 +52,7 @@ test:
 	MOLE_TEST_NO_AUTH=1 ./scripts/test.sh
 
 test-go:
-	$(GO) test ./cmd/...
+	$(GO) test ./...
 
 verify: check test-go
 
