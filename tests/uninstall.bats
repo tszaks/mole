@@ -1595,3 +1595,59 @@ INNER
 	[[ "$output" == *'"uninstall_name": "visual-studio-code"'* ]]
 	[[ "$output" == *'"source": "Homebrew"'* ]]
 }
+
+# Regression tests for #940: detect Background Items left behind after uninstall.
+_btm_helper_runner() {
+	HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+		BTM_DUMP="$1" DETAIL="$2" SUCCESS_PATH="$3" \
+		bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+_uninstall_match_btm_leftovers "$BTM_DUMP" "$DETAIL" -- "$SUCCESS_PATH"
+EOF
+}
+
+@test "_uninstall_match_btm_leftovers reports bundle id still in BTM dump" {
+	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
+	local dump=$'Record #1\n  name: Paste\n  bundleID: com.wiheads.paste\n  url: file:///Applications/Paste.app/'
+
+	result="$(_btm_helper_runner "$dump" "$detail" "/Applications/Paste.app")"
+
+	[ "$result" = "Paste" ]
+}
+
+@test "_uninstall_match_btm_leftovers stays silent when bundle id is absent" {
+	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
+	local dump=$'Record #1\n  name: SomethingElse\n  bundleID: com.example.other'
+
+	result="$(_btm_helper_runner "$dump" "$detail" "/Applications/Paste.app")"
+
+	[ -z "$result" ]
+}
+
+@test "_uninstall_match_btm_leftovers skips apps that were not successfully removed" {
+	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
+	local dump=$'Record #1\n  bundleID: com.wiheads.paste'
+
+	result="$(_btm_helper_runner "$dump" "$detail" "/Applications/OtherApp.app")"
+
+	[ -z "$result" ]
+}
+
+@test "_uninstall_match_btm_leftovers ignores unknown bundle id" {
+	local detail="Paste|/Applications/Paste.app|unknown|0|||false|false|false||||"
+	local dump=$'Record #1\n  bundleID: unknown'
+
+	result="$(_btm_helper_runner "$dump" "$detail" "/Applications/Paste.app")"
+
+	[ -z "$result" ]
+}
+
+@test "_uninstall_match_btm_leftovers returns empty for empty dump" {
+	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
+
+	result="$(_btm_helper_runner "" "$detail" "/Applications/Paste.app")"
+
+	[ -z "$result" ]
+}

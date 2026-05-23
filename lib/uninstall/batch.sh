@@ -92,6 +92,49 @@ decode_file_list() {
 }
 # Note: find_app_files() is in lib/core/app_protection.sh, calculate_total_size() is in lib/core/file_ops.sh.
 
+# Match successfully-uninstalled apps against an sfltool dumpbtm output and emit
+# the names of apps that still have a Background Items entry registered.
+# Args: <btm_dump> <app_detail>... -- <success_path>...
+# app_detail follows the pipe-encoded shape used inside batch_uninstall_applications.
+_uninstall_match_btm_leftovers() {
+    local btm_dump="$1"
+    shift
+
+    local -a details=()
+    local -a success_paths=()
+    local sep_seen=false
+    local arg
+    for arg in "$@"; do
+        if [[ "$sep_seen" == false ]]; then
+            if [[ "$arg" == "--" ]]; then
+                sep_seen=true
+            else
+                details+=("$arg")
+            fi
+        else
+            success_paths+=("$arg")
+        fi
+    done
+
+    [[ -z "$btm_dump" ]] && return 0
+    [[ ${#details[@]} -eq 0 || ${#success_paths[@]} -eq 0 ]] && return 0
+
+    local detail app_name app_path bundle_id sp matched
+    for detail in "${details[@]}"; do
+        IFS='|' read -r app_name app_path bundle_id _ _ _ _ _ _ _ _ _ <<< "$detail"
+        matched=false
+        for sp in "${success_paths[@]}"; do
+            [[ "$sp" == "$app_path" ]] && matched=true && break
+        done
+        [[ "$matched" != true ]] && continue
+        [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && continue
+
+        if grep -qF "$bundle_id" <<< "$btm_dump"; then
+            printf '%s\n' "$app_name"
+        fi
+    done
+}
+
 # Unload Launch Agents/Daemons for an app.
 # Plist deletion is owned by remove_file_list so every removal goes through the
 # same validated path list and Trash/permanent deletion mode.
@@ -862,6 +905,26 @@ batch_uninstall_applications() {
         fi
     done
 
+    # Detect stale Background Items entries (System Settings > Login Items & Extensions).
+    # Modern SMAppService helpers are not removable via osascript and Apple has no
+    # public CLI to delete individual BTM records, so we only detect + warn. Single
+    # dumpbtm call per batch, gated by safety env vars and dry-run.
+    local -a background_items_warning_apps=()
+    local _btm_dump=""
+    if [[ ${#success_items[@]} -gt 0 ]] &&
+        ! is_uninstall_dry_run &&
+        [[ "${MOLE_TEST_NO_AUTH:-0}" != "1" && "${MOLE_TEST_MODE:-0}" != "1" ]] &&
+        command -v sfltool > /dev/null 2>&1; then
+        _btm_dump=$(run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" sfltool dumpbtm 2> /dev/null || true)
+    fi
+
+    if [[ -n "$_btm_dump" ]]; then
+        local _bg_line
+        while IFS= read -r _bg_line; do
+            [[ -n "$_bg_line" ]] && background_items_warning_apps+=("$_bg_line")
+        done < <(_uninstall_match_btm_leftovers "$_btm_dump" "${app_details[@]}" -- "${success_items[@]}")
+    fi
+
     # Summary
     local freed_display
     freed_display=$(bytes_to_human "$((total_size_freed * 1024))")
@@ -985,6 +1048,18 @@ batch_uninstall_applications() {
 
         summary_details+=("${ICON_REVIEW} System extensions may remain after removal: ${YELLOW}${ext_list}${NC}")
         summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Check ${GRAY}System Settings > General > Login Items & Extensions${NC} to remove leftover extensions")
+    fi
+
+    if [[ ${#background_items_warning_apps[@]} -gt 0 ]]; then
+        local bg_list=""
+        local idx
+        for ((idx = 0; idx < ${#background_items_warning_apps[@]}; idx++)); do
+            [[ $idx -gt 0 ]] && bg_list+=", "
+            bg_list+="${background_items_warning_apps[idx]}"
+        done
+
+        summary_details+=("${ICON_REVIEW} Background items still registered: ${YELLOW}${bg_list}${NC}")
+        summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Open ${GRAY}System Settings > General > Login Items & Extensions${NC} and toggle the entry off to clear it")
     fi
 
     if [[ ${#running_at_uninstall_apps[@]} -gt 0 ]]; then
