@@ -1062,6 +1062,7 @@ func TestRenderMemoryCardHidesSwapSizeOnNarrowWidth(t *testing.T) {
 	card := renderMemoryCard(MemoryStatus{
 		Used:        8 << 30,
 		Total:       16 << 30,
+		Available:   8 << 30,
 		UsedPercent: 50.0,
 		SwapUsed:    482,
 		SwapTotal:   1000,
@@ -1081,6 +1082,7 @@ func TestRenderMemoryCardShowsSwapSizeOnWideWidth(t *testing.T) {
 	card := renderMemoryCard(MemoryStatus{
 		Used:        8 << 30,
 		Total:       16 << 30,
+		Available:   8 << 30,
 		UsedPercent: 50.0,
 		SwapUsed:    482,
 		SwapTotal:   1000,
@@ -1093,6 +1095,23 @@ func TestRenderMemoryCardShowsSwapSizeOnWideWidth(t *testing.T) {
 	swapLine := stripANSI(card.lines[2])
 	if !strings.Contains(swapLine, "/") {
 		t.Fatalf("renderMemoryCard() wide width should include swap size, got %q", swapLine)
+	}
+}
+
+func TestRenderMemoryCardUsesCollectedAvailableMemory(t *testing.T) {
+	card := renderMemoryCard(MemoryStatus{
+		Used:        12 << 30,
+		Total:       16 << 30,
+		Available:   9 << 30,
+		UsedPercent: 75.0,
+	}, 60)
+
+	plain := stripANSI(strings.Join(card.lines, "\n"))
+	if !strings.Contains(plain, "Free") || !strings.Contains(plain, "56.2%") {
+		t.Fatalf("renderMemoryCard() should derive free percent from Available, got %q", plain)
+	}
+	if !strings.Contains(plain, "Avail  9.0 GB") {
+		t.Fatalf("renderMemoryCard() should render collected Available memory, got %q", plain)
 	}
 }
 

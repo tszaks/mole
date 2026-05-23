@@ -332,7 +332,10 @@ func renderMemoryCard(mem MemoryStatus, cardWidth int) cardData {
 	lines = append(lines, fmt.Sprintf("Used   %s  %5.1f%%", progressBar(mem.UsedPercent), mem.UsedPercent))
 
 	// Line 2: Free
-	freePercent := 100 - mem.UsedPercent
+	var freePercent float64
+	if mem.Total > 0 {
+		freePercent = (float64(mem.Available) / float64(mem.Total)) * 100.0
+	}
 	lines = append(lines, fmt.Sprintf("Free   %s  %5.1f%%", progressBar(freePercent), freePercent))
 
 	if hasSwap {
@@ -356,7 +359,7 @@ func renderMemoryCard(mem MemoryStatus, cardWidth int) cardData {
 		}
 
 		lines = append(lines, fmt.Sprintf("Total  %s / %s", humanBytes(mem.Used), humanBytes(mem.Total)))
-		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(mem.Total-mem.Used))) // Simplified avail logic for consistency
+		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(mem.Available)))
 	} else {
 		// Layout without Swap:
 		// 3. Total
@@ -367,13 +370,7 @@ func renderMemoryCard(mem MemoryStatus, cardWidth int) cardData {
 		if mem.Cached > 0 {
 			lines = append(lines, fmt.Sprintf("Cached %s", humanBytes(mem.Cached)))
 		}
-		// Calculate available if not provided directly, or use Total-Used as proxy if needed,
-		// but typically available is more nuanced. Using what we have.
-		// Re-calculating available based on logic if needed, but mem.Total - mem.Used is often "Avail"
-		// in simple terms for this view or we could use the passed definition.
-		// Original code calculated: available := mem.Total - mem.Used
-		available := mem.Total - mem.Used
-		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(available)))
+		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(mem.Available)))
 	}
 	// Memory pressure status.
 	if mem.Pressure != "" {

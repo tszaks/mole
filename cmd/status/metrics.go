@@ -134,6 +134,7 @@ type GPUStatus struct {
 type MemoryStatus struct {
 	Used        uint64  `json:"used"`
 	Total       uint64  `json:"total"`
+	Available   uint64  `json:"available"`
 	UsedPercent float64 `json:"used_percent"`
 	SwapUsed    uint64  `json:"swap_used"`
 	SwapTotal   uint64  `json:"swap_total"`
