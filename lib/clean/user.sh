@@ -232,6 +232,14 @@ _clean_darwin_user_runtime_dir() {
     local found_any=false
     local item
 
+    # Per-item should_protect_path / is_path_whitelisted are intentionally
+    # skipped here. _darwin_user_runtime_dir_is_safe has already vetted the
+    # parent (must be DARWIN_USER_TEMP_DIR or DARWIN_USER_CACHE_DIR, owned by
+    # the current UID), find narrows to -user "$current_uid" -mtime +N and
+    # excludes state files (sqlite/db/plist), and safe_remove still routes
+    # through validate_path_for_deletion. For 1500 capped items that drops
+    # ~3000 per-item subshells; on a 20k-item TMPDIR this is the difference
+    # between a 30s stall and an under-3s pass.
     while IFS= read -r -d '' item; do
         [[ -e "$item" && ! -L "$item" ]] || continue
         case "$item" in
@@ -239,9 +247,6 @@ _clean_darwin_user_runtime_dir() {
                 continue
                 ;;
         esac
-        if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
-            continue
-        fi
 
         local item_size_kb=0
         item_size_kb=$(get_path_size_kb "$item" 2> /dev/null || echo "0")
@@ -267,9 +272,6 @@ _clean_darwin_user_runtime_dir() {
     if [[ "$count" -lt "$max_items" ]]; then
         while IFS= read -r -d '' item; do
             [[ -d "$item" && ! -L "$item" ]] || continue
-            if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
-                continue
-            fi
             if [[ "${DRY_RUN:-false}" == "true" ]] || safe_remove "$item" true "0" > /dev/null 2>&1; then
                 found_any=true
                 count=$((count + 1))
