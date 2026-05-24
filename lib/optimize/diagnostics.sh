@@ -148,6 +148,12 @@ opt_diag_parse_image_mount_pairs() {
     local info="${1:-}"
     awk '
     function extract_mount(line) {
+        # Only /dev/disk* lines list real mount points. Other fields like
+        # image-alias / icon-path / shadow-path may contain absolute paths
+        # but are not mounts and previously produced phantom detach offers.
+        if (line !~ /^\/dev\/disk/) {
+            return ""
+        }
         if (line ~ /[[:space:]]\/.*/) {
             sub(/^.*[[:space:]]\//, "/", line)
             return line

@@ -980,3 +980,66 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"ok"* ]]
 }
+
+@test "opt_diag_parse_image_mount_pairs ignores image-alias/icon-path lines (#960)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/diagnostics.sh"
+
+# Sample hdiutil info block reproducing the issue from #960. The image-alias
+# line carries an absolute path identical to image-path, which the previous
+# extract_mount regex incorrectly accepted as a mount point. Only the
+# /dev/disk* line is a real mount.
+sample=$(cat <<'HDIUTIL'
+================================================
+image-path                 : /Volumes/EXT3/Mail/TB.dmg
+image-alias                : /Volumes/EXT3/Mail/TB.dmg
+shadow-path                : <none>
+icon-path                  : /System/Library/PrivateFrameworks/DiskImages.framework/Resources/CDiskImage.icns
+image-type                 : read-only
+/dev/disk6                 Apple_partition_scheme
+/dev/disk6s1               Apple_partition_map
+/dev/disk6s2               Apple_HFS                       /Volumes/mail
+HDIUTIL
+)
+
+opt_diag_parse_image_mount_pairs "$sample"
+EOF
+
+	[ "$status" -eq 0 ]
+	# Expect exactly one pair: image=/Volumes/EXT3/Mail/TB.dmg mount=/Volumes/mail
+	line_count=$(printf '%s\n' "$output" | awk 'NF' | wc -l | tr -d ' ')
+	[ "$line_count" = "1" ]
+	[[ "$output" == *"/Volumes/EXT3/Mail/TB.dmg"$'\t'"/Volumes/mail"* ]]
+	# Critical regression guard: image-alias line must not surface as a mount.
+	[[ "$output" != *"/Volumes/EXT3/Mail/TB.dmg"$'\t'"/Volumes/EXT3/Mail/TB.dmg"* ]]
+}
+
+@test "opt_diag_parse_image_mount_pairs handles multiple blocks" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/diagnostics.sh"
+
+sample=$(cat <<'HDIUTIL'
+================================================
+image-path                 : /Users/test/Sample.dmg
+image-alias                : /Users/test/Sample.dmg
+/dev/disk5s2               Apple_HFS                       /Volumes/Sample
+================================================
+image-path                 : /Library/Developer/CoreSimulator/Volumes/iOS_17.dmg
+image-alias                : /Library/Developer/CoreSimulator/Volumes/iOS_17.dmg
+/dev/disk7s1               Apple_APFS                      /Library/Developer/CoreSimulator/Volumes/iOS_17.0
+HDIUTIL
+)
+
+opt_diag_parse_image_mount_pairs "$sample" | awk 'NF' | sort
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"/Users/test/Sample.dmg"$'\t'"/Volumes/Sample"* ]]
+	[[ "$output" == *"/Library/Developer/CoreSimulator/Volumes/iOS_17.dmg"$'\t'"/Library/Developer/CoreSimulator/Volumes/iOS_17.0"* ]]
+	line_count=$(printf '%s\n' "$output" | awk 'NF' | wc -l | tr -d ' ')
+	[ "$line_count" = "2" ]
+}
