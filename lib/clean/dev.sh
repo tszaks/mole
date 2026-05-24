@@ -1433,6 +1433,20 @@ clean_codex_cli() {
     safe_clean "$codex_root/log"/* "Codex CLI logs"
 }
 
+# Shared Chromium Default profile caches that are safe to regenerate.
+clean_chromium_default_caches() {
+    local profile_root="$1"
+    local label="$2"
+
+    [[ -d "$profile_root" ]] || return 0
+
+    safe_clean "$profile_root/Default/Cache"/* "$label browser cache"
+    safe_clean "$profile_root/Default/Code Cache"/* "$label code cache"
+    safe_clean "$profile_root/Default/GPUCache"/* "$label GPU cache"
+    safe_clean "$profile_root/Default/DawnGraphiteCache"/* "$label Dawn cache"
+    safe_clean "$profile_root/Default/DawnWebGPUCache"/* "$label WebGPU cache"
+}
+
 # Antigravity (Gemini) keeps a full Chromium profile under
 # ~/.gemini/antigravity-browser-profile. Clean its regenerable browser
 # caches, mirroring the Antigravity Electron cache cleanup in clean_dev_misc.
@@ -1446,11 +1460,7 @@ clean_antigravity_caches() {
     fi
 
     if [[ -d "$ag_profile" ]]; then
-        safe_clean "$ag_profile/Default/Cache"/* "Antigravity browser cache"
-        safe_clean "$ag_profile/Default/Code Cache"/* "Antigravity code cache"
-        safe_clean "$ag_profile/Default/GPUCache"/* "Antigravity GPU cache"
-        safe_clean "$ag_profile/Default/DawnGraphiteCache"/* "Antigravity Dawn cache"
-        safe_clean "$ag_profile/Default/DawnWebGPUCache"/* "Antigravity WebGPU cache"
+        clean_chromium_default_caches "$ag_profile" "Antigravity"
         safe_clean "$ag_profile/GraphiteDawnCache"/* "Antigravity Graphite cache"
         safe_clean "$ag_profile/component_crx_cache"/* "Antigravity component cache"
         safe_clean "$ag_profile/extensions_crx_cache"/* "Antigravity extension cache"
@@ -1470,12 +1480,8 @@ clean_chrome_devtools_mcp_caches() {
 
     [[ -d "$mcp_profile" ]] || return 0
 
-    safe_clean "$mcp_profile/Default/Cache"/* "Chrome DevTools MCP browser cache"
-    safe_clean "$mcp_profile/Default/Code Cache"/* "Chrome DevTools MCP code cache"
-    safe_clean "$mcp_profile/Default/GPUCache"/* "Chrome DevTools MCP GPU cache"
+    clean_chromium_default_caches "$mcp_profile" "Chrome DevTools MCP"
     safe_clean "$mcp_profile/Default/DawnCache"/* "Chrome DevTools MCP Dawn cache"
-    safe_clean "$mcp_profile/Default/DawnGraphiteCache"/* "Chrome DevTools MCP Dawn cache"
-    safe_clean "$mcp_profile/Default/DawnWebGPUCache"/* "Chrome DevTools MCP WebGPU cache"
     safe_clean "$mcp_profile/Default/GrShaderCache"/* "Chrome DevTools MCP shader cache"
     safe_clean "$mcp_profile/Default/GraphiteDawnCache"/* "Chrome DevTools MCP Graphite cache"
     safe_clean "$mcp_profile/GraphiteDawnCache"/* "Chrome DevTools MCP Graphite cache"
