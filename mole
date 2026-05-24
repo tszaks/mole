@@ -378,6 +378,7 @@ update_mole() {
     local download_label="Downloading latest version..."
     local install_label="Installing update..."
     local final_success_label="latest version"
+    local switch_to_stable_channel=false
 
     if [[ "$nightly_update" == "true" ]]; then
         latest="main"
@@ -400,7 +401,15 @@ update_mole() {
             exit 1
         fi
 
-        if [[ "$VERSION" == "$latest" && "$force_update" != "true" ]]; then
+        local install_channel
+        install_channel=$(get_install_channel)
+        if [[ "$install_channel" == "nightly" || "$install_channel" == "dev" ]]; then
+            switch_to_stable_channel=true
+        fi
+
+        if [[ "$switch_to_stable_channel" == "true" ]]; then
+            install_label="Switching to stable channel..."
+        elif [[ "$VERSION" == "$latest" && "$force_update" != "true" ]]; then
             echo ""
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version, ${VERSION}"
             echo ""
@@ -539,7 +548,7 @@ update_mole() {
             echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
             exit 1
         fi
-    elif [[ "$force_update" == "true" ]]; then
+    elif [[ "$force_update" == "true" || "$switch_to_stable_channel" == "true" ]]; then
         if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
             process_install_output "$install_output" "$latest" "$final_success_label"
         else

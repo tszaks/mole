@@ -311,6 +311,67 @@ EOF
     [[ "$output" == *"Already on latest version"* ]]
 }
 
+@test "update_mole switches nightly install back to stable even when already latest" {
+    local test_home="$BATS_TMPDIR/nightly-to-stable-home"
+    mkdir -p "$test_home/.config/mole"
+    cat > "$test_home/.config/mole/install_channel" <<'EOF'
+CHANNEL=nightly
+COMMIT_HASH=0123456789abcdef
+EOF
+
+    run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" CURRENT_VERSION="$CURRENT_VERSION" PATH="/usr/bin:/bin" TERM="dumb" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+export URL_LOG="$HOME/stable-switch-url.log"
+export INSTALLER_ARGS_LOG="$HOME/stable-switch-args.log"
+
+curl() {
+  local out=""
+  local url=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o) out="$2"; shift 2 ;;
+      http*://*) url="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  [[ -n "$url" ]] && printf '%s\n' "$url" >> "$URL_LOG"
+
+  if [[ -n "$out" ]]; then
+    cat > "$out" << 'INSTALLER'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$INSTALLER_ARGS_LOG"
+echo "INSTALLER_MOLE_VERSION=${MOLE_VERSION:-}"
+echo "Mole installed successfully, version ${MOLE_VERSION:-unknown}"
+INSTALLER
+    return 0
+  fi
+
+  if [[ "$url" == *"api.github.com"* ]]; then
+    echo "{\"tag_name\":\"$CURRENT_VERSION\"}"
+  else
+    echo "VERSION=\"$CURRENT_VERSION\""
+  fi
+}
+export -f curl
+
+brew() { exit 1; }
+export -f brew
+
+"$PROJECT_ROOT/mole" update
+
+grep -q "raw.githubusercontent.com/tw93/mole/V${CURRENT_VERSION#V}/install.sh" "$URL_LOG"
+! grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$URL_LOG"
+! grep -q -- "--update" "$INSTALLER_ARGS_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Already on latest version"* ]]
+    [[ "$output" == *"Switching to stable channel"* ]]
+    [[ "$output" == *"INSTALLER_MOLE_VERSION=V${CURRENT_VERSION#V}"* ]]
+    [[ "$output" == *"Updated to latest version, V${CURRENT_VERSION#V}"* ]]
+}
+
 @test "process_install_output shows install.sh success message with version" {
     run bash --noprofile --norc <<'EOF'
 set -euo pipefail
