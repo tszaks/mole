@@ -84,10 +84,30 @@ teardown() {
 
     run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/etc'"
     [ "$status" -eq 1 ]
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Apple'"
+    [ "$status" -eq 1 ]
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Applications/Finder.app'"
+    [ "$status" -eq 1 ]
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Users'"
+    [ "$status" -eq 1 ]
+}
+
+@test "validate_path_for_deletion rejects aliased critical paths" {
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '//etc/passwd'"
+    [ "$status" -eq 1 ]
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '///System'"
+    [ "$status" -eq 1 ]
 }
 
 @test "validate_path_for_deletion accepts valid path" {
     run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/valid'"
+    [ "$status" -eq 0 ]
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$HOME/Library/Caches/com.example.app/cache.db'"
     [ "$status" -eq 0 ]
 }
 
@@ -97,7 +117,7 @@ teardown() {
 
     run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Extensions/com.example.driver/com.apple.metal' 2>&1"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"critical system directory"* ]]
+    [[ "$output" == *"critical system path"* ]]
 }
 
 @test "should_protect_path applies high-risk cleanup denylist" {
@@ -223,6 +243,21 @@ teardown() {
 
     run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$TEST_DIR' '*.tmp' 7 'f'"
     [ "$status" -eq 0 ]
+}
+
+@test "safe_find_delete works when app protection is not loaded" {
+    local old_file="$TEST_DIR/file-ops-only.tmp"
+    touch "$old_file"
+    touch -t "$(date -v-8d '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '8 days ago' '+%Y%m%d%H%M.%S')" "$old_file" 2>/dev/null || true
+
+    run bash --noprofile --norc <<EOF
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/file_ops.sh"
+safe_find_delete "$TEST_DIR" "*.tmp" 7 "f"
+EOF
+
+    [ "$status" -eq 0 ]
+    [ ! -e "$old_file" ]
 }
 
 @test "MOLE_* constants are defined" {

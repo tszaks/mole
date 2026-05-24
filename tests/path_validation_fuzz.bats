@@ -49,15 +49,16 @@ setup() {
     local -a accepted_paths=()
     local line
 
-    # bats's ERR trap fires on any non-zero exit inside a @test, even under
-    # set +e or `||`. Use `run` (the bats wrapper) which always returns 0
-    # itself and exposes the real exit code via $status.
     while IFS= read -r line || [[ -n "$line" ]]; do
         # Skip comments and blank lines
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "$line" ]] && continue
 
-        run validate_path_for_deletion "$line"
+        run bash --noprofile --norc -s -- "$line" <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+validate_path_for_deletion "$1"
+EOF
         if [[ "$status" -eq 0 ]]; then
             accepted=$((accepted + 1))
             accepted_paths+=("$line")
@@ -72,6 +73,22 @@ setup() {
     fi
     [ "$accepted" -eq 0 ]
     [ "$rejected" -ge 50 ]
+}
+
+@test "generated control-character paths are rejected" {
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+validate_path_for_deletion $'/Users/me/with\nnewline'
+EOF
+    [ "$status" -eq 1 ]
+
+    run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+validate_path_for_deletion $'/Users/me/with\tab'
+EOF
+    [ "$status" -eq 1 ]
 }
 
 @test "corpus has minimum coverage" {

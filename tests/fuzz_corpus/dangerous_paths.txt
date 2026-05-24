@@ -52,11 +52,8 @@ just-a-name
 /Users/me/Documents/../../../etc
 /../../../../../etc
 
-# ---- control / newline / null injection ----
-/Users/me/foo
-	bar
-/Users/me/with\nnewline
-/Users/me/with\x00null
+# ---- control character injection ----
+/Users/me/foo	bar
 
 # ---- protected system caches ----
 /System/Library/Caches

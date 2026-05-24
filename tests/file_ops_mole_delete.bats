@@ -218,6 +218,23 @@ EOF
     [ "$status_col" = "ok" ]
 }
 
+@test "mole_delete rejects symlinks to protected system paths" {
+    local victim="$SANDBOX/system-link"
+    ln -s "/System" "$victim"
+
+    run bash --noprofile --norc <<EOF
+$(prelude)
+mole_delete "$victim"
+EOF
+
+    [ "$status" -eq 1 ]
+    [[ -L "$victim" ]]
+
+    local status_col
+    status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
+    [ "$status_col" = "rejected" ]
+}
+
 @test "mole_delete dry-run does not touch the filesystem but still logs" {
     local victim="$SANDBOX/dry"
     : > "$victim"

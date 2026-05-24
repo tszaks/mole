@@ -63,6 +63,52 @@ format_duration_human() {
 # Path Validation
 # ============================================================================
 
+_mole_normalize_deletion_policy_path() {
+    local path="$1"
+    local slash="/"
+    local double_slash="//"
+
+    while [[ "$path" == *"$double_slash"* ]]; do
+        path="${path//$double_slash/$slash}"
+    done
+
+    local trimmed="${path%/}"
+    [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed" || printf '%s\n' "$path"
+}
+
+# Deletion policy only. App/data protection stays in app_protection.sh.
+_mole_is_critical_deletion_path() {
+    local path="$1"
+
+    case "$path" in
+        / | \
+            /bin | /bin/* | \
+            /sbin | /sbin/* | \
+            /usr | /usr/bin | /usr/bin/* | /usr/sbin | /usr/sbin/* | /usr/lib | /usr/lib/* | \
+            /System | /System/* | \
+            /Library/Apple | /Library/Apple/* | \
+            /Library/Extensions | /Library/Extensions/* | \
+            /Library/Keychains | /Library/Keychains/* | \
+            /Applications/Finder.app | /Applications/Finder.app/* | \
+            /Applications/Safari.app | /Applications/Safari.app/* | \
+            /Users | /Users/Shared | /Users/Guest | /Users/Guest/*)
+            return 0
+            ;;
+        /private)
+            return 0
+            ;;
+        /etc | /etc/* | /private/etc | /private/etc/*)
+            return 0
+            ;;
+        /var | /var/db | /var/db/* | /var/audit | /var/audit/* | \
+            /private/var | /private/var/db | /private/var/db/* | /private/var/audit | /private/var/audit/*)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
 # Validate path for deletion (absolute, no traversal, not system dir)
 validate_path_for_deletion() {
     local path="$1"
@@ -71,36 +117,6 @@ validate_path_for_deletion() {
     if [[ -z "$path" ]]; then
         log_error "Path validation failed: empty path"
         return 1
-    fi
-
-    # Check symlink target if path is a symbolic link
-    if [[ -L "$path" ]]; then
-        local link_target
-        link_target=$(readlink "$path" 2> /dev/null) || {
-            log_error "Cannot read symlink: $path"
-            return 1
-        }
-
-        # Resolve relative symlinks to absolute paths for validation
-        local resolved_target="$link_target"
-        if [[ "$link_target" != /* ]]; then
-            local link_dir
-            link_dir=$(dirname "$path")
-            resolved_target=$(cd "$link_dir" 2> /dev/null && cd "$(dirname "$link_target")" 2> /dev/null && pwd)/$(basename "$link_target") || resolved_target=""
-        fi
-
-        # Validate resolved target against protected paths
-        if [[ -n "$resolved_target" ]]; then
-            case "$resolved_target" in
-                / | /System | /System/* | /bin | /bin/* | /sbin | /sbin/* | \
-                    /usr | /usr/bin | /usr/bin/* | /usr/lib | /usr/lib/* | \
-                    /etc | /etc/* | /private/etc | /private/etc/* | \
-                    /Library/Extensions | /Library/Extensions/*)
-                    log_error "Symlink points to protected system path: $path -> $resolved_target"
-                    return 1
-                    ;;
-            esac
-        fi
     fi
 
     # Check path is absolute
@@ -123,15 +139,44 @@ validate_path_for_deletion() {
         return 1
     fi
 
+    local policy_path
+    policy_path=$(_mole_normalize_deletion_policy_path "$path")
+
+    # Check symlink target if path is a symbolic link
+    if [[ -L "$path" ]]; then
+        local link_target
+        link_target=$(readlink "$path" 2> /dev/null) || {
+            log_error "Cannot read symlink: $path"
+            return 1
+        }
+
+        # Resolve relative symlinks to absolute paths for validation
+        local resolved_target="$link_target"
+        if [[ "$link_target" != /* ]]; then
+            local link_dir
+            link_dir=$(dirname "$path")
+            resolved_target=$(cd "$link_dir" 2> /dev/null && cd "$(dirname "$link_target")" 2> /dev/null && pwd)/$(basename "$link_target") || resolved_target=""
+        fi
+
+        # Validate resolved target against protected paths
+        if [[ -n "$resolved_target" ]]; then
+            resolved_target=$(_mole_normalize_deletion_policy_path "$resolved_target")
+            if _mole_is_critical_deletion_path "$resolved_target"; then
+                log_error "Symlink points to protected system path: $path -> $resolved_target"
+                return 1
+            fi
+        fi
+    fi
+
     # Allow deletion of coresymbolicationd cache (safe system cache that can be rebuilt)
-    case "$path" in
+    case "$policy_path" in
         /System/Library/Caches/com.apple.coresymbolicationd/data | /System/Library/Caches/com.apple.coresymbolicationd/data/*)
             return 0
             ;;
     esac
 
     # Allow known safe paths under /private
-    case "$path" in
+    case "$policy_path" in
         /private/tmp | /private/tmp/* | \
             /private/var/tmp | /private/var/tmp/* | \
             /private/var/log | /private/var/log/* | \
@@ -146,30 +191,16 @@ validate_path_for_deletion() {
     esac
 
     # Check path isn't critical system directory
-    case "$path" in
-        / | /bin | /bin/* | /sbin | /sbin/* | /usr | /usr/bin | /usr/bin/* | /usr/sbin | /usr/sbin/* | /usr/lib | /usr/lib/* | /System | /System/* | /Library/Extensions | /Library/Extensions/*)
-            log_error "Path validation failed: critical system directory: $path"
-            return 1
-            ;;
-        /private)
-            log_error "Path validation failed: critical system directory: $path"
-            return 1
-            ;;
-        /etc | /etc/* | /private/etc | /private/etc/*)
-            log_error "Path validation failed: /etc contains critical system files: $path"
-            return 1
-            ;;
-        /var | /var/db | /var/db/* | /private/var | /private/var/db | /private/var/db/*)
-            log_error "Path validation failed: /var/db contains system databases: $path"
-            return 1
-            ;;
-    esac
+    if _mole_is_critical_deletion_path "$policy_path"; then
+        log_error "Path validation failed: critical system path: $path"
+        return 1
+    fi
 
     # Check if path is protected (keychains, system settings, etc)
     if declare -f should_protect_path > /dev/null 2>&1; then
-        if should_protect_path "$path"; then
+        if should_protect_path "$policy_path"; then
             if [[ "${MO_DEBUG:-0}" == "1" ]]; then
-                log_warning "Path validation: protected path skipped: $path"
+                log_warning "Path validation: protected path skipped: $policy_path"
             fi
             return 1
         fi
@@ -287,6 +318,10 @@ safe_remove_symlink() {
     local use_sudo="${2:-false}"
 
     if [[ ! -L "$path" ]]; then
+        return 1
+    fi
+
+    if ! validate_path_for_deletion "$path"; then
         return 1
     fi
 
@@ -477,7 +512,7 @@ mole_delete() {
     # up front to avoid a no-op Trash move followed by a validation failure.
     # The rejection itself is recorded in the forensic log so audit trails
     # can distinguish refused-by-policy from never-attempted.
-    if [[ ! -L "$path" ]] && ! validate_path_for_deletion "$path"; then
+    if ! validate_path_for_deletion "$path"; then
         _mole_delete_log "$mode" "0" "rejected" "$path"
         return 1
     fi
@@ -807,7 +842,7 @@ safe_find_delete() {
     # #738, #744, #757); enforcing here makes the protection structural so
     # new clean_* functions get whitelist enforcement for free.
     while IFS= read -r -d '' match; do
-        if should_protect_path "$match"; then
+        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$match"; then
             continue
         fi
         if declare -f is_path_whitelisted > /dev/null && is_path_whitelisted "$match"; then
