@@ -116,14 +116,30 @@ has_active_vpn_interface() {
             ;;
     esac
 
-    if command -v netstat > /dev/null 2>&1; then
-        if netstat -rn -f inet 2> /dev/null | grep -Eq '[[:space:]]utun[0-9]+($|[[:space:]])'; then
+    # macOS creates utun* interfaces for many non-VPN features (iCloud
+    # Private Relay, Continuity, Handoff, AirDrop, Apple Watch sync, Personal
+    # Hotspot). Bare interface presence therefore over-reports active VPNs and
+    # caused the Network Stack Refresh skip in #959. Use two narrower signals:
+    #
+    #   1. scutil --nc list flags Connected for system-managed VPN connections
+    #      (L2TP, IPsec, IKEv2, Cisco IPSec).
+    #   2. The default route's interface is utun* when a full-tunnel third-party
+    #      VPN (WireGuard, OpenVPN, Tunnelblick, etc.) is routing all traffic.
+    #
+    # Split-tunnel third-party VPNs that do not own the default route will not
+    # be detected; route flushing may briefly disrupt their explicit routes,
+    # which the VPN client re-establishes on its next reconcile.
+    if command -v scutil > /dev/null 2>&1; then
+        if scutil --nc list 2> /dev/null | grep -Eq '^\* \(Connected\)'; then
             return 0
         fi
     fi
 
-    if command -v ifconfig > /dev/null 2>&1; then
-        if ifconfig 2> /dev/null | grep -Eq '^utun[0-9]+:.*<[^>]*(UP|RUNNING)'; then
+    if command -v route > /dev/null 2>&1; then
+        local default_iface
+        default_iface=$(route -n get default 2> /dev/null |
+            awk -F': ' '$1 ~ /^[[:space:]]*interface$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}')
+        if [[ "$default_iface" =~ ^utun[0-9]+$ ]]; then
             return 0
         fi
     fi

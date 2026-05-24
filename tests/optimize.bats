@@ -1016,6 +1016,138 @@ EOF
 	[[ "$output" != *"/Volumes/EXT3/Mail/TB.dmg"$'\t'"/Volumes/EXT3/Mail/TB.dmg"* ]]
 }
 
+@test "has_active_vpn_interface respects MOLE_ASSUME_VPN_ACTIVE override" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+# Force scutil/route to fail loudly so the env override is the only path.
+scutil() { echo "should not be called" >&2; return 1; }
+route() { echo "should not be called" >&2; return 1; }
+export -f scutil route
+if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"vpn"* ]]
+	[[ "$output" != *"no_vpn"* ]]
+	[[ "$output" != *"should not be called"* ]]
+}
+
+@test "has_active_vpn_interface returns false when MOLE_ASSUME_VPN_ACTIVE=0" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+# scutil/route should not run when env says no.
+scutil() { echo "should not be called" >&2; return 1; }
+route() { echo "should not be called" >&2; return 1; }
+export -f scutil route
+if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"no_vpn"* ]]
+	[[ "$output" != *"should not be called"* ]]
+}
+
+@test "has_active_vpn_interface detects scutil Connected entry" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+scutil() {
+    cat <<'NC'
+* (Disconnected)   AA1B2C3D-1111-2222-3333-444455556666   PPP     (L2TP)         "Office VPN"   [L2TP]
+* (Connected)      87654321-aaaa-bbbb-cccc-dddddddddddd   IPSec   (IKEv2)        "Remote Office"[IKEv2]
+NC
+}
+export -f scutil
+# Default route should NOT be consulted once scutil already proved a VPN active.
+route() { echo "should not be called" >&2; return 1; }
+export -f route
+if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"vpn"* ]]
+	[[ "$output" != *"should not be called"* ]]
+}
+
+@test "has_active_vpn_interface ignores scutil entries that are all Disconnected" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+scutil() {
+    cat <<'NC'
+* (Disconnected)   AA1B2C3D-1111-2222-3333-444455556666   PPP     (L2TP)         "Office VPN"   [L2TP]
+* (Disconnected)   87654321-aaaa-bbbb-cccc-dddddddddddd   IPSec   (IKEv2)        "Remote Office"[IKEv2]
+NC
+}
+# Default route via en0 (no VPN). This is the user's case in #959.
+route() {
+    cat <<'ROUTE'
+   route to: default
+destination: default
+       mask: default
+    gateway: 192.168.1.1
+  interface: en0
+ROUTE
+}
+export -f scutil route
+if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"no_vpn"* ]]
+}
+
+@test "has_active_vpn_interface detects full-tunnel via utun default route" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+# No system-managed VPN configured in scutil.
+scutil() { echo ""; }
+# Default route owned by utun3 -> full-tunnel VPN (WireGuard / OpenVPN style).
+route() {
+    cat <<'ROUTE'
+   route to: default
+destination: default
+       mask: default
+    gateway: 10.8.0.1
+  interface: utun3
+ROUTE
+}
+export -f scutil route
+if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"vpn"* ]]
+}
+
+@test "has_active_vpn_interface returns false for iCloud Private Relay style utun (#959)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+# Private Relay / Continuity create utun* but the default route stays on en0.
+# The old netstat/ifconfig probe would have false-positived this; the new
+# probe must not.
+scutil() { echo ""; }
+route() {
+    cat <<'ROUTE'
+   route to: default
+destination: default
+       mask: default
+    gateway: 192.168.1.1
+  interface: en0
+ROUTE
+}
+export -f scutil route
+if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"no_vpn"* ]]
+}
+
 @test "opt_diag_parse_image_mount_pairs handles multiple blocks" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
