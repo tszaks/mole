@@ -374,6 +374,7 @@ clean_productivity_apps() {
     safe_clean ~/Library/Containers/com.ranchero.NetNewsWire-Evergreen/Data/Library/Caches/* "NetNewsWire cache"
     safe_clean ~/Library/Containers/com.ideasoncanvas.mindnode/Data/Library/Caches/* "MindNode cache"
     safe_clean ~/.cache/kaku/* "Kaku cache"
+    safe_clean ~/Library/Application\ Support/spacedrive/thumbnails/* "Spacedrive thumbnail cache"
 }
 # Music/media players (protect Spotify offline music).
 clean_media_players() {
@@ -449,6 +450,72 @@ clean_download_managers() {
     safe_clean ~/Library/Caches/com.downie.Downie-* "Downie cache"
     safe_clean ~/Library/Caches/com.folx.*/* "Folx cache"
     safe_clean ~/Library/Caches/com.charlessoft.pacifist/* "Pacifist cache"
+    clean_neatdm_stale_segments
+}
+# Neat Download Manager: clean stale incomplete download segments.
+# History database (NeatDB.db) is never touched; only numbered segment
+# directories whose seg.x0 file is older than MOLE_ORPHAN_AGE_DAYS are removed.
+# Download URLs expire within hours/days so 30-day-old segments cannot be resumed.
+clean_neatdm_stale_segments() {
+    local neatdm_dir="$HOME/Library/Application Support/com.NeatDownloadManager"
+    [[ -d "$neatdm_dir" ]] || return 0
+
+    local stale_count=0
+    local stale_kb=0
+    local current_epoch
+    current_epoch=$(get_epoch_seconds)
+
+    local -a stale_dirs=()
+    local seg_dir
+    for seg_dir in "$neatdm_dir"/*/; do
+        [[ -d "$seg_dir" ]] || continue
+        local seg_name
+        seg_name=$(basename "${seg_dir%/}")
+        [[ "$seg_name" =~ ^[0-9]+$ ]] || continue
+        [[ -f "$seg_dir/seg.x0" ]] || continue
+
+        local seg_mtime
+        seg_mtime=$(get_file_mtime "$seg_dir/seg.x0")
+        local age_days=$(((current_epoch - seg_mtime) / 86400))
+
+        if [[ $age_days -ge ${MOLE_ORPHAN_AGE_DAYS:-30} ]]; then
+            stale_dirs+=("$seg_dir")
+        fi
+    done
+
+    [[ ${#stale_dirs[@]} -eq 0 ]] && return 0
+
+    for seg_dir in "${stale_dirs[@]}"; do
+        local size_kb
+        size_kb=$(get_path_size_kb "$seg_dir")
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+
+        if [[ "$DRY_RUN" != "true" ]]; then
+            if safe_remove "$seg_dir" true; then
+                stale_count=$((stale_count + 1))
+                stale_kb=$((stale_kb + size_kb))
+            fi
+        else
+            stale_count=$((stale_count + 1))
+            stale_kb=$((stale_kb + size_kb))
+        fi
+    done
+
+    if [[ $stale_count -gt 0 ]]; then
+        local size_human
+        size_human=$(bytes_to_human "$((stale_kb * 1024))")
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} NeatDM stale downloads · ${stale_count} items, $(colorize_human_size "$size_human") ${YELLOW}dry${NC}"
+        else
+            local line_color
+            line_color=$(cleanup_result_color_kb "$stale_kb")
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} NeatDM stale downloads · ${stale_count} items, ${line_color}${size_human}${NC}"
+        fi
+        files_cleaned=$((files_cleaned + stale_count))
+        total_size_cleaned=$((total_size_cleaned + stale_kb))
+        total_items=$((total_items + 1))
+        note_activity
+    fi
 }
 # Gaming platforms.
 clean_gaming_platforms() {

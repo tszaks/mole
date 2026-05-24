@@ -588,3 +588,100 @@ EOF
     [[ "$output" == *"Tencent Video native cache"* ]]
     [[ "$output" == *"Tencent Video document cache"* ]]
 }
+
+@test "clean_productivity_apps includes Spacedrive thumbnail cache" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "$2"; }
+clean_productivity_apps
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Spacedrive thumbnail cache"* ]]
+}
+
+@test "clean_neatdm_stale_segments removes segments older than threshold" {
+    local neatdm_dir="$HOME/Library/Application Support/com.NeatDownloadManager"
+    rm -rf "$neatdm_dir"
+    mkdir -p "$neatdm_dir/12345"
+    touch "$neatdm_dir/12345/seg.x0"
+    # Set mtime to 31 days ago
+    touch -t "$(date -v-31d '+%Y%m%d%H%M.%S')" "$neatdm_dir/12345/seg.x0"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_neatdm_stale_segments
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"NeatDM stale downloads"* ]]
+    [[ "$output" == *"1 items"* ]]
+}
+
+@test "clean_neatdm_stale_segments skips recent segments" {
+    local neatdm_dir="$HOME/Library/Application Support/com.NeatDownloadManager"
+    rm -rf "$neatdm_dir"
+    mkdir -p "$neatdm_dir/67890"
+    touch "$neatdm_dir/67890/seg.x0"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_neatdm_stale_segments
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"NeatDM stale downloads"* ]]
+}
+
+@test "clean_neatdm_stale_segments skips non-numeric segment-like directories" {
+    local neatdm_dir="$HOME/Library/Application Support/com.NeatDownloadManager"
+    rm -rf "$neatdm_dir"
+    mkdir -p "$neatdm_dir/history-backup"
+    touch "$neatdm_dir/history-backup/seg.x0"
+    touch -t "$(date -v-31d '+%Y%m%d%H%M.%S')" "$neatdm_dir/history-backup/seg.x0"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_neatdm_stale_segments
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"NeatDM stale downloads"* ]]
+}
+
+@test "clean_neatdm_stale_segments skips when directory absent" {
+    rm -rf "$HOME/Library/Application Support/com.NeatDownloadManager"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+clean_neatdm_stale_segments
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ -z "$output" ]]
+}
