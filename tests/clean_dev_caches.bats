@@ -671,3 +671,80 @@ EOF
     [[ "$output" == *"Flutter build cache (.dart_tool)"* ]]
     [[ "$output" == *"Flutter build cache (build/)"* ]]
 }
+
+@test "clean_dev_misc includes Chrome DevTools MCP cache when server not running" {
+    mkdir -p "$HOME/.cache/chrome-devtools-mcp/chrome-profile/Default/Cache"
+    touch "$HOME/.cache/chrome-devtools-mcp/chrome-profile/Default/Cache/data"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+pgrep() { return 1; }
+safe_clean() { echo "$2"; }
+safe_find_delete() { :; }
+clean_service_worker_cache() { :; }
+clean_dev_misc
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Chrome DevTools MCP browser cache"* ]]
+    [[ "$output" != *"Chrome DevTools MCP cache"* ]]
+}
+
+@test "clean_dev_misc skips Chrome DevTools MCP cache when server is running" {
+    mkdir -p "$HOME/.cache/chrome-devtools-mcp/chrome-profile/Default/Cache"
+    touch "$HOME/.cache/chrome-devtools-mcp/chrome-profile/Default/Cache/data"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+pgrep() { return 0; }
+safe_clean() { echo "$2"; }
+safe_find_delete() { :; }
+clean_service_worker_cache() { :; }
+clean_dev_misc
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Chrome DevTools MCP caches · skipped"* ]]
+    [[ "$output" != *"Chrome DevTools MCP browser cache"* ]]
+}
+
+@test "clean_chrome_devtools_mcp_caches preserves profile state" {
+    profile="$HOME/.cache/chrome-devtools-mcp/chrome-profile"
+    mkdir -p "$profile/Default/Cache" "$profile/Default/Code Cache" "$profile/Default/GPUCache"
+    mkdir -p "$profile/Default/Service Worker/CacheStorage"
+    mkdir -p "$profile/Default/Local Storage/leveldb"
+    touch "$profile/Default/Cache/data" "$profile/Default/Code Cache/data" "$profile/Default/GPUCache/data"
+    touch "$profile/Default/Service Worker/CacheStorage/data"
+    touch "$profile/Default/Cookies" "$profile/Default/Local Storage/leveldb/state"
+    touch "$profile/Local State"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+clean_service_worker_cache() { echo "SWC:$1|$2"; }
+clean_chrome_devtools_mcp_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP browser cache|$profile/Default/Cache/"* ]]
+    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP code cache|$profile/Default/Code Cache/"* ]]
+    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP GPU cache|$profile/Default/GPUCache/"* ]]
+    [[ "$output" == *"SWC:Chrome DevTools MCP|$profile/Default/Service Worker/CacheStorage"* ]]
+    [[ "$output" != *"Cookies"* ]]
+    [[ "$output" != *"Local Storage"* ]]
+    [[ "$output" != *"Local State"* ]]
+}

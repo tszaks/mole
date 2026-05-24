@@ -1316,6 +1316,13 @@ antigravity_or_gemini_running() {
     return 1
 }
 
+chrome_devtools_mcp_running() {
+    command -v pgrep > /dev/null 2>&1 || return 1
+
+    pgrep -f "chrome-devtools-mcp" > /dev/null 2>&1 && return 0
+    return 1
+}
+
 is_codex_runtime_active() {
     local runtime_dir="$1"
     [[ -d "$runtime_dir" ]] || return 1
@@ -1452,6 +1459,34 @@ clean_antigravity_caches() {
     safe_clean "$HOME/.gemini/tmp"/* "Gemini CLI temp files"
 }
 
+clean_chrome_devtools_mcp_caches() {
+    local mcp_profile="$HOME/.cache/chrome-devtools-mcp/chrome-profile"
+
+    if chrome_devtools_mcp_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome DevTools MCP caches · skipped (server running)"
+        note_activity
+        return 0
+    fi
+
+    [[ -d "$mcp_profile" ]] || return 0
+
+    safe_clean "$mcp_profile/Default/Cache"/* "Chrome DevTools MCP browser cache"
+    safe_clean "$mcp_profile/Default/Code Cache"/* "Chrome DevTools MCP code cache"
+    safe_clean "$mcp_profile/Default/GPUCache"/* "Chrome DevTools MCP GPU cache"
+    safe_clean "$mcp_profile/Default/DawnCache"/* "Chrome DevTools MCP Dawn cache"
+    safe_clean "$mcp_profile/Default/DawnGraphiteCache"/* "Chrome DevTools MCP Dawn cache"
+    safe_clean "$mcp_profile/Default/DawnWebGPUCache"/* "Chrome DevTools MCP WebGPU cache"
+    safe_clean "$mcp_profile/Default/GrShaderCache"/* "Chrome DevTools MCP shader cache"
+    safe_clean "$mcp_profile/Default/GraphiteDawnCache"/* "Chrome DevTools MCP Graphite cache"
+    safe_clean "$mcp_profile/GraphiteDawnCache"/* "Chrome DevTools MCP Graphite cache"
+    safe_clean "$mcp_profile/component_crx_cache"/* "Chrome DevTools MCP component cache"
+    safe_clean "$mcp_profile/extensions_crx_cache"/* "Chrome DevTools MCP extension cache"
+
+    if declare -f clean_service_worker_cache > /dev/null 2>&1; then
+        clean_service_worker_cache "Chrome DevTools MCP" "$mcp_profile/Default/Service Worker/CacheStorage"
+    fi
+}
+
 # Misc dev tool caches.
 clean_dev_misc() {
     safe_clean ~/Library/Caches/com.unity3d.*/* "Unity cache"
@@ -1516,6 +1551,8 @@ clean_dev_misc() {
     [[ -d "$HOME/.local/share/cursor-agent" ]] && safe_find_delete "$HOME/.local/share/cursor-agent" "*.log" "$MOLE_LOG_AGE_DAYS" "f"
     # Playwright cached browser binaries
     safe_clean ~/Library/Caches/ms-playwright/* "Playwright browsers"
+    # Chrome DevTools MCP keeps a Chromium profile; clean only rebuildable caches.
+    clean_chrome_devtools_mcp_caches
     # Claude Code state under ~/.claude can include persistent memory,
     # plugin registry data, hooks, and session context. Do not clean it
     # automatically; users can remove specific paths manually if needed.
