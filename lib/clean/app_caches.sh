@@ -406,6 +406,16 @@ clean_media_players() {
     safe_clean ~/Library/Caches/tv.plex.player.desktop "Plex cache"
     safe_clean ~/Library/Caches/com.netease.163music "NetEase Music cache"
     safe_clean ~/Library/Caches/com.tencent.QQMusic/* "QQ Music cache"
+    safe_clean ~/Library/Caches/com.tencent.QQMusicMac/* "QQ Music Mac cache"
+    # QQ Music Mac sandboxed container caches (protect offline downloads in iDownloadProxy).
+    local _qqmusic_container="$HOME/Library/Containers/com.tencent.QQMusicMac/Data/Library/Application Support/QQMusicMac"
+    if [[ -d "$_qqmusic_container" ]]; then
+        safe_clean "$_qqmusic_container/iRRCache"/* "QQ Music streaming cache"
+        safe_clean "$_qqmusic_container/iLog"/* "QQ Music logs"
+        safe_clean "$_qqmusic_container/iCache"/* "QQ Music cache"
+        safe_clean "$_qqmusic_container/iTemp"/* "QQ Music temp files"
+    fi
+    safe_clean ~/Library/Containers/com.tencent.QQMusicMac/Data/Library/Caches/* "QQ Music container cache"
     safe_clean ~/Library/Caches/com.kugou.mac/* "Kugou Music cache"
     safe_clean ~/Library/Caches/com.kuwo.mac/* "Kuwo Music cache"
 }
@@ -416,6 +426,13 @@ clean_video_players() {
     safe_clean ~/Library/Caches/io.mpv "MPV cache"
     safe_clean ~/Library/Caches/com.iqiyi.player "iQIYI cache"
     safe_clean ~/Library/Caches/com.tencent.tenvideo "Tencent Video cache"
+    # Tencent Video sandboxed container caches.
+    local _tenvideo_as="$HOME/Library/Containers/com.tencent.tenvideo/Data/Library/Application Support"
+    if [[ -d "$_tenvideo_as" ]]; then
+        safe_clean "$_tenvideo_as/Upgrade"/* "Tencent Video old installer"
+        safe_clean "$_tenvideo_as/VideoNative"/* "Tencent Video native cache"
+        safe_clean "$_tenvideo_as/documentCache"/* "Tencent Video document cache"
+    fi
     safe_clean ~/Library/Caches/tv.danmaku.bili/* "Bilibili cache"
     safe_clean ~/Library/Caches/com.douyu.*/* "Douyu cache"
     safe_clean ~/Library/Caches/com.huya.*/* "Huya cache"
