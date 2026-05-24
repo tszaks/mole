@@ -431,53 +431,17 @@ remove_file_list() {
     echo "$count"
 }
 
-# Batch uninstall with single confirmation.
-batch_uninstall_applications() {
-    local total_size_freed=0
+# Internal helpers for batch_uninstall_applications. They read and write
+# locals declared in the orchestrator's scope via bash dynamic scoping; do
+# not call them outside batch_uninstall_applications.
 
-    # shellcheck disable=SC2154
-    if [[ ${#selected_apps[@]} -eq 0 ]]; then
-        log_warning "No applications selected for uninstallation"
-        return 0
-    fi
-
-    local old_trap_int old_trap_term
-    old_trap_int=$(trap -p INT)
-    old_trap_term=$(trap -p TERM)
-
-    _cleanup_sudo_keepalive() {
-        if command -v stop_sudo_session > /dev/null 2>&1; then
-            stop_sudo_session
-        fi
-    }
-
-    _restore_uninstall_traps() {
-        _cleanup_sudo_keepalive
-        if [[ -n "$old_trap_int" ]]; then
-            # eval: restore previous trap captured by $(trap -p INT)
-            eval "$old_trap_int"
-        else
-            trap - INT
-        fi
-        if [[ -n "$old_trap_term" ]]; then
-            # eval: restore previous trap captured by $(trap -p TERM)
-            eval "$old_trap_term"
-        else
-            trap - TERM
-        fi
-    }
-
-    # Trap to clean up spinner, sudo keepalive, and uninstall mode on interrupt
-    trap 'stop_inline_spinner 2>/dev/null; _cleanup_sudo_keepalive; unset MOLE_UNINSTALL_MODE; echo ""; _restore_uninstall_traps; return 130' INT TERM
-
-    # Pre-scan: running apps, sudo needs, size.
-    local -a running_apps=()
-    local -a sudo_apps=()
-    local -a brew_cask_apps=()
-    local -a blocked_apps=()
-    local total_estimated_size=0
-    local -a app_details=()
-
+# Phase 1: scan every selected app, classify into running/sudo/brew/blocked
+# buckets, build pipe-encoded app_details records, accumulate the total
+# estimated size, and warn about apps that require an official uninstaller.
+# Reads:  selected_apps
+# Writes: running_apps, sudo_apps, brew_cask_apps, blocked_apps, app_details,
+#         total_estimated_size
+_batch_scan_app_details() {
     # Cache current user outside loop
     local current_user=$(whoami)
 
@@ -601,12 +565,17 @@ batch_uninstall_applications() {
             log_warning "$blocked_name requires the official $blocked_vendor uninstaller"
         done
     fi
+}
 
-    if [[ ${#app_details[@]} -eq 0 ]]; then
-        _restore_uninstall_traps
-        return 1
-    fi
-
+# Phase 2+3: render the preview block listing every target with its size
+# and per-file breakdown, prompt the user for confirmation, and establish
+# a sudo session when admin access is needed. Returns:
+#   0 - user confirmed and (if needed) sudo session established
+#   2 - user cancelled (ESC / 'q' / unknown key)
+#   1 - sudo authorization denied
+# Reads:  app_details, brew_cask_apps, running_apps, sudo_apps,
+#         total_estimated_size
+_batch_preview_and_confirm() {
     local size_display=$(bytes_to_human "$((total_estimated_size * 1024))")
 
     echo -e "\n${PURPLE_BOLD}Files to be removed:${NC}"
@@ -684,8 +653,7 @@ batch_uninstall_applications() {
         $'\e' | q | Q)
             echo ""
             echo ""
-            _restore_uninstall_traps
-            return 0
+            return 2
             ;;
         "" | $'\n' | $'\r' | y | Y)
             echo "" # Move to next line
@@ -693,8 +661,7 @@ batch_uninstall_applications() {
         *)
             echo ""
             echo ""
-            _restore_uninstall_traps
-            return 0
+            return 2
             ;;
     esac
 
@@ -717,24 +684,23 @@ batch_uninstall_applications() {
         if ! ensure_sudo_session "$admin_prompt"; then
             echo ""
             log_error "Admin access denied"
-            _restore_uninstall_traps
             return 1
         fi
     fi
+}
 
-    # Perform uninstallations with per-app progress feedback
-    local success_count=0 failed_count=0
-    local brew_apps_removed=0 # Track successful brew uninstalls for silent autoremove
-    local -a failed_items=()
-    local -a success_items=()
-    local -a success_dock_targets=()
-    local -a local_network_warning_apps=()
-    local -a system_extension_warning_apps=()
-    # Apps whose process was still running after the kill ladder. We do not
-    # abort the uninstall for these — macOS allows deleting a running bundle
-    # (the process keeps using its mmap'd code) — but we warn the user so they
-    # know to quit/relaunch the lingering process.
-    local -a running_at_uninstall_apps=()
+# Phase 4: iterate app_details and perform the actual removal for each.
+# Tracks per-app failures, warnings (local network, system extensions,
+# still-running processes, container leftovers), and the total bytes
+# actually freed. Per-app failures do not halt the loop; the surrounding
+# trap still terminates the whole pass on SIGINT/SIGTERM.
+# Reads:  app_details
+# Writes: success_count, failed_count, failed_items, success_items,
+#         success_dock_targets, local_network_warning_apps,
+#         system_extension_warning_apps, running_at_uninstall_apps,
+#         total_size_freed, brew_apps_removed,
+#         files_cleaned, total_items (the latter two via dynamic scope)
+_batch_execute_removals() {
     local current_index=0
     for detail in "${app_details[@]}"; do
         current_index=$((current_index + 1))
@@ -1017,27 +983,16 @@ batch_uninstall_applications() {
             failed_items+=("$app_name:$reason:${suggestion:-}")
         fi
     done
+}
 
-    # Detect stale Background Items entries (System Settings > Login Items & Extensions).
-    # Modern SMAppService helpers are not removable via osascript and Apple has no
-    # public CLI to delete individual BTM records, so we only detect + warn. Single
-    # dumpbtm call per batch, gated by safety env vars and dry-run.
-    local -a background_items_warning_apps=()
-    local _btm_dump=""
-    if [[ ${#success_items[@]} -gt 0 ]] &&
-        ! is_uninstall_dry_run &&
-        [[ "${MOLE_TEST_NO_AUTH:-0}" != "1" && "${MOLE_TEST_MODE:-0}" != "1" ]] &&
-        command -v sfltool > /dev/null 2>&1; then
-        _btm_dump=$(run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" sfltool dumpbtm 2> /dev/null || true)
-    fi
-
-    if [[ -n "$_btm_dump" ]]; then
-        local _bg_line
-        while IFS= read -r _bg_line; do
-            [[ -n "$_bg_line" ]] && background_items_warning_apps+=("$_bg_line")
-        done < <(_uninstall_match_btm_leftovers "$_btm_dump" "${app_details[@]}" -- "${success_items[@]}")
-    fi
-
+# Phase 5+6: assemble the post-removal summary block (success line, failed
+# apps, Local Network / system extension / Background Items / still-running
+# warnings) and emit it as a single summary block.
+# Reads:  success_count, failed_count, failed_items, success_items,
+#         total_size_freed, local_network_warning_apps,
+#         system_extension_warning_apps, background_items_warning_apps,
+#         running_at_uninstall_apps
+_batch_render_summary() {
     # Summary
     local freed_display
     freed_display=$(bytes_to_human "$((total_size_freed * 1024))")
@@ -1198,6 +1153,135 @@ batch_uninstall_applications() {
     echo ""
     print_summary_block "$title" "${summary_details[@]}"
     printf '\n'
+}
+
+# Batch uninstall with single confirmation. Orchestrates the four phases
+# (scan, preview/confirm, execute, summary) and manages the cross-phase
+# shared state, the SIGINT/SIGTERM trap, sudo keepalive, and the deferred
+# Dock / LaunchServices refresh.
+batch_uninstall_applications() {
+    local total_size_freed=0
+
+    # shellcheck disable=SC2154
+    if [[ ${#selected_apps[@]} -eq 0 ]]; then
+        log_warning "No applications selected for uninstallation"
+        return 0
+    fi
+
+    local old_trap_int old_trap_term
+    old_trap_int=$(trap -p INT)
+    old_trap_term=$(trap -p TERM)
+
+    _cleanup_sudo_keepalive() {
+        if command -v stop_sudo_session > /dev/null 2>&1; then
+            stop_sudo_session
+        fi
+    }
+
+    _restore_uninstall_traps() {
+        _cleanup_sudo_keepalive
+        if [[ -n "$old_trap_int" ]]; then
+            # eval: restore previous trap captured by $(trap -p INT)
+            eval "$old_trap_int"
+        else
+            trap - INT
+        fi
+        if [[ -n "$old_trap_term" ]]; then
+            # eval: restore previous trap captured by $(trap -p TERM)
+            eval "$old_trap_term"
+        else
+            trap - TERM
+        fi
+    }
+
+    # SIGINT/SIGTERM during a phase helper would normally `return 130` out of
+    # the helper only; without an explicit signal flag the orchestrator would
+    # cheerfully run the next phase. The trap sets _batch_interrupted so the
+    # orchestrator can check after each helper and bail out the way the
+    # pre-refactor inline implementation did.
+    local _batch_interrupted=0
+
+    # Trap to clean up spinner, sudo keepalive, and uninstall mode on interrupt
+    trap 'stop_inline_spinner 2>/dev/null; _cleanup_sudo_keepalive; unset MOLE_UNINSTALL_MODE; echo ""; _restore_uninstall_traps; _batch_interrupted=1; return 130' INT TERM
+
+    # Pre-scan: running apps, sudo needs, size.
+    local -a running_apps=()
+    local -a sudo_apps=()
+    local -a brew_cask_apps=()
+    local -a blocked_apps=()
+    local total_estimated_size=0
+    local -a app_details=()
+
+    _batch_scan_app_details
+    if [[ $_batch_interrupted -eq 1 ]]; then
+        _restore_uninstall_traps
+        return 130
+    fi
+
+    if [[ ${#app_details[@]} -eq 0 ]]; then
+        _restore_uninstall_traps
+        return 1
+    fi
+
+    local _confirm_rc=0
+    _batch_preview_and_confirm || _confirm_rc=$?
+    if [[ $_batch_interrupted -eq 1 ]]; then
+        _restore_uninstall_traps
+        return 130
+    fi
+    case $_confirm_rc in
+        0) ;;
+        2)
+            _restore_uninstall_traps
+            return 0
+            ;;
+        *)
+            _restore_uninstall_traps
+            return 1
+            ;;
+    esac
+
+    # Perform uninstallations with per-app progress feedback
+    local success_count=0 failed_count=0
+    local brew_apps_removed=0 # Track successful brew uninstalls for silent autoremove
+    local -a failed_items=()
+    local -a success_items=()
+    local -a success_dock_targets=()
+    local -a local_network_warning_apps=()
+    local -a system_extension_warning_apps=()
+    # Apps whose process was still running after the kill ladder. We do not
+    # abort the uninstall for these — macOS allows deleting a running bundle
+    # (the process keeps using its mmap'd code) — but we warn the user so they
+    # know to quit/relaunch the lingering process.
+    local -a running_at_uninstall_apps=()
+
+    _batch_execute_removals
+    if [[ $_batch_interrupted -eq 1 ]]; then
+        _restore_uninstall_traps
+        return 130
+    fi
+
+    # Detect stale Background Items entries (System Settings > Login Items & Extensions).
+    # Modern SMAppService helpers are not removable via osascript and Apple has no
+    # public CLI to delete individual BTM records, so we only detect + warn. Single
+    # dumpbtm call per batch, gated by safety env vars and dry-run.
+    local -a background_items_warning_apps=()
+    local _btm_dump=""
+    if [[ ${#success_items[@]} -gt 0 ]] &&
+        ! is_uninstall_dry_run &&
+        [[ "${MOLE_TEST_NO_AUTH:-0}" != "1" && "${MOLE_TEST_MODE:-0}" != "1" ]] &&
+        command -v sfltool > /dev/null 2>&1; then
+        _btm_dump=$(run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" sfltool dumpbtm 2> /dev/null || true)
+    fi
+
+    if [[ -n "$_btm_dump" ]]; then
+        local _bg_line
+        while IFS= read -r _bg_line; do
+            [[ -n "$_bg_line" ]] && background_items_warning_apps+=("$_bg_line")
+        done < <(_uninstall_match_btm_leftovers "$_btm_dump" "${app_details[@]}" -- "${success_items[@]}")
+    fi
+
+    _batch_render_summary
 
     # Run brew autoremove silently in background to avoid interrupting UX.
     if [[ $brew_apps_removed -gt 0 && "${MOLE_DRY_RUN:-0}" != "1" ]]; then
