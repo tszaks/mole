@@ -966,6 +966,71 @@ func TestRenderHeaderErrorReturnsMoleOnce(t *testing.T) {
 	}
 }
 
+func TestStatusDiagnosisLineUsesTopCPUProcess(t *testing.T) {
+	m := MetricsSnapshot{
+		CPU: CPUStatus{Usage: 78},
+		TopProcesses: []ProcessInfo{
+			{Name: "Safari", CPU: 12},
+			{Name: "Xcode", CPU: 82},
+		},
+	}
+
+	got := statusDiagnosisLine(m)
+	if got != "Xcode high CPU" {
+		t.Fatalf("statusDiagnosisLine() = %q, want top CPU process", got)
+	}
+}
+
+func TestStatusDiagnosisLineUsesMemoryContributorWhenCPUIsCalm(t *testing.T) {
+	m := MetricsSnapshot{
+		CPU: CPUStatus{Usage: 20},
+		Memory: MemoryStatus{
+			UsedPercent: 86,
+			Pressure:    "warn",
+		},
+		TopProcesses: []ProcessInfo{
+			{Name: "Chrome", Memory: 31},
+			{Name: "Finder", Memory: 2},
+		},
+	}
+
+	got := statusDiagnosisLine(m)
+	if got != "Chrome memory pressure" {
+		t.Fatalf("statusDiagnosisLine() = %q, want memory contributor", got)
+	}
+}
+
+func TestStatusDiagnosisLineFallsBackToAllClear(t *testing.T) {
+	m := MetricsSnapshot{
+		CPU:            CPUStatus{Usage: 10},
+		Memory:         MemoryStatus{UsedPercent: 20, Pressure: "normal"},
+		HealthScoreMsg: "Excellent",
+	}
+
+	got := statusDiagnosisLine(m)
+	if got != "All clear" {
+		t.Fatalf("statusDiagnosisLine() = %q, want All clear", got)
+	}
+}
+
+func TestRenderProcessCardAddsInlineHintWithoutExtraRows(t *testing.T) {
+	card := renderProcessCard([]ProcessInfo{
+		{Name: "Chrome", CPU: 12, Memory: 22},
+		{Name: "Xcode", CPU: 82, Memory: 8},
+	})
+
+	if len(card.lines) != 2 {
+		t.Fatalf("renderProcessCard() lines = %d, want 2", len(card.lines))
+	}
+	plain := stripANSI(strings.Join(card.lines, "\n"))
+	if !strings.Contains(plain, "M22%") {
+		t.Fatalf("renderProcessCard() missing memory hint, got %q", plain)
+	}
+	if !strings.Contains(plain, "hot") {
+		t.Fatalf("renderProcessCard() missing cpu hint, got %q", plain)
+	}
+}
+
 func TestRenderHeaderWrapsOnNarrowWidth(t *testing.T) {
 	m := MetricsSnapshot{
 		HealthScore: 91,
