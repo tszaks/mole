@@ -301,6 +301,27 @@ EOF
     assert_output_not_contains "SAFE_CLEAN:"
 }
 
+@test "clean_dev_ai_agents skips Claude Desktop bundled versions when sdk version is path-like" {
+    local claude_support="$HOME/Library/Application Support/Claude"
+    mkdir -p "$claude_support/claude-code/2.1.140" "$claude_support/claude-code/2.1.150"
+    mkdir -p "$claude_support/claude-code-vm/2.1.140" "$claude_support/claude-code-vm/2.1.150"
+    echo "../2.1.150" > "$claude_support/claude-code-vm/.sdk-version"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+pgrep() { return 1; }
+clean_dev_ai_agents
+EOF
+
+    assert_run_success
+    assert_output_contains "active version unknown · skipping cleanup"
+    assert_output_not_contains "SAFE_CLEAN:"
+}
+
 @test "clean_dev_ai_agents skips Claude Desktop bundled versions while Claude Desktop is running" {
     local claude_support="$HOME/Library/Application Support/Claude"
     mkdir -p "$claude_support/claude-code/2.1.140" "$claude_support/claude-code/2.1.150"

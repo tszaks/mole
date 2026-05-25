@@ -287,6 +287,30 @@ EOF
 	[[ "$output" == *"|$backup_app|OnlyThere|com.example.OnlyThere|"* ]]
 }
 
+@test "scan_applications keeps original rows when dedupe pass fails (#975)" {
+	src="$HOME/uninstall_source.sh"
+	sourceable_uninstall_sh "$src"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" SRC_PATH="$src" \
+		/bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+# shellcheck source=/dev/null
+source "$SRC_PATH"
+
+scan_raw_file="$HOME/scan.raw"
+printf '%s\n' "$HOME/Applications/Keep.app|Keep|com.example.Keep|1" > "$scan_raw_file"
+
+awk() { return 2; }
+
+_scan_dedupe_bundle_ids
+cat "$scan_raw_file"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == "$HOME/Applications/Keep.app|Keep|com.example.Keep|1" ]]
+}
+
 @test "scan_applications ignores PATH stat shims (#865)" {
 	src="$HOME/uninstall_source.sh"
 	sourceable_uninstall_sh "$src"

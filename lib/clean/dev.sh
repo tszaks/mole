@@ -1261,6 +1261,17 @@ count_versioned_agent_entries() {
     echo "$count"
 }
 
+claude_desktop_sdk_version_is_safe() {
+    local sdk_version="${1:-}"
+
+    [[ -n "$sdk_version" ]] || return 1
+    [[ "$sdk_version" == .* ]] && return 1
+    [[ "$sdk_version" == *"/"* ]] && return 1
+    [[ "$sdk_version" == *".."* ]] && return 1
+    [[ "$sdk_version" =~ ^[0-9] ]] || return 1
+    return 0
+}
+
 claude_desktop_running() {
     command -v pgrep > /dev/null 2>&1 || return 1
 
@@ -1306,6 +1317,9 @@ clean_claude_desktop_bundled_versions() {
     local sdk_file="$claude_support/claude-code-vm/.sdk-version"
     if [[ -f "$sdk_file" ]]; then
         sdk_version=$(head -n 1 "$sdk_file" 2> /dev/null | LC_ALL=C tr -d '[:space:]' || true)
+        if ! claude_desktop_sdk_version_is_safe "$sdk_version"; then
+            sdk_version=""
+        fi
     fi
 
     for spec in "${desktop_specs[@]}"; do

@@ -765,7 +765,7 @@ _scan_dedupe_bundle_ids() {
     [[ -s "$scan_raw_file" ]] || return 0
 
     local deduped_file="${scan_raw_file}.deduped"
-    awk -F'|' -v home_apps="$HOME/Applications/" '
+    if ! awk -F'|' -v home_apps="$HOME/Applications/" '
         function starts_with(value, prefix) {
             return prefix != "" && substr(value, 1, length(prefix)) == prefix
         }
@@ -817,7 +817,14 @@ _scan_dedupe_bundle_ids() {
                 }
             }
         }
-    ' "$scan_raw_file" > "$deduped_file" && mv "$deduped_file" "$scan_raw_file"
+    ' "$scan_raw_file" > "$deduped_file"; then
+        rm -f "$deduped_file" 2> /dev/null || true
+        return 0
+    fi
+
+    if ! mv "$deduped_file" "$scan_raw_file" 2> /dev/null; then
+        rm -f "$deduped_file" 2> /dev/null || true
+    fi
 }
 
 # Phase 7+8: merge scan_raw_file with the persistent metadata cache,
