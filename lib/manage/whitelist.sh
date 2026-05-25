@@ -253,6 +253,7 @@ load_whitelist() {
             unique_patterns+=("$pattern")
         done
         CURRENT_WHITELIST_PATTERNS=("${unique_patterns[@]}")
+        WHITELIST_PATTERNS=("${unique_patterns[@]}")
 
         # Migrate legacy optimize config to the new path automatically
         if [[ "$mode" == "optimize" && "$using_legacy" == "true" && "$config_file" != "$WHITELIST_CONFIG_OPTIMIZE" ]]; then
@@ -260,6 +261,7 @@ load_whitelist() {
         fi
     else
         CURRENT_WHITELIST_PATTERNS=()
+        WHITELIST_PATTERNS=()
     fi
 }
 

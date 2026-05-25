@@ -699,6 +699,32 @@ EOF
 	[[ "$output" != *"Mounted image detach candidates:"* ]]
 }
 
+@test "run_optimize_diagnostics honors optimize whitelist paths for mounted images (#977)" {
+	mkdir -p "$HOME/.config/mole"
+	cat > "$HOME/.config/mole/whitelist_optimize" <<'EOF'
+system_maintenance
+/Volumes/EXT3/Mail/TB.dmg
+/Volumes/mail
+EOF
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 \
+		MOLE_OPTIMIZE_PS_SAMPLE_1=$'1 /usr/sbin/distnoted' \
+		MOLE_OPTIMIZE_PS_SAMPLE_2=$'1 /usr/sbin/distnoted' \
+		MOLE_OPTIMIZE_HDIUTIL_INFO=$'================================================\nimage-path      : /Volumes/EXT3/Mail/TB.dmg\n/dev/disk6s2               Apple_HFS                       /Volumes/mail\n' \
+		bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+source "$PROJECT_ROOT/lib/optimize/diagnostics.sh"
+load_whitelist optimize
+run_optimize_diagnostics
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"No obvious sustained high-CPU bottleneck detected"* ]]
+	[[ "$output" != *"Mounted image detach candidates:"* ]]
+	[[ "$output" != *"Would offer detach"* ]]
+}
+
 @test "run_optimize_diagnostics stays quiet when nothing matches" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
 		MOLE_OPTIMIZE_PS_SAMPLE_1=$'4 /usr/sbin/distnoted\n3 /usr/libexec/coreaudiod' \

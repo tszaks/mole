@@ -179,7 +179,6 @@ setup() {
         source '$PROJECT_ROOT/lib/manage/whitelist.sh'
         rm -f \"\$HOME/.config/mole/whitelist\"
         load_whitelist
-        WHITELIST_PATTERNS=(\"\${CURRENT_WHITELIST_PATTERNS[@]}\")
         is_path_whitelisted \"\$HOME/Library/Caches/tealdeer\"
     "; then
         status=0
