@@ -386,6 +386,32 @@ EOF
     [[ "$output" == *"Docker BuildX cache|$HOME/.docker/buildx/cache/*"* ]]
 }
 
+@test "clean_dev_docker reports OrbStack data without deleting disk images" {
+    local orb_data="$HOME/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data"
+    mkdir -p "$orb_data"
+    touch "$orb_data/data.img.raw" "$orb_data/swap.img"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { printf '%s|%s\n' "$2" "$1"; }
+note_activity() { :; }
+debug_log() { :; }
+get_path_size_kb() { echo "4096"; }
+bytes_to_human() { echo "4M"; }
+clean_dev_docker
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"OrbStack container data · skipped by default (4M)"* ]]
+    [[ "$output" == *"Review: docker system df"* ]]
+    [[ "$output" == *"Prune:  docker system prune --filter until=720h"* ]]
+    [[ "$output" == *"Docker BuildX cache|$HOME/.docker/buildx/cache/*"* ]]
+    [[ "$output" != *"data.img.raw"* ]]
+    [[ "$output" != *"swap.img"* ]]
+}
+
 @test "clean_dev_docker no longer depends on whitelist to avoid prune" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
 set -euo pipefail
