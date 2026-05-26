@@ -28,13 +28,6 @@ format_brew_update_detail() {
     printf "%s" "$detail_str"
 }
 
-# Keep for compatibility with existing callers/tests.
-format_brew_update_label() {
-    local detail
-    detail=$(format_brew_update_detail || true)
-    [[ -n "$detail" ]] && printf "Homebrew, %s" "$detail"
-}
-
 populate_brew_update_counts_if_unset() {
     local need_probe=false
     [[ -z "${BREW_OUTDATED_COUNT:-}" ]] && need_probe=true
@@ -62,17 +55,6 @@ populate_brew_update_counts_if_unset() {
     BREW_FORMULA_OUTDATED_COUNT="$formula_count"
     BREW_CASK_OUTDATED_COUNT="$cask_count"
     BREW_OUTDATED_COUNT="$((formula_count + cask_count))"
-}
-
-brew_has_outdated() {
-    local kind="${1:-formula}"
-    command -v brew > /dev/null 2>&1 || return 1
-
-    if [[ "$kind" == "cask" ]]; then
-        brew outdated --cask --quiet 2> /dev/null | grep -q .
-    else
-        brew outdated --quiet 2> /dev/null | grep -q .
-    fi
 }
 
 # Ask user if they want to update
@@ -127,43 +109,4 @@ ask_for_updates() {
     fi
 
     return 1
-}
-
-# Perform all pending updates
-# Returns: 0 if all succeeded, 1 if some failed
-perform_updates() {
-    # Only handle Mole updates here; Homebrew/App Store/macOS are manual (tips shown in ask_for_updates)
-    local updated_count=0
-    local total_count=0
-
-    if [[ -n "${MOLE_UPDATE_AVAILABLE:-}" && "${MOLE_UPDATE_AVAILABLE}" == "true" ]]; then
-        echo -e "${BLUE}Updating Mole...${NC}"
-        local mole_bin="${SCRIPT_DIR}/../../mole"
-        [[ ! -f "$mole_bin" ]] && mole_bin=$(command -v mole 2> /dev/null || echo "")
-
-        if [[ -x "$mole_bin" ]]; then
-            if "$mole_bin" update 2>&1 | grep -qE "(Updated|latest version)"; then
-                echo -e "${GREEN}${ICON_SUCCESS}${NC} Mole updated"
-                reset_mole_cache
-                updated_count=$((updated_count + 1))
-            else
-                echo -e "${RED}✗${NC} Mole update failed"
-            fi
-        else
-            echo -e "${RED}✗${NC} Mole executable not found"
-        fi
-        echo ""
-        total_count=1
-    fi
-
-    if [[ $total_count -eq 0 ]]; then
-        echo -e "${GRAY}No updates to perform${NC}"
-        return 0
-    elif [[ $updated_count -eq $total_count ]]; then
-        echo -e "${GREEN}All updates completed, ${updated_count}/${total_count}${NC}"
-        return 0
-    else
-        echo -e "${RED}Update failed, ${updated_count}/${total_count}${NC}"
-        return 1
-    fi
 }
