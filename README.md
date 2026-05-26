@@ -16,7 +16,7 @@
   <img src="https://gw.alipayobjects.com/zos/k/ro/ZzF8e8.png" alt="Mole - 95.50GB freed" width="1000" />
 </p>
 
-> The CLI stays free and open source. Prefer a GUI? Try [Mole Mac App](https://mole.fit), $9 lifetime, code **MOLEMAC** for 20% off through May 23.
+> The CLI stays free and open source. Prefer a native Mac app? [Mole for Mac](https://mole.fit) adds visual cleanup review, app updates, uninstall, maintenance, disk maps, live status, and a menu bar HUD. One license covers 2 Macs, with lifetime updates and a 14-day refund.
 
 ## Features
 
