@@ -696,56 +696,6 @@ clean_brave_old_versions() {
     fi
 }
 
-scan_external_volumes() {
-    [[ -d "/Volumes" ]] || return 0
-    local -a candidate_volumes=()
-    local -a network_volumes=()
-    for volume in /Volumes/*; do
-        [[ -d "$volume" && -w "$volume" && ! -L "$volume" ]] || continue
-        [[ "$volume" == "/" || "$volume" == "/Volumes/Macintosh HD" ]] && continue
-        local protocol=""
-        protocol=$(run_with_timeout 1 command diskutil info "$volume" 2> /dev/null | grep -i "Protocol:" | awk '{print $2}' || echo "") # 1s: volume protocol probe, see lib/core/timeouts.sh
-        case "$protocol" in
-            SMB | NFS | AFP | CIFS | WebDAV)
-                network_volumes+=("$volume")
-                continue
-                ;;
-        esac
-        local fs_type=""
-        fs_type=$(run_with_timeout 1 command df -T "$volume" 2> /dev/null | tail -1 | awk '{print $2}' || echo "") # 1s: volume FS-type probe, see lib/core/timeouts.sh
-        case "$fs_type" in
-            nfs | smbfs | afpfs | cifs | webdav)
-                network_volumes+=("$volume")
-                continue
-                ;;
-        esac
-        candidate_volumes+=("$volume")
-    done
-    local volume_count=${#candidate_volumes[@]}
-    local network_count=${#network_volumes[@]}
-    if [[ $volume_count -eq 0 ]]; then
-        if [[ $network_count -gt 0 ]]; then
-            echo -e "  ${GRAY}${ICON_LIST}${NC} External volumes, ${network_count} network volumes skipped"
-            note_activity
-        fi
-        return 0
-    fi
-    start_section_spinner "Scanning $volume_count external volumes..."
-    for volume in "${candidate_volumes[@]}"; do
-        [[ -d "$volume" && -r "$volume" ]] || continue
-        local volume_trash="$volume/.Trashes"
-        if [[ -d "$volume_trash" && "$DRY_RUN" != "true" ]] && ! is_path_whitelisted "$volume_trash"; then
-            while IFS= read -r -d '' item; do
-                safe_remove "$item" true || true
-            done < <(command find "$volume_trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
-        fi
-        if [[ "$PROTECT_FINDER_METADATA" != "true" ]]; then
-            clean_ds_store_tree "$volume" "$(basename "$volume") volume, .DS_Store"
-        fi
-    done
-    stop_section_spinner
-}
-
 # Finder metadata (.DS_Store).
 clean_finder_metadata() {
     if [[ "$PROTECT_FINDER_METADATA" == "true" ]]; then
