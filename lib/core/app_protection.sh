@@ -87,20 +87,11 @@ build_regex_var() {
 # Lazy-loaded regex (only built when needed)
 APPLE_UNINSTALLABLE_REGEX=""
 SYSTEM_CRITICAL_REGEX=""
-SYSTEM_CRITICAL_FAST_REGEX=""
-DATA_PROTECTED_REGEX=""
 
 _ensure_uninstall_regex() {
     if [[ -z "$SYSTEM_CRITICAL_REGEX" ]]; then
         build_regex_var APPLE_UNINSTALLABLE_REGEX "${APPLE_UNINSTALLABLE_APPS[@]}"
         build_regex_var SYSTEM_CRITICAL_REGEX "${SYSTEM_CRITICAL_BUNDLES[@]}"
-    fi
-}
-
-_ensure_data_protection_regex() {
-    if [[ -z "$SYSTEM_CRITICAL_FAST_REGEX" ]]; then
-        build_regex_var SYSTEM_CRITICAL_FAST_REGEX "${SYSTEM_CRITICAL_BUNDLES_FAST[@]}"
-        build_regex_var DATA_PROTECTED_REGEX "${DATA_PROTECTED_BUNDLES[@]}"
     fi
 }
 

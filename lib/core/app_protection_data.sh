@@ -12,51 +12,7 @@ readonly MOLE_APP_PROTECTION_DATA_LOADED=1
 
 # Application Management
 
-# ============================================================================
-# Performance Note:
-# - SYSTEM_CRITICAL_BUNDLES_FAST: Fast wildcard patterns for cleanup operations
-# - SYSTEM_CRITICAL_BUNDLES: Detailed list for uninstall protection (lazy-loaded)
-# ============================================================================
-
-# Fast patterns for cleanup operations (used by should_protect_data)
-# These wildcards provide adequate protection with minimal performance impact
-readonly SYSTEM_CRITICAL_BUNDLES_FAST=(
-    "com.apple.*"
-    "loginwindow"
-    "dock"
-    "systempreferences"
-    "finder"
-    "safari"
-    "backgroundtaskmanagement*"
-    "keychain*"
-    "security*"
-    "bluetooth*"
-    "wifi*"
-    "network*"
-    "tcc"
-    "notification*"
-    "accessibility*"
-    "universalaccess*"
-    "HIToolbox*"
-    "textinput*"
-    "TextInput*"
-    "keyboard*"
-    "Keyboard*"
-    "inputsource*"
-    "InputSource*"
-    "keylayout*"
-    "KeyLayout*"
-    "GlobalPreferences"
-    ".GlobalPreferences"
-    "org.pqrs.Karabiner*"
-    # CUPS printing subsystem ships with macOS; there is no parent .app to
-    # anchor it, so org.cups.* prefs always look "orphaned" to bundle-ID
-    # matching. Deleting them wipes the default printer and recent-printer
-    # list, which users see as lost saved printers. See #731.
-    "org.cups.*"
-)
-
-# Detailed list for uninstall protection
+# Detailed list for uninstall protection (lazy-loaded into SYSTEM_CRITICAL_REGEX).
 # Critical system components protected from uninstallation
 # Note: We explicitly list system components instead of using "com.apple.*" wildcard
 # to allow uninstallation of user-installed Apple apps (Xcode, Final Cut Pro, etc.)
