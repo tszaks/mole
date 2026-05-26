@@ -1280,6 +1280,18 @@ claude_desktop_running() {
     return 1
 }
 
+claude_desktop_sdk_version() {
+    local claude_support="$1"
+    local sdk_file="$claude_support/claude-code-vm/.sdk-version"
+    [[ -f "$sdk_file" ]] || return 1
+
+    local sdk_version
+    sdk_version=$(head -n 1 "$sdk_file" 2> /dev/null | LC_ALL=C tr -d '[:space:]' || true)
+    claude_desktop_sdk_version_is_safe "$sdk_version" || return 1
+
+    printf '%s\n' "$sdk_version"
+}
+
 clean_claude_desktop_bundled_versions() {
     local keep_previous="$1"
     local claude_support="$HOME/Library/Application Support/Claude"
@@ -1314,13 +1326,24 @@ clean_claude_desktop_bundled_versions() {
     fi
 
     local sdk_version=""
-    local sdk_file="$claude_support/claude-code-vm/.sdk-version"
-    if [[ -f "$sdk_file" ]]; then
-        sdk_version=$(head -n 1 "$sdk_file" 2> /dev/null | LC_ALL=C tr -d '[:space:]' || true)
-        if ! claude_desktop_sdk_version_is_safe "$sdk_version"; then
-            sdk_version=""
-        fi
+    sdk_version=$(claude_desktop_sdk_version "$claude_support" || true)
+    if [[ -z "$sdk_version" ]]; then
+        note_activity
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Claude Desktop bundled Claude Code active version unknown · skipping cleanup"
+        return 0
     fi
+
+    for spec in "${desktop_specs[@]}"; do
+        local versions_root="${spec%%|*}"
+        local label="${spec#*|}"
+        [[ -d "$versions_root" ]] || continue
+
+        if [[ ! -e "$versions_root/$sdk_version" ]]; then
+            note_activity
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} $label active version unknown · skipping cleanup"
+            return 0
+        fi
+    done
 
     for spec in "${desktop_specs[@]}"; do
         local versions_root="${spec%%|*}"
@@ -1331,12 +1354,6 @@ clean_claude_desktop_bundled_versions() {
         version_count=$(count_versioned_agent_entries "$versions_root")
         [[ "$version_count" =~ ^[0-9]+$ ]] || version_count=0
         [[ "$version_count" -le 1 ]] && continue
-
-        if [[ -z "$sdk_version" || ! -e "$versions_root/$sdk_version" ]]; then
-            note_activity
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} $label active version unknown · skipping cleanup"
-            continue
-        fi
 
         clean_versioned_agent_root "$versions_root" "$label" "$keep_previous" "$versions_root/$sdk_version"
     done

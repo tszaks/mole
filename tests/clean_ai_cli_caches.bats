@@ -261,6 +261,34 @@ EOF
     assert_output_not_contains "$claude_support/claude-code-vm/2.1.150"
 }
 
+@test "clean_dev_ai_agents keeps active Claude Desktop bundled version even when it is older" {
+    local claude_support="$HOME/Library/Application Support/Claude"
+    mkdir -p "$claude_support/claude-code/2.1.140" "$claude_support/claude-code/2.1.142" "$claude_support/claude-code/2.1.150"
+    mkdir -p "$claude_support/claude-code-vm/2.1.140" "$claude_support/claude-code-vm/2.1.142" "$claude_support/claude-code-vm/2.1.150"
+    echo "2.1.140" > "$claude_support/claude-code-vm/.sdk-version"
+    touch -t 202604010000 "$claude_support/claude-code/2.1.140" "$claude_support/claude-code-vm/2.1.140"
+    touch -t 202604150000 "$claude_support/claude-code/2.1.142" "$claude_support/claude-code-vm/2.1.142"
+    touch -t 202604250000 "$claude_support/claude-code/2.1.150" "$claude_support/claude-code-vm/2.1.150"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+pgrep() { return 1; }
+clean_dev_ai_agents
+EOF
+
+    assert_run_success
+    assert_output_contains "SAFE_CLEAN:Claude Desktop bundled Claude Code old version|$claude_support/claude-code/2.1.142"
+    assert_output_contains "SAFE_CLEAN:Claude Desktop bundled Claude Code VM old version|$claude_support/claude-code-vm/2.1.142"
+    assert_output_not_contains "$claude_support/claude-code/2.1.140"
+    assert_output_not_contains "$claude_support/claude-code-vm/2.1.140"
+    assert_output_not_contains "$claude_support/claude-code/2.1.150"
+    assert_output_not_contains "$claude_support/claude-code-vm/2.1.150"
+}
+
 @test "clean_dev_ai_agents leaves single Claude Desktop bundled version alone" {
     local claude_support="$HOME/Library/Application Support/Claude"
     mkdir -p "$claude_support/claude-code/2.1.150" "$claude_support/claude-code-vm/2.1.150"
@@ -306,6 +334,46 @@ EOF
     mkdir -p "$claude_support/claude-code/2.1.140" "$claude_support/claude-code/2.1.150"
     mkdir -p "$claude_support/claude-code-vm/2.1.140" "$claude_support/claude-code-vm/2.1.150"
     echo "../2.1.150" > "$claude_support/claude-code-vm/.sdk-version"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+pgrep() { return 1; }
+clean_dev_ai_agents
+EOF
+
+    assert_run_success
+    assert_output_contains "active version unknown · skipping cleanup"
+    assert_output_not_contains "SAFE_CLEAN:"
+}
+
+@test "clean_dev_ai_agents skips Claude Desktop cleanup when active version is missing from one bundled root" {
+    local claude_support="$HOME/Library/Application Support/Claude"
+    mkdir -p "$claude_support/claude-code/2.1.140" "$claude_support/claude-code/2.1.142"
+    mkdir -p "$claude_support/claude-code-vm/2.1.140" "$claude_support/claude-code-vm/2.1.142" "$claude_support/claude-code-vm/2.1.150"
+    echo "2.1.150" > "$claude_support/claude-code-vm/.sdk-version"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+pgrep() { return 1; }
+clean_dev_ai_agents
+EOF
+
+    assert_run_success
+    assert_output_contains "active version unknown · skipping cleanup"
+    assert_output_not_contains "SAFE_CLEAN:"
+}
+
+@test "clean_dev_ai_agents skips Claude Desktop cleanup when only one bundled root can identify active version" {
+    local claude_support="$HOME/Library/Application Support/Claude"
+    mkdir -p "$claude_support/claude-code/2.1.140" "$claude_support/claude-code/2.1.150"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

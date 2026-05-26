@@ -855,7 +855,7 @@ EOF
     rm -rf "$HOME/Library"
 }
 
-@test "clean_browsers skips Arc User Data ScriptCache when Arc is running" {
+@test "clean_browsers preserves Arc User Data ScriptCache regardless of running state" {
     mkdir -p "$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
