@@ -17,9 +17,6 @@ import (
 const refreshInterval = time.Second
 
 var (
-	Version   = "dev"
-	BuildTime = ""
-
 	// Command-line flags
 	jsonOutput       = flag.Bool("json", false, "output metrics as JSON instead of TUI")
 	procCPUThreshold = flag.Float64("proc-cpu-threshold", 100, "alert when a process stays above this CPU percent")
