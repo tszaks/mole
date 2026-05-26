@@ -751,15 +751,8 @@ clean_orphaned_system_services() {
 
 }
 
-# ============================================================================
-# User LaunchAgents
-# ============================================================================
-
-# User-level LaunchAgents are user-owned automation/configuration, not generic
-# cleanup targets. `mo clean` must not delete them automatically.
-clean_orphaned_launch_agents() {
-    return 0
-}
+# Policy: mo clean does NOT touch user LaunchAgents (~/Library/LaunchAgents),
+# they are user-owned automation and not generic cleanup targets.
 
 # ============================================================================
 # Orphaned container stubs

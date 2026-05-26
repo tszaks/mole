@@ -792,36 +792,6 @@ EOF
     [[ "$output" != *"Skipping protected"* ]] || return 1
 }
 
-@test "clean_orphaned_launch_agents preserves user launch agents" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/apps.sh"
-
-mkdir -p "$HOME/Library/LaunchAgents"
-cat > "$HOME/Library/LaunchAgents/com.example.custom-task.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.example.custom-task</string>
-</dict>
-</plist>
-PLIST
-
-start_section_spinner() { :; }
-stop_section_spinner() { :; }
-note_activity() { :; }
-
-clean_orphaned_launch_agents
-
-[[ -f "$HOME/Library/LaunchAgents/com.example.custom-task.plist" ]]
-EOF
-
-    [ "$status" -eq 0 ]
-}
-
 @test "clean_orphaned_container_stubs removes stub container when app is uninstalled" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
 set -euo pipefail
