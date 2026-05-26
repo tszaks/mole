@@ -187,23 +187,6 @@ get_file_owner() {
 # System Utilities
 # ============================================================================
 
-# Check if System Integrity Protection is enabled
-# Returns: 0 if SIP is enabled, 1 if disabled or cannot determine
-is_sip_enabled() {
-    if ! command -v csrutil > /dev/null 2>&1; then
-        return 0
-    fi
-
-    local sip_status
-    sip_status=$(csrutil status 2> /dev/null || echo "")
-
-    if echo "$sip_status" | grep -qi "enabled"; then
-        return 0
-    else
-        return 1
-    fi
-}
-
 # Detect CPU architecture
 # Returns: "Apple Silicon" or "Intel"
 detect_architecture() {
@@ -250,14 +233,6 @@ get_darwin_major() {
     echo "$major"
 }
 
-# Check if Darwin kernel major version meets minimum
-is_darwin_ge() {
-    local minimum="$1"
-    local major
-    major=$(get_darwin_major)
-    [[ "$major" -ge "$minimum" ]]
-}
-
 # Get optimal parallel jobs for operation type (scan|io|compute|default)
 get_optimal_parallel_jobs() {
     local operation_type="${1:-default}"
@@ -284,23 +259,6 @@ get_optimal_parallel_jobs() {
 
 is_root_user() {
     [[ "$(id -u)" == "0" ]]
-}
-
-get_invoking_user() {
-    if [[ -n "${_MOLE_INVOKING_USER_CACHE:-}" ]]; then
-        echo "$_MOLE_INVOKING_USER_CACHE"
-        return 0
-    fi
-
-    local user
-    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
-        user="$SUDO_USER"
-    else
-        user="${USER:-}"
-    fi
-
-    export _MOLE_INVOKING_USER_CACHE="$user"
-    echo "$user"
 }
 
 get_invoking_uid() {
@@ -475,62 +433,6 @@ ensure_user_file() {
 # Formatting Utilities
 # ============================================================================
 
-# Get brand-friendly localized name for an application
-get_brand_name() {
-    local name="$1"
-
-    # Detect if system primary language is Chinese (Cached)
-    if [[ -z "${MOLE_IS_CHINESE_SYSTEM:-}" ]]; then
-        local sys_lang
-        sys_lang=$(defaults read -g AppleLanguages 2> /dev/null | grep -o 'zh-Hans\|zh-Hant\|zh' | head -1 || echo "")
-        if [[ -n "$sys_lang" ]]; then
-            export MOLE_IS_CHINESE_SYSTEM="true"
-        else
-            export MOLE_IS_CHINESE_SYSTEM="false"
-        fi
-    fi
-
-    local is_chinese="${MOLE_IS_CHINESE_SYSTEM}"
-
-    # Return localized names based on system language
-    if [[ "$is_chinese" == true ]]; then
-        # Chinese system - prefer Chinese names
-        case "$name" in
-            "qiyimac" | "iQiyi") echo "爱奇艺" ;;
-            "wechat" | "WeChat") echo "微信" ;;
-            "QQ") echo "QQ" ;;
-            "VooV Meeting") echo "腾讯会议" ;;
-            "dingtalk" | "DingTalk") echo "钉钉" ;;
-            "NeteaseMusic" | "NetEase Music") echo "网易云音乐" ;;
-            "BaiduNetdisk" | "Baidu NetDisk") echo "百度网盘" ;;
-            "alipay" | "Alipay") echo "支付宝" ;;
-            "taobao" | "Taobao") echo "淘宝" ;;
-            "futunn" | "Futu NiuNiu") echo "富途牛牛" ;;
-            "tencent lemon" | "Tencent Lemon Cleaner" | "Tencent Lemon") echo "腾讯柠檬清理" ;;
-            *) echo "$name" ;;
-        esac
-    else
-        # Non-Chinese system - use English names
-        case "$name" in
-            "qiyimac" | "爱奇艺") echo "iQiyi" ;;
-            "wechat" | "微信") echo "WeChat" ;;
-            "QQ") echo "QQ" ;;
-            "腾讯会议") echo "VooV Meeting" ;;
-            "dingtalk" | "钉钉") echo "DingTalk" ;;
-            "网易云音乐") echo "NetEase Music" ;;
-            "百度网盘") echo "Baidu NetDisk" ;;
-            "alipay" | "支付宝") echo "Alipay" ;;
-            "taobao" | "淘宝") echo "Taobao" ;;
-            "富途牛牛") echo "Futu NiuNiu" ;;
-            "腾讯柠檬清理" | "Tencent Lemon Cleaner") echo "Tencent Lemon" ;;
-            "keynote" | "Keynote") echo "Keynote" ;;
-            "pages" | "Pages") echo "Pages" ;;
-            "numbers" | "Numbers") echo "Numbers" ;;
-            *) echo "$name" ;;
-        esac
-    fi
-}
-
 # Convert bytes to human-readable format (e.g., 1.5GB)
 # macOS (since Snow Leopard) uses Base-10 calculation (1 KB = 1000 bytes)
 bytes_to_human() {
@@ -684,11 +586,6 @@ ensure_mole_temp_root() {
     [[ -n "$resolved" ]] || resolved="/tmp"
     MOLE_RESOLVED_TMPDIR="$resolved"
     export MOLE_RESOLVED_TMPDIR
-}
-
-get_mole_temp_root() {
-    ensure_mole_temp_root
-    printf '%s\n' "$MOLE_RESOLVED_TMPDIR"
 }
 
 prepare_mole_tmpdir() {

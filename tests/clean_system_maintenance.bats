@@ -62,7 +62,6 @@ safe_sudo_remove() {
 log_success() { :; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
@@ -143,7 +142,6 @@ safe_sudo_remove() {
 log_success() { :; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
@@ -191,7 +189,6 @@ safe_sudo_remove() {
 log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
@@ -252,7 +249,6 @@ safe_sudo_remove() {
 log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
@@ -598,7 +594,6 @@ safe_sudo_find_delete() {
 }
 safe_sudo_remove() { return 0; }
 log_success() { :; }
-is_sip_enabled() { return 1; }
 find() { return 0; }
 run_with_timeout() { shift; "$@"; }
 
@@ -644,7 +639,6 @@ safe_sudo_find_delete() {
 safe_sudo_remove() { return 0; }
 log_success() { :; }
 log_info() { echo "$*"; }
-is_sip_enabled() { return 1; }
 find() { return 0; }
 run_with_timeout() { shift; "$@"; }
 
@@ -685,7 +679,6 @@ safe_sudo_find_delete() {
 }
 safe_sudo_remove() { return 0; }
 log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
-is_sip_enabled() { return 1; }
 find() { return 0; }
 run_with_timeout() { shift; "$@"; }
 
@@ -731,7 +724,6 @@ safe_sudo_remove() {
 log_success() { :; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 find() { return 0; }
 run_with_timeout() { shift; "$@"; }
 
@@ -770,7 +762,6 @@ safe_sudo_remove() {
 log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 find() { return 0; }
 run_with_timeout() {
     local _timeout="$1"
@@ -816,7 +807,6 @@ safe_sudo_remove() {
 log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 find() { return 0; }
 run_with_timeout() {
     local _timeout="$1"
@@ -867,7 +857,6 @@ safe_sudo_remove() {
 log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 find() { return 0; }
 run_with_timeout() { shift; "$@"; }
 
@@ -941,7 +930,6 @@ safe_sudo_remove() {
 log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-is_sip_enabled() { return 1; }
 find() { return 0; }
 gpu_cache_dir_is_stale() { return 0; }
 run_with_timeout() {

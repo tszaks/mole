@@ -48,23 +48,9 @@ setup() {
     [ "$result" = "999" ]
 }
 
-@test "is_darwin_ge correctly compares versions" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; is_darwin_ge 1"
-    [ "$status" -eq 0 ]
-
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; is_darwin_ge 100 && echo 'yes' || echo 'no'")
-    [[ -n "$result" ]]
-}
-
 @test "is_root_user detects non-root correctly" {
     result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; is_root_user && echo 'root' || echo 'not-root'")
     [ "$result" = "not-root" ]
-}
-
-@test "get_invoking_user returns current user when not sudo" {
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_invoking_user")
-    [ -n "$result" ]
-    [ "$result" = "${USER:-$(whoami)}" ]
 }
 
 @test "get_invoking_uid returns numeric UID" {
@@ -83,25 +69,25 @@ setup() {
     [ -d "$result" ]
 }
 
-@test "get_mole_temp_root uses writable TMPDIR when available" {
+@test "prepare_mole_tmpdir uses writable TMPDIR when available" {
     local writable_tmp="$HOME/custom-tmp"
     mkdir -p "$writable_tmp"
 
-    result=$(env HOME="$HOME" TMPDIR="$writable_tmp" bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_mole_temp_root")
+    result=$(env HOME="$HOME" TMPDIR="$writable_tmp" bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; prepare_mole_tmpdir")
     [ "$result" = "$writable_tmp" ]
 }
 
-@test "get_mole_temp_root falls back to user cache when TMPDIR is not writable" {
+@test "prepare_mole_tmpdir falls back to user cache when TMPDIR is not writable" {
     local blocked_tmp="$HOME/blocked-tmp"
     mkdir -p "$blocked_tmp"
     chmod 500 "$blocked_tmp"
 
-    result=$(env HOME="$HOME" TMPDIR="$blocked_tmp" bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_mole_temp_root")
+    result=$(env HOME="$HOME" TMPDIR="$blocked_tmp" bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; prepare_mole_tmpdir")
     [ "$result" = "$HOME/.cache/mole/tmp" ]
     [ -d "$HOME/.cache/mole/tmp" ]
 }
 
-@test "get_mole_temp_root caches the first resolved directory" {
+@test "ensure_mole_temp_root caches the first resolved directory" {
     local first_tmp="$HOME/first-tmp"
     local second_tmp="$HOME/second-tmp"
     mkdir -p "$first_tmp" "$second_tmp"
@@ -119,11 +105,11 @@ setup() {
     [ "$result" = "$first_tmp|$first_tmp" ]
 }
 
-@test "get_mole_temp_root falls back to /tmp when TMPDIR and invoking home are unavailable" {
+@test "prepare_mole_tmpdir falls back to /tmp when TMPDIR and invoking home are unavailable" {
     result=$(env HOME="$HOME" TMPDIR="/var/empty" bash -c "
         source '$PROJECT_ROOT/lib/core/base.sh'
         get_invoking_home() { echo '/var/empty'; }
-        get_mole_temp_root
+        prepare_mole_tmpdir
     ")
 
     [ "$result" = "/tmp" ]
