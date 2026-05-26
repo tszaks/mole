@@ -21,7 +21,7 @@ Mole is a macOS system cleanup and optimization tool with shell and Go component
 - `cmd/analyze/` - Go disk-analysis TUI. `main.go` is bootstrap only; `model.go` holds types and accessor methods; `update.go` holds the Bubble Tea Update chain.
 - `cmd/status/` - Go status dashboard.
 - `tests/` - Bats and shell test coverage. `tests/fuzz_corpus/` holds property-test corpora consumed by `path_validation_fuzz.bats`.
-- `scripts/` - check, test, build, and release helpers. `audit_bundle_drift.sh` and `perf_baseline.sh` back the monthly bundle audit and per-PR perf gate.
+- `scripts/` - check, test, build, and release helpers. `audit_bundle_drift.sh` backs the monthly bundle audit; per-PR perf is covered by `tests/core_performance.bats`.
 - `docs/SECURITY_DESIGN.md` - design doc for the path validation / app protection / # SAFE annotation contract.
 - `SECURITY_AUDIT.md` - security review notes.
 
@@ -87,7 +87,6 @@ These files are intentionally large. Do not start by splitting them. Keep edits 
 - `mo optimize` - maintenance and diagnostics, with `--whitelist` support.
 - `mo analyze` / `mo analyse` - Go disk explorer; safer for ad hoc cleanup because it uses Trash routing.
 - `mo status` - live health dashboard and JSON output for automation.
-- `mo check` / `mo doctor` - run system diagnostics (updates, health, security, config, dev environment) with optional auto-fix prompts.
 - `mo purge` - project build artifact cleanup, with configurable scan paths through `mo purge --paths`.
 - `mo installer` - installer-file discovery and cleanup.
 - `mo completion`, `mo touchid`, `mo update`, and `mo remove` manage shell integration, sudo auth convenience, updates, and uninstalling Mole itself.
