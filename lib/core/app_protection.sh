@@ -1331,6 +1331,20 @@ force_kill_app() {
     # Use executable name for precise matching, fallback to app name
     local match_pattern="${exec_name:-$app_name}"
 
+    # Defensive guard: even though should_protect_from_uninstall (bin/uninstall.sh)
+    # filters protected bundle IDs out of the selection list, match_pattern comes
+    # from CFBundleExecutable (a string a third-party .app can set freely). Refuse
+    # to AppleScript-Quit or pkill any pattern that exactly matches a critical
+    # system process name. force_kill_app is a public function; future callers
+    # must not be able to weaponise a spoofed executable name to take down Finder,
+    # Dock, loginwindow, etc.
+    case "$match_pattern" in
+        Finder | Dock | loginwindow | WindowServer | SystemUIServer | launchd | coreaudiod | NotificationCenter | ControlCenter | Spotlight)
+            debug_log "force_kill_app: refusing to operate on system process name '$match_pattern'"
+            return 1
+            ;;
+    esac
+
     # Check if process is running using exact match only
     if ! pgrep -x "$match_pattern" > /dev/null 2>&1; then
         return 0

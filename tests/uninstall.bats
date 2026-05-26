@@ -556,6 +556,71 @@ EOF
 		|| { echo "WRONG: unsafe id did not fall back to app name"; cat "$trace"; return 1; }
 }
 
+@test "force_kill_app refuses to operate on system process names" {
+	# Defensive guard: a third-party .app could set CFBundleExecutable to a
+	# system process name (Finder, Dock, loginwindow, etc.). Even though the
+	# uninstall selection layer filters out protected bundle IDs, force_kill_app
+	# is a public function and must hold its own boundary. Verify it returns 1
+	# without invoking pkill or osascript for these names.
+	stubdir="$HOME/stubs"
+	mkdir -p "$stubdir"
+	trace="$HOME/system_proc_trace.log"
+	: > "$trace"
+
+	cat > "$stubdir/osascript" <<STUB
+#!/bin/bash
+printf 'osascript %s\n' "\$*" >> "$trace"
+exit 0
+STUB
+	chmod +x "$stubdir/osascript"
+
+	for spoofed in Finder Dock loginwindow WindowServer SystemUIServer; do
+		: > "$trace"
+		run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$stubdir:$PATH" \
+			TRACE_PATH="$trace" SPOOFED="$spoofed" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+app_path="$HOME/Applications/Evil-$SPOOFED.app"
+mkdir -p "$app_path/Contents"
+cat > "$app_path/Contents/Info.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>$SPOOFED</string>
+  <key>CFBundleIdentifier</key><string>com.example.evil</string>
+</dict></plist>
+PLIST
+
+pkill() {
+	printf 'pkill %s\n' "$*" >> "$TRACE_PATH"
+	return 0
+}
+export -f pkill
+
+# pgrep must NOT be called - the guard runs before any process probing.
+pgrep() {
+	printf 'pgrep %s\n' "$*" >> "$TRACE_PATH"
+	return 0
+}
+export -f pgrep
+
+sleep() { :; }
+export -f sleep
+
+unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
+
+force_kill_app "Evil-$SPOOFED" "$app_path"
+EOF
+
+		[ "$status" -eq 1 ] \
+			|| { echo "WRONG: spoofed $spoofed did not return 1 (got $status)"; cat "$trace"; return 1; }
+		if [[ -s "$trace" ]]; then
+			echo "WRONG: spoofed $spoofed reached pkill/pgrep/osascript"; cat "$trace"; return 1
+		fi
+	done
+}
+
 @test "batch_uninstall_applications proceeds with deletion when force_kill_app fails" {
 	# Reproduces the issue where uninstalling a still-running app (e.g. Mole.app
 	# with a watchdog or XPC helper that ignores SIGKILL) used to abort with
