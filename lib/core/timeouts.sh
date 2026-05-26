@@ -32,7 +32,9 @@
 #         is the right behavior.
 #   8s    External tool calls that are too slow for MEDIUM_PROBE (5s) but
 #         shouldn't pay the PKG_LIST (10s) ceiling: `hdiutil info`,
-#         `brew outdated`, `simctl list` warm-up retry.
+#         `brew outdated`, `simctl list` warm-up retry. Also the deep
+#         `find /private/var/folders -maxdepth 8` GPU-cache scan in
+#         lib/clean/system.sh - same "occasionally slow disk probe" shape.
 #   15s   Long-running maintenance ops on user-selected targets:
 #         `hdiutil detach`, `lsregister -r -f`, Time Machine backupdb
 #         `find`. Different shape from PKG_CLEANUP (20s, brew/conda) -

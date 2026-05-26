@@ -178,7 +178,7 @@ bootout_login_item_helpers() {
     while IFS= read -r helper_id; do
         [[ -n "$helper_id" ]] || continue
         mole_is_reverse_dns_bundle_id "$helper_id" || continue
-        run_with_timeout 5 launchctl bootout "gui/$uid/$helper_id" > /dev/null 2>&1 || true
+        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" launchctl bootout "gui/$uid/$helper_id" > /dev/null 2>&1 || true
     done <<< "$helper_ids"
 }
 
@@ -197,9 +197,9 @@ unload_launch_plist() {
     local needs_sudo="${2:-false}"
     can_unload_launch_plist "$plist" || return 0
     if [[ "$needs_sudo" == "true" ]]; then
-        run_with_timeout 5 sudo launchctl unload "$plist" > /dev/null 2>&1 || true
+        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sudo launchctl unload "$plist" > /dev/null 2>&1 || true
     else
-        run_with_timeout 5 launchctl unload "$plist" > /dev/null 2>&1 || true
+        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" launchctl unload "$plist" > /dev/null 2>&1 || true
     fi
 }
 
