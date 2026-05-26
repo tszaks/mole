@@ -368,33 +368,6 @@ log_system_info() {
 }
 
 # ============================================================================
-# Command Execution Wrappers
-# ============================================================================
-
-# Run command silently (ignore errors)
-run_silent() {
-    "$@" > /dev/null 2>&1 || true
-}
-
-# Run command with error logging
-run_logged() {
-    local cmd="$1"
-    # Log to main file, and also to debug file if enabled
-    if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        if ! "$@" 2>&1 | tee -a "$LOG_FILE" | tee -a "$DEBUG_LOG_FILE" > /dev/null; then
-            log_warning "Command failed: $cmd"
-            return 1
-        fi
-    else
-        if ! "$@" 2>&1 | tee -a "$LOG_FILE" > /dev/null; then
-            log_warning "Command failed: $cmd"
-            return 1
-        fi
-    fi
-    return 0
-}
-
-# ============================================================================
 # Formatted Output
 # ============================================================================
 
