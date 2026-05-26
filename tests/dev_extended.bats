@@ -94,37 +94,6 @@ EOF
 	[[ "$output" == *"Opam cache"* ]]
 }
 
-@test "clean_dev_editors cleans VS Code and Zed caches" {
-	mkdir -p "$HOME/Library/Caches/com.microsoft.VSCode" "$HOME/Library/Application Support/Code" "$HOME/Library/Caches/Zed"
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/dev.sh"
-safe_clean() { echo "$2"; }
-clean_service_worker_cache() { :; }
-clean_dev_editors
-EOF
-
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"VS Code cached data"* ]]
-	[[ "$output" == *"Zed cache"* ]]
-}
-
-@test "clean_dev_editors does not clean VS Code workspace storage" {
-	mkdir -p "$HOME/Library/Application Support/Code/User/workspaceStorage/abc123"
-	touch "$HOME/Library/Application Support/Code/User/workspaceStorage/abc123/workspace.json"
-
-	# Source and run the function
-	source "$PROJECT_ROOT/lib/core/common.sh"
-	source "$PROJECT_ROOT/lib/clean/dev.sh"
-	# shellcheck disable=SC2329
-	safe_clean() { :; }
-	clean_dev_editors >/dev/null 2>&1 || true
-
-	# Verify the file still exists
-	[ -f "$HOME/Library/Application Support/Code/User/workspaceStorage/abc123/workspace.json" ]
-}
-
 @test "check_android_ndk reports multiple NDK versions" {
 	run bash -c 'HOME=$(mktemp -d) && mkdir -p "$HOME/Library/Android/sdk/ndk"/{21.0.1,22.0.0,20.0.0} && source "$0" && note_activity() { :; } && NC="" && GREEN="" && GRAY="" && YELLOW="" && ICON_SUCCESS="✓" && check_android_ndk' "$PROJECT_ROOT/lib/clean/dev.sh"
 

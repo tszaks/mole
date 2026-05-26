@@ -1759,37 +1759,6 @@ clean_dev_haskell() {
 clean_dev_ocaml() {
     safe_clean ~/.opam/download-cache/* "Opam cache"
 }
-# Editor caches.
-# Note: ~/Library/Application Support/Code/User/workspaceStorage contains workspace settings - excluded from cleanup
-clean_dev_editors() {
-    safe_clean ~/Library/Caches/com.microsoft.VSCode/Cache/* "VS Code cached data"
-    safe_clean ~/Library/Application\ Support/Code/CachedData/* "VS Code cached data"
-    safe_clean ~/Library/Application\ Support/Code/DawnGraphiteCache/* "VS Code Dawn cache"
-    safe_clean ~/Library/Application\ Support/Code/DawnWebGPUCache/* "VS Code WebGPU cache"
-    safe_clean ~/Library/Application\ Support/Code/GPUCache/* "VS Code GPU cache"
-    safe_clean ~/Library/Application\ Support/Code/CachedExtensionVSIXs/* "VS Code extension cache"
-    safe_clean ~/Library/Application\ Support/Code/WebStorage/* "VS Code WebStorage"
-    clean_service_worker_cache "VS Code" "$HOME/Library/Application Support/Code/Service Worker/CacheStorage"
-    if ! pgrep -x "Code" > /dev/null 2>&1; then
-        safe_clean ~/Library/Application\ Support/Code/Service\ Worker/ScriptCache/* "VS Code Service Worker ScriptCache"
-    fi
-    safe_clean ~/Library/Caches/Zed/* "Zed cache"
-    safe_clean ~/Library/Caches/copilot/* "GitHub Copilot cache"
-    safe_clean ~/.cache/vscode-ripgrep/* "VS Code ripgrep cache"
-    if [[ -d ~/Library/Application\ Support/Cursor ]]; then
-        safe_clean ~/Library/Caches/Cursor/* "Cursor cache"
-        safe_clean ~/Library/Application\ Support/Cursor/CachedData/* "Cursor cached data"
-        safe_clean ~/Library/Application\ Support/Cursor/CachedExtensionVSIXs/* "Cursor extension cache"
-        safe_clean ~/Library/Application\ Support/Cursor/WebStorage/* "Cursor WebStorage"
-        safe_clean ~/Library/Application\ Support/Cursor/GPUCache/* "Cursor GPU cache"
-        safe_clean ~/Library/Application\ Support/Cursor/DawnGraphiteCache/* "Cursor Dawn cache"
-        safe_clean ~/Library/Application\ Support/Cursor/DawnWebGPUCache/* "Cursor WebGPU cache"
-        clean_service_worker_cache "Cursor" "$HOME/Library/Application Support/Cursor/Service Worker/CacheStorage"
-        if ! pgrep -x "Cursor" > /dev/null 2>&1; then
-            safe_clean ~/Library/Application\ Support/Cursor/Service\ Worker/ScriptCache/* "Cursor Service Worker ScriptCache"
-        fi
-    fi
-}
 # Main developer tools cleanup sequence.
 clean_developer_tools() {
     stop_section_spinner
