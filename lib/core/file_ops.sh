@@ -219,8 +219,11 @@ safe_remove() {
     local silent="${2:-false}"
     local precomputed_size_kb="${3:-}"
 
-    # Validate path
-    if ! validate_path_for_deletion "$path"; then
+    # Validate path. Silent cleanup callers still need the same policy result,
+    # but should not print one validation warning per skipped cache item.
+    if [[ "$silent" == "true" ]]; then
+        validate_path_for_deletion "$path" 2> /dev/null || return 1
+    elif ! validate_path_for_deletion "$path"; then
         return 1
     fi
 

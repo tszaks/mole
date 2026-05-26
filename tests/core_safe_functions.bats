@@ -165,6 +165,16 @@ EOF
     [[ "$output" == *"protected system path"* ]]
 }
 
+@test "safe_remove silent mode hides protected symlink validation warning" {
+    local link_path="$TEST_DIR/silent-system-link"
+    ln -s "/System" "$link_path"
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$link_path' true 2>&1"
+    [ "$status" -eq 1 ]
+    [[ -L "$link_path" ]]
+    [[ "$output" != *"Symlink points to protected system path"* ]]
+}
+
 @test "safe_remove successfully removes file" {
     local test_file="$TEST_DIR/test_file.txt"
     echo "test" > "$test_file"
