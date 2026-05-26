@@ -41,7 +41,7 @@ teardown() {
 
 # Build a sourceable copy of bin/uninstall.sh: rewrites SCRIPT_DIR so library
 # sources resolve, and strips the `main "$@"` invocation so we can drive
-# scan_applications directly. Mirrors tests/performance_uninstall_scan.sh.
+# scan_applications directly.
 sourceable_uninstall_sh() {
 	local out="$1"
 	awk -v script_dir="$PROJECT_ROOT/bin" '
