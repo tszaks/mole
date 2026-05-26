@@ -15,9 +15,10 @@ Before drafting, confirm:
 1. **Version**. Capital `V`, e.g. `V1.38.0`. Lowercase `v` does not trigger the workflow and may indicate a botched tag.
 2. **CodeName + emoji**. Ask the user. The title format is `V<version> <CodeName> <emoji>`.
 3. **Release commit range**. `git log <previous-tag>..V<version> --oneline` gives the raw material.
-4. **Sponsors**. Run `scripts/sponsors.sh` from this skill dir.
-5. **Contributors in this range**. `git log <previous-tag>..V<version> --pretty='%an' | sort -u`. Exclude `tw93` and bots.
-6. **Verify release exists**. `gh release view V<version> --repo tw93/Mole --json id,name` should return non-empty. If it doesn't, the workflow hasn't finished — wait, don't `gh release create`.
+4. **User-visible behavior changes**. Scan the full commit message bodies (not just subjects) for any narrowed detection, removed feature, or "controlled regression" wording. Examples that have shipped before: the V1.40 VPN narrowing (37a446c9) silently stopped detecting split-tunnel third-party VPNs, the Bluetooth reset removal (357ee057) dropped a flow some users depended on. These belong in notes even when not bug-fix-shaped, because users will hit them in production and won't know what changed.
+5. **Sponsors**. Run `scripts/sponsors.sh` from this skill dir.
+6. **Contributors in this range**. `git log <previous-tag>..V<version> --pretty='%an' | sort -u`. Exclude `tw93` and bots.
+7. **Verify release exists**. `gh release view V<version> --repo tw93/Mole --json id,name` should return non-empty. If it doesn't, the workflow hasn't finished — wait, don't `gh release create`.
 
 ## Pre-flight (cross-check against CLAUDE.md)
 
