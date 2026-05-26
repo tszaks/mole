@@ -265,6 +265,9 @@ _clean_darwin_user_runtime_dir() {
     )
 
     if [[ "$count" -lt "$max_items" ]]; then
+        # Same safety contract as the file loop above: parent vetted,
+        # find narrowed to current UID + age + -type d -empty, and safe_remove
+        # still validates. Do not re-add per-item should_protect_path here.
         while IFS= read -r -d '' item; do
             [[ -d "$item" && ! -L "$item" ]] || continue
             if [[ "${DRY_RUN:-false}" == "true" ]] || safe_remove "$item" true "0" > /dev/null 2>&1; then
