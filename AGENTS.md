@@ -54,6 +54,7 @@ Public docs and examples should prefer the installed `mo` command. Use `./mole` 
 - Any new direct use of `sudo`, `osascript`, or `launchctl` must have a `MOLE_TEST_MODE` / `MOLE_TEST_NO_AUTH` guard or be fully mocked in tests.
 - Do not change ESC timeout behavior in `lib/core/ui.sh` unless explicitly requested.
 - Preserve operation logging to the project log path unless the user explicitly asks to change `MO_NO_OPLOG` behavior.
+- **AI-generated PRs touching destructive sinks need line-by-line review.** Any PR touching `find_app_files`, `mole_delete`, `remove_file_list`, Group Container / `~/Library/Containers` traversal, `TeamID.*.prefix*` style wildcards, or any `find` recursion that ends in deletion must be audited per branch (fallback branches often regress to broad globs even when the primary branch looks correct), per protected-path coverage (does `should_protect_path` already include the new entry point?), and per user-confirmation step (does the PR silently skip an existing prompt?). When the PR is plausibly AI-generated, raise the bar: ask the contributor to narrow matchers to the exact bundle ID or app path before merge; do not approve "this looks fine." PR #874 (Group Container + diagnostic discovery) and PR #875 (interactive file selector) were merged and then reverted (`6ea1987`, `b4e9205`) precisely because a TeamID-prefix wildcard in a fallback branch matched far more than intended. Same shape, same revert risk.
 
 ## Working Rules
 
@@ -65,6 +66,7 @@ Public docs and examples should prefer the installed `mo` command. Use `./mole` 
 - Prefer targeted Bats tests during development; run the full suite before committing.
 - Do not add AI attribution trailers to commits.
 - `start_section` / `end_section` / `note_activity` have three intentionally different implementations in `lib/core/base.sh`, `bin/clean.sh`, and `bin/purge.sh`. Source order decides which one wins, and the wording, color, and dry-run export semantics differ on purpose. Read the cross-reference comment in `lib/core/base.sh` before changing any of them.
+- **Test-orphan pattern: grep the whole repo including top-level entry scripts before declaring a function dead.** Mole has a recurring shape where a helper is defined in `lib/core/base.sh` (or similar core lib), has full bats coverage in `tests/`, and is referenced by zero production callers. Known instances: `is_sip_enabled`, `is_darwin_ge`, `get_invoking_user`, `get_brand_name`, `get_mole_temp_root`, `scan_external_volumes`, `clean_dev_editors`, `perform_updates`, `format_brew_update_label`, `brew_has_outdated`. A "zero callers" verdict requires three checks: (1) grep across `lib`, `bin`, `cmd`, `scripts`, `tests`, AND the top-level entry (`mole` shim, install/uninstall scripts), not just core lib dirs; (2) check for string-built call sites (`eval`, `declare -f`, `compgen`); (3) re-grep after removal to confirm nothing was hand-wired. When deleting a write-only helper, also trace every variable it wrote and every config it read; the entire data path may be orphaned. Sub-agent "dead code" reports are starting points, not verdicts.
 
 ## Hotspot Ownership
 
