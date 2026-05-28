@@ -171,8 +171,34 @@ readonly ORPHAN_NEVER_DELETE_PATTERNS=(
     "com.apple.keychain*"
 )
 
-# Cache file for mdfind results (Bash 3.2 compatible, no associative arrays)
-ORPHAN_MDFIND_CACHE_FILE=""
+# In-memory mdfind result cache (Bash 3.2 compatible, no associative arrays).
+# Newline-delimited strings checked via case glob — no subprocess per lookup.
+_MOLE_MDFIND_FOUND=""
+_MOLE_MDFIND_NOTFOUND=""
+
+_mdfind_cache_check() {
+    local bundle_id="$1"
+    local _nl=$'\n'
+    case "${_nl}${_MOLE_MDFIND_FOUND}${_nl}" in
+        *"${_nl}${bundle_id}${_nl}"*) return 0 ;;
+    esac
+    case "${_nl}${_MOLE_MDFIND_NOTFOUND}${_nl}" in
+        *"${_nl}${bundle_id}${_nl}"*) return 1 ;;
+    esac
+    return 2
+}
+
+_mdfind_cache_store() {
+    local bundle_id="$1"
+    local found="$2"
+    if [[ "$found" == "true" ]]; then
+        _MOLE_MDFIND_FOUND="${_MOLE_MDFIND_FOUND:+${_MOLE_MDFIND_FOUND}
+}${bundle_id}"
+    else
+        _MOLE_MDFIND_NOTFOUND="${_MOLE_MDFIND_NOTFOUND:+${_MOLE_MDFIND_NOTFOUND}
+}${bundle_id}"
+    fi
+}
 
 # Usage: is_bundle_orphaned "bundle_id" "directory_path" "installed_bundles_file"
 is_bundle_orphaned() {
@@ -218,32 +244,21 @@ is_bundle_orphaned() {
         fi
     fi
 
-    # 6. Slow path: mdfind fallback with file-based caching (Bash 3.2 compatible)
+    # 6. Slow path: mdfind fallback with in-memory caching (Bash 3.2 compatible)
     # This catches apps installed in non-standard locations
     if mole_is_reverse_dns_bundle_id "$bundle_id"; then
-        # Initialize cache file if needed
-        if [[ -z "$ORPHAN_MDFIND_CACHE_FILE" ]]; then
-            ensure_mole_temp_root
-            ORPHAN_MDFIND_CACHE_FILE=$(mktemp "$MOLE_RESOLVED_TMPDIR/mole_mdfind_cache.XXXXXX")
-            register_temp_file "$ORPHAN_MDFIND_CACHE_FILE"
-        fi
-
-        # Check cache first (grep is fast for small files)
-        if grep -Fxq "FOUND:$bundle_id" "$ORPHAN_MDFIND_CACHE_FILE" 2> /dev/null; then
+        local _cache_rc=0
+        _mdfind_cache_check "$bundle_id" || _cache_rc=$?
+        if [[ $_cache_rc -eq 0 ]]; then
             return 1
-        fi
-        if grep -Fxq "NOTFOUND:$bundle_id" "$ORPHAN_MDFIND_CACHE_FILE" 2> /dev/null; then
-            # Already checked, not found - continue to return 0
-            :
-        else
-            # Query mdfind with strict timeout (2 seconds max)
+        elif [[ $_cache_rc -eq 2 ]]; then
             local app_exists
             app_exists=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2> /dev/null | head -1 || echo "")
             if [[ -n "$app_exists" ]]; then
-                echo "FOUND:$bundle_id" >> "$ORPHAN_MDFIND_CACHE_FILE"
+                _mdfind_cache_store "$bundle_id" "true"
                 return 1
             else
-                echo "NOTFOUND:$bundle_id" >> "$ORPHAN_MDFIND_CACHE_FILE"
+                _mdfind_cache_store "$bundle_id" "false"
             fi
         fi
     fi
@@ -279,23 +294,18 @@ is_claude_vm_bundle_orphaned() {
         fi
     fi
 
-    if [[ -z "$ORPHAN_MDFIND_CACHE_FILE" ]]; then
-        ensure_mole_temp_root
-        ORPHAN_MDFIND_CACHE_FILE=$(mktemp "$MOLE_RESOLVED_TMPDIR/mole_mdfind_cache.XXXXXX")
-        register_temp_file "$ORPHAN_MDFIND_CACHE_FILE"
-    fi
-
-    if grep -Fxq "FOUND:$claude_bundle_id" "$ORPHAN_MDFIND_CACHE_FILE" 2> /dev/null; then
+    local _cache_rc=0
+    _mdfind_cache_check "$claude_bundle_id" || _cache_rc=$?
+    if [[ $_cache_rc -eq 0 ]]; then
         return 1
-    fi
-    if ! grep -Fxq "NOTFOUND:$claude_bundle_id" "$ORPHAN_MDFIND_CACHE_FILE" 2> /dev/null; then
+    elif [[ $_cache_rc -eq 2 ]]; then
         local app_exists
         app_exists=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemCFBundleIdentifier == '$claude_bundle_id'" 2> /dev/null | head -1 || echo "")
         if [[ -n "$app_exists" ]]; then
-            echo "FOUND:$claude_bundle_id" >> "$ORPHAN_MDFIND_CACHE_FILE"
+            _mdfind_cache_store "$claude_bundle_id" "true"
             return 1
         fi
-        echo "NOTFOUND:$claude_bundle_id" >> "$ORPHAN_MDFIND_CACHE_FILE"
+        _mdfind_cache_store "$claude_bundle_id" "false"
     fi
 
     return 0
@@ -460,7 +470,6 @@ clean_orphaned_system_services() {
         "homebrew.mxcl.*:"
     )
 
-    local mdfind_cache_file=""
     # Returns 0 (found/protected) when any app backing a system service is installed.
     # app_path may be a pipe-separated list of candidate .app paths; any match = protected.
     # An empty app_path always returns 0 (unconditionally protected).
@@ -498,23 +507,18 @@ clean_orphaned_system_services() {
         done
 
         if mole_is_reverse_dns_bundle_id "$bundle_id"; then
-            if [[ -z "$mdfind_cache_file" ]]; then
-                ensure_mole_temp_root
-                mdfind_cache_file=$(mktemp "$MOLE_RESOLVED_TMPDIR/mole_mdfind_cache.XXXXXX")
-                register_temp_file "$mdfind_cache_file"
-            fi
-
-            if grep -Fxq "FOUND:$bundle_id" "$mdfind_cache_file" 2> /dev/null; then
+            local _cache_rc=0
+            _mdfind_cache_check "$bundle_id" || _cache_rc=$?
+            if [[ $_cache_rc -eq 0 ]]; then
                 return 0
-            fi
-            if ! grep -Fxq "NOTFOUND:$bundle_id" "$mdfind_cache_file" 2> /dev/null; then
+            elif [[ $_cache_rc -eq 2 ]]; then
                 local app_found
                 app_found=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2> /dev/null | head -1 || echo "")
                 if [[ -n "$app_found" ]]; then
-                    echo "FOUND:$bundle_id" >> "$mdfind_cache_file"
+                    _mdfind_cache_store "$bundle_id" "true"
                     return 0
                 fi
-                echo "NOTFOUND:$bundle_id" >> "$mdfind_cache_file"
+                _mdfind_cache_store "$bundle_id" "false"
             fi
         fi
 
@@ -799,9 +803,19 @@ clean_orphaned_container_stubs() {
         esac
 
         if mole_is_reverse_dns_bundle_id "$bundle_id"; then
-            local app_found
-            app_found=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2> /dev/null | head -1 || echo "")
-            [[ -n "$app_found" ]] && return 0
+            local _cache_rc=0
+            _mdfind_cache_check "$bundle_id" || _cache_rc=$?
+            if [[ $_cache_rc -eq 0 ]]; then
+                return 0
+            elif [[ $_cache_rc -eq 2 ]]; then
+                local app_found
+                app_found=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2> /dev/null | head -1 || echo "")
+                if [[ -n "$app_found" ]]; then
+                    _mdfind_cache_store "$bundle_id" "true"
+                    return 0
+                fi
+                _mdfind_cache_store "$bundle_id" "false"
+            fi
         fi
 
         return 1
