@@ -306,19 +306,15 @@ EOF
 	[[ "$output" != *"MATCHED"* ]]
 }
 
-@test "opt_dock_refresh clears cache files" {
+@test "opt_dock_refresh reports refresh" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-mkdir -p "$HOME/Library/Application Support/Dock"
-touch "$HOME/Library/Application Support/Dock/test.db"
-safe_remove() { return 0; }
 opt_dock_refresh
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Dock cache cleared"* ]]
 	[[ "$output" == *"Dock refreshed"* ]]
 }
 
@@ -1172,6 +1168,26 @@ EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"no_vpn"* ]]
+}
+
+@test "opt_dock_refresh preserves desktoppicture.db and other db files (#995)" {
+	local dock_support="$HOME/Library/Application Support/Dock"
+	mkdir -p "$dock_support"
+	: > "$dock_support/desktoppicture.db"
+	: > "$dock_support/another.db"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+killall() { return 0; }
+export -f killall
+opt_dock_refresh
+EOF
+
+	[ "$status" -eq 0 ]
+	[ -f "$HOME/Library/Application Support/Dock/desktoppicture.db" ]
+	[ -f "$HOME/Library/Application Support/Dock/another.db" ]
 }
 
 @test "opt_diag_parse_image_mount_pairs handles multiple blocks" {

@@ -856,19 +856,13 @@ opt_spotlight_index_optimize() {
     fi
 }
 
-# Dock cache refresh.
+# Dock refresh (restart Dock so plist edits take effect).
+# The previous implementation also wiped every "*.db" under
+# ~/Library/Application Support/Dock, which deleted macOS's
+# desktoppicture.db and reset the user's wallpaper (#995). No .db under
+# that directory needs to be cleared for Dock to refresh — killall plus
+# touching the plist is sufficient.
 opt_dock_refresh() {
-    local dock_support="$HOME/Library/Application Support/Dock"
-    local refreshed=false
-
-    if [[ -d "$dock_support" ]]; then
-        while IFS= read -r db_file; do
-            if [[ -f "$db_file" ]]; then
-                safe_remove "$db_file" true > /dev/null 2>&1 && refreshed=true
-            fi
-        done < <(command find "$dock_support" -name "*.db" -type f 2> /dev/null || true)
-    fi
-
     local dock_plist="$HOME/Library/Preferences/com.apple.dock.plist"
     if [[ -f "$dock_plist" ]]; then
         touch "$dock_plist" 2> /dev/null || true
@@ -878,9 +872,6 @@ opt_dock_refresh() {
         killall Dock 2> /dev/null || true
     fi
 
-    if [[ "$refreshed" == "true" ]]; then
-        opt_msg "Dock cache cleared"
-    fi
     opt_msg "Dock refreshed"
 }
 
