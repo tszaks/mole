@@ -230,6 +230,7 @@ func getAppleSmartBatteryHealthData() (cycles int, capacity int) {
 }
 
 func parseAppleSmartBatteryHealth(out string) (cycles int, capacity int) {
+	var design, nominal, rawMax int
 	for line := range strings.Lines(out) {
 		line = strings.TrimSpace(line)
 		if cycles == 0 {
@@ -239,20 +240,54 @@ func parseAppleSmartBatteryHealth(out string) (cycles int, capacity int) {
 				}
 			}
 		}
-		if capacity == 0 {
-			if value, found := parseIORegFloatValue(line, "MaxCapacity"); found {
-				capacity = normalizeBatteryHealthCapacity(value)
+		if design == 0 {
+			if raw, found := ioRegValueForKey(line, "DesignCapacity"); found {
+				if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+					design = value
+				}
+			}
+		}
+		if nominal == 0 {
+			if raw, found := ioRegValueForKey(line, "NominalChargeCapacity"); found {
+				if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+					nominal = value
+				}
+			}
+		}
+		if rawMax == 0 {
+			if raw, found := ioRegValueForKey(line, "AppleRawMaxCapacity"); found {
+				if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+					rawMax = value
+				}
 			}
 		}
 	}
-	return cycles, capacity
+	return cycles, batteryHealthPercent(design, nominal, rawMax)
 }
 
-func normalizeBatteryHealthCapacity(value float64) int {
-	if value <= 0 || value > 100 {
+// batteryHealthPercent mirrors the algorithm used by the Mole Mac app
+// (SystemMetricsCollector.batteryHealthPercent): NominalChargeCapacity is
+// preferred over AppleRawMaxCapacity, the ratio is rounded half-away-from-zero,
+// and the result is clamped to [0, 100].
+func batteryHealthPercent(design, nominal, rawMax int) int {
+	if design <= 0 {
 		return 0
 	}
-	return int(math.Round(value))
+	capacity := nominal
+	if capacity == 0 {
+		capacity = rawMax
+	}
+	if capacity <= 0 {
+		return 0
+	}
+	pct := math.Round(float64(capacity) * 100.0 / float64(design))
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return int(pct)
 }
 
 func getSystemPowerJSONOutput() string {

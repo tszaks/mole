@@ -76,29 +76,28 @@ func TestMergeBatteryHealthDataPrefersAppleSmartBatteryCapacity(t *testing.T) {
 	}
 }
 
-func TestParseAppleSmartBatteryHealth(t *testing.T) {
+func TestParseAppleSmartBatteryHealthPrefersNominalCharge(t *testing.T) {
 	out := `
-  | |   "BatteryData" = {"MaxCapacity"=100,"DesignCapacity"=8579,"BatteryHealthMetric"=0}
-  | |   "NominalChargeCapacity" = 7989
-  | |   "MaxCapacity" = 100
-  | |   "DesignCapacity" = 8579
-  | |   "CycleCount" = 4
+  | |   "DesignCapacity" = 10000
+  | |   "AppleRawMaxCapacity" = 7800
+  | |   "NominalChargeCapacity" = 8300
+  | |   "CycleCount" = 250
 `
 
 	cycles, capacity := parseAppleSmartBatteryHealth(out)
 
-	if cycles != 4 {
-		t.Fatalf("cycles = %d, want 4", cycles)
+	if cycles != 250 {
+		t.Fatalf("cycles = %d, want 250", cycles)
 	}
-	if capacity != 100 {
-		t.Fatalf("capacity = %d, want 100", capacity)
+	if capacity != 83 {
+		t.Fatalf("capacity = %d, want 83", capacity)
 	}
 }
 
-func TestParseAppleSmartBatteryHealthIgnoresRawMaxCapacity(t *testing.T) {
+func TestParseAppleSmartBatteryHealthFallsBackToRawMaxCapacity(t *testing.T) {
 	out := `
-  | |   "MaxCapacity" = 7745
-  | |   "DesignCapacity" = 8579
+  | |   "DesignCapacity" = 10000
+  | |   "AppleRawMaxCapacity" = 7800
   | |   "CycleCount" = 12
 `
 
@@ -107,8 +106,26 @@ func TestParseAppleSmartBatteryHealthIgnoresRawMaxCapacity(t *testing.T) {
 	if cycles != 12 {
 		t.Fatalf("cycles = %d, want 12", cycles)
 	}
-	if capacity != 0 {
-		t.Fatalf("capacity = %d, want 0", capacity)
+	if capacity != 78 {
+		t.Fatalf("capacity = %d, want 78", capacity)
+	}
+}
+
+func TestBatteryHealthPercentRoundsAndClamps(t *testing.T) {
+	if got := batteryHealthPercent(10000, 8249, 0); got != 82 {
+		t.Errorf("8249/10000 rounded = %d, want 82", got)
+	}
+	if got := batteryHealthPercent(10000, 8250, 0); got != 83 {
+		t.Errorf("8250/10000 rounded = %d, want 83", got)
+	}
+	if got := batteryHealthPercent(10000, 12000, 0); got != 100 {
+		t.Errorf("12000/10000 clamped = %d, want 100", got)
+	}
+	if got := batteryHealthPercent(0, 8000, 0); got != 0 {
+		t.Errorf("zero design = %d, want 0", got)
+	}
+	if got := batteryHealthPercent(10000, 0, 0); got != 0 {
+		t.Errorf("no capacity = %d, want 0", got)
 	}
 }
 
