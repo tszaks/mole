@@ -579,87 +579,6 @@ opt_launch_services_rebuild() {
     fi
 }
 
-# Font cache rebuild.
-browser_family_is_running() {
-    local browser_name="$1"
-
-    case "$browser_name" in
-        "Firefox")
-            pgrep -if "Firefox|org\\.mozilla\\.firefox|firefox .*contentproc|firefox .*plugin-container|firefox .*crashreporter" > /dev/null 2>&1
-            ;;
-        "Zen Browser")
-            pgrep -if "Zen Browser|org\\.mozilla\\.zen|Zen Browser Helper|zen .*contentproc" > /dev/null 2>&1
-            ;;
-        *)
-            pgrep -ix "$browser_name" > /dev/null 2>&1
-            ;;
-    esac
-}
-
-opt_font_cache_rebuild() {
-    if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        debug_operation_start "Font Cache Rebuild" "Clear and rebuild font cache"
-        debug_operation_detail "Method" "Run atsutil databases -remove"
-        debug_operation_detail "Safety checks" "Skip when browsers or browser helpers are running to avoid cache rebuild conflicts"
-        debug_operation_detail "Expected outcome" "Fixed font display issues, removed corrupted font cache"
-        debug_risk_level "LOW" "System automatically rebuilds font database"
-    fi
-
-    local success=false
-
-    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        # Some browsers can keep stale GPU/text caches in /var/folders if system font
-        # databases are reset while browser/helper processes are still running.
-        local -a running_browsers=()
-
-        local browser_name
-        local -a browser_checks=(
-            "Firefox"
-            "Safari"
-            "Google Chrome"
-            "Chromium"
-            "Brave Browser"
-            "Microsoft Edge"
-            "Arc"
-            "Opera"
-            "Vivaldi"
-            "Zen Browser"
-            "Helium"
-        )
-        for browser_name in "${browser_checks[@]}"; do
-            if browser_family_is_running "$browser_name"; then
-                running_browsers+=("$browser_name")
-            fi
-        done
-
-        if [[ ${#running_browsers[@]} -gt 0 ]]; then
-            local running_list
-            running_list=$(printf "%s, " "${running_browsers[@]}")
-            running_list="${running_list%, }"
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Font cache rebuild skipped · ${running_list} still running"
-            return 0
-        fi
-
-        if ! optimize_sudo_available; then
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Font cache rebuild skipped · admin access required"
-            return 0
-        fi
-
-        if sudo atsutil databases -remove > /dev/null 2>&1; then
-            success=true
-        fi
-    else
-        success=true
-    fi
-
-    if [[ "$success" == "true" ]]; then
-        opt_msg "Font cache cleared"
-        opt_msg "System will rebuild font database automatically"
-    else
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to clear font cache"
-    fi
-}
-
 # Removed high-risk optimizations:
 # - opt_startup_items_cleanup: Risk of deleting legitimate app helpers
 # - opt_dyld_cache_update: Low benefit, time-consuming, auto-managed by macOS
@@ -1393,7 +1312,6 @@ execute_optimization() {
         quarantine_cleanup) opt_quarantine_cleanup ;;
         sqlite_vacuum) opt_sqlite_vacuum ;;
         launch_services_rebuild) opt_launch_services_rebuild ;;
-        font_cache_rebuild) opt_font_cache_rebuild ;;
         dock_refresh) opt_dock_refresh ;;
         prevent_network_dsstore) opt_prevent_network_dsstore ;;
         memory_pressure_relief) opt_memory_pressure_relief ;;
