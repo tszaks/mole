@@ -339,6 +339,124 @@ EOF
 	[[ "$output" == *"Unknown action"* ]]
 }
 
+@test "opt_prune_spotlight_orphan_rules removes orphan but keeps system, apple and installed rules" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+PLIST="$HOME/Library/Preferences/com.apple.spotlight.plist"
+mkdir -p "$(dirname "$PLIST")"
+rm -f "$PLIST"
+/usr/libexec/PlistBuddy \
+    -c "Add :EnabledPreferenceRules array" \
+    -c "Add :EnabledPreferenceRules:0 string System.iphoneApps" \
+    -c "Add :EnabledPreferenceRules:1 string com.apple.Safari" \
+    -c "Add :EnabledPreferenceRules:2 string com.installed.App" \
+    -c "Add :EnabledPreferenceRules:3 string com.lm.william.TwinklingCard" \
+    "$PLIST" >/dev/null 2>&1
+defaults() {
+    case "$1" in
+        read) return 0 ;;
+        write | delete) echo "DEFAULTS: $*" ;;
+    esac
+}
+bundle_has_installed_app() { [[ "$1" == "com.installed.App" ]]; }
+opt_prune_spotlight_orphan_rules
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Removed 1 orphan"* ]]
+	[[ "$output" == *"DEFAULTS: write"* ]]
+	[[ "$output" == *"System.iphoneApps"* ]]
+	[[ "$output" == *"com.apple.Safari"* ]]
+	[[ "$output" == *"com.installed.App"* ]]
+	[[ "$output" != *"com.lm.william.TwinklingCard"* ]]
+}
+
+@test "opt_prune_spotlight_orphan_rules dry-run reports but does not write" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+PLIST="$HOME/Library/Preferences/com.apple.spotlight.plist"
+mkdir -p "$(dirname "$PLIST")"
+rm -f "$PLIST"
+/usr/libexec/PlistBuddy \
+    -c "Add :EnabledPreferenceRules array" \
+    -c "Add :EnabledPreferenceRules:0 string System.iphoneApps" \
+    -c "Add :EnabledPreferenceRules:1 string com.lm.william.TwinklingCard" \
+    "$PLIST" >/dev/null 2>&1
+defaults() {
+    case "$1" in
+        read) return 0 ;;
+        write | delete) echo "DEFAULTS: $*" ;;
+    esac
+}
+bundle_has_installed_app() { return 1; }
+opt_prune_spotlight_orphan_rules
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Would remove 1 orphan"* ]]
+	[[ "$output" != *"DEFAULTS: write"* ]]
+	[[ "$output" != *"DEFAULTS: delete"* ]]
+}
+
+@test "opt_prune_spotlight_orphan_rules reports clean when every rule still has its app" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+PLIST="$HOME/Library/Preferences/com.apple.spotlight.plist"
+mkdir -p "$(dirname "$PLIST")"
+rm -f "$PLIST"
+/usr/libexec/PlistBuddy \
+    -c "Add :EnabledPreferenceRules array" \
+    -c "Add :EnabledPreferenceRules:0 string System.iphoneApps" \
+    -c "Add :EnabledPreferenceRules:1 string com.apple.Safari" \
+    -c "Add :EnabledPreferenceRules:2 string com.installed.App" \
+    "$PLIST" >/dev/null 2>&1
+defaults() {
+    case "$1" in
+        read) return 0 ;;
+        write | delete) echo "DEFAULTS: $*" ;;
+    esac
+}
+bundle_has_installed_app() { return 0; }
+opt_prune_spotlight_orphan_rules
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"already clean"* ]]
+	[[ "$output" != *"DEFAULTS: write"* ]]
+}
+
+@test "opt_prune_spotlight_orphan_rules reports clean when rules key is absent" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+defaults() { return 1; }
+opt_prune_spotlight_orphan_rules
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"already clean"* ]]
+}
+
+@test "execute_optimization dispatches spotlight_orphan_rules_cleanup" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+opt_prune_spotlight_orphan_rules() { echo "pruned"; }
+execute_optimization spotlight_orphan_rules_cleanup
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"pruned"* ]]
+}
+
 @test "opt_launch_services_rebuild handles missing lsregister without exiting" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

@@ -775,6 +775,65 @@ opt_spotlight_index_optimize() {
     fi
 }
 
+# Remove orphaned Spotlight search-rule entries.
+# Uninstalling an app (especially Mac App Store apps that synced via iCloud)
+# can leave its bundle id behind in com.apple.spotlight EnabledPreferenceRules,
+# showing up as a dead row in System Settings > Spotlight (#1000). macOS never
+# prunes these, so we drop entries whose app is no longer installed.
+opt_prune_spotlight_orphan_rules() {
+    local domain="com.apple.spotlight"
+    local plist="$HOME/Library/Preferences/${domain}.plist"
+
+    if ! defaults read "$domain" EnabledPreferenceRules &> /dev/null; then
+        opt_msg "Spotlight search rules already clean"
+        return 0
+    fi
+
+    local -a keep=() removed=()
+    local i=0 entry
+    while entry=$(/usr/libexec/PlistBuddy -c "Print :EnabledPreferenceRules:$i" "$plist" 2> /dev/null); do
+        case "$entry" in
+            # Never touch system or Apple rules (e.g. System.iphoneApps); these
+            # pass the reverse-DNS shape check but are not removable app bundles.
+            System.* | com.apple.*)
+                keep+=("$entry")
+                ;;
+            *)
+                # Only act on well-formed bundle ids; bundle_has_installed_app
+                # double-checks with mdfind and a filesystem scan, so a return of
+                # 1 means the app is genuinely gone. Anything else is kept.
+                if mole_is_reverse_dns_bundle_id "$entry" && ! bundle_has_installed_app "$entry"; then
+                    removed+=("$entry")
+                else
+                    keep+=("$entry")
+                fi
+                ;;
+        esac
+        i=$((i + 1))
+    done
+
+    if [[ ${#removed[@]} -eq 0 ]]; then
+        opt_msg "Spotlight search rules already clean"
+        return 0
+    fi
+
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        opt_msg "Would remove ${#removed[@]} orphan Spotlight rule(s)"
+        return 0
+    fi
+
+    # Rewrite the filtered array through cfprefsd (defaults), not by deleting
+    # plist indices in place: this avoids the cfprefsd cache overwriting a direct
+    # file edit, and ensures System Settings reflects the change and it persists.
+    if [[ ${#keep[@]} -gt 0 ]]; then
+        defaults write "$domain" EnabledPreferenceRules -array "${keep[@]}" 2> /dev/null || true
+    else
+        defaults delete "$domain" EnabledPreferenceRules 2> /dev/null || true
+    fi
+
+    opt_msg "Removed ${#removed[@]} orphan Spotlight rule(s)"
+}
+
 # Dock refresh (restart Dock so plist edits take effect).
 # The previous implementation also wiped every "*.db" under
 # ~/Library/Application Support/Dock, which deleted macOS's
@@ -1318,6 +1377,7 @@ execute_optimization() {
         network_stack_optimize) opt_network_stack_optimize ;;
         disk_permissions_repair) opt_disk_permissions_repair ;;
         spotlight_index_optimize) opt_spotlight_index_optimize ;;
+        spotlight_orphan_rules_cleanup) opt_prune_spotlight_orphan_rules ;;
         launch_agents_cleanup) opt_launch_agents_cleanup ;;
         periodic_maintenance) opt_periodic_maintenance ;;
         shared_file_list_repair) opt_shared_file_list_repair ;;
