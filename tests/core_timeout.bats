@@ -187,6 +187,52 @@ setup() {
     [[ "$result" == "1" ]]
 }
 
+@test "run_with_timeout: perl fallback preserves command exit code (#1003)" {
+    if ! command -v perl > /dev/null 2>&1; then
+        skip "perl not available"
+    fi
+    set +e
+    bash -c "
+        set +e
+        source '$PROJECT_ROOT/lib/core/timeout.sh'
+        MO_TIMEOUT_BIN=''
+        MO_TIMEOUT_PERL_BIN=\"\$(command -v perl)\"
+        run_with_timeout 5 sh -c 'exit 7'
+        exit \$?
+    "
+    exit_code=$?
+    set -e
+    [[ $exit_code -eq 7 ]]
+}
+
+@test "run_with_timeout: perl fallback kills long-running command (#1003)" {
+    if ! command -v perl > /dev/null 2>&1; then
+        skip "perl not available"
+    fi
+    start_time=$(date +%s)
+    set +e
+    bash -c "
+        set +e
+        source '$PROJECT_ROOT/lib/core/timeout.sh'
+        MO_TIMEOUT_BIN=''
+        MO_TIMEOUT_PERL_BIN=\"\$(command -v perl)\"
+        run_with_timeout 2 sleep 8
+    " > /dev/null 2>&1
+    set -e
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
+    [[ $duration -lt 7 ]]
+}
+
+# setsid() in the perl fallback strips the controlling terminal, which breaks
+# nested sudo inside brew cask uninstall scripts (issue #1003). The fallback must
+# use setpgid to keep the tty while still enabling process-group kill. This guards
+# against a regression that is otherwise only observable on a real terminal.
+@test "timeout.sh: perl fallback must not detach the controlling tty (#1003)" {
+    ! grep -q 'setsid' "$PROJECT_ROOT/lib/core/timeout.sh"
+    grep -q 'setpgid' "$PROJECT_ROOT/lib/core/timeout.sh"
+}
+
 @test "run_with_timeout: shell fallback preserves caller INT trap" {
     result=$(bash -c "
         set -euo pipefail

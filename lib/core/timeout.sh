@@ -131,7 +131,7 @@ run_with_timeout() {
         "$MO_TIMEOUT_PERL_BIN" -e '
             use strict;
             use warnings;
-            use POSIX qw(:sys_wait_h setsid);
+            use POSIX qw(:sys_wait_h setpgid);
             use Time::HiRes qw(time sleep);
 
             my $duration = 0 + shift @ARGV;
@@ -141,7 +141,13 @@ run_with_timeout() {
             defined $pid or exit 125;
 
             if ($pid == 0) {
-                setsid() or exit 125;
+                # New process group, NOT a new session: keep the controlling
+                # terminal so nested sudo inside the wrapped command can reuse
+                # the cached credential. setsid() would detach the tty and break
+                # brew cask uninstall scripts that call sudo (issue #1003).
+                # setpgid returns 0 on success (falsy in Perl), so it must not be
+                # guarded with `or exit`; a rare failure only degrades group-kill.
+                setpgid(0, 0);
                 exec @ARGV;
                 exit 127;
             }
