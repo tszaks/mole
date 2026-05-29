@@ -229,8 +229,12 @@ setup() {
 # use setpgid to keep the tty while still enabling process-group kill. This guards
 # against a regression that is otherwise only observable on a real terminal.
 @test "timeout.sh: perl fallback must not detach the controlling tty (#1003)" {
-    ! grep -q 'setsid' "$PROJECT_ROOT/lib/core/timeout.sh"
-    grep -q 'setpgid' "$PROJECT_ROOT/lib/core/timeout.sh"
+    # Match call statements at line start, not the comments that explain why
+    # setsid is avoided (those mention "setsid()" mid-line and would false-positive).
+    run grep -nE '^[[:space:]]*setsid[[:space:]]*\(' "$PROJECT_ROOT/lib/core/timeout.sh"
+    [ "$status" -ne 0 ]
+    run grep -nE '^[[:space:]]*setpgid[[:space:]]*\(' "$PROJECT_ROOT/lib/core/timeout.sh"
+    [ "$status" -eq 0 ]
 }
 
 @test "run_with_timeout: shell fallback preserves caller INT trap" {
