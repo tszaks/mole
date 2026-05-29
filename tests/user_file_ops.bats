@@ -33,21 +33,6 @@ setup() {
     mkdir -p "$HOME"
 }
 
-@test "get_darwin_major returns numeric version on macOS" {
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_darwin_major")
-    [[ "$result" =~ ^[0-9]+$ ]]
-}
-
-@test "get_darwin_major returns 999 on failure (mock uname failure)" {
-    result=$(bash -c "
-        uname() { return 1; }
-        export -f uname
-        source '$PROJECT_ROOT/lib/core/base.sh'
-        get_darwin_major
-    ")
-    [ "$result" = "999" ]
-}
-
 @test "is_root_user detects non-root correctly" {
     result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; is_root_user && echo 'root' || echo 'not-root'")
     [ "$result" = "not-root" ]

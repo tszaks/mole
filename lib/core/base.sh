@@ -214,25 +214,6 @@ get_free_space() {
     df -h "$target" | awk 'NR==2 {print $4}'
 }
 
-# Get Darwin kernel major version (e.g., 24 for 24.2.0)
-# Returns 999 on failure to adopt conservative behavior (assume modern system)
-get_darwin_major() {
-    if [[ -n "${MOLE_DARWIN_MAJOR_CACHE:-}" ]]; then
-        echo "$MOLE_DARWIN_MAJOR_CACHE"
-        return 0
-    fi
-
-    local kernel
-    kernel=$(uname -r 2> /dev/null || true)
-    local major="${kernel%%.*}"
-    if [[ ! "$major" =~ ^[0-9]+$ ]]; then
-        # Return high number to skip potentially dangerous operations on unknown systems
-        major=999
-    fi
-    export MOLE_DARWIN_MAJOR_CACHE="$major"
-    echo "$major"
-}
-
 # Get optimal parallel jobs for operation type (scan|io|compute|default)
 get_optimal_parallel_jobs() {
     local operation_type="${1:-default}"

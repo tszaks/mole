@@ -278,14 +278,6 @@ check_for_updates() {
     )
 }
 
-show_update_notification() {
-    local msg_cache="$HOME/.cache/mole/update_message"
-    if [[ -f "$msg_cache" && -s "$msg_cache" ]]; then
-        cat "$msg_cache"
-        echo
-    fi
-}
-
 # UI helpers
 show_brand_banner() {
     cat << EOF
@@ -1029,9 +1021,6 @@ main() {
             ;;
         "status")
             exec "$SCRIPT_DIR/bin/status.sh" "${args[@]:1}"
-            ;;
-        "history")
-            exec "$SCRIPT_DIR/bin/history.sh" "${args[@]:1}"
             ;;
         "purge")
             exec "$SCRIPT_DIR/bin/purge.sh" "${args[@]:1}"

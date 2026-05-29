@@ -106,15 +106,6 @@ setup() {
     [ "$result" = "$current_user" ]
 }
 
-@test "get_darwin_major caches correctly" {
-    local first second
-    first=$(get_darwin_major)
-    second=$(get_darwin_major)
-
-    [ "$first" = "$second" ]
-    [[ "$first" =~ ^[0-9]+$ ]]
-}
-
 @test "create_temp_file and cleanup_temp_files work efficiently" {
     local start end elapsed
     local limit_ms="${MOLE_PERF_CREATE_TEMP_FILE_LIMIT_MS:-3000}"

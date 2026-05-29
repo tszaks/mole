@@ -1694,7 +1694,7 @@ agent_worktree_is_disposable() {
 # uncommitted or unpushed work, so this is skipped by default. Set
 # MOLE_AGENT_WORKTREES=1 to remove only the worktrees that are fully clean.
 clean_dev_agent_worktrees() {
-    local scan_timeout="${MOLE_AGENT_WORKTREE_SCAN_SEC:-20}"
+    local scan_timeout=20
 
     local -a containers=()
     local root container
