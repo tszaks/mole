@@ -3,7 +3,7 @@
 #
 # Enumerates bundle IDs of all apps in /System/Applications and /Applications
 # on the current macOS host, then reports any that are NOT covered by
-# SYSTEM_CRITICAL_BUNDLES / SYSTEM_CRITICAL_BUNDLES_FAST / DATA_PROTECTED_BUNDLES.
+# SYSTEM_CRITICAL_BUNDLES / DATA_PROTECTED_BUNDLES.
 #
 # Intent: when a new macOS major release adds a system component (e.g. Apple
 # Intelligence introduced new daemons), this script surfaces it so we can
@@ -35,7 +35,7 @@ list_bundle_ids() {
 is_covered() {
     local bundle="$1"
     local pattern
-    for pattern in "${SYSTEM_CRITICAL_BUNDLES_FAST[@]}" "${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}"; do
+    for pattern in "${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}"; do
         if bundle_matches_pattern "$bundle" "$pattern"; then
             return 0
         fi
