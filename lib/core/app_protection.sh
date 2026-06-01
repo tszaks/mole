@@ -306,6 +306,17 @@ should_protect_path() {
         */Library/Logs/mole | */Library/Logs/mole/ | */Library/Logs/mole/*)
             return 0
             ;;
+        # Codex Desktop and CLI keep conversation indexes and app state in cache-
+        # shaped paths. Default cleanup must not remove those records.
+        */Library/Application\ Support/Codex | */Library/Application\ Support/Codex/* | \
+            */Library/Logs/com.openai.codex | */Library/Logs/com.openai.codex/* | \
+            */.codex/sessions | */.codex/sessions/* | \
+            */.codex/auth.json | */.codex/history.jsonl | \
+            */.codex/state_*.sqlite | */.codex/logs_*.sqlite | \
+            */.codex/session_index.jsonl | */.codex/cache/session_index.jsonl | \
+            */.codex/cache/codex_app_directory | */.codex/cache/codex_app_directory/*)
+            return 0
+            ;;
         # Bluetooth and WiFi configurations
         */ByHost/com.apple.bluetooth.* | */ByHost/com.apple.wifi.*)
             return 0

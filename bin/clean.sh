@@ -994,6 +994,8 @@ perform_cleanup() {
         total_size_cleaned=0
     fi
 
+    local initial_free_space_kb=""
+
     # Test mode skips expensive scans and returns minimal output.
     local test_mode_enabled=false
     if [[ -z "$EXTERNAL_VOLUME_TARGET" && "${MOLE_TEST_MODE:-0}" == "1" ]]; then
@@ -1031,6 +1033,9 @@ perform_cleanup() {
     fi
 
     if [[ "$test_mode_enabled" == "false" && -z "$EXTERNAL_VOLUME_TARGET" ]]; then
+        if ! initial_free_space_kb=$(get_free_space_kb 2> /dev/null); then
+            initial_free_space_kb=""
+        fi
         echo -e "${BLUE}${ICON_ADMIN}${NC} $(detect_architecture) | Free space: $(get_free_space)"
     fi
 
@@ -1258,7 +1263,7 @@ perform_cleanup() {
             summary_details+=("Detailed file list: ${GRAY}$EXPORT_LIST_FILE${NC}")
             summary_details+=("Use ${GRAY}mo clean --whitelist${NC} to add protection rules")
         else
-            local summary_line="Space freed: ${GREEN}${freed_size_human}${NC}"
+            local summary_line="Tracked cleanup: ${GREEN}${freed_size_human}${NC}"
 
             if [[ $files_cleaned -gt 0 && $total_items -gt 0 ]]; then
                 summary_line+=" | Items cleaned: $files_cleaned | Categories: $total_items"
@@ -1284,6 +1289,15 @@ perform_cleanup() {
                 fi
             fi
 
+            local final_free_space_kb
+            if ! final_free_space_kb=$(get_free_space_kb 2> /dev/null); then
+                final_free_space_kb=""
+            fi
+            if [[ "$initial_free_space_kb" =~ ^[0-9]+$ && "$final_free_space_kb" =~ ^[0-9]+$ ]]; then
+                local free_space_delta_kb=$((final_free_space_kb - initial_free_space_kb))
+                summary_details+=("Free space change: $(format_free_space_delta_kb "$free_space_delta_kb")")
+            fi
+
             local final_free_space
             final_free_space=$(get_free_space)
             summary_details+=("Free space now: $final_free_space")
@@ -1294,6 +1308,16 @@ perform_cleanup() {
             summary_details+=("No significant reclaimable space detected, system already clean.")
         else
             summary_details+=("System was already clean; no additional space freed.")
+        fi
+        if [[ "$DRY_RUN" != "true" ]]; then
+            local final_free_space_kb
+            if ! final_free_space_kb=$(get_free_space_kb 2> /dev/null); then
+                final_free_space_kb=""
+            fi
+            if [[ "$initial_free_space_kb" =~ ^[0-9]+$ && "$final_free_space_kb" =~ ^[0-9]+$ ]]; then
+                local free_space_delta_kb=$((final_free_space_kb - initial_free_space_kb))
+                summary_details+=("Free space change: $(format_free_space_delta_kb "$free_space_delta_kb")")
+            fi
         fi
         summary_details+=("Free space now: $(get_free_space)")
     fi
@@ -1376,4 +1400,6 @@ main() {
     exit 0
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

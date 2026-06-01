@@ -56,11 +56,13 @@ assert_output_not_contains() {
     }
 }
 
-@test "clean_codex_cli cleans codex cache, tmp, and log directories" {
+@test "clean_codex_cli skips codex state by default" {
     mkdir -p "$HOME/.codex/cache" "$HOME/.codex/.tmp" "$HOME/.codex/log" "$HOME/.codex/sessions"
-    touch "$HOME/.codex/cache/c.bin" "$HOME/.codex/.tmp/t.bin" "$HOME/.codex/log/codex-tui.log"
+    mkdir -p "$HOME/.codex/cache/codex_app_directory"
+    touch "$HOME/.codex/cache/c.bin" "$HOME/.codex/cache/session_index.jsonl"
+    touch "$HOME/.codex/cache/codex_app_directory/index.json" "$HOME/.codex/.tmp/t.bin" "$HOME/.codex/log/codex-tui.log"
     touch "$HOME/.codex/sessions/s.jsonl" "$HOME/.codex/auth.json" "$HOME/.codex/history.jsonl"
-    touch "$HOME/.codex/state_5.sqlite" "$HOME/.codex/logs_2.sqlite"
+    touch "$HOME/.codex/state_5.sqlite" "$HOME/.codex/logs_2.sqlite" "$HOME/.codex/session_index.jsonl"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -73,14 +75,15 @@ clean_codex_cli
 EOF
 
     assert_run_success
-    assert_output_contains "SAFE_CLEAN:Codex CLI cache|$HOME/.codex/cache/"
-    assert_output_contains "SAFE_CLEAN:Codex CLI temp files|$HOME/.codex/.tmp/"
-    assert_output_contains "SAFE_CLEAN:Codex CLI logs|$HOME/.codex/log/"
-    assert_output_not_contains "sessions"
-    assert_output_not_contains "auth.json"
-    assert_output_not_contains "history.jsonl"
-    assert_output_not_contains "state_5.sqlite"
-    assert_output_not_contains "logs_2.sqlite"
+    assert_output_contains "Codex CLI state · skipped by default"
+    assert_output_not_contains "SAFE_CLEAN:"
+    [ -f "$HOME/.codex/cache/session_index.jsonl" ]
+    [ -f "$HOME/.codex/cache/codex_app_directory/index.json" ]
+    [ -f "$HOME/.codex/.tmp/t.bin" ]
+    [ -f "$HOME/.codex/log/codex-tui.log" ]
+    [ -f "$HOME/.codex/sessions/s.jsonl" ]
+    [ -f "$HOME/.codex/state_5.sqlite" ]
+    [ -f "$HOME/.codex/logs_2.sqlite" ]
 }
 
 @test "clean_codex_cli is a no-op when ~/.codex is absent" {
@@ -98,7 +101,7 @@ EOF
     assert_output_not_contains "SAFE_CLEAN:"
 }
 
-@test "clean_codex_cli skips all targets while Codex is running" {
+@test "clean_codex_cli reports running Codex without cleaning state" {
     mkdir -p "$HOME/.codex/cache" "$HOME/.codex/.tmp" "$HOME/.codex/log"
     touch "$HOME/.codex/cache/c.bin"
 
@@ -113,7 +116,7 @@ clean_codex_cli
 EOF
 
     assert_run_success
-    assert_output_contains "Codex CLI caches · skipped (Codex running)"
+    assert_output_contains "Codex CLI state · skipped (Codex running)"
     assert_output_not_contains "SAFE_CLEAN:"
 }
 

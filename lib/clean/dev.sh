@@ -1574,22 +1574,21 @@ clean_codex_runtimes() {
     done < <(command find "$runtime_root" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null)
 }
 
-# Codex CLI working directory: rebuildable cache, temp, and log files.
-# Conversation state (sessions, *.sqlite, history.jsonl, credentials) is
-# intentionally left untouched - see issue #913.
+# Codex CLI and Desktop share state under ~/.codex. Keep it out of default
+# cleanup so app indexes, sessions, credentials, and local thread state survive.
 clean_codex_cli() {
     local codex_root="$HOME/.codex"
     [[ -d "$codex_root" ]] || return 0
 
     if codex_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex CLI caches · skipped (Codex running)"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex CLI state · skipped (Codex running)"
         note_activity
         return 0
     fi
 
-    safe_clean "$codex_root/cache"/* "Codex CLI cache"
-    safe_clean "$codex_root/.tmp"/* "Codex CLI temp files"
-    safe_clean "$codex_root/log"/* "Codex CLI logs"
+    echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex CLI state · skipped by default"
+    note_activity
+    debug_log "Codex CLI state left intact by default: $codex_root"
 }
 
 # Shared Chromium Default profile caches that are safe to regenerate.

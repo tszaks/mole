@@ -194,14 +194,36 @@ EOF
 @test "clean_ai_apps calls expected caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
 safe_clean() { echo "$2"; }
+note_activity() { :; }
 clean_ai_apps
 EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"ChatGPT cache"* ]]
     [[ "$output" == *"Claude desktop cache"* ]]
+    [[ "$output" != *"Codex"* ]]
+}
+
+@test "clean_ai_apps skips Codex Desktop state by default" {
+    mkdir -p "$HOME/Library/Application Support/Codex/Cache" "$HOME/Library/Logs/com.openai.codex"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "$2"; }
+note_activity() { echo "NOTE_ACTIVITY"; }
+clean_ai_apps
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Codex Desktop state · skipped by default"* ]]
+    [[ "$output" == *"NOTE_ACTIVITY"* ]]
+    [[ "$output" != *"Codex cache"* ]]
+    [[ "$output" != *"Codex CLI logs"* ]]
 }
 
 @test "clean_design_tools calls expected caches" {

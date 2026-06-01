@@ -203,15 +203,40 @@ detect_architecture() {
     echo "$MOLE_ARCH_CACHE"
 }
 
-# Get free disk space on root volume
-# Returns: human-readable string (e.g., "100G")
-get_free_space() {
+get_free_space_target() {
     local target="/"
     if [[ -d "/System/Volumes/Data" ]]; then
         target="/System/Volumes/Data"
     fi
 
-    df -h "$target" | awk 'NR==2 {print $4}'
+    printf '%s\n' "$target"
+}
+
+# Get free disk space on root volume in 1K blocks.
+get_free_space_kb() {
+    local target
+    target=$(get_free_space_target)
+
+    local available_kb
+    available_kb=$(command df -Pk "$target" 2> /dev/null | awk 'NR==2 {print $4}' || true)
+    if [[ "$available_kb" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$available_kb"
+        return 0
+    fi
+
+    return 1
+}
+
+# Get free disk space on root volume.
+# Returns: human-readable decimal string (e.g., "100.00GB")
+get_free_space() {
+    local free_kb
+    if free_kb=$(get_free_space_kb) && [[ "$free_kb" =~ ^[0-9]+$ ]]; then
+        bytes_to_human_kb "$free_kb"
+        return 0
+    fi
+
+    echo "Unknown"
 }
 
 # Get optimal parallel jobs for operation type (scan|io|compute|default)
@@ -444,6 +469,22 @@ bytes_to_human() {
 # Returns: formatted string
 bytes_to_human_kb() {
     bytes_to_human "$((${1:-0} * 1024))"
+}
+
+format_free_space_delta_kb() {
+    local delta_kb="${1:-0}"
+    [[ "$delta_kb" =~ ^-?[0-9]+$ ]] || delta_kb=0
+
+    local sign=""
+    local abs_kb="$delta_kb"
+    if ((delta_kb > 0)); then
+        sign="+"
+    elif ((delta_kb < 0)); then
+        sign="-"
+        abs_kb=$((-delta_kb))
+    fi
+
+    printf '%s%s\n' "$sign" "$(bytes_to_human_kb "$abs_kb")"
 }
 
 mole_is_reverse_dns_bundle_id() {

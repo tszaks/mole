@@ -51,6 +51,37 @@ setup() {
     [[ -n "$result" ]]
 }
 
+@test "get_free_space uses decimal formatting from df kilobytes" {
+    local mock_bin="$HOME/bin"
+    mkdir -p "$mock_bin"
+    cat > "$mock_bin/df" <<'MOCK'
+#!/bin/bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '/dev/disk1 200000000 126599680 73400320 64%% /\n'
+MOCK
+    chmod +x "$mock_bin/df"
+
+    output="$(
+        HOME="$HOME" PATH="$mock_bin:$PATH" bash --noprofile --norc <<'EOF'
+source "$PROJECT_ROOT/lib/core/common.sh"
+get_free_space_kb
+get_free_space
+format_free_space_delta_kb 1024
+format_free_space_delta_kb -1024
+EOF
+    )"
+
+    lines=()
+    while IFS= read -r line; do
+        lines+=("$line")
+    done <<< "$output"
+
+    [ "${lines[0]}" = "73400320" ]
+    [ "${lines[1]}" = "75.16GB" ]
+    [ "${lines[2]}" = "+1.0MB" ]
+    [ "${lines[3]}" = "-1.0MB" ]
+}
+
 @test "cleanup_result_color_kb always returns green" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -250,7 +281,7 @@ EOF
 
 @test "colorize_human_size colors dry-run size units by suffix" {
     output="$(
-        HOME="$HOME" bash --noprofile --norc << 'EOF'
+        env -u NO_COLOR HOME="$HOME" bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
 colorize_human_size "1.00GB"
 printf '\n'
@@ -334,6 +365,18 @@ EOF
     local codex_runtimes_path="$HOME/.cache/codex-runtimes"
     result=$(HOME="$HOME" TARGET_PATH="$codex_runtimes_path" bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
     [ "$result" = "protected" ]
+
+    for codex_state_path in \
+        "$HOME/Library/Application Support/Codex/Cache/index" \
+        "$HOME/Library/Logs/com.openai.codex/codex.log" \
+        "$HOME/.codex/sessions/2026/06/session.jsonl" \
+        "$HOME/.codex/cache/session_index.jsonl" \
+        "$HOME/.codex/cache/codex_app_directory/index.json" \
+        "$HOME/.codex/state_5.sqlite" \
+        "$HOME/.codex/logs_2.sqlite"; do
+        result=$(HOME="$HOME" TARGET_PATH="$codex_state_path" bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
+        [ "$result" = "protected" ]
+    done
 }
 
 @test "should_protect_path protects NetworkExtension VPN preferences" {

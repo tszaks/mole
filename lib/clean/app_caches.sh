@@ -223,14 +223,9 @@ clean_ai_apps() {
     safe_clean ~/Library/Caches/com.openai.chat/* "ChatGPT cache"
     safe_clean ~/Library/Caches/com.anthropic.claudefordesktop/* "Claude desktop cache"
     safe_clean ~/Library/Logs/Claude/* "Claude logs"
-    safe_clean ~/Library/Logs/com.openai.codex/* "Codex CLI logs"
-    # Codex (OpenAI, Electron)
-    if [[ -d ~/Library/Application\ Support/Codex ]]; then
-        safe_clean ~/Library/Application\ Support/Codex/Cache/* "Codex cache"
-        safe_clean ~/Library/Application\ Support/Codex/Code\ Cache/* "Codex code cache"
-        safe_clean ~/Library/Application\ Support/Codex/GPUCache/* "Codex GPU cache"
-        safe_clean ~/Library/Application\ Support/Codex/DawnGraphiteCache/* "Codex Dawn cache"
-        safe_clean ~/Library/Application\ Support/Codex/DawnWebGPUCache/* "Codex WebGPU cache"
+    if [[ -d "$HOME/Library/Application Support/Codex" || -d "$HOME/Library/Logs/com.openai.codex" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop state · skipped by default"
+        declare -f note_activity > /dev/null 2>&1 && note_activity
     fi
 }
 # Design and creative tools.

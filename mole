@@ -299,7 +299,7 @@ show_version() {
     fi
 
     local disk_free
-    disk_free=$(df -h / 2> /dev/null | awk 'NR==2 {print $4}' || echo "Unknown")
+    disk_free=$(get_free_space)
 
     local install_method="Manual"
     if is_homebrew_install; then

@@ -124,6 +124,83 @@ MOCK
     [ "$status" -eq 0 ]
 }
 
+@test "mo clean summary separates tracked cleanup from free space change" {
+    local mock_bin="$HOME/bin"
+    mkdir -p "$mock_bin"
+    cat > "$mock_bin/df" <<'MOCK'
+#!/bin/bash
+count_file="${MOLE_DF_COUNT:?}"
+count=0
+if [[ -f "$count_file" ]]; then
+    count=$(cat "$count_file")
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$count_file"
+
+available=73400320
+if [[ "$count" -ge 3 ]]; then
+    available=74400320
+fi
+
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf '/dev/disk1 200000000 126599680 %s 64%% /\n' "$available"
+MOCK
+    chmod +x "$mock_bin/df"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" MOLE_DF_COUNT="$HOME/df.count" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+
+DRY_RUN=false
+SYSTEM_CLEAN=false
+EXTERNAL_VOLUME_TARGET=""
+WHITELIST_PATTERNS=()
+WHITELIST_WARNINGS=()
+
+check_tcc_permissions() { :; }
+start_section() { :; }
+end_section() { :; }
+log_operation_session_end() { :; }
+run_with_shell_timeout() { shift; "$@"; }
+
+clean_user_essentials() {
+    total_size_cleaned=$((total_size_cleaned + 1000000))
+    files_cleaned=$((files_cleaned + 1))
+    total_items=$((total_items + 1))
+}
+clean_finder_metadata() { :; }
+clean_app_caches() { :; }
+clean_browsers() { :; }
+run_cloud_and_office_cleanup() { :; }
+clean_developer_tools() { :; }
+clean_user_gui_applications() { :; }
+clean_virtualization_tools() { :; }
+clean_application_support_logs() { :; }
+clean_orphaned_app_data() { :; }
+clean_orphaned_system_services() { :; }
+clean_orphaned_container_stubs() { :; }
+show_user_launch_agent_hint_notice() { :; }
+show_orphan_dotdir_hint_notice() { :; }
+clean_apple_silicon_caches() { :; }
+clean_cached_device_firmware() { :; }
+check_ios_device_backups() { :; }
+clean_time_machine_failed_backups() { :; }
+check_large_file_candidates() { :; }
+show_system_data_hint_notice() { :; }
+show_project_artifact_hint_notice() { :; }
+
+perform_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Free space: 75.16GB"* ]]
+    [[ "$output" == *"Tracked cleanup:"* ]]
+    [[ "$output" == *"1.02GB"* ]]
+    [[ "$output" == *"Free space change: +1.02GB"* ]]
+    [[ "$output" == *"Free space now: 76.19GB"* ]]
+    [[ "$output" != *"Space freed:"* ]]
+}
+
 @test "mo clean --dry-run survives an unwritable TMPDIR" {
     local blocked_tmp="$HOME/blocked-tmp"
     mkdir -p "$blocked_tmp"

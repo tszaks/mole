@@ -134,6 +134,50 @@ EOF
 	[[ "$output" != *"lint:$HOME/Library/Preferences/loginwindow.plist"* ]]
 }
 
+@test "fix_broken_preferences does not count safe_remove failures" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/maintenance.sh"
+
+prefs="$HOME/Library/Preferences"
+mkdir -p "$prefs"
+touch "$prefs/com.example.broken.plist"
+
+plutil() { return 1; }
+safe_remove() { return 1; }
+
+count=$(fix_broken_preferences)
+echo "count=$count"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=0"* ]]
+}
+
+@test "fix_broken_preferences does not count protected Adobe plists" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/maintenance.sh"
+
+prefs="$HOME/Library/Preferences"
+plist="$prefs/com.adobe.Photoshop.uxp_com.adobe.ccx.start.plist"
+mkdir -p "$prefs"
+touch "$plist"
+
+plutil() { return 1; }
+
+count=$(fix_broken_preferences)
+echo "count=$count"
+[[ -f "$plist" ]] && echo "still-present"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=0"* ]]
+	[[ "$output" == *"still-present"* ]]
+}
+
 @test "opt_cache_refresh reuses measured cache sizes for deletion" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
 set -euo pipefail
