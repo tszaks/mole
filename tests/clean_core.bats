@@ -138,7 +138,7 @@ count=$((count + 1))
 printf '%s\n' "$count" > "$count_file"
 
 available=73400320
-if [[ "$count" -ge 3 ]]; then
+if [[ "$count" -ge 2 ]]; then
     available=74400320
 fi
 
@@ -147,7 +147,7 @@ printf '/dev/disk1 200000000 126599680 %s 64%% /\n' "$available"
 MOCK
     chmod +x "$mock_bin/df"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" MOLE_DF_COUNT="$HOME/df.count" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" MOLE_DF_COUNT="$HOME/df.count" MOLE_TEST_MODE=0 bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -199,6 +199,7 @@ EOF
     [[ "$output" == *"Free space change: +1.02GB"* ]]
     [[ "$output" == *"Free space now: 76.19GB"* ]]
     [[ "$output" != *"Space freed:"* ]]
+    [ "$(cat "$HOME/df.count")" = "2" ]
 }
 
 @test "mo clean --dry-run survives an unwritable TMPDIR" {

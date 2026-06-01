@@ -995,6 +995,7 @@ perform_cleanup() {
     fi
 
     local initial_free_space_kb=""
+    local initial_free_space_display="Unknown"
 
     # Test mode skips expensive scans and returns minimal output.
     local test_mode_enabled=false
@@ -1036,7 +1037,8 @@ perform_cleanup() {
         if ! initial_free_space_kb=$(get_free_space_kb 2> /dev/null); then
             initial_free_space_kb=""
         fi
-        echo -e "${BLUE}${ICON_ADMIN}${NC} $(detect_architecture) | Free space: $(get_free_space)"
+        initial_free_space_display=$(format_free_space_kb "$initial_free_space_kb")
+        echo -e "${BLUE}${ICON_ADMIN}${NC} $(detect_architecture) | Free space: $initial_free_space_display"
     fi
 
     if [[ "$test_mode_enabled" == "true" ]]; then
@@ -1293,14 +1295,14 @@ perform_cleanup() {
             if ! final_free_space_kb=$(get_free_space_kb 2> /dev/null); then
                 final_free_space_kb=""
             fi
+            local final_free_space_display
+            final_free_space_display=$(format_free_space_kb "$final_free_space_kb")
             if [[ "$initial_free_space_kb" =~ ^[0-9]+$ && "$final_free_space_kb" =~ ^[0-9]+$ ]]; then
                 local free_space_delta_kb=$((final_free_space_kb - initial_free_space_kb))
                 summary_details+=("Free space change: $(format_free_space_delta_kb "$free_space_delta_kb")")
             fi
 
-            local final_free_space
-            final_free_space=$(get_free_space)
-            summary_details+=("Free space now: $final_free_space")
+            summary_details+=("Free space now: $final_free_space_display")
         fi
     else
         summary_status="info"
@@ -1309,17 +1311,21 @@ perform_cleanup() {
         else
             summary_details+=("System was already clean; no additional space freed.")
         fi
+        local final_free_space_display
         if [[ "$DRY_RUN" != "true" ]]; then
             local final_free_space_kb
             if ! final_free_space_kb=$(get_free_space_kb 2> /dev/null); then
                 final_free_space_kb=""
             fi
+            final_free_space_display=$(format_free_space_kb "$final_free_space_kb")
             if [[ "$initial_free_space_kb" =~ ^[0-9]+$ && "$final_free_space_kb" =~ ^[0-9]+$ ]]; then
                 local free_space_delta_kb=$((final_free_space_kb - initial_free_space_kb))
                 summary_details+=("Free space change: $(format_free_space_delta_kb "$free_space_delta_kb")")
             fi
+        else
+            final_free_space_display=$(get_free_space)
         fi
-        summary_details+=("Free space now: $(get_free_space)")
+        summary_details+=("Free space now: $final_free_space_display")
     fi
 
     if [[ $had_errexit -eq 1 ]]; then

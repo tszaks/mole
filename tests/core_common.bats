@@ -66,6 +66,8 @@ MOCK
 source "$PROJECT_ROOT/lib/core/common.sh"
 get_free_space_kb
 get_free_space
+format_free_space_kb 73400320
+format_free_space_kb invalid
 format_free_space_delta_kb 1024
 format_free_space_delta_kb -1024
 EOF
@@ -78,8 +80,10 @@ EOF
 
     [ "${lines[0]}" = "73400320" ]
     [ "${lines[1]}" = "75.16GB" ]
-    [ "${lines[2]}" = "+1.0MB" ]
-    [ "${lines[3]}" = "-1.0MB" ]
+    [ "${lines[2]}" = "75.16GB" ]
+    [ "${lines[3]}" = "Unknown" ]
+    [ "${lines[4]}" = "+1.0MB" ]
+    [ "${lines[5]}" = "-1.0MB" ]
 }
 
 @test "cleanup_result_color_kb always returns green" {

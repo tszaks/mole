@@ -227,13 +227,23 @@ get_free_space_kb() {
     return 1
 }
 
+format_free_space_kb() {
+    local free_kb="${1:-}"
+    if [[ "$free_kb" =~ ^[0-9]+$ ]]; then
+        bytes_to_human_kb "$free_kb"
+        return 0
+    fi
+
+    echo "Unknown"
+}
+
 # Get free disk space on root volume.
 # Returns: human-readable decimal string (e.g., "100.00GB")
 get_free_space() {
     local free_kb
     if free_kb=$(get_free_space_kb) && [[ "$free_kb" =~ ^[0-9]+$ ]]; then
-        bytes_to_human_kb "$free_kb"
-        return 0
+        format_free_space_kb "$free_kb"
+        return $?
     fi
 
     echo "Unknown"
