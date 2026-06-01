@@ -388,14 +388,18 @@ powershell.exe -ExecutionPolicy Bypass -NoLogo -NoProfile -Command "& '%MOLE_DIR
     # Add to PATH if requested
     if ($AddToPath) {
         Write-Host ""
-        Add-ToUserPath -Directory $InstallDir
+        if (-not (Add-ToUserPath -Directory $InstallDir)) {
+            return $false
+        }
     }
 
     # Create shortcut if requested
     if ($CreateShortcut) {
         Write-Host ""
         $targetPath = Join-Path $InstallDir "mole.ps1"
-        New-StartMenuShortcut -TargetPath $targetPath -ShortcutName $script:ShortcutName -Description "Windows System Maintenance Toolkit"
+        if (-not (New-StartMenuShortcut -TargetPath $targetPath -ShortcutName $script:ShortcutName -Description "Windows System Maintenance Toolkit")) {
+            return $false
+        }
     }
 
     Write-Host ""
@@ -489,10 +493,14 @@ function Main {
     Show-Banner
 
     if ($Uninstall) {
-        Uninstall-Mole
+        $ok = Uninstall-Mole
     }
     else {
-        Install-Mole
+        $ok = Install-Mole
+    }
+
+    if (-not $ok) {
+        exit 1
     }
 }
 

@@ -3,6 +3,9 @@
 
 #Requires -Version 5.1
 param(
+    [Alias('debug', 'd')]
+    [switch]$DebugMode,
+
     [Alias('h')]
     [switch]$ShowHelp
 )
@@ -29,6 +32,7 @@ function Show-UpdateHelp {
     Write-Host "$esc[33mNotes:$esc[0m"
     Write-Host "  - Works only for git-based source installs"
     Write-Host "  - Legacy copied installs should be reinstalled with quick-install"
+    Write-Host "  - Use --debug to include full git output on failures"
     Write-Host ""
 }
 
@@ -39,6 +43,8 @@ function Invoke-GitCommand {
         [string[]]$Arguments
     )
 
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     $previousNativeErrorPreference = $null
     $hasNativeErrorPreference = $false
 
@@ -64,9 +70,56 @@ function Invoke-GitCommand {
         }
     }
     finally {
+        $ErrorActionPreference = $previousErrorActionPreference
         if ($hasNativeErrorPreference) {
             $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
         }
+    }
+}
+
+function Mask-GitText {
+    param([string]$Text)
+
+    if (-not $Text) {
+        return ""
+    }
+
+    return ($Text -replace '(https?://)([^/@\s]+)@', '$1***@')
+}
+
+function Write-IndentedText {
+    param([string]$Text)
+
+    if (-not $Text) {
+        return
+    }
+
+    foreach ($line in ($Text -split "`r?`n")) {
+        Write-Host "    $line"
+    }
+}
+
+function Write-GitFailure {
+    param(
+        [string]$Message,
+        [Parameter(Mandatory)]
+        $Result
+    )
+
+    Write-Host "$Message (git exit $($Result.ExitCode))." -ForegroundColor Red
+    $text = Mask-GitText -Text $Result.Text
+    if (-not $text) {
+        return
+    }
+
+    if ($DebugMode) {
+        Write-Host "Git output:" -ForegroundColor Yellow
+        Write-IndentedText -Text $text
+    }
+    else {
+        $firstLine = ($text -split "`r?`n" | Select-Object -First 1)
+        Write-Host "    $firstLine"
+        Write-Host "    Re-run with 'mo update --debug' for full git output." -ForegroundColor Yellow
     }
 }
 
@@ -84,6 +137,10 @@ function Test-InstallDirOnUserPath {
 if ($ShowHelp) {
     Show-UpdateHelp
     return
+}
+
+if ($DebugMode) {
+    $env:MOLE_DEBUG = "1"
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -104,7 +161,7 @@ if (-not (Test-Path $gitDir)) {
 
 $dirtyStatus = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("status", "--porcelain", "--untracked-files=no")
 if ($dirtyStatus.ExitCode -ne 0) {
-    Write-Host "Failed to inspect git status: $($dirtyStatus.Text)" -ForegroundColor Red
+    Write-GitFailure -Message "Failed to inspect git status" -Result $dirtyStatus
     exit 1
 }
 
@@ -117,7 +174,12 @@ if ($dirtyStatus.Text) {
 $remoteResult = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("remote", "get-url", "origin")
 $remote = $remoteResult.Text
 if ($remoteResult.ExitCode -ne 0 -or -not $remote) {
-    Write-Host "Git remote 'origin' is not configured for this install." -ForegroundColor Red
+    if ($remoteResult.ExitCode -ne 0) {
+        Write-GitFailure -Message "Failed to inspect git remote 'origin'" -Result $remoteResult
+    }
+    else {
+        Write-Host "Git remote 'origin' is not configured for this install." -ForegroundColor Red
+    }
     exit 1
 }
 
@@ -134,11 +196,11 @@ if ($beforeResult.ExitCode -ne 0 -or -not $before) {
     exit 1
 }
 
-Write-Host "Updating source from $remote ($branch)..." -ForegroundColor Cyan
+Write-Host "Updating source from $(Mask-GitText -Text $remote) ($branch)..." -ForegroundColor Cyan
 
 $pullResult = Invoke-GitCommand -WorkingDirectory $windowsDir -Arguments @("pull", "--ff-only", "origin", $branch)
 if ($pullResult.ExitCode -ne 0) {
-    Write-Host "Failed to update source: $($pullResult.Text)" -ForegroundColor Red
+    Write-GitFailure -Message "Failed to update source" -Result $pullResult
     exit 1
 }
 
