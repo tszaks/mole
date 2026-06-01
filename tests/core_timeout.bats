@@ -249,3 +249,23 @@ setup() {
     ")
     [[ "$result" == *"caller-trap"* ]]
 }
+
+@test "run_with_timeout: shell fallback cleans up watchdog sleep" {
+    bash -c "
+        set -euo pipefail
+        source '$PROJECT_ROOT/lib/core/timeout.sh'
+        MO_TIMEOUT_BIN=''
+        MO_TIMEOUT_PERL_BIN=''
+        run_with_timeout 287 true
+        sleep 0.1
+        leaked=''
+        for pid in \$(pgrep -x sleep 2>/dev/null || true); do
+            command_line=\$(ps -p \"\$pid\" -o command= 2>/dev/null || true)
+            if [[ \"\$command_line\" == 'sleep 287' ]]; then
+                leaked=\"\$pid\"
+                kill \"\$pid\" 2>/dev/null || true
+            fi
+        done
+        [[ -z \"\$leaked\" ]]
+    "
+}

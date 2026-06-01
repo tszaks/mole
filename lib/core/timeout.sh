@@ -67,6 +67,28 @@ fi
 # Timeout Execution
 # ============================================================================
 
+_mole_cleanup_timeout_killer() {
+    local killer_pid="${1:-}"
+    [[ "$killer_pid" =~ ^[0-9]+$ ]] || return 0
+
+    local child_pids=""
+    if command -v pgrep > /dev/null 2>&1; then
+        child_pids=$(pgrep -P "$killer_pid" 2> /dev/null || true)
+    fi
+
+    kill "$killer_pid" 2> /dev/null || true
+
+    if [[ -n "$child_pids" ]]; then
+        local child_pid
+        while IFS= read -r child_pid; do
+            [[ "$child_pid" =~ ^[0-9]+$ ]] || continue
+            kill "$child_pid" 2> /dev/null || true
+        done <<< "$child_pids"
+    fi
+
+    wait "$killer_pid" 2> /dev/null || true
+}
+
 # Run command with timeout
 # Uses gtimeout/timeout if available, falls back to shell-based implementation
 #
@@ -231,7 +253,7 @@ run_with_timeout() {
     previous_int_trap=$(trap -p INT || true)
 
     # Forward SIGINT to the command while preserving the caller's trap.
-    trap 'interrupted=1; kill -INT "$cmd_pid" 2>/dev/null || true; kill "$killer_pid" 2>/dev/null || true' INT
+    trap 'interrupted=1; kill -INT "$cmd_pid" 2>/dev/null || true; _mole_cleanup_timeout_killer "$killer_pid"' INT
 
     # Wait for command to complete
     local exit_code=0
@@ -247,11 +269,7 @@ run_with_timeout() {
         trap - INT
     fi
 
-    # Clean up killer process
-    if kill -0 "$killer_pid" 2> /dev/null; then
-        kill "$killer_pid" 2> /dev/null || true
-        wait "$killer_pid" 2> /dev/null || true
-    fi
+    _mole_cleanup_timeout_killer "$killer_pid"
 
     if [[ $interrupted -eq 1 ]]; then
         return 130
