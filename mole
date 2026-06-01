@@ -914,6 +914,12 @@ interactive_main_menu() {
         exit 0
     }
 
+    launch_menu_command() {
+        show_cursor
+        drain_pending_input 0.1
+        exec "$@"
+    }
+
     trap cleanup_and_exit INT
     hide_cursor
 
@@ -932,34 +938,28 @@ interactive_main_menu() {
             "UP") ((current_option > 1)) && ((current_option--)) ;;
             "DOWN") ((current_option < 5)) && ((current_option++)) ;;
             "ENTER")
-                show_cursor
                 case $current_option in
-                    1) exec "$SCRIPT_DIR/bin/clean.sh" ;;
-                    2) exec "$SCRIPT_DIR/bin/uninstall.sh" ;;
-                    3) exec "$SCRIPT_DIR/bin/optimize.sh" ;;
-                    4) exec "$SCRIPT_DIR/bin/analyze.sh" ;;
-                    5) exec "$SCRIPT_DIR/bin/status.sh" ;;
+                    1) launch_menu_command "$SCRIPT_DIR/bin/clean.sh" ;;
+                    2) launch_menu_command "$SCRIPT_DIR/bin/uninstall.sh" ;;
+                    3) launch_menu_command "$SCRIPT_DIR/bin/optimize.sh" ;;
+                    4) launch_menu_command "$SCRIPT_DIR/bin/analyze.sh" ;;
+                    5) launch_menu_command "$SCRIPT_DIR/bin/status.sh" ;;
                 esac
                 ;;
             "CHAR:1")
-                show_cursor
-                exec "$SCRIPT_DIR/bin/clean.sh"
+                launch_menu_command "$SCRIPT_DIR/bin/clean.sh"
                 ;;
             "CHAR:2")
-                show_cursor
-                exec "$SCRIPT_DIR/bin/uninstall.sh"
+                launch_menu_command "$SCRIPT_DIR/bin/uninstall.sh"
                 ;;
             "CHAR:3")
-                show_cursor
-                exec "$SCRIPT_DIR/bin/optimize.sh"
+                launch_menu_command "$SCRIPT_DIR/bin/optimize.sh"
                 ;;
             "CHAR:4")
-                show_cursor
-                exec "$SCRIPT_DIR/bin/analyze.sh"
+                launch_menu_command "$SCRIPT_DIR/bin/analyze.sh"
                 ;;
             "CHAR:5")
-                show_cursor
-                exec "$SCRIPT_DIR/bin/status.sh"
+                launch_menu_command "$SCRIPT_DIR/bin/status.sh"
                 ;;
             "MORE")
                 show_cursor

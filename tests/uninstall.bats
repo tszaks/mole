@@ -1589,6 +1589,7 @@ format_app_display() {
 }
 drain_pending_input() { printf 'drain\n' >> "$trace_file"; }
 paginated_multi_select() {
+    printf 'guard:%s\n' "${MOLE_MENU_IGNORE_INITIAL_ENTER:-unset}" >> "$trace_file"
     printf 'paginated\n' >> "$trace_file"
     MOLE_SELECTION_RESULT="0"
     return 0
@@ -1596,8 +1597,9 @@ paginated_multi_select() {
 
 select_apps_for_uninstall
 [[ ${#selected_apps[@]} -eq 1 ]]
+[[ -z "${MOLE_MENU_IGNORE_INITIAL_ENTER:-}" ]]
 
-expected=$(printf 'format\ndrain\npaginated\n')
+expected=$(printf 'format\ndrain\nguard:1\npaginated\n')
 actual=$(cat "$trace_file")
 [[ "$actual" == "$expected" ]] || {
     printf 'unexpected trace:\n%s\n' "$actual" >&2
@@ -1606,6 +1608,39 @@ actual=$(cat "$trace_file")
 INNER
 
 	[ "$status" -eq 0 ]
+}
+
+@test "paginated menu can ignore one initial Enter for uninstall launch guard" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/ui/menu_paginated.sh"
+
+key_state="$HOME/menu-initial-enter-state"
+read_key() {
+    if [[ ! -f "$key_state" ]]; then
+        : > "$key_state"
+        echo "ENTER"
+    else
+        echo "QUIT"
+    fi
+}
+
+MOLE_SELECTION_RESULT=""
+set +e
+MOLE_MENU_IGNORE_INITIAL_ENTER=1 paginated_multi_select "Test Menu" "First App" > "$HOME/menu.out" 2> "$HOME/menu.err"
+rc=$?
+set -e
+
+echo "rc=$rc"
+echo "result=${MOLE_SELECTION_RESULT:-}"
+INNER
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"rc=1"* ]]
+	[[ "$output" == *"result="* ]]
+	[[ "$output" != *"result=0"* ]]
 }
 
 @test "main rescans cleanly after returning from a completed uninstall (#866)" {

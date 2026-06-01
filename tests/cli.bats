@@ -282,6 +282,43 @@ EOF
 	[[ "$output" == *"UPDATE_CALLED"* ]]
 }
 
+@test "interactive_main_menu drains numeric shortcut Enter before launching uninstall" {
+	run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+HOME="$(mktemp -d)"
+export HOME MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1
+source "$PROJECT_ROOT/mole"
+
+fake_root="$HOME/fake-mole"
+mkdir -p "$fake_root/bin"
+cat > "$fake_root/bin/uninstall.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+if IFS= read -r -s -n1 -t 0.1 key; then
+    if [[ -z "$key" ]]; then
+        echo "LEAK:ENTER"
+    else
+        printf 'LEAK:%s\n' "$key"
+    fi
+else
+    echo "NO_LEAK"
+fi
+SCRIPT
+chmod +x "$fake_root/bin/uninstall.sh"
+
+SCRIPT_DIR="$fake_root"
+show_brand_banner() { :; }
+show_main_menu() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+
+interactive_main_menu < <(printf '2\n')
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"NO_LEAK"* ]]
+	[[ "$output" != *"LEAK:"* ]]
+}
+
 @test "touchid status reports current configuration" {
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" touchid status
 	[ "$status" -eq 0 ]

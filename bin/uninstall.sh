@@ -1640,7 +1640,7 @@ main() {
         # Keystrokes typed during the scan/load phase must not leak into the
         # selector. A queued Enter would confirm whichever app is highlighted
         # first and drop the user straight into the destructive path. See #726.
-        drain_pending_input
+        drain_pending_input 0.2
 
         set +e
         select_apps_for_uninstall
