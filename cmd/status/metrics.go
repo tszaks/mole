@@ -257,6 +257,8 @@ type collectedMetrics struct {
 }
 
 type snapshotEnrichment struct {
+	// When adding MetricsSnapshot fields, update
+	// TestMetricsSnapshotFieldsHaveCollectionClassifications.
 	hardware       HardwareInfo
 	cpuPCores      int
 	cpuECores      int

@@ -39,9 +39,11 @@ func collectCPUWithOptions(includeSlowFallbacks bool) (CPUStatus, error) {
 		logical = 1
 	}
 
-	// Two-call pattern for more reliable CPU usage.
-	warmUpCPU()
-	time.Sleep(cpuSampleInterval)
+	if includeSlowFallbacks {
+		// Two-call pattern for more reliable CPU usage on the full refresh path.
+		warmUpCPU()
+		time.Sleep(cpuSampleInterval)
+	}
 	percents, err := cpu.Percent(0, true)
 	var totalPercent float64
 	perCoreEstimated := false

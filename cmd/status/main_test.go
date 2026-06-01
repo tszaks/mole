@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -289,5 +290,47 @@ func TestCollectorKeepsLiveProcessDataWhenApplyingEnrichment(t *testing.T) {
 	}
 	if len(next.ProcessAlerts) != 1 || next.ProcessAlerts[0].Name != "new" {
 		t.Fatalf("expected live process alerts, got %#v", next.ProcessAlerts)
+	}
+}
+
+func TestMetricsSnapshotFieldsHaveCollectionClassifications(t *testing.T) {
+	classified := map[string]string{
+		"CollectedAt":    "fast",
+		"Host":           "fast",
+		"Platform":       "fast",
+		"Uptime":         "fast",
+		"UptimeSeconds":  "fast",
+		"Procs":          "fast",
+		"Hardware":       "enrichment",
+		"HealthScore":    "recomputed",
+		"HealthScoreMsg": "recomputed",
+		"CPU":            "mixed",
+		"GPU":            "enrichment",
+		"Memory":         "mixed",
+		"Disks":          "fast",
+		"TrashSize":      "enrichment",
+		"TrashApprox":    "enrichment",
+		"DiskIO":         "fast",
+		"Network":        "fast",
+		"NetworkHistory": "fast",
+		"Proxy":          "enrichment",
+		"Batteries":      "enrichment",
+		"Thermal":        "enrichment",
+		"Sensors":        "enrichment",
+		"Bluetooth":      "enrichment",
+		"TopProcesses":   "live-or-enrichment",
+		"ProcessWatch":   "config",
+		"ProcessAlerts":  "live-or-enrichment",
+	}
+
+	typ := reflect.TypeOf(MetricsSnapshot{})
+	for i := 0; i < typ.NumField(); i++ {
+		name := typ.Field(i).Name
+		if _, ok := classified[name]; !ok {
+			t.Fatalf("MetricsSnapshot.%s has no collection classification", name)
+		}
+	}
+	if len(classified) != typ.NumField() {
+		t.Fatalf("field classification count = %d, want %d", len(classified), typ.NumField())
 	}
 }
