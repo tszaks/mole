@@ -838,3 +838,42 @@ EOF
     [[ "$output" != *"clean-one"* ]]
     [[ "$output" == *"dirty-one"* ]]
 }
+
+@test "clean_dev_agent_worktrees keeps worktrees with stashed work when opted in" {
+    local origin="$HOME/origin-stash.git"
+    local proj="$HOME/code/proj-stash"
+    git init --bare -q "$origin"
+    git -c init.defaultBranch=main init -q "$proj"
+    (
+        cd "$proj"
+        git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+        git remote add origin "$origin"
+        git push -q origin HEAD:main
+        git worktree add -q .claude/worktrees/stashed-one HEAD
+        cd .claude/worktrees/stashed-one
+        echo "stashed work" > scratch.txt
+        git add scratch.txt
+        git -c user.email=t@t -c user.name=t stash push -q -m "agent scratch"
+    )
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        MOLE_AGENT_WORKTREES=1 MOLE_AGENT_WORKTREE_PATHS="$HOME/code" \
+        bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+safe_clean() { echo "REMOVED:$1"; rm -rf "$1"; }
+clean_dev_agent_worktrees
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Kept agent worktree (unsaved work)"* ]]
+    [[ "$output" == *"stashed-one"* ]]
+    [[ "$output" != *"REMOVED:$proj/.claude/worktrees/stashed-one"* ]]
+    [ -d "$proj/.claude/worktrees/stashed-one" ]
+    run git -C "$proj/.claude/worktrees/stashed-one" stash list
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"agent scratch"* ]]
+}

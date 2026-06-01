@@ -267,6 +267,50 @@ func TestCollectorAppliesZeroValueEnrichmentExactly(t *testing.T) {
 	}
 }
 
+func TestCollectorOverridesFastDisksWithCorrectedCache(t *testing.T) {
+	collector := NewCollector(ProcessWatchOptions{})
+	collector.cacheEnrichment(MetricsSnapshot{
+		Disks: []DiskStatus{
+			{Mount: "/", Total: 1000, Used: 600, UsedPercent: 60, External: false},
+		},
+	})
+
+	// Fast path produced raw statfs numbers that ignore APFS purgeable space.
+	next := MetricsSnapshot{
+		Disks: []DiskStatus{
+			{Mount: "/", Total: 1000, Used: 900, UsedPercent: 90, External: true},
+		},
+	}
+
+	collector.applyEnrichment(&next, false)
+
+	if len(next.Disks) != 1 {
+		t.Fatalf("expected one disk, got %#v", next.Disks)
+	}
+	if next.Disks[0].Used != 600 || next.Disks[0].UsedPercent != 60 || next.Disks[0].External {
+		t.Fatalf("expected corrected disk values from cache, got %#v", next.Disks[0])
+	}
+}
+
+func TestCollectorKeepsFastDisksWhenCacheHasNone(t *testing.T) {
+	collector := NewCollector(ProcessWatchOptions{})
+	// First full refresh failed to enumerate disks; the cache should not blank
+	// out the fast path's raw disks.
+	collector.cacheEnrichment(MetricsSnapshot{Disks: nil})
+
+	next := MetricsSnapshot{
+		Disks: []DiskStatus{
+			{Mount: "/", Total: 1000, Used: 900, UsedPercent: 90},
+		},
+	}
+
+	collector.applyEnrichment(&next, false)
+
+	if len(next.Disks) != 1 || next.Disks[0].Used != 900 {
+		t.Fatalf("expected raw fast disks to survive empty cache, got %#v", next.Disks)
+	}
+}
+
 func TestCollectorKeepsLiveProcessDataWhenApplyingEnrichment(t *testing.T) {
 	collector := NewCollector(ProcessWatchOptions{})
 	collector.cacheEnrichment(MetricsSnapshot{
@@ -307,7 +351,7 @@ func TestMetricsSnapshotFieldsHaveCollectionClassifications(t *testing.T) {
 		"CPU":            "mixed",
 		"GPU":            "enrichment",
 		"Memory":         "mixed",
-		"Disks":          "fast",
+		"Disks":          "enrichment",
 		"TrashSize":      "enrichment",
 		"TrashApprox":    "enrichment",
 		"DiskIO":         "fast",

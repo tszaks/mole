@@ -264,6 +264,8 @@ type snapshotEnrichment struct {
 	cpuECores      int
 	memoryCached   uint64
 	memoryPressure string
+	disks          []DiskStatus
+	hasDisks       bool
 	gpu            []GPUStatus
 	trashSize      uint64
 	trashApprox    bool
@@ -502,6 +504,8 @@ func (c *Collector) cacheEnrichment(snapshot MetricsSnapshot) {
 		cpuECores:      snapshot.CPU.ECoreCount,
 		memoryCached:   snapshot.Memory.Cached,
 		memoryPressure: snapshot.Memory.Pressure,
+		disks:          slices.Clone(snapshot.Disks),
+		hasDisks:       true,
 		gpu:            slices.Clone(snapshot.GPU),
 		trashSize:      snapshot.TrashSize,
 		trashApprox:    snapshot.TrashApprox,
@@ -538,6 +542,14 @@ func (e snapshotEnrichment) apply(snapshot *MetricsSnapshot, preserveLiveProcess
 	snapshot.CPU.ECoreCount = e.cpuECores
 	snapshot.Memory.Cached = e.memoryCached
 	snapshot.Memory.Pressure = e.memoryPressure
+	// Disk capacity is slow-changing and the corrections (APFS purgeable,
+	// diskutil, Finder) are expensive, so the fast path collects raw statfs
+	// values and we overwrite them with the last full-refresh corrected
+	// snapshot. DiskIO stays live. Skip when the cache is empty so the first
+	// fast paint still shows raw disks instead of a blank card.
+	if e.hasDisks && len(e.disks) > 0 {
+		snapshot.Disks = slices.Clone(e.disks)
+	}
 	snapshot.GPU = slices.Clone(e.gpu)
 	snapshot.TrashSize = e.trashSize
 	snapshot.TrashApprox = e.trashApprox

@@ -49,12 +49,11 @@ func collectCPUWithOptions(includeSlowFallbacks bool) (CPUStatus, error) {
 	perCoreEstimated := false
 	if err != nil || len(percents) == 0 {
 		if !includeSlowFallbacks {
+			// Fast path: skip the expensive secondary sampling and just
+			// estimate zeroed per-core usage. The next full refresh corrects it.
 			percents = make([]float64, logical)
-			if len(percents) > 0 {
-				perCoreEstimated = true
-			}
-		}
-		if includeSlowFallbacks {
+			perCoreEstimated = true
+		} else {
 			fallbackUsage, fallbackPerCore, fallbackErr := fallbackCPUUtilization(logical)
 			if fallbackErr != nil {
 				if err != nil {

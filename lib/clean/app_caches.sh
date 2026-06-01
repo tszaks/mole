@@ -225,7 +225,7 @@ clean_ai_apps() {
     safe_clean ~/Library/Logs/Claude/* "Claude logs"
     if [[ -d "$HOME/Library/Application Support/Codex" || -d "$HOME/Library/Logs/com.openai.codex" ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop state · skipped by default"
-        declare -f note_activity > /dev/null 2>&1 && note_activity
+        note_activity
     fi
 }
 # Design and creative tools.

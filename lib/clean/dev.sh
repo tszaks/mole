@@ -1679,6 +1679,10 @@ agent_worktree_is_disposable() {
     if [[ -n "$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" git -C "$wt" status --porcelain 2> /dev/null)" ]]; then
         return 1
     fi
+    # A clean, pushed worktree can still hold stashed work; keep it if so.
+    if [[ -n "$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" git -C "$wt" stash list 2> /dev/null)" ]]; then
+        return 1
+    fi
     local local_only
     local_only=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" git -C "$wt" rev-list --count HEAD --not --remotes 2> /dev/null || echo 1)
     [[ "$local_only" =~ ^[0-9]+$ ]] || return 1

@@ -1242,6 +1242,26 @@ perform_cleanup() {
 
     local -a summary_details=()
 
+    # Emit the "Free space change" (when measurable) and "Free space now" lines.
+    # $1 is the free space in KB captured before cleanup started. Caller appends
+    # each printed line to summary_details.
+    emit_free_space_summary() {
+        local initial_kb="$1"
+        if [[ "$DRY_RUN" == "true" ]]; then
+            printf 'Free space now: %s\n' "$(get_free_space)"
+            return 0
+        fi
+
+        local final_kb
+        if ! final_kb=$(get_free_space_kb 2> /dev/null); then
+            final_kb=""
+        fi
+        if [[ "$initial_kb" =~ ^[0-9]+$ && "$final_kb" =~ ^[0-9]+$ ]]; then
+            printf 'Free space change: %s\n' "$(format_free_space_delta_kb "$((final_kb - initial_kb))")"
+        fi
+        printf 'Free space now: %s\n' "$(format_free_space_kb "$final_kb")"
+    }
+
     if [[ $total_size_cleaned -gt 0 ]]; then
         local freed_size_human
         freed_size_human=$(bytes_to_human_kb "$total_size_cleaned")
@@ -1291,18 +1311,10 @@ perform_cleanup() {
                 fi
             fi
 
-            local final_free_space_kb
-            if ! final_free_space_kb=$(get_free_space_kb 2> /dev/null); then
-                final_free_space_kb=""
-            fi
-            local final_free_space_display
-            final_free_space_display=$(format_free_space_kb "$final_free_space_kb")
-            if [[ "$initial_free_space_kb" =~ ^[0-9]+$ && "$final_free_space_kb" =~ ^[0-9]+$ ]]; then
-                local free_space_delta_kb=$((final_free_space_kb - initial_free_space_kb))
-                summary_details+=("Free space change: $(format_free_space_delta_kb "$free_space_delta_kb")")
-            fi
-
-            summary_details+=("Free space now: $final_free_space_display")
+            local free_space_line
+            while IFS= read -r free_space_line; do
+                summary_details+=("$free_space_line")
+            done < <(emit_free_space_summary "$initial_free_space_kb")
         fi
     else
         summary_status="info"
@@ -1311,21 +1323,10 @@ perform_cleanup() {
         else
             summary_details+=("System was already clean; no additional space freed.")
         fi
-        local final_free_space_display
-        if [[ "$DRY_RUN" != "true" ]]; then
-            local final_free_space_kb
-            if ! final_free_space_kb=$(get_free_space_kb 2> /dev/null); then
-                final_free_space_kb=""
-            fi
-            final_free_space_display=$(format_free_space_kb "$final_free_space_kb")
-            if [[ "$initial_free_space_kb" =~ ^[0-9]+$ && "$final_free_space_kb" =~ ^[0-9]+$ ]]; then
-                local free_space_delta_kb=$((final_free_space_kb - initial_free_space_kb))
-                summary_details+=("Free space change: $(format_free_space_delta_kb "$free_space_delta_kb")")
-            fi
-        else
-            final_free_space_display=$(get_free_space)
-        fi
-        summary_details+=("Free space now: $final_free_space_display")
+        local free_space_line
+        while IFS= read -r free_space_line; do
+            summary_details+=("$free_space_line")
+        done < <(emit_free_space_summary "$initial_free_space_kb")
     fi
 
     if [[ $had_errexit -eq 1 ]]; then
