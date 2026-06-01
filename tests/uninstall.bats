@@ -1515,6 +1515,99 @@ INNER
 	[ "$status" -eq 0 ]
 }
 
+@test "scan_applications starts feedback before discovery and cleans no-app state" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_FORCE_SCAN_SPINNER=1 bash --noprofile --norc <<'INNER'
+set -euo pipefail
+
+trace_file="$HOME/scan-feedback-trace.log"
+scan_temp="$HOME/scan-feedback-temp"
+
+MOLE_UNINSTALL_META_CACHE_DIR="$HOME/.cache/mole"
+MOLE_UNINSTALL_META_CACHE_FILE="$MOLE_UNINSTALL_META_CACHE_DIR/uninstall_app_metadata_v1"
+MOLE_UNINSTALL_META_CACHE_LOCK="${MOLE_UNINSTALL_META_CACHE_FILE}.lock"
+
+create_temp_file() { printf '%s\n' "$scan_temp"; }
+ensure_user_dir() { mkdir -p "$1"; }
+ensure_user_file() {
+    mkdir -p "$(dirname "$1")"
+    : > "$1"
+}
+
+_scan_discover_apps() {
+    if [[ -n "${spinner_pid:-}" ]]; then
+        printf 'spinner-before-discover\n' >> "$trace_file"
+    else
+        printf 'missing-spinner\n' >> "$trace_file"
+    fi
+    : > "$discovered_file"
+}
+_scan_partition_cache() { printf 'partition\n' >> "$trace_file"; }
+_scan_resolve_uncached() { printf 'resolve\n' >> "$trace_file"; }
+_scan_dedupe_bundle_ids() { printf 'dedupe\n' >> "$trace_file"; }
+_scan_finalize_index() { printf 'finalize\n' >> "$trace_file"; }
+
+eval "$(sed -n '/^scan_applications()/,/^load_applications()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+
+set +e
+scan_applications > "$HOME/scan-feedback.out" 2> "$HOME/scan-feedback.err"
+rc=$?
+set -e
+
+[[ $rc -eq 1 ]] || exit 1
+
+expected=$(printf 'spinner-before-discover\npartition\n')
+actual=$(cat "$trace_file")
+[[ "$actual" == "$expected" ]] || {
+    printf 'unexpected trace:\n%s\n' "$actual" >&2
+    exit 1
+}
+
+[[ ! -e "${scan_temp}.spinner_shown" ]]
+[[ ! -e "${scan_temp}.scan_status" ]]
+INNER
+
+	[ "$status" -eq 0 ]
+}
+
+@test "select_apps_for_uninstall drains pending input before opening paginated menu" {
+	mkdir -p "$HOME/Applications/TraceApp.app"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+
+trace_file="$HOME/selector-drain-trace.log"
+
+source "$PROJECT_ROOT/lib/ui/app_selector.sh"
+
+apps_data=("1700000000|$HOME/Applications/TraceApp.app|TraceApp|com.example.TraceApp|1MB|Today|1024")
+selected_apps=()
+
+get_display_width() { printf '%s\n' "${#1}"; }
+format_app_display() {
+    printf 'format\n' >> "$trace_file"
+    printf '%s' "$1"
+}
+drain_pending_input() { printf 'drain\n' >> "$trace_file"; }
+paginated_multi_select() {
+    printf 'paginated\n' >> "$trace_file"
+    MOLE_SELECTION_RESULT="0"
+    return 0
+}
+
+select_apps_for_uninstall
+[[ ${#selected_apps[@]} -eq 1 ]]
+
+expected=$(printf 'format\ndrain\npaginated\n')
+actual=$(cat "$trace_file")
+[[ "$actual" == "$expected" ]] || {
+    printf 'unexpected trace:\n%s\n' "$actual" >&2
+    exit 1
+}
+INNER
+
+	[ "$status" -eq 0 ]
+}
+
 @test "main rescans cleanly after returning from a completed uninstall (#866)" {
 	local first_cache second_cache
 	first_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-866-first.XXXXXX")"

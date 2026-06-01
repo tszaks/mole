@@ -92,13 +92,12 @@ PLIST
 
 	done_marker="$HOME/scan.done"
 
-	# The bug not only emits "unbound variable" — the spinner subshell
-	# `( ... ) &` launched just before the failing iteration keeps running
-	# after the parent script errors out (its `while true` loop has no
-	# inherited signal). The user-visible symptom is exactly "scanning
-	# forever". Mirror the marker-file watchdog from the #722 hang test
-	# (uninstall.bats: "uninstall_persist_cache_file does not hang…") so a
-	# regression surfaces as HANG rather than blocking the whole bats run.
+	# The bug not only emits "unbound variable"; the spinner subshell can
+	# keep running after the parent script errors out. The user-visible
+	# symptom is exactly "scanning forever". Mirror the marker-file watchdog
+	# from the #722 hang test (uninstall.bats: "uninstall_persist_cache_file
+	# does not hang...") so a regression surfaces as HANG rather than blocking
+	# the whole bats run.
 	(
 		env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
 			MOLE_TEST_NO_AUTH=1 \

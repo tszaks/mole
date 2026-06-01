@@ -155,6 +155,8 @@ select_apps_for_uninstall() {
         fi
     fi
 
+    drain_pending_input
+
     # Expose metadata for the paginated menu (optional inputs)
     # - MOLE_MENU_META_EPOCHS: numeric last_used_epoch per item
     # - MOLE_MENU_META_SIZEKB: numeric size in KB per item
