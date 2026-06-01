@@ -18,6 +18,14 @@ const (
 )
 
 func collectCPU() (CPUStatus, error) {
+	return collectCPUWithOptions(true)
+}
+
+func collectCPUFast() (CPUStatus, error) {
+	return collectCPUWithOptions(false)
+}
+
+func collectCPUWithOptions(includeSlowFallbacks bool) (CPUStatus, error) {
 	counts, countsErr := cpu.Counts(false)
 	if countsErr != nil || counts == 0 {
 		counts = runtime.NumCPU()
@@ -38,16 +46,24 @@ func collectCPU() (CPUStatus, error) {
 	var totalPercent float64
 	perCoreEstimated := false
 	if err != nil || len(percents) == 0 {
-		fallbackUsage, fallbackPerCore, fallbackErr := fallbackCPUUtilization(logical)
-		if fallbackErr != nil {
-			if err != nil {
-				return CPUStatus{}, err
+		if !includeSlowFallbacks {
+			percents = make([]float64, logical)
+			if len(percents) > 0 {
+				perCoreEstimated = true
 			}
-			return CPUStatus{}, fallbackErr
 		}
-		totalPercent = fallbackUsage
-		percents = fallbackPerCore
-		perCoreEstimated = true
+		if includeSlowFallbacks {
+			fallbackUsage, fallbackPerCore, fallbackErr := fallbackCPUUtilization(logical)
+			if fallbackErr != nil {
+				if err != nil {
+					return CPUStatus{}, err
+				}
+				return CPUStatus{}, fallbackErr
+			}
+			totalPercent = fallbackUsage
+			percents = fallbackPerCore
+			perCoreEstimated = true
+		}
 	} else {
 		for _, v := range percents {
 			totalPercent += v
@@ -60,14 +76,17 @@ func collectCPU() (CPUStatus, error) {
 	if loadStats != nil {
 		loadAvg = *loadStats
 	}
-	if loadErr != nil || isZeroLoad(loadAvg) {
+	if includeSlowFallbacks && (loadErr != nil || isZeroLoad(loadAvg)) {
 		if fallback, err := fallbackLoadAvgFromUptime(); err == nil {
 			loadAvg = fallback
 		}
 	}
 
 	// P/E core counts for Apple Silicon.
-	pCores, eCores := getCoreTopology()
+	var pCores, eCores int
+	if includeSlowFallbacks {
+		pCores, eCores = getCoreTopology()
+	}
 
 	return CPUStatus{
 		Usage:            totalPercent,

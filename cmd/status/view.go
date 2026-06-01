@@ -167,9 +167,13 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 	var specs []string
 	if m.Hardware.TotalRAM != "" {
 		specs = append(specs, m.Hardware.TotalRAM)
+	} else if m.Memory.Total > 0 {
+		specs = append(specs, humanBytes(m.Memory.Total))
 	}
 	if m.Hardware.DiskSize != "" {
 		specs = append(specs, m.Hardware.DiskSize)
+	} else if disk, ok := rootDisk(m.Disks); ok && disk.Total > 0 {
+		specs = append(specs, humanBytes(disk.Total))
 	}
 	if len(specs) > 0 {
 		infoParts = append(infoParts, strings.Join(specs, "/"))
@@ -541,7 +545,7 @@ func renderNetworkCard(netStats []NetworkStatus, history NetworkHistory, proxy P
 	}
 
 	if len(netStats) == 0 {
-		lines = []string{subtleStyle.Render("Collecting...")}
+		lines = append(lines, subtleStyle.Render("Collecting..."))
 	} else {
 		// Calculate dynamic width
 		// Layout: "Down   " (7) + graph + "  " (2) + rate (approx 10-12)

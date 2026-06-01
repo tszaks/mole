@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -88,5 +89,205 @@ func TestValidateFlags(t *testing.T) {
 	*procCPUWindow = 0
 	if err := validateFlags(); err == nil {
 		t.Fatal("expected zero window to fail validation")
+	}
+}
+
+func TestNextCollectionModeUsesFastFirstThenPeriodicFull(t *testing.T) {
+	now := time.Now()
+
+	m := model{}
+	if got := m.nextCollectionMode(now); got != collectionFast {
+		t.Fatalf("new model nextCollectionMode() = %v, want fast", got)
+	}
+
+	m.ready = true
+	if got := m.nextCollectionMode(now); got != collectionFull {
+		t.Fatalf("ready model without full collection = %v, want full", got)
+	}
+
+	m.lastFullAt = now.Add(-slowRefreshInterval + time.Second)
+	if got := m.nextCollectionMode(now); got != collectionProcess {
+		t.Fatalf("fresh full without process collection mode = %v, want process", got)
+	}
+
+	m.lastProcessAt = now.Add(-processWatchInterval + time.Millisecond)
+	if got := m.nextCollectionMode(now); got != collectionFast {
+		t.Fatalf("fresh process collection mode = %v, want fast", got)
+	}
+
+	m.lastProcessAt = now.Add(-processWatchInterval)
+	if got := m.nextCollectionMode(now); got != collectionProcess {
+		t.Fatalf("stale process collection mode = %v, want process", got)
+	}
+
+	m.lastFullAt = now.Add(-slowRefreshInterval)
+	if got := m.nextCollectionMode(now); got != collectionFull {
+		t.Fatalf("expired full collection mode = %v, want full", got)
+	}
+}
+
+func TestFullCollectionErrorDoesNotMarkFullFresh(t *testing.T) {
+	now := time.Now()
+	lastFull := now.Add(-slowRefreshInterval)
+	m := model{
+		ready:      true,
+		lastFullAt: lastFull,
+	}
+
+	updated, _ := m.Update(metricsMsg{
+		data: MetricsSnapshot{
+			CollectedAt: now,
+		},
+		err:  errors.New("full collector failed"),
+		mode: collectionFull,
+	})
+	got := updated.(model)
+
+	if !got.lastFullAt.Equal(lastFull) {
+		t.Fatalf("full error updated lastFullAt = %v, want %v", got.lastFullAt, lastFull)
+	}
+	if got.nextCollectionMode(now) != collectionFull {
+		t.Fatalf("full error should leave the next tick eligible for a full retry")
+	}
+}
+
+func TestProcessCollectionUpdatesProcessFreshness(t *testing.T) {
+	now := time.Now()
+	m := model{ready: true}
+
+	updated, _ := m.Update(metricsMsg{
+		data: MetricsSnapshot{CollectedAt: now},
+		mode: collectionProcess,
+	})
+	got := updated.(model)
+
+	if !got.lastProcessAt.Equal(now) {
+		t.Fatalf("process collection updated lastProcessAt = %v, want %v", got.lastProcessAt, now)
+	}
+	if !got.lastFullAt.IsZero() {
+		t.Fatalf("process collection should not update lastFullAt, got %v", got.lastFullAt)
+	}
+}
+
+func TestCollectorAppliesCachedEnrichmentToFastSnapshot(t *testing.T) {
+	previous := MetricsSnapshot{
+		CPU:         CPUStatus{PCoreCount: 8, ECoreCount: 4},
+		Memory:      MemoryStatus{Cached: 512, Pressure: "warn"},
+		Hardware:    HardwareInfo{Model: "MacBook Pro", CPUModel: "M3", OSVersion: "macOS 15", RefreshRate: "120Hz"},
+		GPU:         []GPUStatus{{Name: "Apple GPU", Usage: 12}},
+		TrashSize:   42,
+		TrashApprox: true,
+		Proxy:       ProxyStatus{Enabled: true, Type: "HTTP", Host: "127.0.0.1:8080"},
+		Batteries:   []BatteryStatus{{Percent: 80, Capacity: 92}},
+		Thermal:     ThermalStatus{CPUTemp: 45},
+		Sensors:     []SensorReading{{Label: "Fan", Value: 1200, Unit: "rpm"}},
+		Bluetooth:   []BluetoothDevice{{Name: "Keyboard", Connected: true}},
+		TopProcesses: []ProcessInfo{
+			{PID: 42, Name: "Xcode", CPU: 82},
+		},
+		ProcessAlerts: []ProcessAlert{
+			{PID: 42, Name: "Xcode", CPU: 140, Status: "active"},
+		},
+	}
+
+	collector := NewCollector(ProcessWatchOptions{})
+	collector.cacheEnrichment(previous)
+	previous.GPU[0].Name = "mutated"
+
+	next := MetricsSnapshot{
+		UptimeSeconds: 60,
+		Hardware:      HardwareInfo{TotalRAM: "16G", DiskSize: "1T"},
+		CPU:           CPUStatus{Usage: 10},
+		Memory:        MemoryStatus{UsedPercent: 30, Pressure: "normal"},
+		Disks:         []DiskStatus{{Mount: "/", Total: 100, Used: 20, UsedPercent: 20}},
+		DiskIO:        DiskIOStatus{ReadRate: 1, WriteRate: 1},
+	}
+
+	collector.applyEnrichment(&next, false)
+
+	if next.Hardware.Model != "MacBook Pro" {
+		t.Fatalf("expected hardware details to be preserved, got %#v", next.Hardware)
+	}
+	if next.CPU.PCoreCount != 8 || next.CPU.ECoreCount != 4 {
+		t.Fatalf("expected CPU topology to be preserved, got %#v", next.CPU)
+	}
+	if next.Memory.Cached != 512 || next.Memory.Pressure != "warn" {
+		t.Fatalf("expected slow memory annotations to be preserved, got %#v", next.Memory)
+	}
+	if next.TrashSize != 42 || !next.TrashApprox {
+		t.Fatalf("expected trash metadata to be preserved, got size=%d approx=%v", next.TrashSize, next.TrashApprox)
+	}
+	if !next.Proxy.Enabled || next.Proxy.Host != "127.0.0.1:8080" {
+		t.Fatalf("expected proxy metadata to be preserved, got %#v", next.Proxy)
+	}
+	if len(next.GPU) != 1 || next.GPU[0].Name != "Apple GPU" {
+		t.Fatalf("expected GPU metadata to be preserved from cache, got %#v", next.GPU)
+	}
+	if len(next.Batteries) != 1 || next.Batteries[0].Capacity != 92 {
+		t.Fatalf("expected battery metadata to be preserved, got %#v", next.Batteries)
+	}
+	if next.Thermal.CPUTemp != 45 {
+		t.Fatalf("expected thermal metadata to be preserved, got %#v", next.Thermal)
+	}
+	if len(next.Bluetooth) != 1 || next.Bluetooth[0].Name != "Keyboard" {
+		t.Fatalf("expected Bluetooth metadata to be preserved, got %#v", next.Bluetooth)
+	}
+	if len(next.TopProcesses) != 1 || next.TopProcesses[0].Name != "Xcode" {
+		t.Fatalf("expected top processes to be preserved, got %#v", next.TopProcesses)
+	}
+	if len(next.ProcessAlerts) != 1 || next.ProcessAlerts[0].Status != "active" {
+		t.Fatalf("expected process alerts to be preserved, got %#v", next.ProcessAlerts)
+	}
+	if next.HealthScore == 0 || next.HealthScoreMsg == "" {
+		t.Fatalf("expected health score to be recalculated, got %d %q", next.HealthScore, next.HealthScoreMsg)
+	}
+}
+
+func TestCollectorAppliesZeroValueEnrichmentExactly(t *testing.T) {
+	collector := NewCollector(ProcessWatchOptions{})
+	collector.cacheEnrichment(MetricsSnapshot{
+		Memory: MemoryStatus{
+			Cached:   0,
+			Pressure: "",
+		},
+	})
+
+	next := MetricsSnapshot{
+		Memory: MemoryStatus{
+			Cached:   512,
+			Pressure: "critical",
+		},
+	}
+
+	collector.applyEnrichment(&next, false)
+
+	if next.Memory.Cached != 0 || next.Memory.Pressure != "" {
+		t.Fatalf("expected exact memory enrichment, got %#v", next.Memory)
+	}
+}
+
+func TestCollectorKeepsLiveProcessDataWhenApplyingEnrichment(t *testing.T) {
+	collector := NewCollector(ProcessWatchOptions{})
+	collector.cacheEnrichment(MetricsSnapshot{
+		TopProcesses: []ProcessInfo{{PID: 1, Name: "old", CPU: 10}},
+		ProcessAlerts: []ProcessAlert{
+			{PID: 1, Name: "old", Status: "active"},
+		},
+	})
+
+	next := MetricsSnapshot{
+		TopProcesses: []ProcessInfo{{PID: 2, Name: "new", CPU: 90}},
+		ProcessAlerts: []ProcessAlert{
+			{PID: 2, Name: "new", Status: "active"},
+		},
+	}
+
+	collector.applyEnrichment(&next, true)
+
+	if len(next.TopProcesses) != 1 || next.TopProcesses[0].Name != "new" {
+		t.Fatalf("expected live top process data, got %#v", next.TopProcesses)
+	}
+	if len(next.ProcessAlerts) != 1 || next.ProcessAlerts[0].Name != "new" {
+		t.Fatalf("expected live process alerts, got %#v", next.ProcessAlerts)
 	}
 }

@@ -1031,6 +1031,23 @@ func TestRenderProcessCardAddsInlineHintWithoutExtraRows(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderUsesFastMetricSpecFallbacks(t *testing.T) {
+	const ram = uint64(16 * 1024 * 1024 * 1024)
+	const diskSize = uint64(512 * 1024 * 1024 * 1024)
+	m := MetricsSnapshot{
+		HealthScore: 90,
+		Memory:      MemoryStatus{Total: ram},
+		Disks:       []DiskStatus{{Mount: "/", Total: diskSize}},
+	}
+
+	header, _ := renderHeader(m, "", 0, 120, true)
+	plain := stripANSI(header)
+	want := humanBytes(ram) + "/" + humanBytes(diskSize)
+	if !strings.Contains(plain, want) {
+		t.Fatalf("renderHeader() should use fast metric specs %q, got %q", want, plain)
+	}
+}
+
 func TestRenderHeaderWrapsOnNarrowWidth(t *testing.T) {
 	m := MetricsSnapshot{
 		HealthScore: 91,
