@@ -199,6 +199,7 @@ clean_communication_apps() {
     safe_clean ~/Library/Caches/com.skype.skype/* "Skype cache"
     safe_clean ~/Library/Caches/com.tencent.meeting/* "Tencent Meeting cache"
     safe_clean ~/Library/Caches/com.tencent.WeWorkMac/* "WeCom cache"
+    safe_clean ~/Library/Caches/com.tencent.qq/* "QQ cache"
     safe_clean ~/Library/Caches/com.feishu.*/* "Feishu cache"
     if [[ -d ~/Library/Application\ Support/Microsoft/Teams ]]; then
         safe_clean ~/Library/Application\ Support/Microsoft/Teams/Cache/* "Microsoft Teams legacy cache"
@@ -223,6 +224,7 @@ clean_ai_apps() {
     safe_clean ~/Library/Caches/com.openai.chat/* "ChatGPT cache"
     safe_clean ~/Library/Caches/com.anthropic.claudefordesktop/* "Claude desktop cache"
     safe_clean ~/Library/Logs/Claude/* "Claude logs"
+    safe_clean ~/Library/Caches/com.lmstudio.lmstudio/* "LM Studio cache"
     if [[ -d "$HOME/Library/Application Support/Codex" || -d "$HOME/Library/Logs/com.openai.codex" ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop state · skipped by default"
         note_activity

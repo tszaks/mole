@@ -596,12 +596,12 @@ func TestColorizeTemp(t *testing.T) {
 	}{
 		{"very low", 20.0},
 		{"low", 40.0},
-		{"normal threshold", 55.9},
-		{"at warn threshold", 56.0},
-		{"warn range", 65.0},
-		{"just below danger", 75.9},
-		{"at danger threshold", 76.0},
-		{"high", 85.0},
+		{"normal range", 55.0},
+		{"at warn threshold", 65.0},
+		{"warn range", 75.0},
+		{"just below danger", 84.9},
+		{"at danger threshold", 85.0},
+		{"high", 92.0},
 		{"very high", 95.0},
 	}
 
@@ -968,7 +968,7 @@ func TestRenderHeaderErrorReturnsMoleOnce(t *testing.T) {
 
 func TestStatusDiagnosisLineUsesTopCPUProcess(t *testing.T) {
 	m := MetricsSnapshot{
-		CPU: CPUStatus{Usage: 78},
+		CPU: CPUStatus{Usage: 95},
 		TopProcesses: []ProcessInfo{
 			{Name: "Safari", CPU: 12},
 			{Name: "Xcode", CPU: 82},
@@ -1016,7 +1016,7 @@ func TestStatusDiagnosisLineFallsBackToAllClear(t *testing.T) {
 func TestRenderProcessCardAddsInlineHintWithoutExtraRows(t *testing.T) {
 	card := renderProcessCard([]ProcessInfo{
 		{Name: "Chrome", CPU: 12, Memory: 22, MemoryBytes: 2 * 1024 * 1024 * 1024},
-		{Name: "Xcode", CPU: 82, Memory: 8, MemoryBytes: 512 * 1024 * 1024},
+		{Name: "Xcode", CPU: 95, Memory: 8, MemoryBytes: 512 * 1024 * 1024},
 	})
 
 	if len(card.lines) != 2 {

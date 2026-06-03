@@ -244,14 +244,12 @@ func renderHeader(m MetricsSnapshot, errMsg string, animFrame int, termWidth int
 
 func getScoreStyle(score int) lipgloss.Style {
 	switch {
-	case score >= 90:
+	case score >= 85:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#87FF87")).Bold(true)
-	case score >= 75:
+	case score >= 65:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#87D787")).Bold(true)
-	case score >= 60:
+	case score >= 45:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD75F")).Bold(true)
-	case score >= 40:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAF5F")).Bold(true)
 	default:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B")).Bold(true)
 	}
@@ -846,9 +844,9 @@ func colorizeBattery(percent float64, s string) string {
 
 func colorizeTemp(t float64) string {
 	switch {
-	case t >= 76:
+	case t >= 85:
 		return dangerStyle.Render(fmt.Sprintf("%.1f", t))
-	case t >= 56:
+	case t >= 65:
 		return warnStyle.Render(fmt.Sprintf("%.1f", t))
 	default:
 		return okStyle.Render(fmt.Sprintf("%.1f", t))
