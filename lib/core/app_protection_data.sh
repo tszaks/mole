@@ -377,7 +377,7 @@ readonly DATA_PROTECTED_BUNDLES=(
 
     # Launcher & Automation
     "com.runningwithcrayons.Alfred"
-    "com.raycast.macos"
+    "com.raycast.*"
     "com.blacktree.Quicksilver"
     "com.stairways.keyboardmaestro.*"
     "com.manytricks.Butler"
