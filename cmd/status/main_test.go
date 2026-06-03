@@ -367,7 +367,7 @@ func TestMetricsSnapshotFieldsHaveCollectionClassifications(t *testing.T) {
 		"ProcessAlerts":  "live-or-enrichment",
 	}
 
-	typ := reflect.TypeOf(MetricsSnapshot{})
+	typ := reflect.TypeFor[MetricsSnapshot]()
 	for i := 0; i < typ.NumField(); i++ {
 		name := typ.Field(i).Name
 		if _, ok := classified[name]; !ok {
