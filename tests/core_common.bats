@@ -383,6 +383,16 @@ EOF
     done
 }
 
+@test "should_protect_data covers Raycast wildcard variants" {
+    for id in com.raycast.macos com.raycast.shared com.raycast.macos.BrowserExtension; do
+        result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data '$id' && echo 'protected' || echo 'not-protected'")
+        [ "$result" = "protected" ]
+    done
+
+    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.raycastfoo.bar' && echo 'protected' || echo 'not-protected'")
+    [ "$result" = "not-protected" ]
+}
+
 @test "should_protect_path protects NetworkExtension VPN preferences" {
     result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_path '/Volumes/Data/Library/Preferences/com.apple.networkextension.plist' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
