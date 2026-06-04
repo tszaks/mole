@@ -108,6 +108,28 @@ EOT2B
     [[ "$output" == *"Review: mo purge --include-empty"* ]]
 }
 
+@test "show_project_artifact_hint_notice reports skipped slow project artifact scans (#1053)" {
+    local root="$HOME/Library/CloudStorage"
+    mkdir -p "$root"
+    printf '%s\n' "$root" > "$HOME/.config/mole/purge_paths"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOT2C'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+run_with_timeout() {
+    shift
+    return 124
+}
+note_activity() { :; }
+show_project_artifact_hint_notice
+EOT2C
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipped slow project artifact scan"* ]]
+    [[ "$output" == *"Review: mo purge"* ]]
+}
+
 @test "show_system_data_hint_notice reports large clue paths" {
     mkdir -p "$HOME/Library/Developer/Xcode/DerivedData"
 

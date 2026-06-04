@@ -107,6 +107,50 @@ SCRIPT
 	chmod +x "$bin_dir/curl"
 }
 
+make_nightly_update_curl_stub() {
+	local bin_dir="$1"
+	local latest_commit="$2"
+	cat > "$bin_dir/curl" <<SCRIPT
+#!/usr/bin/env bash
+out=""
+url=""
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+		-o)
+			out="\$2"
+			shift 2
+			;;
+		http*://*)
+			url="\$1"
+			shift
+			;;
+		*)
+			shift
+			;;
+	esac
+done
+[[ -n "\$url" ]] && printf '%s\n' "\$url" >> "\$CURL_URL_LOG"
+
+if [[ -n "\$out" ]]; then
+	cat > "\$out" <<'INSTALLER'
+#!/usr/bin/env bash
+printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
+printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
+echo "Updated to latest version, \${MOLE_VERSION#V}"
+INSTALLER
+	exit 0
+fi
+
+if [[ "\$url" == *"api.github.com/repos/tw93/mole/commits/main"* ]]; then
+	printf '{"sha":"%s"}\n' "$latest_commit"
+	exit 0
+fi
+
+exit 1
+SCRIPT
+	chmod +x "$bin_dir/curl"
+}
+
 @test "mo update targets the invoked manual install, not another Homebrew mole in PATH" {
 	local manual_bin="$TEST_ROOT/manual/bin"
 	local manual_config="$TEST_ROOT/manual/config"
@@ -147,6 +191,68 @@ SCRIPT
 	if grep -q '^upgrade mole$' "$brew_log"; then
 		return 1
 	fi
+}
+
+@test "mo update --nightly skips reinstall when the installed commit is current" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local installer_version_log="$TEST_ROOT/installer.version"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local latest_commit="e31d46faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	make_nightly_update_curl_stub "$fake_bin" "$latest_commit"
+	printf 'CHANNEL=nightly\nCOMMIT_HASH=e31d46f\n' > "$manual_config/install_channel"
+	: > "$curl_url_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		INSTALLER_VERSION_LOG="$installer_version_log" \
+		"$manual_bin/mo" update --nightly
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Already on latest nightly, e31d46f"* ]]
+	[ ! -e "$installer_args_log" ]
+	grep -q "api.github.com/repos/tw93/mole/commits/main" "$curl_url_log"
+	if grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"; then
+		return 1
+	fi
+}
+
+@test "mo update --nightly --force reinstalls even when the installed commit is current" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local installer_version_log="$TEST_ROOT/installer.version"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local latest_commit="e31d46faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	make_nightly_update_curl_stub "$fake_bin" "$latest_commit"
+	printf 'CHANNEL=nightly\nCOMMIT_HASH=e31d46f\n' > "$manual_config/install_channel"
+	: > "$curl_url_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		INSTALLER_VERSION_LOG="$installer_version_log" \
+		"$manual_bin/mo" update --nightly --force
+
+	[ "$status" -eq 0 ]
+	[ -f "$installer_args_log" ]
+	grep -q -- "--prefix" "$installer_args_log"
+	[ "$(cat "$installer_version_log")" = "main" ]
+	grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"
 }
 
 @test "mo update keeps Homebrew installs on the Homebrew update path" {

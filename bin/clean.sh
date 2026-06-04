@@ -18,6 +18,7 @@ source "$SCRIPT_DIR/../lib/clean/apps.sh"
 source "$SCRIPT_DIR/../lib/clean/dev.sh"
 source "$SCRIPT_DIR/../lib/clean/app_caches.sh"
 source "$SCRIPT_DIR/../lib/clean/hints.sh"
+source "$SCRIPT_DIR/../lib/clean/launch_services.sh"
 source "$SCRIPT_DIR/../lib/clean/system.sh"
 source "$SCRIPT_DIR/../lib/clean/user.sh"
 
@@ -1195,6 +1196,7 @@ perform_cleanup() {
         clean_orphaned_app_data
         clean_orphaned_system_services
         clean_orphaned_container_stubs
+        clean_stale_launch_services_registrations
         show_user_launch_agent_hint_notice
         show_orphan_dotdir_hint_notice
         end_section

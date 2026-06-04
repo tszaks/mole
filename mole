@@ -209,7 +209,7 @@ get_latest_commit_from_github() {
     local sha
     sha=$(curl -fsSL --connect-timeout 2 --max-time 3 \
         "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null |
-        grep '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+        grep '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/') || sha=""
     echo "$sha"
 }
 
@@ -412,6 +412,20 @@ update_mole() {
         download_label="Downloading nightly installer..."
         install_label="Installing nightly update..."
         final_success_label="nightly build (main)"
+
+        if [[ "$force_update" != "true" ]]; then
+            local installed_commit latest_commit
+            installed_commit=$(get_install_commit)
+            latest_commit=$(get_latest_commit_from_github)
+
+            if [[ "$installed_commit" =~ ^[0-9a-f]{7,40}$ && "$latest_commit" =~ ^[0-9a-f]{40}$ &&
+                "${installed_commit:0:7}" == "${latest_commit:0:7}" ]]; then
+                echo ""
+                echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest nightly, ${latest_commit:0:7}"
+                echo ""
+                exit 0
+            fi
+        fi
     else
         latest=$(get_latest_version_from_github)
         [[ -z "$latest" ]] && latest=$(get_latest_version)

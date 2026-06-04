@@ -55,6 +55,21 @@ hint_get_path_size_kb_with_timeout() {
 }
 
 # shellcheck disable=SC2329
+hint_collect_child_dirs_with_timeout() {
+    local parent="$1"
+    local output_file="$2"
+    local timeout_seconds="${3:-1}"
+
+    [[ -d "$parent" ]] || return 1
+    : > "$output_file" || return 1
+
+    # 1s: shallow directory listing should be near-instant on healthy local
+    # paths. Slow/cloud-backed roots are skipped so `mo clean` never appears
+    # stuck while rendering this non-destructive hint.
+    run_with_timeout "$timeout_seconds" find "$parent" -mindepth 1 -maxdepth 1 -type d -print0 > "$output_file" 2> /dev/null
+}
+
+# shellcheck disable=SC2329
 hint_extract_launch_agent_program_path() {
     local plist="$1"
     local program=""
@@ -277,11 +292,13 @@ probe_project_artifact_hints() {
     PROJECT_ARTIFACT_HINT_ESTIMATED_KB=0
     PROJECT_ARTIFACT_HINT_ESTIMATE_SAMPLES=0
     PROJECT_ARTIFACT_HINT_ESTIMATE_PARTIAL=false
+    PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=false
 
     local max_projects=200
     local max_projects_per_root=0
     local max_nested_per_project=120
     local max_matches=12
+    local list_timeout_seconds=1
 
     local -a target_names=()
     while IFS= read -r target_name; do
@@ -302,15 +319,10 @@ probe_project_artifact_hints() {
     fi
     [[ $max_projects_per_root -gt $max_projects ]] && max_projects_per_root=$max_projects
 
-    local nullglob_was_set=0
-    if shopt -q nullglob; then
-        nullglob_was_set=1
-    fi
-    shopt -s nullglob
-
     local scanned_projects=0
     local stop_scan=false
     local root project_dir nested_dir target_name candidate
+    local project_dirs_file nested_dirs_file
 
     for root in "${scan_roots[@]}"; do
         [[ -d "$root" ]] || continue
@@ -339,9 +351,20 @@ probe_project_artifact_hints() {
             continue
         fi
 
-        for project_dir in "$root"/*/; do
+        project_dirs_file=$(mktemp) || {
+            PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=true
+            PROJECT_ARTIFACT_HINT_TRUNCATED=true
+            continue
+        }
+        if ! hint_collect_child_dirs_with_timeout "$root" "$project_dirs_file" "$list_timeout_seconds"; then
+            PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=true
+            PROJECT_ARTIFACT_HINT_TRUNCATED=true
+            rm -f "$project_dirs_file"
+            continue
+        fi
+
+        while IFS= read -r -d '' project_dir; do
             [[ -d "$project_dir" ]] || continue
-            project_dir="${project_dir%/}"
 
             local project_name
             project_name=$(basename "$project_dir")
@@ -369,9 +392,20 @@ probe_project_artifact_hints() {
             [[ "$stop_scan" == "true" ]] && break
 
             local nested_count=0
-            for nested_dir in "$project_dir"/*/; do
+            nested_dirs_file=$(mktemp) || {
+                PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=true
+                PROJECT_ARTIFACT_HINT_TRUNCATED=true
+                continue
+            }
+            if ! hint_collect_child_dirs_with_timeout "$project_dir" "$nested_dirs_file" "$list_timeout_seconds"; then
+                PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=true
+                PROJECT_ARTIFACT_HINT_TRUNCATED=true
+                rm -f "$nested_dirs_file"
+                continue
+            fi
+
+            while IFS= read -r -d '' nested_dir; do
                 [[ -d "$nested_dir" ]] || continue
-                nested_dir="${nested_dir%/}"
 
                 local nested_name
                 nested_name=$(basename "$nested_dir")
@@ -396,17 +430,15 @@ probe_project_artifact_hints() {
                 done
 
                 [[ "$stop_scan" == "true" ]] && break
-            done
+            done < "$nested_dirs_file"
+            rm -f "$nested_dirs_file"
 
             [[ "$stop_scan" == "true" ]] && break
-        done
+        done < "$project_dirs_file"
+        rm -f "$project_dirs_file"
 
         [[ "$stop_scan" == "true" ]] && break
     done
-
-    if [[ $nullglob_was_set -eq 0 ]]; then
-        shopt -u nullglob
-    fi
 
     if [[ $PROJECT_ARTIFACT_HINT_COUNT -gt 0 ]]; then
         PROJECT_ARTIFACT_HINT_DETECTED=true
@@ -497,6 +529,11 @@ show_project_artifact_hint_notice() {
     probe_project_artifact_hints
 
     if [[ "$PROJECT_ARTIFACT_HINT_DETECTED" != "true" ]]; then
+        if [[ "${PROJECT_ARTIFACT_HINT_SCAN_SKIPPED:-false}" == "true" ]]; then
+            note_activity
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Skipped slow project artifact scan"
+            echo -e "  ${GRAY}${ICON_REVIEW}${NC} Review: mo purge"
+        fi
         return 0
     fi
 
@@ -533,6 +570,9 @@ show_project_artifact_hint_notice() {
 
     if [[ -n "$example_text" ]]; then
         echo -e "  ${GRAY}${ICON_SUBLIST}${NC} Examples: ${GRAY}${example_text}${NC}"
+    fi
+    if [[ "${PROJECT_ARTIFACT_HINT_SCAN_SKIPPED:-false}" == "true" ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Some slow locations were skipped"
     fi
     local review_command="mo purge"
     if [[ $PROJECT_ARTIFACT_HINT_ESTIMATE_SAMPLES -gt 0 && $PROJECT_ARTIFACT_HINT_ESTIMATED_KB -eq 0 ]]; then
