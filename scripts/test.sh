@@ -236,24 +236,24 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
         bats_opts+=("--timing")
     fi
 
-    # core_performance.bats has wall-clock timing assertions that are skewed by
+    # Some test files include wall-clock timing assertions that are skewed by
     # CPU contention from parallel test workers. When parallel mode is active,
-    # split it out to run sequentially after the parallel batch completes.
-    _perf_files=()
+    # split them out to run sequentially after the parallel batch completes.
+    _sequential_files=()
     if [[ ${#bats_opts[@]} -gt 0 ]]; then
         _all=("$@")
         _rest=()
         if [[ ${#_all[@]} -eq 1 && -d "${_all[0]}" ]]; then
             while IFS= read -r _f; do
                 case "$_f" in
-                    *core_performance.bats) _perf_files+=("$_f") ;;
+                    *core_performance.bats | *regression.bats) _sequential_files+=("$_f") ;;
                     *) _rest+=("$_f") ;;
                 esac
             done < <(find "${_all[0]}" -type f -name '*.bats' | sort)
         else
             for _f in "${_all[@]}"; do
                 case "$_f" in
-                    *core_performance.bats) _perf_files+=("$_f") ;;
+                    *core_performance.bats | *regression.bats) _sequential_files+=("$_f") ;;
                     *) _rest+=("$_f") ;;
                 esac
             done
@@ -298,16 +298,16 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
         fi
     fi
 
-    # Post-run: timing-sensitive perf tests run after parallel workers have
-    # finished so CPU contention does not skew wall-clock assertions.
-    for _pf in ${_perf_files[@]+"${_perf_files[@]}"}; do
+    # Post-run: timing-sensitive tests run after parallel workers have finished
+    # so CPU contention does not skew wall-clock assertions.
+    for _pf in ${_sequential_files[@]+"${_sequential_files[@]}"}; do
         if [[ "${MOLE_TEST_TIMING:-0}" == "1" ]]; then
             bats --timing "$_pf" || _unit_rc=1
         else
             bats "$_pf" || _unit_rc=1
         fi
     done
-    unset _perf_files _pf
+    unset _sequential_files _pf
 
     report_unit_result "$_unit_rc"
 else
