@@ -196,12 +196,13 @@ read_clean_sudo_choice() {
 prompt_for_system_clean() {
     local prompt_attempt=0
     while true; do
-        echo -ne "${PURPLE}${ICON_ARROW}${NC} System caches need sudo. ${GREEN}Enter${NC} password, ${GRAY}Space${NC} skip: "
+        echo -ne "${PURPLE}${ICON_ARROW}${NC} System caches need sudo. ${GREEN}Enter${NC} continue, ${GRAY}Space${NC} skip: "
 
         local choice
         choice=$(read_clean_sudo_choice)
 
-        # ESC aborts, Space skips, Enter enables system cleanup.
+        # ESC aborts, Space skips, Enter (or any typed key, e.g. someone who
+        # starts typing their password) proceeds to authentication.
         if [[ "$choice" == "QUIT" ]]; then
             echo -e " ${GRAY}Canceled${NC}"
             exit 0
@@ -212,7 +213,7 @@ prompt_for_system_clean() {
             echo ""
             SYSTEM_CLEAN=false
             break
-        elif [[ "$choice" == "ENTER" ]]; then
+        elif [[ "$choice" == "ENTER" || "$choice" == CHAR:* ]]; then
             printf "\r\033[K" # Clear the prompt line
             if ensure_sudo_session "System cleanup requires admin access"; then
                 SYSTEM_CLEAN=true

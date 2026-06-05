@@ -116,10 +116,37 @@ MOCK
     [[ "$output" == *"full preview"* ]]
 }
 
-@test "mo clean sudo prompt does not skip when a password character is typed first (#1059)" {
-    local read_count_file="$HOME/read-count"
+@test "mo clean sudo prompt proceeds to auth when a password character is typed first (#1059)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" READ_COUNT_FILE="$read_count_file" \
+ensure_sudo_session() {
+    echo "ENSURE_SUDO"
+    return 0
+}
+drain_pending_input() { :; }
+# A user who reads "Enter ... password" literally starts typing; the first
+# printable key must go to authentication, never an auto-skip.
+read_key() {
+    echo "CHAR:p"
+}
+
+prompt_for_system_clean
+printf '\nSYSTEM_CLEAN=%s\n' "$SYSTEM_CLEAN"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"continue"* ]]
+    [[ "$output" != *"Enter"*"password"* ]]
+    [[ "$output" == *"ENSURE_SUDO"* ]]
+    [[ "$output" == *"SYSTEM_CLEAN=true"* ]]
+    [[ "$output" != *"Skipped"* ]]
+}
+
+@test "mo clean sudo prompt still skips on explicit Space (#1059)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
@@ -130,17 +157,7 @@ ensure_sudo_session() {
 }
 drain_pending_input() { :; }
 read_key() {
-    local count=0
-    if [[ -f "$READ_COUNT_FILE" ]]; then
-        count=$(cat "$READ_COUNT_FILE")
-    fi
-    count=$((count + 1))
-    printf '%s\n' "$count" > "$READ_COUNT_FILE"
-    if [[ "$count" -eq 1 ]]; then
-        echo "CHAR:p"
-    else
-        echo "ENTER"
-    fi
+    echo "SPACE"
 }
 
 prompt_for_system_clean
@@ -148,10 +165,9 @@ printf '\nSYSTEM_CLEAN=%s\n' "$SYSTEM_CLEAN"
 SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Press Enter to type your sudo password, or Space to skip"* ]]
-    [[ "$output" == *"ENSURE_SUDO"* ]]
-    [[ "$output" == *"SYSTEM_CLEAN=true"* ]]
-    [[ "$output" != *"Skipped"* ]]
+    [[ "$output" == *"Skipped"* ]]
+    [[ "$output" != *"ENSURE_SUDO"* ]]
+    [[ "$output" == *"SYSTEM_CLEAN=false"* ]]
 }
 
 @test "cloud and office timeout path uses helper function instead of bash -c" {
