@@ -364,7 +364,7 @@ probe_project_artifact_hints() {
             continue
         fi
 
-        project_dirs_file=$(mktemp) || {
+        project_dirs_file=$(mktemp_file "project_artifact_dirs") || {
             PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=true
             PROJECT_ARTIFACT_HINT_TRUNCATED=true
             continue
@@ -411,7 +411,7 @@ probe_project_artifact_hints() {
             [[ "$stop_scan" == "true" ]] && break
 
             local nested_count=0
-            nested_dirs_file=$(mktemp) || {
+            nested_dirs_file=$(mktemp_file "project_artifact_nested") || {
                 PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=true
                 PROJECT_ARTIFACT_HINT_TRUNCATED=true
                 continue

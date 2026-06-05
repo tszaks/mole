@@ -235,7 +235,7 @@ prompt_for_system_clean() {
                 break
             fi
             printf "\r\033[K"
-            echo -e "${YELLOW}${ICON_WARNING}${NC} Press Enter to type your sudo password, or Space to skip"
+            echo -e "${YELLOW}${ICON_WARNING}${NC} Press Enter to continue, or Space to skip"
         fi
     done
 }
