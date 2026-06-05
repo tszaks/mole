@@ -47,6 +47,11 @@ const (
 	uptimeDangerDays = 14
 	uptimeWarnSecs   = uptimeWarnDays * 86400
 	uptimeDangerSecs = uptimeDangerDays * 86400
+
+	// Score display bands (shared with view.go score styling).
+	scoreExcellentThreshold = 85
+	scoreGoodThreshold      = 65
+	scoreFairThreshold      = 45
 )
 
 func calculateHealthScore(cpu CPUStatus, mem MemoryStatus, disks []DiskStatus, diskIO DiskIOStatus, thermal ThermalStatus, batteries []BatteryStatus, uptimeSecs uint64) (int, string) {
@@ -167,11 +172,11 @@ func calculateHealthScore(cpu CPUStatus, mem MemoryStatus, disks []DiskStatus, d
 	// Build message.
 	var msg string
 	switch {
-	case score >= 85:
+	case score >= scoreExcellentThreshold:
 		msg = "Excellent"
-	case score >= 65:
+	case score >= scoreGoodThreshold:
 		msg = "Good"
-	case score >= 45:
+	case score >= scoreFairThreshold:
 		msg = "Fair"
 	default:
 		msg = "Needs Attention"
