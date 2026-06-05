@@ -853,16 +853,6 @@ opt_dock_refresh() {
     opt_msg "Dock refreshed"
 }
 
-# Rebuild user font database.
-opt_font_cache_rebuild() {
-    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        atsutil databases -removeUser > /dev/null 2>&1 || true
-        atsutil server -shutdown > /dev/null 2>&1 || true
-        atsutil server -ping > /dev/null 2>&1 || true
-    fi
-    opt_msg "Font cache rebuilt"
-}
-
 # Prevent .DS_Store on network and USB volumes.
 # Idempotent: writes two user defaults that stop Finder from creating
 # .DS_Store files on SMB/AFP/NFS shares and removable USB volumes.
@@ -1382,7 +1372,6 @@ execute_optimization() {
         sqlite_vacuum) opt_sqlite_vacuum ;;
         launch_services_rebuild) opt_launch_services_rebuild ;;
         dock_refresh) opt_dock_refresh ;;
-        font_cache_rebuild) opt_font_cache_rebuild ;;
         prevent_network_dsstore) opt_prevent_network_dsstore ;;
         memory_pressure_relief) opt_memory_pressure_relief ;;
         network_stack_optimize) opt_network_stack_optimize ;;

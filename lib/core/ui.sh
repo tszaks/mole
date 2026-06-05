@@ -207,6 +207,7 @@ read_key() {
                 fi
                 ;;
             ' ') echo "SPACE" ;; # Allow space in filter mode for selection
+            $'\x03') echo "QUIT" ;;
             [[:print:]]) echo "CHAR:$key" ;;
             *) echo "OTHER" ;;
         esac

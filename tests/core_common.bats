@@ -512,6 +512,11 @@ EOF
     [ "$output" = "CHAR:j" ]
 }
 
+@test "read_key keeps Ctrl-C as quit when forcing printable characters" {
+    run bash -c "export MOLE_BASE_LOADED=1; export MOLE_READ_KEY_FORCE_CHAR=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf '\\003' | read_key"
+    [ "$output" = "QUIT" ]
+}
+
 @test "ensure_sudo_session returns 1 and sets MOLE_SUDO_ESTABLISHED=false in test mode" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 bash --noprofile --norc <<'SCRIPT'
 source "$PROJECT_ROOT/lib/core/base.sh"

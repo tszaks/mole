@@ -302,30 +302,6 @@ EOF
 	[[ "$output" == *"Dock refreshed"* ]]
 }
 
-@test "opt_font_cache_rebuild reports success in dry-run" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-opt_font_cache_rebuild
-EOF
-
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"Font cache rebuilt"* ]]
-}
-
-@test "execute_optimization dispatches font_cache_rebuild" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-execute_optimization font_cache_rebuild
-EOF
-
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"Font cache rebuilt"* ]]
-}
-
 @test "opt_prevent_network_dsstore dry-run reports enabled" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
 set -euo pipefail

@@ -116,6 +116,44 @@ MOCK
     [[ "$output" == *"full preview"* ]]
 }
 
+@test "mo clean sudo prompt does not skip when a password character is typed first (#1059)" {
+    local read_count_file="$HOME/read-count"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" READ_COUNT_FILE="$read_count_file" \
+        bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+
+ensure_sudo_session() {
+    echo "ENSURE_SUDO"
+    return 0
+}
+drain_pending_input() { :; }
+read_key() {
+    local count=0
+    if [[ -f "$READ_COUNT_FILE" ]]; then
+        count=$(cat "$READ_COUNT_FILE")
+    fi
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$READ_COUNT_FILE"
+    if [[ "$count" -eq 1 ]]; then
+        echo "CHAR:p"
+    else
+        echo "ENTER"
+    fi
+}
+
+prompt_for_system_clean
+printf '\nSYSTEM_CLEAN=%s\n' "$SYSTEM_CLEAN"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Press Enter to type your sudo password, or Space to skip"* ]]
+    [[ "$output" == *"ENSURE_SUDO"* ]]
+    [[ "$output" == *"SYSTEM_CLEAN=true"* ]]
+    [[ "$output" != *"Skipped"* ]]
+}
+
 @test "cloud and office timeout path uses helper function instead of bash -c" {
     run bash -c "grep -Eq 'run_with_shell_timeout 300 run_cloud_and_office_cleanup' '$PROJECT_ROOT/bin/clean.sh'"
     [ "$status" -eq 0 ]

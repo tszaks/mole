@@ -173,6 +173,72 @@ register_dry_run_cleanup_target() {
     return 0
 }
 
+read_clean_sudo_choice() {
+    local had_force_char=false
+    local previous_force_char="${MOLE_READ_KEY_FORCE_CHAR:-}"
+    if [[ ${MOLE_READ_KEY_FORCE_CHAR+x} ]]; then
+        had_force_char=true
+    fi
+
+    export MOLE_READ_KEY_FORCE_CHAR=1
+    local choice
+    choice=$(read_key)
+
+    if [[ "$had_force_char" == "true" ]]; then
+        export MOLE_READ_KEY_FORCE_CHAR="$previous_force_char"
+    else
+        unset MOLE_READ_KEY_FORCE_CHAR
+    fi
+
+    printf '%s\n' "$choice"
+}
+
+prompt_for_system_clean() {
+    local prompt_attempt=0
+    while true; do
+        echo -ne "${PURPLE}${ICON_ARROW}${NC} System caches need sudo. ${GREEN}Enter${NC} password, ${GRAY}Space${NC} skip: "
+
+        local choice
+        choice=$(read_clean_sudo_choice)
+
+        # ESC aborts, Space skips, Enter enables system cleanup.
+        if [[ "$choice" == "QUIT" ]]; then
+            echo -e " ${GRAY}Canceled${NC}"
+            exit 0
+        fi
+
+        if [[ "$choice" == "SPACE" ]]; then
+            echo -e " ${GRAY}Skipped${NC}"
+            echo ""
+            SYSTEM_CLEAN=false
+            break
+        elif [[ "$choice" == "ENTER" ]]; then
+            printf "\r\033[K" # Clear the prompt line
+            if ensure_sudo_session "System cleanup requires admin access"; then
+                SYSTEM_CLEAN=true
+                echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access granted"
+                echo ""
+            else
+                SYSTEM_CLEAN=false
+                echo ""
+                echo -e "${YELLOW}Authentication failed${NC}, continuing with user-level cleanup"
+            fi
+            break
+        else
+            prompt_attempt=$((prompt_attempt + 1))
+            drain_pending_input 0.05
+            if [[ $prompt_attempt -ge 2 ]]; then
+                SYSTEM_CLEAN=false
+                echo -e " ${GRAY}Skipped${NC}"
+                echo ""
+                break
+            fi
+            printf "\r\033[K"
+            echo -e "${YELLOW}${ICON_WARNING}${NC} Press Enter to type your sudo password, or Space to skip"
+        fi
+    done
+}
+
 CLEANUP_DONE=false
 # shellcheck disable=SC2329
 cleanup() {
@@ -941,37 +1007,7 @@ EOF
             echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access already available"
             echo ""
         else
-            echo -ne "${PURPLE}${ICON_ARROW}${NC} System caches need sudo. ${GREEN}Enter${NC} continue, ${GRAY}Space${NC} skip: "
-
-            local choice
-            choice=$(read_key)
-
-            # ESC/Q aborts, Space skips, Enter enables system cleanup.
-            if [[ "$choice" == "QUIT" ]]; then
-                echo -e " ${GRAY}Canceled${NC}"
-                exit 0
-            fi
-
-            if [[ "$choice" == "SPACE" ]]; then
-                echo -e " ${GRAY}Skipped${NC}"
-                echo ""
-                SYSTEM_CLEAN=false
-            elif [[ "$choice" == "ENTER" ]]; then
-                printf "\r\033[K" # Clear the prompt line
-                if ensure_sudo_session "System cleanup requires admin access"; then
-                    SYSTEM_CLEAN=true
-                    echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access granted"
-                    echo ""
-                else
-                    SYSTEM_CLEAN=false
-                    echo ""
-                    echo -e "${YELLOW}Authentication failed${NC}, continuing with user-level cleanup"
-                fi
-            else
-                SYSTEM_CLEAN=false
-                echo -e " ${GRAY}Skipped${NC}"
-                echo ""
-            fi
+            prompt_for_system_clean
         fi
     else
         echo ""
