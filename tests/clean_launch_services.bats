@@ -150,6 +150,49 @@ EOF
     fi
 }
 
+@test "launch_services_stale_app_path_is_safe rejects unsafe, live, and malformed paths" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TEST_ROOT="$TEST_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/launch_services.sh"
+
+fail=0
+expect_reject() {
+    if launch_services_stale_app_path_is_safe "$1"; then
+        printf 'UNEXPECTED_ACCEPT: %q\n' "$1"
+        fail=1
+    fi
+}
+expect_accept() {
+    if ! launch_services_stale_app_path_is_safe "$1"; then
+        printf 'UNEXPECTED_REJECT: %q\n' "$1"
+        fail=1
+    fi
+}
+
+# Genuinely missing, absolute, .app bundle is the only case that may unregister.
+expect_accept "$TEST_ROOT/Gone.app"
+
+# A live bundle on disk must never be unregistered.
+mkdir -p "$TEST_ROOT/Live.app"
+expect_reject "$TEST_ROOT/Live.app"
+
+# Format, protected-root, traversal, and injection rejections.
+expect_reject ""
+expect_reject "relative/Path.app"
+expect_reject "$TEST_ROOT/NotAnApp"
+expect_reject "/System/Applications/Gone.app"
+expect_reject "/Library/Apple/Gone.app"
+expect_reject "$TEST_ROOT/../Gone.app"
+expect_reject "$(printf '/tmp/Bad\nName.app')"
+expect_reject "$(printf '/tmp/Bad\rName.app')"
+
+exit $fail
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "clean_stale_launch_services_registrations ignores dump failures" {
     local lsregister="$TEST_ROOT/bin/lsregister"
     local dump_file="$TEST_ROOT/missing.dump"

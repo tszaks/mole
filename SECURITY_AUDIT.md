@@ -54,6 +54,7 @@ Core controls include:
 - removal flows use guarded helpers such as `safe_remove()`, `safe_sudo_remove()`, `safe_find_delete()`, and `safe_sudo_find_delete()`
 - uninstall removal flows that move items to Trash use `mole_delete`, which validates the path again and records the operation result. `mole_delete` now also validates symlinks instead of skipping them, and normalizes the target by collapsing repeated slashes and stripping a trailing slash before the protected-path check, so equivalent path spellings cannot slip past protection.
 - incomplete download cleanup skips files currently open (lsof check) and uses quoted glob patterns to prevent word-splitting on filenames that contain spaces
+- stale LaunchServices cleanup in `mo clean` (`lib/clean/launch_services.sh`) only unregisters records with `lsregister -u` and never deletes files; it acts on an entry only when the dump marks it `Bundle node not found on disk` and the referenced `.app` is confirmed absent (`[[ ! -e ]]`), rejects `/System`, `/Library/Apple`, `..` traversal, and newline/carriage-return paths, honors dry-run, is bounded by `MOLE_LAUNCH_SERVICES_STALE_LIMIT` (default 50), and never performs a global `lsregister -r -f` rebuild
 
 Blocked paths remain protected even with sudo. Examples include:
 
@@ -258,6 +259,7 @@ Relevant timeout behavior includes:
 
 - orphan and Spotlight checks: 2s
 - LaunchServices rebuild during uninstall: bounded 10s and 15s steps
+- LaunchServices stale registration cleanup in clean: dump bounded to 10s, each unregister bounded to 3s
 - Homebrew uninstall cask flow: 300s by default, extended for large apps when needed
 - project scans and sizing operations: bounded to avoid whole-home stalls
 
@@ -298,6 +300,7 @@ There is no single `tests/security.bats` file. Instead, security-relevant behavi
 - `tests/clean_dev_caches.bats`
 - `tests/clean_system_maintenance.bats`
 - `tests/clean_apps.bats`
+- `tests/clean_launch_services.bats`
 - `tests/file_ops_mole_delete.bats`
 - `tests/purge.bats`
 - `tests/installer.bats`
@@ -321,6 +324,7 @@ Key coverage areas include:
 - sudo credential prompting and session management (`tests/manage_sudo.bats`)
 - purge config path discovery and write behavior (`tests/purge_config_paths.bats`)
 - hint and cleanup-hint flows (`tests/clean_hints.bats`)
+- stale LaunchServices unregister limited to missing apps, dry-run preview, fail-closed on dump failure, and a path-safety filter that rejects live, system, traversal, and injection paths (`tests/clean_launch_services.bats`)
 - Touch ID PAM file permission enforcement (`tests/cli.bats`)
 - bundle ID boundary matching and malformed-ID rejection (`tests/uninstall_safety.bats`)
 - official-uninstaller exclusion and receipt payload allowlisting (`tests/uninstall_safety.bats`)
