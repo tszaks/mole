@@ -19,6 +19,10 @@
 #   PKG_LIST          Package manager listing (brew list, simctl list). ~10s.
 #   PKG_CLEANUP       Cache cleanup commands that walk disks. ~20s.
 #   DISK_VERIFY       Filesystem-level verify/repair operations. ~30s.
+#   HINT_SCAN         Non-destructive hint that walks an unbounded user
+#                     directory tree (project-artifact discovery). Per-listing
+#                     finds are already capped; this is the cumulative wall-clock
+#                     ceiling for the whole walk so it can never appear hung. ~15s.
 #
 # Migration: new code should use these constants. Existing call sites can
 # be migrated incrementally; the script `grep 'run_with_timeout [0-9]'` lists
@@ -59,3 +63,4 @@ readonly MOLE_TIMEOUT_MEDIUM_PROBE_SEC="${MOLE_TIMEOUT_MEDIUM_PROBE_SEC:-5}"
 readonly MOLE_TIMEOUT_PKG_LIST_SEC="${MOLE_TIMEOUT_PKG_LIST_SEC:-10}"
 readonly MOLE_TIMEOUT_PKG_CLEANUP_SEC="${MOLE_TIMEOUT_PKG_CLEANUP_SEC:-20}"
 readonly MOLE_TIMEOUT_DISK_VERIFY_SEC="${MOLE_TIMEOUT_DISK_VERIFY_SEC:-30}"
+readonly MOLE_TIMEOUT_HINT_SCAN_SEC="${MOLE_TIMEOUT_HINT_SCAN_SEC:-15}"

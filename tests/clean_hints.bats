@@ -130,6 +130,28 @@ EOT2C
     [[ "$output" == *"Review: mo purge"* ]]
 }
 
+@test "probe_project_artifact_hints stops at the wall-clock budget (#1053)" {
+    local root="$HOME/hints-root"
+    mkdir -p "$root/proj/node_modules"
+    touch "$root/proj/package.json"
+    printf '%s\n' "$root" > "$HOME/.config/mole/purge_paths"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TIMEOUT_HINT_SCAN_SEC=0 \
+        bash --noprofile --norc << 'EOT2D'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+run_with_timeout() { shift; "$@"; }
+probe_project_artifact_hints
+printf 'count=%s\n' "$PROJECT_ARTIFACT_HINT_COUNT"
+printf 'skipped=%s\n' "$PROJECT_ARTIFACT_HINT_SCAN_SKIPPED"
+EOT2D
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"count=0"* ]]
+    [[ "$output" == *"skipped=true"* ]]
+}
+
 @test "show_system_data_hint_notice reports large clue paths" {
     mkdir -p "$HOME/Library/Developer/Xcode/DerivedData"
 

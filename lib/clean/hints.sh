@@ -300,6 +300,14 @@ probe_project_artifact_hints() {
     local max_matches=12
     local list_timeout_seconds=1
 
+    # Wall-clock ceiling for the whole walk. Per-listing finds are already
+    # capped at 1s, but with up to max_projects roots the cumulative scan can
+    # stretch into minutes on busy machines and look hung (#1053). Checked
+    # between iterations so the section degrades gracefully instead of stalling.
+    local hint_budget_seconds="${MOLE_TIMEOUT_HINT_SCAN_SEC:-15}"
+    [[ "$hint_budget_seconds" =~ ^[0-9]+$ ]] || hint_budget_seconds=15
+    local scan_deadline=$((SECONDS + hint_budget_seconds))
+
     local -a target_names=()
     while IFS= read -r target_name; do
         [[ -n "$target_name" ]] && target_names+=("$target_name")
@@ -325,6 +333,11 @@ probe_project_artifact_hints() {
     local project_dirs_file nested_dirs_file
 
     for root in "${scan_roots[@]}"; do
+        if [[ $SECONDS -ge $scan_deadline ]]; then
+            PROJECT_ARTIFACT_HINT_TRUNCATED=true
+            PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=true
+            break
+        fi
         [[ -d "$root" ]] || continue
         local root_projects_scanned=0
 
@@ -364,6 +377,12 @@ probe_project_artifact_hints() {
         fi
 
         while IFS= read -r -d '' project_dir; do
+            if [[ $SECONDS -ge $scan_deadline ]]; then
+                PROJECT_ARTIFACT_HINT_TRUNCATED=true
+                PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=true
+                stop_scan=true
+                break
+            fi
             [[ -d "$project_dir" ]] || continue
 
             local project_name
