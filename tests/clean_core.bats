@@ -116,21 +116,28 @@ MOCK
     [[ "$output" == *"full preview"* ]]
 }
 
-@test "mo clean sudo prompt proceeds to auth when a password character is typed first (#1059)" {
+@test "mo clean sudo prompt preserves a directly typed password (#1059)" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
 ensure_sudo_session() {
-    echo "ENSURE_SUDO"
+    echo "ENSURE_PLAIN"
     return 0
 }
+ensure_sudo_session_with_password() {
+    echo "ENSURE_PASSWORD=$1"
+    [[ "$1" == "secret" ]]
+}
 drain_pending_input() { :; }
-# A user who reads "Enter ... password" literally starts typing; the first
-# printable key must go to authentication, never an auto-skip.
+# A user who expects a password prompt may start typing immediately. The first
+# printable key and the rest of the line must reach authentication together.
 read_key() {
-    echo "CHAR:p"
+    echo "CHAR:s"
+}
+read_clean_sudo_password_remainder() {
+    printf -v "$1" '%s' "ecret"
 }
 
 prompt_for_system_clean
@@ -140,7 +147,8 @@ SCRIPT
     [ "$status" -eq 0 ]
     [[ "$output" == *"continue"* ]]
     [[ "$output" != *"Enter"*"password"* ]]
-    [[ "$output" == *"ENSURE_SUDO"* ]]
+    [[ "$output" == *"ENSURE_PASSWORD=secret"* ]]
+    [[ "$output" != *"ENSURE_PLAIN"* ]]
     [[ "$output" == *"SYSTEM_CLEAN=true"* ]]
     [[ "$output" != *"Skipped"* ]]
 }

@@ -193,6 +193,19 @@ read_clean_sudo_choice() {
     printf '%s\n' "$choice"
 }
 
+read_clean_sudo_password_remainder() {
+    local __remainder_var="$1"
+    local remainder=""
+
+    if [[ -r /dev/tty ]]; then
+        IFS= read -r -s remainder < /dev/tty || true
+    else
+        IFS= read -r -s remainder || true
+    fi
+
+    printf -v "$__remainder_var" '%s' "$remainder"
+}
+
 prompt_for_system_clean() {
     local prompt_attempt=0
     while true; do
@@ -213,7 +226,7 @@ prompt_for_system_clean() {
             echo ""
             SYSTEM_CLEAN=false
             break
-        elif [[ "$choice" == "ENTER" || "$choice" == CHAR:* ]]; then
+        elif [[ "$choice" == "ENTER" ]]; then
             printf "\r\033[K" # Clear the prompt line
             if ensure_sudo_session "System cleanup requires admin access"; then
                 SYSTEM_CLEAN=true
@@ -224,6 +237,24 @@ prompt_for_system_clean() {
                 echo ""
                 echo -e "${YELLOW}Authentication failed${NC}, continuing with user-level cleanup"
             fi
+            break
+        elif [[ "$choice" == CHAR:* ]]; then
+            local typed_password="${choice#CHAR:}"
+            local password_remainder=""
+            read_clean_sudo_password_remainder password_remainder
+            typed_password="${typed_password}${password_remainder}"
+
+            printf "\r\033[K" # Clear the prompt line
+            if ensure_sudo_session_with_password "$typed_password" "System cleanup requires admin access"; then
+                SYSTEM_CLEAN=true
+                echo -e "${GREEN}${ICON_SUCCESS}${NC} Admin access granted"
+                echo ""
+            else
+                SYSTEM_CLEAN=false
+                echo ""
+                echo -e "${YELLOW}Authentication failed${NC}, continuing with user-level cleanup"
+            fi
+            unset typed_password password_remainder
             break
         else
             prompt_attempt=$((prompt_attempt + 1))
