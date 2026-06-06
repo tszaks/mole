@@ -40,10 +40,6 @@ is_critical_system_component() {
     esac
 }
 
-# Legacy function - preserved for backward compatibility
-# Use should_protect_from_uninstall() or should_protect_data() instead
-readonly PRESERVED_BUNDLE_PATTERNS=("${SYSTEM_CRITICAL_BUNDLES[@]}" "${DATA_PROTECTED_BUNDLES[@]}")
-
 # Check if bundle ID matches pattern (glob support)
 bundle_matches_pattern() {
     local bundle_id="$1"
@@ -635,9 +631,11 @@ _path_belongs_to_independent_cli() {
     [[ -z "$lc_name" ]] && return 1
 
     case "$lc_name" in
-        # Keep this list in sync with INDEPENDENT_CLI_DOTDIR_NAMES in
-        # app_protection_data.sh (kept there for discoverability /
-        # documentation; this case is the live source of truth).
+        # Standalone CLI tools shipped independently of a same-named GUI app:
+        # never delete their dotdirs when uninstalling the GUI namesake.
+        # Issue #993: uninstalling Claude.app wiped ~/.claude (Claude Code CLI),
+        # OpenCode.app wiped ~/.local/share/opencode. Case-insensitive APFS makes
+        # the collision worse. Add new GUI/CLI namesakes here.
         claude | opencode | codex | gemini) ;;
         *) return 1 ;;
     esac
@@ -903,10 +901,10 @@ find_app_files() {
     # Short-name apps (e.g., Zoom, Arc) are still cleaned via bundle_id matching above
     # Security: Common words are excluded to prevent matching unrelated plist files
     if [[ ${#app_name} -ge 5 ]] && [[ -d ~/Library/LaunchAgents ]]; then
-        # Skip common words that could match many unrelated LaunchAgents
-        # These are either generic terms or names that overlap with system/common utilities
-        local common_words="Music|Notes|Photos|Finder|Safari|Preview|Calendar|Contacts|Messages|Reminders|Clock|Weather|Stocks|Books|News|Podcasts|Voice|Files|Store|System|Helper|Agent|Daemon|Service|Update|Sync|Backup|Cloud|Manager|Monitor|Server|Client|Worker|Runner|Launcher|Driver|Plugin|Extension|Widget|Utility"
-        if [[ "$app_name" =~ ^($common_words)$ ]]; then
+        # Skip generic words that collide with many unrelated LaunchAgents.
+        # Shared with the system-level scan in find_app_system_files();
+        # defined in app_protection_data.sh.
+        if [[ "$app_name" =~ ^(${LAUNCH_AGENT_NAME_COMMON_WORDS})$ ]]; then
             debug_log "Skipping LaunchAgent name search for common word: $app_name"
         else
             while IFS= read -r -d '' plist; do
@@ -1203,10 +1201,16 @@ find_app_system_files() {
         done
     fi
 
-    # System LaunchAgents/LaunchDaemons by name
-    if [[ ${#app_name} -gt 3 ]]; then
+    # System LaunchAgents/LaunchDaemons by name. These live under /Library and
+    # are removed with sudo, so mirror the (stricter) user-level guard above:
+    # require >=5 chars, skip generic collision words, and skip Apple's own
+    # plists. A short or generic app name must not match unrelated system agents.
+    if [[ ${#app_name} -ge 5 ]] && ! [[ "$app_name" =~ ^(${LAUNCH_AGENT_NAME_COMMON_WORDS})$ ]]; then
         for base in /Library/LaunchAgents /Library/LaunchDaemons; do
             [[ -d "$base" ]] && while IFS= read -r -d '' plist; do
+                local plist_name
+                plist_name=$(basename "$plist")
+                [[ "$plist_name" =~ ^com\.apple\. ]] && continue
                 system_files+=("$plist")
             done < <(command find "$base" -maxdepth 1 \( -name "*$app_name*.plist" \) -print0 2> /dev/null)
         done

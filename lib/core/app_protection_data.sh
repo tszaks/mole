@@ -564,22 +564,10 @@ readonly DATA_PROTECTED_BUNDLES=(
     "org.sparkle-project.Sparkle*"
 )
 
-# Dotdir / XDG state directory names that belong to standalone CLI tools
-# shipped independently of any same-named GUI app. find_app_files() must not
-# propose these for deletion even when uninstalling a GUI app whose display
-# name collides, because the CLI tool is a separate product.
-#
-# Issue #993: uninstalling Claude.app wiped ~/.claude (Claude Code CLI);
-# uninstalling OpenCode.app wiped ~/.local/share/opencode and the opencode
-# CLI binary. Case-insensitive APFS makes the collision worse: $HOME/.Claude
-# (built from app_name="Claude") aliases to $HOME/.claude.
-#
-# Match is lowercase + leading-dot-stripped, scoped to $HOME, $HOME/.config,
-# $HOME/.local/share, $HOME/.cache. Add new entries as the AI-tool ecosystem
-# produces more GUI/CLI namesakes.
-readonly INDEPENDENT_CLI_DOTDIR_NAMES=(
-    "claude"   # Claude Code CLI (Claude Desktop uses ~/Library/Application Support/Claude)
-    "opencode" # sst/opencode CLI
-    "codex"    # OpenAI codex CLI (Codex Desktop uses ~/Library/Application Support/Codex)
-    "gemini"   # Google gemini CLI
-)
+# Generic app-name words that collide with many unrelated LaunchAgents/Daemons.
+# When an app's display name is exactly one of these, name-based plist matching
+# is skipped (bundle-id matching still applies) so we never delete third-party or
+# system agents that merely share the word. Shared by find_app_files() (user
+# LaunchAgents) and find_app_system_files() (system LaunchAgents/Daemons) so the
+# two scans stay symmetric.
+readonly LAUNCH_AGENT_NAME_COMMON_WORDS="Music|Notes|Photos|Finder|Safari|Preview|Calendar|Contacts|Messages|Reminders|Clock|Weather|Stocks|Books|News|Podcasts|Voice|Files|Store|System|Helper|Agent|Daemon|Service|Update|Sync|Backup|Cloud|Manager|Monitor|Server|Client|Worker|Runner|Launcher|Driver|Plugin|Extension|Widget|Utility"

@@ -927,6 +927,13 @@ process_container_cache() {
         local item
         for item in "$cache_dir"/*; do
             [[ -e "$item" ]] || continue
+            [[ -L "$item" ]] && continue
+            # Re-check each item, not just the parent bundle: a user may have
+            # whitelisted a specific cache path, and should_protect_path may
+            # cover a nested entry. Mirrors clean_group_container_caches.
+            if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
+                continue
+            fi
             safe_remove "$item" true || true
         done
         # eval: restore shopt state captured by $(shopt -p)
