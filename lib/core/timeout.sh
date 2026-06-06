@@ -120,8 +120,10 @@ run_with_timeout() {
     local duration="${1:-0}"
     shift || true
 
-    # No timeout if duration is invalid or zero
-    if [[ ! "$duration" =~ ^[0-9]+(\.[0-9]+)?$ ]] || [[ $(echo "$duration <= 0" | bc -l 2> /dev/null) -eq 1 ]]; then
+    # No timeout if duration is invalid or zero. The regex already forbids a
+    # leading sign, so "<= 0" reduces to "is zero"; match that in pure bash
+    # rather than shelling out to bc, which is not guaranteed on macOS.
+    if [[ ! "$duration" =~ ^[0-9]+(\.[0-9]+)?$ ]] || [[ "$duration" =~ ^0+(\.0+)?$ ]]; then
         "$@"
         return $?
     fi
