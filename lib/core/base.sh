@@ -542,7 +542,9 @@ colorize_human_size() {
     printf '%s%s%s' "$size_color" "$size_human" "$NC"
 }
 
-# Pick a cleanup result color using the displayed decimal 1 GB threshold.
+# Cleanup result lines are always shown in green. Kept as a function (callers
+# still pass a size in KB) so per-size coloring can be reintroduced in one place
+# if ever wanted.
 cleanup_result_color_kb() {
     printf '%s' "$GREEN"
 }

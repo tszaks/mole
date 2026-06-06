@@ -329,6 +329,10 @@ normalize_paths_for_cleanup() {
     # Paths with embedded newlines cannot go through the newline-delimited pipeline;
     # they are output directly with null-byte delimiters and skipped by the sort pass.
     if [[ ${#input_paths[@]} -gt 50 ]]; then
+        # The gradle-DSL collapse below is intentionally inlined (not a call to
+        # _normalize_single_cleanup_path): this path runs for thousands of items
+        # and per-item function-call overhead trips the large-batch time budget
+        # in tests/regression.bats. Keep it in sync with that helper.
         local -a _fast_pipeline=()
         local _fast_path _fast_raw
         for _fast_path in "${input_paths[@]}"; do
@@ -436,26 +440,18 @@ normalize_paths_for_cleanup() {
 get_cleanup_path_size_kb() {
     local path="$1"
 
-    if [[ -f "$path" && ! -L "$path" ]]; then
-        if command -v stat > /dev/null 2>&1; then
-            local bytes
-            bytes=$(stat -f%z "$path" 2> /dev/null || echo "0")
-            if [[ "$bytes" =~ ^[0-9]+$ && "$bytes" -gt 0 ]]; then
-                echo $(((bytes + 1023) / 1024))
-                return 0
-            fi
+    # A plain file or a symlink is a single stat. Directories and the
+    # stat-unavailable case fall back to get_path_size_kb. For a regular file
+    # with a zero/invalid stat we also fall back; a symlink reports 0 directly.
+    if [[ -L "$path" || -f "$path" ]] && command -v stat > /dev/null 2>&1; then
+        local bytes
+        bytes=$(stat -f%z "$path" 2> /dev/null || echo "0")
+        if [[ "$bytes" =~ ^[0-9]+$ && "$bytes" -gt 0 ]]; then
+            echo $(((bytes + 1023) / 1024))
+            return 0
         fi
-    fi
-
-    if [[ -L "$path" ]]; then
-        if command -v stat > /dev/null 2>&1; then
-            local bytes
-            bytes=$(stat -f%z "$path" 2> /dev/null || echo "0")
-            if [[ "$bytes" =~ ^[0-9]+$ && "$bytes" -gt 0 ]]; then
-                echo $(((bytes + 1023) / 1024))
-            else
-                echo 0
-            fi
+        if [[ -L "$path" ]]; then
+            echo 0
             return 0
         fi
     fi

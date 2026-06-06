@@ -1852,10 +1852,6 @@ clean_dev_network() {
     safe_clean ~/Library/Caches/curl/* "macOS curl cache"
     safe_clean ~/Library/Caches/wget/* "macOS wget cache"
 }
-# Orphaned SQLite temp files (-shm/-wal). Disabled due to low ROI.
-clean_sqlite_temp_files() {
-    return 0
-}
 # Elixir/Erlang ecosystem.
 # Note: ~/.mix/archives contains installed Mix tools - excluded from cleanup
 clean_dev_elixir() {
@@ -1875,7 +1871,6 @@ clean_developer_tools() {
     stop_section_spinner
 
     # CLI tools and languages
-    clean_sqlite_temp_files
     clean_dev_npm
     clean_dev_python
     clean_dev_go

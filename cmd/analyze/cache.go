@@ -70,7 +70,6 @@ func historyEntryFromScanResult(path string, result scanResult, previous history
 		LargeSelected: previous.LargeSelected,
 		LargeOffset:   previous.LargeOffset,
 		NeedsRefresh:  needsRefresh,
-		Dirty:         false,
 		IsOverview:    previous.IsOverview,
 	}
 	return entry

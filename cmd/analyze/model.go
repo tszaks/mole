@@ -58,7 +58,6 @@ type historyEntry struct {
 	EntryOffset   int
 	LargeSelected int
 	LargeOffset   int
-	Dirty         bool
 	NeedsRefresh  bool
 	IsOverview    bool
 }
@@ -87,44 +86,40 @@ type deleteProgressMsg struct {
 }
 
 type model struct {
-	path                 string
-	history              []historyEntry
-	entries              []dirEntry
-	largeFiles           []fileEntry
-	selected             int
-	offset               int
-	status               string
-	totalSize            int64
-	scanning             bool
-	spinner              int
-	filesScanned         *int64
-	dirsScanned          *int64
-	bytesScanned         *int64
-	currentPath          *atomic.Value
-	showLargeFiles       bool
-	isOverview           bool
-	deleteConfirm        bool
-	deleteTarget         *dirEntry
-	deleting             bool
-	deleteCount          *int64
-	cache                map[string]historyEntry
-	largeSelected        int
-	largeOffset          int
-	overviewSizeCache    map[string]int64
-	overviewFilesScanned *int64
-	overviewDirsScanned  *int64
-	overviewBytesScanned *int64
-	overviewCurrentPath  *string
-	overviewScanning     bool
-	overviewScanningSet  map[string]bool // Track which paths are currently being scanned
-	width                int             // Terminal width
-	height               int             // Terminal height
-	multiSelected        map[string]bool // Track multi-selected items by path (safer than index)
-	largeMultiSelected   map[string]bool // Track multi-selected large files by path (safer than index)
-	totalFiles           int64           // Total files found in current/last scan
-	lastTotalFiles       int64           // Total files from previous scan (for progress bar)
-	diskFree             int64           // Free disk space for the analyzed volume
-	viewNeedsRefresh     bool
+	path                string
+	history             []historyEntry
+	entries             []dirEntry
+	largeFiles          []fileEntry
+	selected            int
+	offset              int
+	status              string
+	totalSize           int64
+	scanning            bool
+	spinner             int
+	filesScanned        *int64
+	dirsScanned         *int64
+	bytesScanned        *int64
+	currentPath         *atomic.Value
+	showLargeFiles      bool
+	isOverview          bool
+	deleteConfirm       bool
+	deleteTarget        *dirEntry
+	deleting            bool
+	deleteCount         *int64
+	cache               map[string]historyEntry
+	largeSelected       int
+	largeOffset         int
+	overviewSizeCache   map[string]int64
+	overviewScanning    bool
+	overviewScanningSet map[string]bool // Track which paths are currently being scanned
+	width               int             // Terminal width
+	height              int             // Terminal height
+	multiSelected       map[string]bool // Track multi-selected items by path (safer than index)
+	largeMultiSelected  map[string]bool // Track multi-selected large files by path (safer than index)
+	totalFiles          int64           // Total files found in current/last scan
+	lastTotalFiles      int64           // Total files from previous scan (for progress bar)
+	diskFree            int64           // Free disk space for the analyzed volume
+	viewNeedsRefresh    bool
 }
 
 func (m model) inOverviewMode() bool {

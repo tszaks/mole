@@ -705,23 +705,6 @@ func (m model) goBack() (tea.Model, tea.Cmd) {
 	m.largeSelected = last.LargeSelected
 	m.largeOffset = last.LargeOffset
 	m.isOverview = last.IsOverview
-	if last.Dirty {
-		// On overview return, refresh cached entries.
-		if last.IsOverview {
-			m.hydrateOverviewEntries()
-			m.totalSize = sumKnownEntrySizes(m.entries)
-			m.status = "Ready"
-			m.scanning = false
-			if nextPendingOverviewIndex(m.entries) >= 0 {
-				m.overviewScanning = true
-				return m, m.scheduleOverviewScans()
-			}
-			return m, nil
-		}
-		m.status = "Scanning..."
-		m.scanning = true
-		return m, tea.Batch(m.scanCmd(m.path), tickCmd())
-	}
 	m.entries = last.Entries
 	m.largeFiles = last.LargeFiles
 	m.totalSize = last.TotalSize
@@ -803,7 +786,7 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 			m.currentPath.Store("")
 		}
 
-		if cached, ok := m.cache[m.path]; ok && !cached.Dirty {
+		if cached, ok := m.cache[m.path]; ok {
 			m.entries = slices.Clone(cached.Entries)
 			m.largeFiles = slices.Clone(cached.LargeFiles)
 			m.totalSize = cached.TotalSize

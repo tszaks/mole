@@ -407,9 +407,7 @@ stop_inline_spinner() {
 
 # Get spinner characters
 mo_spinner_chars() {
-    local chars="|/-\\"
-    [[ -z "$chars" ]] && chars="|/-\\"
-    printf "%s" "$chars"
+    printf "%s" "|/-\\"
 }
 
 # Format relative time for compact display (e.g., 3d ago)

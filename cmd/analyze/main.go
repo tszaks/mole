@@ -73,8 +73,6 @@ func newModel(path string, isOverview bool) model {
 	var filesScanned, dirsScanned, bytesScanned int64
 	currentPath := &atomic.Value{}
 	currentPath.Store("")
-	var overviewFilesScanned, overviewDirsScanned, overviewBytesScanned int64
-	overviewCurrentPath := ""
 	var diskFreeBytes int64
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err == nil {
@@ -82,26 +80,22 @@ func newModel(path string, isOverview bool) model {
 	}
 
 	m := model{
-		path:                 path,
-		selected:             0,
-		status:               "Preparing scan...",
-		diskFree:             diskFreeBytes,
-		scanning:             !isOverview,
-		filesScanned:         &filesScanned,
-		dirsScanned:          &dirsScanned,
-		bytesScanned:         &bytesScanned,
-		currentPath:          currentPath,
-		showLargeFiles:       false,
-		isOverview:           isOverview,
-		cache:                make(map[string]historyEntry),
-		overviewFilesScanned: &overviewFilesScanned,
-		overviewDirsScanned:  &overviewDirsScanned,
-		overviewBytesScanned: &overviewBytesScanned,
-		overviewCurrentPath:  &overviewCurrentPath,
-		overviewSizeCache:    make(map[string]int64),
-		overviewScanningSet:  make(map[string]bool),
-		multiSelected:        make(map[string]bool),
-		largeMultiSelected:   make(map[string]bool),
+		path:                path,
+		selected:            0,
+		status:              "Preparing scan...",
+		diskFree:            diskFreeBytes,
+		scanning:            !isOverview,
+		filesScanned:        &filesScanned,
+		dirsScanned:         &dirsScanned,
+		bytesScanned:        &bytesScanned,
+		currentPath:         currentPath,
+		showLargeFiles:      false,
+		isOverview:          isOverview,
+		cache:               make(map[string]historyEntry),
+		overviewSizeCache:   make(map[string]int64),
+		overviewScanningSet: make(map[string]bool),
+		multiSelected:       make(map[string]bool),
+		largeMultiSelected:  make(map[string]bool),
 	}
 
 	if isOverview {
