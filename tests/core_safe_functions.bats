@@ -111,6 +111,11 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
+@test "validate_path_for_deletion accepts CoreSimulator system cache children" {
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Developer/CoreSimulator/Caches/dyld'"
+    [ "$status" -eq 0 ]
+}
+
 @test "validate_path_for_deletion allows Darwin C cache shards but rejects protected extension paths" {
     run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/test/a/C/com.example.App/com.apple.metal'"
     [ "$status" -eq 0 ]

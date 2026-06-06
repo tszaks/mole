@@ -352,6 +352,25 @@ EOF
     [[ "$output" == *"Zed logs"* ]]
 }
 
+@test "clean_code_editors includes VS Code WebStorage CacheStorage only" {
+    mkdir -p "$HOME/Library/Application Support/Code/WebStorage/29/CacheStorage/uuid-1"
+    mkdir -p "$HOME/Library/Application Support/Code/WebStorage/29/Local Storage"
+    touch "$HOME/Library/Application Support/Code/WebStorage/29/QuotaManager"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "CLEAN:$1|$2"; }
+clean_code_editors
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CLEAN:$HOME/Library/Application Support/Code/WebStorage/29/CacheStorage/uuid-1|VS Code webview cache"* ]]
+    [[ "$output" != *"Local Storage"* ]]
+    [[ "$output" != *"QuotaManager"* ]]
+}
+
 @test "clean_shell_utils includes Warp and Ghostty caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -465,6 +484,36 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Stremio cache"* ]]
     [[ "$output" == *"Stremio server cache"* ]]
+}
+
+@test "clean_video_players includes SenPlayer video cache" {
+    mkdir -p "$HOME/Library/Containers/com.wuziqi.SenPlayer/Data/tmp/videoCache/blob"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "CLEAN:$1|$2"; }
+clean_video_players
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CLEAN:$HOME/Library/Containers/com.wuziqi.SenPlayer/Data/tmp/videoCache/blob|SenPlayer video cache"* ]]
+}
+
+@test "clean_productivity_apps includes Folo cache data" {
+    mkdir -p "$HOME/Library/Containers/is.follow/Data/Library/Application Support/Folo/Cache/Cache_Data/blob"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "CLEAN:$1|$2"; }
+clean_productivity_apps
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CLEAN:$HOME/Library/Containers/is.follow/Data/Library/Application Support/Folo/Cache/Cache_Data/blob|Folo cache"* ]]
 }
 
 @test "clean_editor_obsolete_extensions removes only dirs listed in .obsolete (#910)" {

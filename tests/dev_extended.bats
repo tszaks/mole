@@ -175,6 +175,49 @@ EOF
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
 }
 
+@test "clean_xcode_system_coresimulator_caches removes only direct cache children" {
+	local cache_root="$HOME/SystemCoreSimulatorCaches"
+	mkdir -p "$cache_root/dyld/runtime" "$cache_root/metadata"
+	touch "$cache_root/dyld/runtime/cache" "$cache_root/metadata/index"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 1; }
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+safe_sudo_remove() { echo "REMOVE:$1"; }
+clean_xcode_system_coresimulator_caches
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"REMOVE:$cache_root/dyld"* ]]
+	[[ "$output" == *"REMOVE:$cache_root/metadata"* ]]
+	[[ "$output"$'\n' != *"REMOVE:$cache_root"$'\n'* ]]
+}
+
+@test "clean_xcode_system_coresimulator_caches skips while CoreSimulator is active" {
+	local cache_root="$HOME/SystemCoreSimulatorCaches"
+	mkdir -p "$cache_root/dyld"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 0; }
+safe_sudo_remove() { echo "UNEXPECTED_SAFE_SUDO_REMOVE"; }
+clean_xcode_system_coresimulator_caches
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"CoreSimulator is running"* ]]
+	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
+}
+
 @test "check_rust_toolchains reports multiple toolchains" {
 	run bash -c 'HOME=$(mktemp -d) && mkdir -p "$HOME/.rustup/toolchains"/{stable,nightly,1.75.0}-aarch64-apple-darwin && source "$0" && note_activity() { :; } && NC="" && GREEN="" && GRAY="" && YELLOW="" && ICON_SUCCESS="✓" && rustup() { :; } && export -f rustup && check_rust_toolchains' "$PROJECT_ROOT/lib/clean/dev.sh"
 

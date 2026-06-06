@@ -567,6 +567,93 @@ clean_xcode_documentation_cache() {
     fi
 }
 
+_coresimulator_cache_process_running() {
+    pgrep -x "Xcode" > /dev/null 2>&1 ||
+        pgrep -x "Simulator" > /dev/null 2>&1 ||
+        pgrep -x "CoreSimulatorService" > /dev/null 2>&1 ||
+        pgrep -x "simdiskimaged" > /dev/null 2>&1 ||
+        pgrep -f "com.apple.CoreSimulator" > /dev/null 2>&1
+}
+
+clean_xcode_system_coresimulator_caches() {
+    local cache_root="${MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR:-/Library/Developer/CoreSimulator/Caches}"
+    [[ -d "$cache_root" ]] || return 0
+
+    if _coresimulator_cache_process_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} CoreSimulator is running, skipping system Simulator cache cleanup"
+        note_activity
+        return 0
+    fi
+
+    local -a cache_entries=()
+    while IFS= read -r -d '' entry; do
+        cache_entries+=("$entry")
+    done < <(command find "$cache_root" -mindepth 1 -maxdepth 1 -print0 2> /dev/null)
+
+    [[ ${#cache_entries[@]} -gt 0 ]] || return 0
+
+    local total_size_kb=0
+    local entry
+    for entry in "${cache_entries[@]}"; do
+        local entry_size_kb
+        entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null || echo 0)
+        [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
+        total_size_kb=$((total_size_kb + entry_size_kb))
+    done
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        local total_size_human
+        total_size_human=$(bytes_to_human "$((total_size_kb * 1024))")
+        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode Simulator system cache · would remove ${#cache_entries[@]} entries (${total_size_human})"
+        note_activity
+        return 0
+    fi
+
+    if ! has_sudo_session; then
+        if ! ensure_sudo_session "Cleaning Xcode Simulator system cache requires admin access"; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (sudo denied)"
+            note_activity
+            return 0
+        fi
+    fi
+
+    local removed_count=0
+    local removed_size_kb=0
+    local skipped_count=0
+    for entry in "${cache_entries[@]}"; do
+        if should_protect_path "$entry" || is_path_whitelisted "$entry"; then
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        local entry_size_kb
+        entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null || echo 0)
+        [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
+        if safe_sudo_remove "$entry"; then
+            removed_count=$((removed_count + 1))
+            removed_size_kb=$((removed_size_kb + entry_size_kb))
+        fi
+    done
+
+    if [[ $removed_count -gt 0 ]]; then
+        local removed_human
+        removed_human=$(bytes_to_human "$((removed_size_kb * 1024))")
+        local line_color
+        line_color=$(cleanup_result_color_kb "$removed_size_kb")
+        if [[ $skipped_count -gt 0 ]]; then
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode Simulator system cache · removed ${removed_count} (${line_color}${removed_human}${NC}), skipped ${skipped_count} protected"
+        else
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode Simulator system cache · removed ${removed_count} (${line_color}${removed_human}${NC})"
+        fi
+        note_activity
+    elif [[ $skipped_count -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped ${skipped_count} protected, none removed"
+        note_activity
+    else
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode Simulator system cache · already clean"
+        note_activity
+    fi
+}
+
 # Clean old Xcode DeviceSupport versions, keeping the most recent ones.
 # Each version holds debug symbols (1-3 GB) for a specific iOS/watchOS/tvOS version.
 # Symbols regenerate automatically when a device running that version is connected.
@@ -866,6 +953,7 @@ clean_xcode_simulator_runtime_volumes() {
 clean_dev_mobile() {
     check_android_ndk
     clean_xcode_documentation_cache
+    clean_xcode_system_coresimulator_caches
     clean_xcode_simulator_runtime_volumes
 
     if command -v xcrun > /dev/null 2>&1; then
