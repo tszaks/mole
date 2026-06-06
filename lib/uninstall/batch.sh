@@ -512,20 +512,16 @@ _batch_scan_app_details() {
         diag_system=$(get_diagnostic_report_paths_for_app "$app_path" "$app_name" "/Library/Logs/DiagnosticReports" || true)
         local review_only_system_files="$system_files"
         review_only_system_files=$(append_line "$review_only_system_files" "$diag_system")
-        # System-level remnants are review-only in the CLI preview. The regular
-        # confirmation removes the app bundle and user-owned leftovers only.
+        # System-level remnants are review-only in the CLI: shown in the preview
+        # via review_only_system_files (encoded into encoded_review_system) but
+        # never deleted. Blanking system_files/diag_system here is what enforces
+        # that: _batch_execute_removals decodes the now-empty encoded_system_files
+        # and encoded_diag_system fields and therefore skips them. Do NOT remove
+        # this blanking, or system files would become deletable again.
         system_files=""
         diag_system=""
-        # shellcheck disable=SC2128
-        local system_size_kb=$(calculate_total_size "$system_files" || echo "0")
-        local diag_system_size_kb=$(calculate_total_size "$diag_system" || echo "0")
-        local total_kb=$((app_size_kb + related_size_kb + system_size_kb + diag_system_size_kb))
+        local total_kb=$((app_size_kb + related_size_kb))
         total_estimated_size=$((total_estimated_size + total_kb))
-
-        # shellcheck disable=SC2128
-        if [[ -n "$system_files" || -n "$diag_system" ]]; then
-            needs_sudo=true
-        fi
 
         if [[ "$needs_sudo" == "true" ]]; then
             sudo_apps+=("$app_name")

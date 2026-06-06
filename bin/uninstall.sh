@@ -35,49 +35,10 @@ readonly MOLE_UNINSTALL_META_CACHE_DIR="$HOME/.cache/mole"
 readonly MOLE_UNINSTALL_META_CACHE_FILE="$MOLE_UNINSTALL_META_CACHE_DIR/uninstall_app_metadata_v1"
 readonly MOLE_UNINSTALL_META_CACHE_LOCK="${MOLE_UNINSTALL_META_CACHE_FILE}.lock"
 readonly MOLE_UNINSTALL_META_REFRESH_TTL=604800 # 7 days
-readonly MOLE_UNINSTALL_INLINE_METADATA_LIMIT="${MOLE_UNINSTALL_INLINE_METADATA_LIMIT:-0}"
 readonly MOLE_UNINSTALL_EPOCH_FLOOR=978307200
-readonly MOLE_UNINSTALL_INLINE_MDLS_TIMEOUT_SEC="${MOLE_UNINSTALL_INLINE_MDLS_TIMEOUT_SEC:-0.08}"
-# Display-name lookups are smaller queries than last-used-date, so the budget
-# is half. Both timeouts are overridable for slow disks or cold Spotlight.
+# Display-name mdls lookup budget during scan; overridable for slow disks or
+# cold Spotlight.
 readonly MOLE_UNINSTALL_INLINE_MDLS_DISPLAY_TIMEOUT_SEC="${MOLE_UNINSTALL_INLINE_MDLS_DISPLAY_TIMEOUT_SEC:-0.04}"
-
-uninstall_relative_time_from_epoch() {
-    local value_epoch="${1:-0}"
-    local now_epoch="${2:-0}"
-
-    if [[ ! "$value_epoch" =~ ^[0-9]+$ || $value_epoch -le 0 ]]; then
-        echo "Unknown"
-        return 0
-    fi
-
-    if [[ $value_epoch -lt $MOLE_UNINSTALL_EPOCH_FLOOR ]]; then
-        echo "Unknown"
-        return 0
-    fi
-
-    local days_ago=$(((now_epoch - value_epoch) / 86400))
-    if [[ $days_ago -lt 0 ]]; then
-        days_ago=0
-    fi
-
-    if [[ $days_ago -eq 0 ]]; then
-        echo "Today"
-    elif [[ $days_ago -eq 1 ]]; then
-        echo "Yesterday"
-    elif [[ $days_ago -lt 7 ]]; then
-        echo "${days_ago} days ago"
-    elif [[ $days_ago -lt 30 ]]; then
-        local weeks_ago=$((days_ago / 7))
-        [[ $weeks_ago -eq 1 ]] && echo "1 week ago" || echo "${weeks_ago} weeks ago"
-    elif [[ $days_ago -lt 365 ]]; then
-        local months_ago=$((days_ago / 30))
-        [[ $months_ago -eq 1 ]] && echo "1 month ago" || echo "${months_ago} months ago"
-    else
-        local years_ago=$((days_ago / 365))
-        [[ $years_ago -eq 1 ]] && echo "1 year ago" || echo "${years_ago} years ago"
-    fi
-}
 
 uninstall_normalize_size_display() {
     local size="${1:-}"
@@ -217,38 +178,6 @@ uninstall_persist_cache_file() {
         cp -f "$src" "$dst" < /dev/null 2> /dev/null || true
         rm -f "$src" 2> /dev/null || true
     }
-}
-
-uninstall_collect_inline_metadata() {
-    local app_path="$1"
-    local app_mtime="${2:-0}"
-    local now_epoch="${3:-0}"
-
-    local size_kb
-    size_kb=$(get_path_size_kb "$app_path")
-    [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
-
-    local last_used_epoch=0
-    local metadata_date
-    metadata_date=$(run_with_timeout "$MOLE_UNINSTALL_INLINE_MDLS_TIMEOUT_SEC" mdls -name kMDItemLastUsedDate -raw "$app_path" 2> /dev/null || echo "")
-    if [[ "$metadata_date" != "(null)" && -n "$metadata_date" ]]; then
-        last_used_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$metadata_date" "+%s" 2> /dev/null || echo "0")
-    fi
-
-    if [[ "$last_used_epoch" =~ ^[0-9]+$ && $last_used_epoch -lt $MOLE_UNINSTALL_EPOCH_FLOOR ]]; then
-        last_used_epoch=0
-    fi
-
-    # Fallback to app mtime so first scan does not show "...".
-    if [[ ! "$last_used_epoch" =~ ^[0-9]+$ || $last_used_epoch -le 0 ]]; then
-        if [[ "$app_mtime" =~ ^[0-9]+$ && $app_mtime -gt $MOLE_UNINSTALL_EPOCH_FLOOR ]]; then
-            last_used_epoch="$app_mtime"
-        else
-            last_used_epoch=0
-        fi
-    fi
-
-    printf "%s|%s|%s\n" "$size_kb" "$last_used_epoch" "$now_epoch"
 }
 
 start_uninstall_metadata_refresh() {
@@ -801,12 +730,10 @@ _scan_dedupe_bundle_ids() {
 }
 
 # Phase 7+8: merge scan_raw_file with the persistent metadata cache,
-# compute display size / last-used / refresh-needed flags (either via the
-# embedded awk pipeline or the bash fallback that performs inline
-# metadata fetches when MOLE_UNINSTALL_INLINE_METADATA_LIMIT > 0), persist
-# the cache snapshot under a lock, sort the result by epoch, kick off the
-# deferred background refresh, and echo the sorted index path for the
-# caller to capture.
+# compute display size / last-used / refresh-needed flags via the embedded awk
+# pipeline, persist the cache snapshot under a lock, sort the result by epoch,
+# kick off the deferred background refresh, and echo the sorted index path for
+# the caller to capture.
 # Reads:  scan_raw_file, cache_source
 # Writes: merged_file, refresh_file, cache_snapshot_file, temp_file,
 #         ${temp_file}.sorted, MOLE_UNINSTALL_META_CACHE_FILE
@@ -834,23 +761,18 @@ _scan_finalize_index() {
 
     local current_epoch
     current_epoch=$(get_epoch_seconds)
-    local inline_metadata_count=0
-    local inline_metadata_effective_limit=$MOLE_UNINSTALL_INLINE_METADATA_LIMIT
-    [[ $cache_source_is_temp == true && $inline_metadata_effective_limit -gt 0 ]] && inline_metadata_effective_limit=99999
     local metadata_total=0
     metadata_total=$(wc -l < "$merged_file" 2> /dev/null || echo "0")
     [[ "$metadata_total" =~ ^[0-9]+$ ]] || metadata_total=0
-    local metadata_processed=0
     update_scan_status "Collecting metadata..." "0" "$metadata_total"
 
-    if [[ "$inline_metadata_effective_limit" -eq 0 ]]; then
-        awk -F'|' \
-            -v now="$current_epoch" \
-            -v floor="$MOLE_UNINSTALL_EPOCH_FLOOR" \
-            -v ttl="$MOLE_UNINSTALL_META_REFRESH_TTL" \
-            -v refresh_out="$refresh_file" \
-            -v snapshot_out="$cache_snapshot_file" \
-            -v apps_out="$temp_file" '
+    awk -F'|' \
+        -v now="$current_epoch" \
+        -v floor="$MOLE_UNINSTALL_EPOCH_FLOOR" \
+        -v ttl="$MOLE_UNINSTALL_META_REFRESH_TTL" \
+        -v refresh_out="$refresh_file" \
+        -v snapshot_out="$cache_snapshot_file" \
+        -v apps_out="$temp_file" '
             function isnum(value) {
                 return value ~ /^[0-9]+$/
             }
@@ -950,94 +872,6 @@ _scan_finalize_index() {
                 print final_epoch "|" app_path "|" display_name "|" bundle_id "|" final_size "|" final_last_used "|" final_size_kb >> apps_out
             }
         ' "$merged_file"
-    else
-        while IFS='|' read -r app_path display_name bundle_id app_mtime cached_mtime cached_size_kb cached_epoch cached_updated_epoch cached_bundle_id cached_display_name; do
-            ((metadata_processed++))
-            if ((metadata_processed % 5 == 0 || metadata_processed == metadata_total)); then
-                update_scan_status "Collecting metadata..." "$metadata_processed" "$metadata_total"
-            fi
-
-            [[ -n "$app_path" && -e "$app_path" ]] || continue
-
-            local cache_match=false
-            if [[ -n "$cached_mtime" && -n "$app_mtime" && "$cached_mtime" == "$app_mtime" ]]; then
-                cache_match=true
-            fi
-
-            local final_epoch=0
-            if [[ "$cached_epoch" =~ ^[0-9]+$ && $cached_epoch -gt 0 ]]; then
-                final_epoch="$cached_epoch"
-            fi
-
-            local final_size_kb=0
-            local final_size="--"
-            if [[ "$cached_size_kb" =~ ^[0-9]+$ && $cached_size_kb -gt 0 ]]; then
-                final_size_kb="$cached_size_kb"
-                final_size=$(bytes_to_human "$((cached_size_kb * 1024))")
-            fi
-
-            if [[ "$final_epoch" =~ ^[0-9]+$ && $final_epoch -lt $MOLE_UNINSTALL_EPOCH_FLOOR ]]; then
-                final_epoch=0
-            fi
-            # Fallback to app mtime to avoid unknown "last used" on first scan.
-            if [[ ! "$final_epoch" =~ ^[0-9]+$ || $final_epoch -le 0 ]]; then
-                if [[ "$app_mtime" =~ ^[0-9]+$ && $app_mtime -gt $MOLE_UNINSTALL_EPOCH_FLOOR ]]; then
-                    final_epoch="$app_mtime"
-                fi
-            fi
-
-            local final_last_used
-            final_last_used=$(uninstall_relative_time_from_epoch "$final_epoch" "$current_epoch")
-
-            local needs_refresh=false
-            if [[ $cache_match == false ]]; then
-                needs_refresh=true
-            elif [[ ! "$cached_size_kb" =~ ^[0-9]+$ || $cached_size_kb -le 0 ]]; then
-                needs_refresh=true
-            elif [[ ! "$cached_epoch" =~ ^[0-9]+$ || $cached_epoch -le 0 ]]; then
-                needs_refresh=true
-            elif [[ ! "$cached_updated_epoch" =~ ^[0-9]+$ ]]; then
-                needs_refresh=true
-            elif [[ -z "$cached_bundle_id" || -z "$cached_display_name" ]]; then
-                needs_refresh=true
-            else
-                local cache_age=$((current_epoch - cached_updated_epoch))
-                if [[ $cache_age -gt $MOLE_UNINSTALL_META_REFRESH_TTL ]]; then
-                    needs_refresh=true
-                fi
-            fi
-
-            if [[ $needs_refresh == true ]]; then
-                if [[ $inline_metadata_count -lt $inline_metadata_effective_limit ]]; then
-                    local inline_metadata inline_size_kb inline_epoch inline_updated_epoch
-                    inline_metadata=$(uninstall_collect_inline_metadata "$app_path" "${app_mtime:-0}" "$current_epoch")
-                    IFS='|' read -r inline_size_kb inline_epoch inline_updated_epoch <<< "$inline_metadata"
-                    ((inline_metadata_count++))
-
-                    if [[ "$inline_size_kb" =~ ^[0-9]+$ && $inline_size_kb -gt 0 ]]; then
-                        final_size_kb="$inline_size_kb"
-                        final_size=$(bytes_to_human "$((inline_size_kb * 1024))")
-                    fi
-                    if [[ "$inline_epoch" =~ ^[0-9]+$ && $inline_epoch -gt 0 ]]; then
-                        final_epoch="$inline_epoch"
-                        final_last_used=$(uninstall_relative_time_from_epoch "$final_epoch" "$current_epoch")
-                    fi
-                    if [[ "$inline_updated_epoch" =~ ^[0-9]+$ && $inline_updated_epoch -gt 0 ]]; then
-                        cached_updated_epoch="$inline_updated_epoch"
-                    fi
-                fi
-                printf "%s|%s|%s|%s\n" "$app_path" "${app_mtime:-0}" "$bundle_id" "$display_name" >> "$refresh_file"
-            fi
-
-            local persist_updated_epoch=0
-            if [[ "$cached_updated_epoch" =~ ^[0-9]+$ && $cached_updated_epoch -gt 0 ]]; then
-                persist_updated_epoch="$cached_updated_epoch"
-            fi
-            printf "%s|%s|%s|%s|%s|%s|%s\n" "$app_path" "${app_mtime:-0}" "${final_size_kb:-0}" "${final_epoch:-0}" "${persist_updated_epoch:-0}" "$bundle_id" "$display_name" >> "$cache_snapshot_file"
-
-            echo "${final_epoch}|${app_path}|${display_name}|${bundle_id}|${final_size}|${final_last_used}|${final_size_kb}" >> "$temp_file"
-        done < "$merged_file"
-    fi
 
     update_scan_status "Updating cache..." "0" "0"
     if [[ -s "$cache_snapshot_file" ]]; then
