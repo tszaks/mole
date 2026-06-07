@@ -218,6 +218,87 @@ EOF
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
 }
 
+@test "clean_xcode_xctest_devices targets only exact XCTestDevices directory" {
+	local developer_root="$HOME/Library/Developer"
+	mkdir -p "$developer_root/XCTestDevices" "$developer_root/XCTestDevices-old"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 1; }
+safe_clean() { printf 'SAFE:%s|%s\n' "$1" "$2"; }
+clean_xcode_xctest_devices
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"SAFE:$developer_root/XCTestDevices|Xcode XCTestDevices test data"* ]]
+	[[ "$output" != *"XCTestDevices-old"* ]]
+}
+
+@test "clean_xcode_xctest_devices skips while XCTest process is active" {
+	local xctest_root="$HOME/Library/Developer/XCTestDevices"
+	mkdir -p "$xctest_root"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() {
+    [[ "$*" == *"xcodebuild"* ]]
+}
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN"; }
+clean_xcode_xctest_devices
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Xcode or XCTest is running"* ]]
+	[[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+}
+
+@test "clean_xcode_xctest_devices dry-run keeps XCTestDevices directory" {
+	local xctest_root="$HOME/Library/Developer/XCTestDevices"
+	mkdir -p "$xctest_root"
+	touch "$xctest_root/test-device"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=true
+MOLE_DRY_RUN=1
+pgrep() { return 1; }
+clean_xcode_xctest_devices
+[[ -d "$HOME/Library/Developer/XCTestDevices" ]] && echo "STILL_EXISTS"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Xcode XCTestDevices test data"* ]]
+	[[ "$output" == *"dry"* ]]
+	[[ "$output" == *"STILL_EXISTS"* ]]
+}
+
+@test "clean_xcode_xctest_devices respects whitelist" {
+	local xctest_root="$HOME/Library/Developer/XCTestDevices"
+	mkdir -p "$xctest_root"
+	touch "$xctest_root/test-device"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+WHITELIST_PATTERNS=("$HOME/Library/Developer/XCTestDevices")
+pgrep() { return 1; }
+clean_xcode_xctest_devices
+[[ -d "$HOME/Library/Developer/XCTestDevices" ]] && echo "STILL_EXISTS"
+printf 'WHITELIST_SKIPPED:%s\n' "$whitelist_skipped_count"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"STILL_EXISTS"* ]]
+	[[ "$output" == *"WHITELIST_SKIPPED:1"* ]]
+}
+
 @test "check_rust_toolchains reports multiple toolchains" {
 	run bash -c 'HOME=$(mktemp -d) && mkdir -p "$HOME/.rustup/toolchains"/{stable,nightly,1.75.0}-aarch64-apple-darwin && source "$0" && note_activity() { :; } && NC="" && GREEN="" && GRAY="" && YELLOW="" && ICON_SUCCESS="✓" && rustup() { :; } && export -f rustup && check_rust_toolchains' "$PROJECT_ROOT/lib/clean/dev.sh"
 

@@ -575,6 +575,28 @@ _coresimulator_cache_process_running() {
         pgrep -f "com.apple.CoreSimulator" > /dev/null 2>&1
 }
 
+_xcode_xctest_devices_process_running() {
+    _coresimulator_cache_process_running ||
+        pgrep -x "xcodebuild" > /dev/null 2>&1 ||
+        pgrep -x "xctest" > /dev/null 2>&1 ||
+        pgrep -x "XCTRunner" > /dev/null 2>&1 ||
+        pgrep -f "com.apple.dt.XCTest" > /dev/null 2>&1 ||
+        pgrep -f "XCTest" > /dev/null 2>&1
+}
+
+clean_xcode_xctest_devices() {
+    local xctest_devices_dir="${MOLE_XCODE_XCTEST_DEVICES_DIR:-$HOME/Library/Developer/XCTestDevices}"
+    [[ -d "$xctest_devices_dir" ]] || return 0
+
+    if _xcode_xctest_devices_process_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode or XCTest is running, skipping XCTestDevices cleanup"
+        note_activity
+        return 0
+    fi
+
+    safe_clean "$xctest_devices_dir" "Xcode XCTestDevices test data"
+}
+
 clean_xcode_system_coresimulator_caches() {
     local cache_root="${MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR:-/Library/Developer/CoreSimulator/Caches}"
     [[ -d "$cache_root" ]] || return 0
@@ -955,6 +977,7 @@ clean_dev_mobile() {
     clean_xcode_documentation_cache
     clean_xcode_system_coresimulator_caches
     clean_xcode_simulator_runtime_volumes
+    clean_xcode_xctest_devices
 
     if command -v xcrun > /dev/null 2>&1; then
         debug_log "Checking for unavailable Xcode simulators"
