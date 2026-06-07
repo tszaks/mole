@@ -19,7 +19,7 @@ if [[ -z "$MAX_MINOS" ]]; then
     exit 1
 fi
 
-if ! command -v otool >/dev/null 2>&1; then
+if ! command -v otool > /dev/null 2>&1; then
     echo "otool is required to inspect Mach-O release binaries" >&2
     exit 1
 fi
