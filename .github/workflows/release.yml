@@ -34,6 +34,7 @@ jobs:
         run: |
           make ${{ matrix.target }}
           ls -l bin/
+          ./scripts/check_release_minos.sh
 
       - name: Package binaries for Homebrew
         run: |

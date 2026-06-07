@@ -67,6 +67,14 @@ setup() {
     [ "$status" -eq 0 ]
 }
 
+@test "release builds disable cgo and check minimum macOS version" {
+    run bash -c "grep -q '^RELEASE_GO_ENV := CGO_ENABLED=0$' '$PROJECT_ROOT/Makefile'"
+    [ "$status" -eq 0 ]
+    run bash -c "grep -q 'scripts/check_release_minos.sh' '$PROJECT_ROOT/.github/workflows/release.yml'"
+    [ "$status" -eq 0 ]
+    [ -x "$PROJECT_ROOT/scripts/check_release_minos.sh" ]
+}
+
 @test "setup-quick-launchers.sh has detect_mo function" {
     run bash -c "grep -q 'detect_mo()' '$PROJECT_ROOT/scripts/setup-quick-launchers.sh'"
     [ "$status" -eq 0 ]

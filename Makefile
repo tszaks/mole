@@ -19,6 +19,7 @@ STATUS_SRC := ./cmd/status
 
 # Build flags
 LDFLAGS := -s -w
+RELEASE_GO_ENV := CGO_ENABLED=0
 
 all: build
 
@@ -56,16 +57,17 @@ test-go:
 
 verify: check test-go
 
-# Release build targets (run on native architectures for CGO support)
+# Release build targets. Keep these pure-Go so the macOS SDK on the
+# release runner cannot raise the Mach-O minimum OS version via cgo.
 release-amd64: mod-download
 	@echo "Building release binaries (amd64)..."
-	GOOS=darwin GOARCH=amd64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(ANALYZE)-darwin-amd64 $(ANALYZE_SRC)
-	GOOS=darwin GOARCH=amd64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(STATUS)-darwin-amd64 $(STATUS_SRC)
+	$(RELEASE_GO_ENV) GOOS=darwin GOARCH=amd64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(ANALYZE)-darwin-amd64 $(ANALYZE_SRC)
+	$(RELEASE_GO_ENV) GOOS=darwin GOARCH=amd64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(STATUS)-darwin-amd64 $(STATUS_SRC)
 
 release-arm64: mod-download
 	@echo "Building release binaries (arm64)..."
-	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(ANALYZE)-darwin-arm64 $(ANALYZE_SRC)
-	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(STATUS)-darwin-arm64 $(STATUS_SRC)
+	$(RELEASE_GO_ENV) GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(ANALYZE)-darwin-arm64 $(ANALYZE_SRC)
+	$(RELEASE_GO_ENV) GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(STATUS)-darwin-arm64 $(STATUS_SRC)
 
 clean:
 	@echo "Cleaning binaries..."

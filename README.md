@@ -34,6 +34,8 @@
 brew install mole
 ```
 
+Homebrew follows Homebrew's supported macOS tiers. Use macOS 14 or later for the Homebrew path; older macOS versions should use the script installer below on a best-effort basis.
+
 **Or via script**
 
 ```bash
