@@ -567,8 +567,22 @@ clean_orphaned_system_services() {
         local binary
         binary=$(_plist_binary_path "$plist") || return 1 # no Program key → skip
 
-        # If the binary still exists, the service is healthy.
-        [[ -e "$binary" ]] && return 1
+        # If the binary still exists, check if it's in PrivilegedHelperTools.
+        # If so, verify the parent app is still installed. If the parent app
+        # is gone, the binary itself is orphaned, so this plist is too. See #1082.
+        if [[ -e "$binary" ]]; then
+            if [[ "$binary" == /Library/PrivilegedHelperTools/* ]]; then
+                local helper_bundle_id
+                helper_bundle_id=$(basename "$binary")
+                helper_bundle_id="${helper_bundle_id%.plist}"
+                if bundle_has_installed_app "$helper_bundle_id"; then
+                    return 1 # Parent app still installed, plist is healthy
+                fi
+                # Parent app is gone, binary is orphaned, so plist is orphaned
+                return 0
+            fi
+            return 1 # Binary exists and not in PrivilegedHelperTools, plist is healthy
+        fi
 
         # If the binary is in a package-manager / system path, skip.
         _is_package_managed_binary "$binary" && return 1
@@ -705,7 +719,12 @@ clean_orphaned_system_services() {
         local removed_kb=0
 
         for orphan_file in "${orphaned_files[@]}"; do
-            if should_protect_path "$orphan_file"; then
+            # Orphans were already verified to have no installed parent app, so
+            # bypass the data-protection filename check (which would otherwise block
+            # legitimately orphaned files like Docker helpers) for this single call.
+            # MOLE_UNINSTALL_MODE is scoped to the call and never leaks to later
+            # cleanup sections; SYSTEM_CRITICAL_BUNDLES stay protected. See #1082.
+            if MOLE_UNINSTALL_MODE=1 should_protect_path "$orphan_file"; then
                 debug_log "Skipping protected orphaned service: $orphan_file"
                 skipped_protected_count=$((skipped_protected_count + 1))
                 continue

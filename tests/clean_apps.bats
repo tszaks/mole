@@ -708,6 +708,67 @@ EOF
     [[ "$output" != *"unexpected-launchctl"* ]]
 }
 
+@test "clean_orphaned_system_services removes orphaned helper despite data protection (#1082)" {
+    # The Docker leftover in #1082 survived because should_protect_data matches
+    # com.docker.* and blocked cleanup. com.getpostman.* hits the exact same
+    # should_protect_data branch; orphan cleanup must call should_protect_path in
+    # uninstall mode so a verified orphan is not blocked by data protection.
+    # Routed through /Library/LaunchDaemons (always present) rather than
+    # /Library/PrivilegedHelperTools (absent on CI runners).
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=false MOLE_DRY_RUN=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { :; }
+
+tmp_dir="$(mktemp -d)"
+tmp_plist="$tmp_dir/com.getpostman.helper.plist"
+# Program points at a missing binary, so the plist is a genuine orphan.
+/usr/libexec/PlistBuddy -c "Add :Program string $tmp_dir/missing-binary" "$tmp_plist" 2> /dev/null || true
+
+removed_marker="$tmp_dir/removed"
+safe_sudo_remove() {
+  echo "removed:$1"
+  printf '%s\n' "$1" >> "$removed_marker"
+  return 0
+}
+
+sudo() {
+  if [[ "$1" == "-n" && "$2" == "true" ]]; then
+    return 0
+  fi
+  [[ "${1:-}" == "-n" ]] && shift
+  if [[ "$1" == "find" ]]; then
+    case "$2" in
+      /Library/LaunchDaemons) printf '%s\0' "$tmp_plist" ;;
+      *) : ;;
+    esac
+    return 0
+  fi
+  if [[ "$1" == "du" ]]; then
+    echo "4 $tmp_plist"
+    return 0
+  fi
+  if [[ "$1" == "launchctl" ]]; then
+    return 0
+  fi
+  command "$@"
+}
+
+clean_orphaned_system_services
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Found 1 orphaned"* ]] || return 1
+    [[ "$output" == *"Cleaned 1 orphaned"* ]] || return 1
+    [[ "$output" == *"removed:"* ]] || return 1
+    [[ "$output" != *"skipped 1 protected"* ]] || return 1
+}
+
 @test "clean_orphaned_system_services dry-run skips protected paths (#886)" {
     # MOLE_TEST_NO_AUTH=0 overrides the CI default (=1) so the function actually
     # runs past the auth-skip guard in apps.sh; the sudo() mock satisfies the
