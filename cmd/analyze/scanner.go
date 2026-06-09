@@ -20,11 +20,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"golang.org/x/sync/singleflight"
 )
-
-var scanGroup singleflight.Group
 
 // scanLimiter bundles the concurrency budgets used by a single scan pass.
 //

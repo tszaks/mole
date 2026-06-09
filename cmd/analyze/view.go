@@ -17,6 +17,8 @@ func (m model) View() string {
 	// background refresh runs, instead of blanking to a scan-only screen. Fresh
 	// scans (no cached entries yet) still fall back to the scan-only view.
 	showingCachedView := m.scanning && !m.inOverviewMode() && m.viewNeedsRefresh && len(m.entries) > 0
+	showingLiveScanView := m.scanning && !m.inOverviewMode() && len(m.entries) > 0 &&
+		(m.liveScanEvents != nil || len(m.liveScanningPaths) > 0)
 
 	if m.inOverviewMode() {
 		freeLabel := ""
@@ -43,7 +45,7 @@ func (m model) View() string {
 		}
 	} else {
 		fmt.Fprintf(&b, "%sAnalyze Disk%s  %s%s%s", colorPurpleBold, colorReset, colorGray, displayPath(m.path), colorReset)
-		if !m.scanning {
+		if !m.scanning || m.totalSize > 0 {
 			fmt.Fprintf(&b, "  |  Total: %s", humanizeBytes(m.totalSize))
 		}
 		fmt.Fprintf(&b, "\n\n")
@@ -99,10 +101,14 @@ func (m model) View() string {
 			}
 		}
 
-		if !showingCachedView {
+		if !showingCachedView && !showingLiveScanView {
 			return b.String()
 		}
-		fmt.Fprintf(&b, "%sShowing cached results while refreshing...%s\n\n", colorGray, colorReset)
+		if showingCachedView {
+			fmt.Fprintf(&b, "%sShowing cached results while refreshing...%s\n\n", colorGray, colorReset)
+		} else {
+			fmt.Fprintln(&b)
+		}
 	}
 
 	if m.showLargeFiles {
@@ -259,16 +265,27 @@ func (m model) View() string {
 					if entry.IsDir {
 						icon = "📁"
 					}
-					size := humanizeBytes(entry.Size)
 					name := trimNameWithWidth(entry.Name, nameWidth)
 					paddedName := padName(name, nameWidth)
 
-					percent := float64(entry.Size) / float64(m.totalSize) * 100
+					sizeValue := max(entry.Size, 0)
+					percent := 0.0
+					if m.totalSize > 0 && entry.Size >= 0 {
+						percent = float64(entry.Size) / float64(m.totalSize) * 100
+					}
 					percentStr := fmt.Sprintf("%5.1f%%", percent)
+					if entry.Size < 0 || m.totalSize <= 0 {
+						percentStr = "  --  "
+					}
 
-					bar := coloredProgressBar(entry.Size, maxSize, percent)
+					bar := coloredProgressBar(sizeValue, maxSize, percent)
 
 					sizeColor := sizeColorForPercent(percent)
+					size := humanizeBytes(entry.Size)
+					if entry.Size < 0 {
+						size = fmt.Sprintf("%s %s", spinnerFrames[m.spinner], "scanning")
+						sizeColor = colorCyan
+					}
 
 					isMultiSelected := m.multiSelected != nil && m.multiSelected[entry.Path]
 					selectIcon := "○"
@@ -298,15 +315,19 @@ func (m model) View() string {
 					displayIndex := idx + 1
 
 					hintLabel := entryHintLabel(entry)
+					activityMarker := "|"
+					if entry.IsDir && m.liveScanningPaths != nil && m.liveScanningPaths[entry.Path] {
+						activityMarker = fmt.Sprintf("%s%s%s%s", colorCyan, colorBold, spinnerFrames[m.spinner], colorReset)
+					}
 
 					if hintLabel == "" {
-						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  |  %s %s%10s%s\n",
+						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  %s  %s %s%10s%s\n",
 							entryPrefix, selectIcon, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
-							nameSegment, sizeColor, size, colorReset)
+							activityMarker, nameSegment, sizeColor, size, colorReset)
 					} else {
-						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  |  %s %s%10s%s  %s\n",
+						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  %s  %s %s%10s%s  %s\n",
 							entryPrefix, selectIcon, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
-							nameSegment, sizeColor, size, colorReset, hintLabel)
+							activityMarker, nameSegment, sizeColor, size, colorReset, hintLabel)
 					}
 				}
 			}

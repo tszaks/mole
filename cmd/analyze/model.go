@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -70,6 +71,52 @@ type scanResultMsg struct {
 	stale  bool
 }
 
+type liveScanStartMsg struct {
+	id            int64
+	path          string
+	entries       []dirEntry
+	totalSize     int64
+	totalFiles    int64
+	largeFiles    []fileEntry
+	scanningPaths []string
+	events        <-chan liveScanEventMsg
+	cancel        context.CancelFunc
+	err           error
+}
+
+type liveScanEventKind int
+
+const (
+	liveScanChildProgress liveScanEventKind = iota + 1
+	liveScanChildDone
+	liveScanComplete
+	liveScanFailed
+	liveScanCanceled
+)
+
+type liveScanEventMsg struct {
+	id     int64
+	path   string
+	kind   liveScanEventKind
+	entry  dirEntry
+	result scanResult
+	err    error
+}
+
+type liveSortMode int
+
+const (
+	liveSortContinuous liveSortMode = iota
+	liveSortFreezeOnMove
+)
+
+type liveCursorMode int
+
+const (
+	liveCursorByIndex liveCursorMode = iota
+	liveCursorByPath
+)
+
 type overviewSizeMsg struct {
 	Path  string
 	Index int
@@ -131,9 +178,16 @@ type model struct {
 	// Directory (drill-down) view incremental filter, mirroring the Top-files
 	// one. entriesAll is the full non-empty entry list; entries is the rendered,
 	// possibly filtered view. Disabled in overview mode.
-	entriesAll     []dirEntry
-	entryFilter    string
-	entryFiltering bool
+	entriesAll          []dirEntry
+	entryFilter         string
+	entryFiltering      bool
+	liveScanID          int64
+	liveScanCancel      context.CancelFunc
+	liveScanEvents      <-chan liveScanEventMsg
+	liveScanningPaths   map[string]bool
+	autoSortLiveEntries bool
+	liveSortMode        liveSortMode
+	liveCursorMode      liveCursorMode
 }
 
 func (m model) inOverviewMode() bool {

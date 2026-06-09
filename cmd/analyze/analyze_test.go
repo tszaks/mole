@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -27,24 +28,84 @@ func runScanResultCmd(t *testing.T, cmd tea.Cmd) scanResultMsg {
 	t.Helper()
 
 	msg := cmd()
+	if scanMsg, ok := scanResultMsgFromMsg(t, msg); ok {
+		return scanMsg
+	}
+	t.Fatalf("expected scanResultMsg or live scan result, got %T", msg)
+	return scanResultMsg{}
+}
+
+func scanResultMsgFromMsg(t *testing.T, msg tea.Msg) (scanResultMsg, bool) {
+	t.Helper()
+
 	switch typed := msg.(type) {
 	case scanResultMsg:
-		return typed
+		return typed, true
+	case liveScanStartMsg:
+		return drainLiveScanToResultMsg(t, typed), true
 	case tea.BatchMsg:
 		for _, batchCmd := range typed {
 			if batchCmd == nil {
 				continue
 			}
-			if scanMsg, ok := batchCmd().(scanResultMsg); ok {
-				return scanMsg
+			if scanMsg, ok := scanResultMsgFromMsg(t, batchCmd()); ok {
+				return scanMsg, true
 			}
 		}
-		t.Fatalf("expected tea.BatchMsg to contain a scanResultMsg, got %T", msg)
+		return scanResultMsg{}, false
 	default:
-		t.Fatalf("expected scanResultMsg or tea.BatchMsg, got %T", msg)
+		return scanResultMsg{}, false
 	}
+}
 
-	return scanResultMsg{}
+func drainLiveScanToResultMsg(t *testing.T, start liveScanStartMsg) scanResultMsg {
+	t.Helper()
+	if start.err != nil {
+		return scanResultMsg{path: start.path, err: start.err}
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event, ok := <-start.events:
+			if !ok {
+				t.Fatalf("live scan event channel closed without completion")
+			}
+			switch event.kind {
+			case liveScanComplete:
+				return scanResultMsg{path: start.path, result: event.result}
+			case liveScanFailed:
+				return scanResultMsg{path: start.path, err: event.err}
+			case liveScanCanceled:
+				return scanResultMsg{path: start.path, err: event.err}
+			}
+		case <-deadline:
+			if start.cancel != nil {
+				start.cancel()
+			}
+			t.Fatalf("timed out waiting for live scan completion")
+		}
+	}
+}
+
+func cancelAndDrainLiveScan(start liveScanStartMsg) {
+	if start.cancel != nil {
+		start.cancel()
+	}
+	for range start.events {
+	}
+}
+
+func rowContaining(view, needle string) string {
+	for line := range strings.SplitSeq(view, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
+}
+
+func progressFillCount(row string) int {
+	return strings.Count(row, "█") + strings.Count(row, "▓") + strings.Count(row, "▒")
 }
 
 func TestScanPathConcurrentBasic(t *testing.T) {
@@ -713,6 +774,592 @@ func TestScanCmdTreatsWarmedCacheAsStale(t *testing.T) {
 	}
 	if scanMsg.result.TotalFiles != result.TotalFiles {
 		t.Fatalf("expected cached result to survive stale load, got %d", scanMsg.result.TotalFiles)
+	}
+}
+
+func TestLiveScanUXConfigFromEnv(t *testing.T) {
+	t.Setenv(liveSortModeEnv, "freeze-on-move")
+	t.Setenv(liveCursorModeEnv, "index")
+
+	m := newModel(t.TempDir(), false)
+	if m.liveSortMode != liveSortFreezeOnMove {
+		t.Fatalf("expected freeze-on-move sort mode, got %v", m.liveSortMode)
+	}
+	if m.liveCursorMode != liveCursorByIndex {
+		t.Fatalf("expected index cursor mode, got %v", m.liveCursorMode)
+	}
+}
+
+func TestLiveScanDefaultsToPathCursor(t *testing.T) {
+	m := newModel(t.TempDir(), false)
+	if m.liveCursorMode != liveCursorByPath {
+		t.Fatalf("expected default path cursor mode, got %v", m.liveCursorMode)
+	}
+}
+
+func TestLiveScanInitialListingShowsImmediateChildren(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root := filepath.Join(home, "root")
+	child := filepath.Join(root, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	filePath := filepath.Join(root, "root.txt")
+	if err := os.WriteFile(filePath, []byte("root-data"), 0o644); err != nil {
+		t.Fatalf("write root file: %v", err)
+	}
+
+	m := newModel(root, false)
+	msg := m.scanFreshCmd(root)()
+	start, ok := msg.(liveScanStartMsg)
+	if !ok {
+		t.Fatalf("expected liveScanStartMsg, got %T", msg)
+	}
+	defer cancelAndDrainLiveScan(start)
+
+	foundFile := false
+	foundDir := false
+	for _, entry := range start.entries {
+		switch entry.Path {
+		case filePath:
+			foundFile = true
+			if entry.Size <= 0 {
+				t.Fatalf("expected file size to be known immediately, got %d", entry.Size)
+			}
+		case child:
+			foundDir = true
+			if entry.Size != -1 {
+				t.Fatalf("expected child directory to start pending, got %d", entry.Size)
+			}
+		}
+	}
+	if !foundFile || !foundDir {
+		t.Fatalf("expected immediate file and directory entries, got %+v", start.entries)
+	}
+}
+
+func TestLiveScanStartDoesNotAddSecondSpinnerTick(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	m := newModel(root, false)
+	start := m.scanFreshCmd(root)().(liveScanStartMsg)
+	defer cancelAndDrainLiveScan(start)
+
+	_, cmd := m.Update(start)
+	if cmd == nil {
+		t.Fatalf("expected live scan start to wait for scan events")
+	}
+	if _, ok := cmd().(tickMsg); ok {
+		t.Fatalf("live scan start must not schedule an extra spinner tick")
+	}
+}
+
+func TestOverviewHomeNavigationRendersImmediateRows(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	downloads := filepath.Join(home, "Downloads")
+	desktop := filepath.Join(home, "Desktop")
+	for _, dir := range []string{downloads, desktop} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, "note.txt"), []byte("home-note"), 0o644); err != nil {
+		t.Fatalf("write home file: %v", err)
+	}
+
+	m := newModel("/", true)
+	for i, entry := range m.entries {
+		if entry.Path == home {
+			m.selected = i
+			break
+		}
+	}
+
+	updated, cmd := m.enterSelectedDir()
+	if cmd == nil {
+		t.Fatalf("expected Home navigation to start a scan")
+	}
+	got := updated.(model)
+	if got.path != home {
+		t.Fatalf("expected path %s, got %s", home, got.path)
+	}
+
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected navigation command batch, got %T", msg)
+	}
+	var start liveScanStartMsg
+	for _, batchCmd := range batch {
+		if batchCmd == nil {
+			continue
+		}
+		if candidate, ok := batchCmd().(liveScanStartMsg); ok {
+			start = candidate
+			break
+		}
+	}
+	if start.events == nil {
+		t.Fatalf("expected batch to include live scan start")
+	}
+	defer cancelAndDrainLiveScan(start)
+
+	updated, _ = got.Update(start)
+	got = updated.(model)
+	view := got.View()
+	for _, want := range []string{"Downloads", "Desktop", "note.txt"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected Home view to contain %q, got:\n%s", want, view)
+		}
+	}
+}
+
+func TestLiveScanChildUpdateUpdatesRowTotalAndCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root := filepath.Join(home, "root")
+	child := filepath.Join(root, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "data.bin"), []byte(strings.Repeat("x", 4096)), 0o644); err != nil {
+		t.Fatalf("write child file: %v", err)
+	}
+
+	m := newModel(root, false)
+	start := m.scanFreshCmd(root)().(liveScanStartMsg)
+	defer cancelAndDrainLiveScan(start)
+
+	updated, _ := m.Update(start)
+	liveModel := updated.(model)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-start.events:
+			if event.kind != liveScanChildDone {
+				continue
+			}
+			updated, _ = liveModel.Update(event)
+			liveModel = updated.(model)
+
+			var found dirEntry
+			for _, entry := range liveModel.entries {
+				if entry.Path == child {
+					found = entry
+					break
+				}
+			}
+			if found.Path == "" {
+				t.Fatalf("expected child row to remain visible")
+			}
+			if found.Size <= 0 {
+				t.Fatalf("expected child row size to update, got %d", found.Size)
+			}
+			if liveModel.totalSize != found.Size {
+				t.Fatalf("expected total size %d, got %d", found.Size, liveModel.totalSize)
+			}
+			cached, ok := liveModel.cache[child]
+			if !ok {
+				t.Fatalf("expected child result to warm in-memory cache")
+			}
+			if cached.TotalSize != found.Size {
+				t.Fatalf("cached child size mismatch: want %d, got %d", found.Size, cached.TotalSize)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for child update")
+		}
+	}
+}
+
+func TestLiveScanStartPreservesEntryFilterBackingList(t *testing.T) {
+	root := t.TempDir()
+	apps := filepath.Join(root, "apps")
+	logs := filepath.Join(root, "logs")
+
+	m := newModel(root, false)
+	m.entryFilter = "app"
+	start := liveScanStartMsg{
+		id:   1,
+		path: root,
+		entries: []dirEntry{
+			{Name: "apps", Path: apps, Size: -1, IsDir: true},
+			{Name: "logs", Path: logs, Size: -1, IsDir: true},
+		},
+		events: make(chan liveScanEventMsg),
+		cancel: func() {},
+	}
+
+	updated, _ := m.Update(start)
+	got := updated.(model)
+	if len(got.entriesAll) != 2 {
+		t.Fatalf("expected backing list to keep both live entries, got %+v", got.entriesAll)
+	}
+	if len(got.entries) != 1 || got.entries[0].Path != apps {
+		t.Fatalf("expected active filter to render only apps, got %+v", got.entries)
+	}
+}
+
+func TestLiveScanIgnoresStaleEventsAfterNavigation(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+
+	m := newModel(other, false)
+	m.liveScanID = 2
+	m.liveScanEvents = make(chan liveScanEventMsg)
+	m.entries = []dirEntry{{Name: "current", Path: filepath.Join(other, "current"), Size: 1}}
+	m.totalSize = 1
+
+	stale := liveScanEventMsg{
+		id:   1,
+		path: root,
+		kind: liveScanChildDone,
+		entry: dirEntry{
+			Name:  "stale",
+			Path:  filepath.Join(root, "stale"),
+			Size:  99,
+			IsDir: true,
+		},
+		result: scanResult{TotalSize: 99},
+	}
+
+	updated, _ := m.Update(stale)
+	got := updated.(model)
+	if got.totalSize != 1 || len(got.entries) != 1 || got.entries[0].Name != "current" {
+		t.Fatalf("stale event changed model: %+v", got)
+	}
+}
+
+func TestLiveScanDefaultCursorByPathKeepsSelectedPathAcrossReorder(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	b := filepath.Join(root, "b")
+
+	m := newModel(root, false)
+	m.liveScanID = 1
+	m.liveScanEvents = make(chan liveScanEventMsg)
+	m.scanning = true
+	m.autoSortLiveEntries = true
+	m.liveSortMode = liveSortContinuous
+	m.liveScanningPaths = map[string]bool{a: true, b: true}
+	m.entries = []dirEntry{
+		{Name: "a", Path: a, Size: -1, IsDir: true},
+		{Name: "b", Path: b, Size: -1, IsDir: true},
+	}
+	m.entriesAll = slices.Clone(m.entries)
+
+	updated, _ := m.Update(liveScanEventMsg{
+		id:     1,
+		path:   root,
+		kind:   liveScanChildDone,
+		entry:  dirEntry{Name: "b", Path: b, Size: 10, IsDir: true},
+		result: scanResult{TotalSize: 10},
+	})
+	m = updated.(model)
+	if got := []string{m.entries[0].Path, m.entries[1].Path}; !slices.Equal(got, []string{b, a}) {
+		t.Fatalf("expected live sort to reorder by size, got %v", got)
+	}
+	if m.entries[m.selected].Path != a {
+		t.Fatalf("expected default cursor to stay on %s, selected=%d entries=%+v", a, m.selected, m.entries)
+	}
+
+	updated, _ = m.enterSelectedDir()
+	got := updated.(model)
+	if got.path != a {
+		t.Fatalf("expected Enter to drill into selected path %s, got %s", a, got.path)
+	}
+}
+
+func TestLiveScanProgressUpdatesRowBarAndPercent(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	sibling := filepath.Join(root, "sibling.bin")
+
+	m := newModel(root, false)
+	m.liveScanID = 1
+	m.liveScanEvents = make(chan liveScanEventMsg)
+	m.scanning = true
+	m.autoSortLiveEntries = false
+	m.liveScanningPaths = map[string]bool{child: true}
+	m.entries = []dirEntry{
+		{Name: "child", Path: child, Size: -1, IsDir: true},
+		{Name: "sibling.bin", Path: sibling, Size: 100},
+	}
+	m.totalSize = 100
+
+	updated, _ := m.Update(liveScanEventMsg{
+		id:    1,
+		path:  root,
+		kind:  liveScanChildProgress,
+		entry: dirEntry{Name: "child", Path: child, Size: 10, IsDir: true},
+	})
+	m = updated.(model)
+	firstRow := rowContaining(m.View(), "child")
+	firstFill := progressFillCount(firstRow)
+	if !strings.Contains(firstRow, "9.1%") {
+		t.Fatalf("expected first progress row to show 9.1%%, got:\n%s", firstRow)
+	}
+
+	updated, _ = m.Update(liveScanEventMsg{
+		id:    1,
+		path:  root,
+		kind:  liveScanChildProgress,
+		entry: dirEntry{Name: "child", Path: child, Size: 50, IsDir: true},
+	})
+	m = updated.(model)
+	secondRow := rowContaining(m.View(), "child")
+	secondFill := progressFillCount(secondRow)
+	if !strings.Contains(secondRow, "33.3%") {
+		t.Fatalf("expected second progress row to show 33.3%%, got:\n%s", secondRow)
+	}
+	if secondFill <= firstFill {
+		t.Fatalf("expected child progress bar fill to increase, first=%d second=%d\nfirst: %s\nsecond: %s", firstFill, secondFill, firstRow, secondRow)
+	}
+	if m.totalSize != 150 {
+		t.Fatalf("expected total known size to grow to 150, got %d", m.totalSize)
+	}
+	if _, ok := m.cache[child]; ok {
+		t.Fatalf("progress event must not warm child cache before completion")
+	}
+	if !m.liveScanningPaths[child] {
+		t.Fatalf("progress event must keep child marked as scanning")
+	}
+}
+
+func TestLiveScanContinuousSortKeepsCursorByIndex(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	b := filepath.Join(root, "b")
+
+	m := newModel(root, false)
+	m.liveScanID = 1
+	m.liveScanEvents = make(chan liveScanEventMsg)
+	m.scanning = true
+	m.autoSortLiveEntries = true
+	m.liveSortMode = liveSortContinuous
+	m.liveCursorMode = liveCursorByIndex
+	m.liveScanningPaths = map[string]bool{a: true, b: true}
+	m.entries = []dirEntry{
+		{Name: "a", Path: a, Size: -1, IsDir: true},
+		{Name: "b", Path: b, Size: -1, IsDir: true},
+	}
+
+	updated, _ := m.Update(liveScanEventMsg{
+		id:     1,
+		path:   root,
+		kind:   liveScanChildDone,
+		entry:  dirEntry{Name: "b", Path: b, Size: 10, IsDir: true},
+		result: scanResult{TotalSize: 10},
+	})
+	m = updated.(model)
+	if m.entries[0].Path != b {
+		t.Fatalf("expected live auto-sort to move larger row first, got %+v", m.entries)
+	}
+
+	updated, _ = m.updateKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	if !m.autoSortLiveEntries {
+		t.Fatalf("expected navigation key to keep live sort enabled")
+	}
+	if m.entries[m.selected].Path != a {
+		t.Fatalf("expected selection to move to a before reorder, got selected=%d entries=%+v", m.selected, m.entries)
+	}
+	selectedIndex := m.selected
+
+	updated, _ = m.Update(liveScanEventMsg{
+		id:     1,
+		path:   root,
+		kind:   liveScanChildDone,
+		entry:  dirEntry{Name: "a", Path: a, Size: 100, IsDir: true},
+		result: scanResult{TotalSize: 100},
+	})
+	m = updated.(model)
+	if got := []string{m.entries[0].Path, m.entries[1].Path}; !slices.Equal(got, []string{a, b}) {
+		t.Fatalf("expected live sort to continue after navigation, got %v", got)
+	}
+	if m.selected != selectedIndex {
+		t.Fatalf("expected selection index to stay %d, got %d", selectedIndex, m.selected)
+	}
+	if m.entries[m.selected].Path != b {
+		t.Fatalf("expected cursor-by-index to now point at row %d (%s), selected entries=%+v", selectedIndex, b, m.entries)
+	}
+}
+
+func TestLiveScanContinuousSortCanKeepCursorByPath(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	b := filepath.Join(root, "b")
+
+	m := newModel(root, false)
+	m.liveScanID = 1
+	m.liveScanEvents = make(chan liveScanEventMsg)
+	m.scanning = true
+	m.autoSortLiveEntries = true
+	m.liveSortMode = liveSortContinuous
+	m.liveCursorMode = liveCursorByPath
+	m.liveScanningPaths = map[string]bool{a: true, b: true}
+	m.entries = []dirEntry{
+		{Name: "a", Path: a, Size: -1, IsDir: true},
+		{Name: "b", Path: b, Size: -1, IsDir: true},
+	}
+
+	updated, _ := m.Update(liveScanEventMsg{
+		id:     1,
+		path:   root,
+		kind:   liveScanChildDone,
+		entry:  dirEntry{Name: "b", Path: b, Size: 10, IsDir: true},
+		result: scanResult{TotalSize: 10},
+	})
+	m = updated.(model)
+	updated, _ = m.updateKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	if m.entries[m.selected].Path != a {
+		t.Fatalf("expected selection to move to a before reorder, got selected=%d entries=%+v", m.selected, m.entries)
+	}
+
+	updated, _ = m.Update(liveScanEventMsg{
+		id:     1,
+		path:   root,
+		kind:   liveScanChildDone,
+		entry:  dirEntry{Name: "a", Path: a, Size: 100, IsDir: true},
+		result: scanResult{TotalSize: 100},
+	})
+	m = updated.(model)
+	if got := []string{m.entries[0].Path, m.entries[1].Path}; !slices.Equal(got, []string{a, b}) {
+		t.Fatalf("expected live sort to continue after navigation, got %v", got)
+	}
+	if m.entries[m.selected].Path != a {
+		t.Fatalf("expected cursor-by-path to stay on %s after reorder, selected=%d entries=%+v", a, m.selected, m.entries)
+	}
+}
+
+func TestLiveScanSortCanFreezeAfterNavigationKey(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	b := filepath.Join(root, "b")
+
+	m := newModel(root, false)
+	m.liveScanID = 1
+	m.liveScanEvents = make(chan liveScanEventMsg)
+	m.scanning = true
+	m.autoSortLiveEntries = true
+	m.liveSortMode = liveSortFreezeOnMove
+	m.liveCursorMode = liveCursorByIndex
+	m.liveScanningPaths = map[string]bool{a: true, b: true}
+	m.entries = []dirEntry{
+		{Name: "a", Path: a, Size: -1, IsDir: true},
+		{Name: "b", Path: b, Size: -1, IsDir: true},
+	}
+
+	updated, _ := m.Update(liveScanEventMsg{
+		id:     1,
+		path:   root,
+		kind:   liveScanChildDone,
+		entry:  dirEntry{Name: "b", Path: b, Size: 10, IsDir: true},
+		result: scanResult{TotalSize: 10},
+	})
+	m = updated.(model)
+	updated, _ = m.updateKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	if m.autoSortLiveEntries {
+		t.Fatalf("expected freeze-on-move to disable live sort")
+	}
+	before := []string{m.entries[0].Path, m.entries[1].Path}
+
+	updated, _ = m.Update(liveScanEventMsg{
+		id:     1,
+		path:   root,
+		kind:   liveScanChildDone,
+		entry:  dirEntry{Name: "a", Path: a, Size: 100, IsDir: true},
+		result: scanResult{TotalSize: 100},
+	})
+	m = updated.(model)
+	after := []string{m.entries[0].Path, m.entries[1].Path}
+	if !slices.Equal(before, after) {
+		t.Fatalf("expected freeze-on-move to keep row order %v, got %v", before, after)
+	}
+}
+
+func TestScanningViewRendersRowsWithSpinner(t *testing.T) {
+	m := model{
+		path:      "/tmp/project",
+		scanning:  true,
+		spinner:   1,
+		totalSize: 8,
+		entries: []dirEntry{
+			{Name: "child", Path: "/tmp/project/child", Size: -1, IsDir: true},
+			{Name: "file.txt", Path: "/tmp/project/file.txt", Size: 8},
+		},
+		liveScanningPaths: map[string]bool{"/tmp/project/child": true},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "child") || !strings.Contains(view, "file.txt") {
+		t.Fatalf("expected scanning view to render rows, got:\n%s", view)
+	}
+	if !strings.Contains(view, spinnerFrames[m.spinner]+" scanning") {
+		t.Fatalf("expected pending directory spinner in row, got:\n%s", view)
+	}
+}
+
+func TestScanningViewShowsSpinnerDividerForPartiallySizedFolders(t *testing.T) {
+	m := model{
+		path:      "/tmp/project",
+		scanning:  true,
+		spinner:   1,
+		totalSize: 150,
+		entries: []dirEntry{
+			{Name: "child", Path: "/tmp/project/child", Size: 50, IsDir: true},
+			{Name: "file.txt", Path: "/tmp/project/file.txt", Size: 100},
+		},
+		liveScanningPaths: map[string]bool{"/tmp/project/child": true},
+	}
+
+	view := m.View()
+	childRow := rowContaining(view, "child")
+	fileRow := rowContaining(view, "file.txt")
+	if !strings.Contains(childRow, spinnerFrames[m.spinner]) {
+		t.Fatalf("expected active child row divider to show spinner, got:\n%s", childRow)
+	}
+	if strings.Contains(fileRow, spinnerFrames[m.spinner]) {
+		t.Fatalf("expected non-scanning file row to keep static divider, got:\n%s", fileRow)
+	}
+}
+
+func TestEnterSelectedDirMarksScanningParentForRefresh(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	cancelled := false
+	m := newModel(root, false)
+	m.entries = []dirEntry{{Name: "child", Path: child, Size: -1, IsDir: true}}
+	m.scanning = true
+	m.liveScanID = 1
+	m.liveScanCancel = func() { cancelled = true }
+
+	updated, cmd := m.enterSelectedDir()
+	if cmd == nil {
+		t.Fatalf("expected child navigation to start a scan")
+	}
+	got := updated.(model)
+	if !cancelled {
+		t.Fatalf("expected active parent scan to be cancelled")
+	}
+	if len(got.history) != 1 || !got.history[0].NeedsRefresh {
+		t.Fatalf("expected scanning parent history to be marked for refresh, got %+v", got.history)
 	}
 }
 

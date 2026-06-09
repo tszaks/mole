@@ -97,44 +97,13 @@ func (m model) scanCmd(path string) tea.Cmd {
 			return scanResultMsg{path: path, result: result, err: nil, stale: true}
 		}
 
-		v, err, _ := scanGroup.Do(path, func() (any, error) {
-			return scanPathConcurrent(path, m.filesScanned, m.dirsScanned, m.bytesScanned, m.currentPath)
-		})
-
-		if err != nil {
-			return scanResultMsg{path: path, err: err}
-		}
-
-		result := v.(scanResult)
-
-		go func(p string, r scanResult) {
-			if err := saveCacheToDisk(p, r); err != nil {
-				_ = err // Cache save failure is not critical
-			}
-		}(path, result)
-
-		return scanResultMsg{path: path, result: result, err: nil}
+		return startLiveScanCmd(path, m.filesScanned, m.dirsScanned, m.bytesScanned, m.currentPath)()
 	}
 }
 
 func (m model) scanFreshCmd(path string) tea.Cmd {
 	return func() tea.Msg {
-		v, err, _ := scanGroup.Do(path, func() (any, error) {
-			return scanPathConcurrent(path, m.filesScanned, m.dirsScanned, m.bytesScanned, m.currentPath)
-		})
-
-		if err != nil {
-			return scanResultMsg{path: path, err: err}
-		}
-
-		result := v.(scanResult)
-		go func(p string, r scanResult) {
-			if err := saveCacheToDisk(p, r); err != nil {
-				_ = err
-			}
-		}(path, result)
-
-		return scanResultMsg{path: path, result: result}
+		return startLiveScanCmd(path, m.filesScanned, m.dirsScanned, m.bytesScanned, m.currentPath)()
 	}
 }
 
@@ -142,6 +111,170 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(uiTickInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+func (m *model) cancelLiveScan() {
+	if m.liveScanCancel != nil {
+		m.liveScanCancel()
+	}
+	m.liveScanID = 0
+	m.liveScanCancel = nil
+	m.liveScanEvents = nil
+	m.liveScanningPaths = nil
+	m.autoSortLiveEntries = false
+}
+
+func (m model) isCurrentLiveScan(id int64, path string) bool {
+	return id != 0 && id == m.liveScanID && path == m.path && m.liveScanEvents != nil
+}
+
+func (m *model) noteLiveCursorMove() {
+	if m.scanning && !m.showLargeFiles && m.liveSortMode == liveSortFreezeOnMove {
+		m.autoSortLiveEntries = false
+	}
+}
+
+func (m *model) applyLiveChildProgress(entry dirEntry) {
+	m.applyLiveChildSize(entry, false, scanResult{})
+}
+
+func (m *model) applyLiveChildUpdate(entry dirEntry, result scanResult) {
+	m.applyLiveChildSize(entry, true, result)
+}
+
+func (m *model) ensureLiveEntryBacking() {
+	if m.entriesAll == nil {
+		m.entriesAll = slices.Clone(m.entries)
+	}
+}
+
+func (m *model) applyLiveChildSize(entry dirEntry, complete bool, result scanResult) {
+	if complete && m.liveScanningPaths != nil {
+		delete(m.liveScanningPaths, entry.Path)
+	}
+
+	m.ensureLiveEntryBacking()
+	previousSize := int64(-1)
+	found := false
+	for i := range m.entriesAll {
+		if m.entriesAll[i].Path == entry.Path {
+			previousSize = m.entriesAll[i].Size
+			m.entriesAll[i] = entry
+			found = true
+			break
+		}
+	}
+	if !found {
+		m.entriesAll = append(m.entriesAll, entry)
+	}
+
+	if entry.Size > 0 {
+		if previousSize > 0 {
+			m.totalSize += entry.Size - previousSize
+		} else {
+			m.totalSize += entry.Size
+		}
+	}
+	if complete && result.TotalFiles > 0 {
+		m.totalFiles += result.TotalFiles
+	}
+	if complete && (len(result.Entries) > 0 || len(result.LargeFiles) > 0 || result.TotalSize > 0 || result.TotalFiles > 0) {
+		childResult := result
+		childResult.Entries = filterNonEmptyEntries(result.Entries)
+		m.cache[entry.Path] = historyEntryFromScanResult(entry.Path, childResult, m.cache[entry.Path], true)
+	}
+	if m.autoSortLiveEntries {
+		m.sortLiveEntriesForCurrentCursorMode()
+	} else {
+		m.applyEntryFilter()
+	}
+	m.clampEntrySelection()
+	m.status = fmt.Sprintf("Scanning %s...", displayPath(m.path))
+}
+
+func (m *model) finishLiveScan(result scanResult) {
+	m.scanning = false
+	m.liveScanID = 0
+	m.liveScanCancel = nil
+	m.liveScanEvents = nil
+	m.liveScanningPaths = nil
+	m.autoSortLiveEntries = false
+
+	filteredEntries := filterNonEmptyEntries(result.Entries)
+	result.Entries = filteredEntries
+	selectedPath := m.selectedEntryPath()
+	m.entriesAll = filteredEntries
+	m.largeFilesAll = result.LargeFiles
+	m.totalSize = result.TotalSize
+	m.totalFiles = result.TotalFiles
+	m.viewNeedsRefresh = false
+	m.applyEntryFilter()
+	m.applyLargeFilter()
+	if selectedPath != "" {
+		m.selectEntryPath(selectedPath)
+	}
+	m.cache[m.path] = historyEntryFromScanResult(m.path, result, m.cache[m.path], false)
+	if m.totalSize > 0 {
+		if m.overviewSizeCache == nil {
+			m.overviewSizeCache = make(map[string]int64)
+		}
+		m.overviewSizeCache[m.path] = m.totalSize
+		go func(path string, size int64) {
+			_ = storeOverviewSize(path, size)
+		}(m.path, m.totalSize)
+	}
+	go func(path string, scan scanResult) {
+		_ = saveCacheToDisk(path, scan)
+	}(m.path, result)
+	m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
+}
+
+func (m *model) finishCanceledLiveScan() {
+	m.scanning = false
+	m.liveScanID = 0
+	m.liveScanCancel = nil
+	m.liveScanEvents = nil
+	m.liveScanningPaths = nil
+	m.autoSortLiveEntries = false
+	m.status = "Scan cancelled"
+}
+
+func (m *model) sortLiveEntriesForCurrentCursorMode() {
+	m.ensureLiveEntryBacking()
+	selectedPath := ""
+	if m.liveCursorMode == liveCursorByPath {
+		selectedPath = m.selectedEntryPath()
+	}
+
+	if m.liveCursorMode == liveCursorByIndex {
+		sortDirEntriesBySize(m.entriesAll)
+		m.applyEntryFilter()
+		m.clampEntrySelection()
+		return
+	}
+	sortDirEntriesBySize(m.entriesAll)
+	m.applyEntryFilter()
+	if selectedPath == "" {
+		return
+	}
+	m.selectEntryPath(selectedPath)
+}
+
+func (m model) selectedEntryPath() string {
+	if len(m.entries) == 0 || m.selected < 0 || m.selected >= len(m.entries) {
+		return ""
+	}
+	return m.entries[m.selected].Path
+}
+
+func (m *model) selectEntryPath(path string) {
+	for i, entry := range m.entries {
+		if entry.Path == path {
+			m.selected = i
+			return
+		}
+	}
+	m.clampEntrySelection()
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -185,6 +318,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
+				m.cancelLiveScan()
 				m.scanning = true
 				atomic.StoreInt64(m.filesScanned, 0)
 				atomic.StoreInt64(m.dirsScanned, 0)
@@ -254,6 +388,65 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
 		return m, nil
+	case liveScanStartMsg:
+		if msg.path != m.path {
+			if msg.cancel != nil {
+				msg.cancel()
+			}
+			return m, nil
+		}
+		m.cancelLiveScan()
+		if msg.err != nil {
+			m.scanning = false
+			m.status = fmt.Sprintf("Scan failed: %v", msg.err)
+			return m, nil
+		}
+		m.liveScanID = msg.id
+		m.liveScanCancel = msg.cancel
+		m.liveScanEvents = msg.events
+		m.liveScanningPaths = make(map[string]bool, len(msg.scanningPaths))
+		for _, path := range msg.scanningPaths {
+			m.liveScanningPaths[path] = true
+		}
+		m.autoSortLiveEntries = true
+		selectedPath := m.selectedEntryPath()
+		m.entriesAll = slices.Clone(msg.entries)
+		m.largeFilesAll = slices.Clone(msg.largeFiles)
+		m.totalSize = msg.totalSize
+		m.totalFiles = msg.totalFiles
+		m.viewNeedsRefresh = false
+		m.scanning = true
+		m.status = fmt.Sprintf("Scanning %s...", displayPath(m.path))
+		m.sortLiveEntriesForCurrentCursorMode()
+		m.applyLargeFilter()
+		if selectedPath != "" {
+			m.selectEntryPath(selectedPath)
+		}
+		m.clampEntrySelection()
+		return m, waitLiveScanEventCmd(msg.events)
+	case liveScanEventMsg:
+		if !m.isCurrentLiveScan(msg.id, msg.path) {
+			return m, nil
+		}
+		switch msg.kind {
+		case liveScanChildProgress:
+			m.applyLiveChildProgress(msg.entry)
+			return m, waitLiveScanEventCmd(m.liveScanEvents)
+		case liveScanChildDone:
+			m.applyLiveChildUpdate(msg.entry, msg.result)
+			return m, waitLiveScanEventCmd(m.liveScanEvents)
+		case liveScanComplete:
+			m.finishLiveScan(msg.result)
+			return m, nil
+		case liveScanFailed:
+			m.status = fmt.Sprintf("Scan failed: %v", msg.err)
+			return m, waitLiveScanEventCmd(m.liveScanEvents)
+		case liveScanCanceled:
+			m.finishCanceledLiveScan()
+			return m, nil
+		default:
+			return m, waitLiveScanEventCmd(m.liveScanEvents)
+		}
 	case overviewSizeMsg:
 		delete(m.overviewScanningSet, msg.Path)
 
@@ -398,6 +591,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.goBack()
 	case "up", "k", "K":
+		m.noteLiveCursorMove()
 		if m.showLargeFiles {
 			if m.largeSelected > 0 {
 				m.largeSelected--
@@ -416,6 +610,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "down", "j", "J":
+		m.noteLiveCursorMove()
 		if m.showLargeFiles {
 			if m.largeSelected < len(m.largeFiles)-1 {
 				m.largeSelected++
@@ -448,6 +643,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.goBack()
 	case "r", "R":
+		m.cancelLiveScan()
 		m.multiSelected = make(map[string]bool)
 		m.largeMultiSelected = make(map[string]bool)
 
@@ -485,6 +681,10 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.scanFreshCmd(m.path), tickCmd())
 	case "t", "T":
+		if m.scanning {
+			m.status = "Top files are available after the scan finishes"
+			return m, nil
+		}
 		if !m.inOverviewMode() {
 			m.showLargeFiles = !m.showLargeFiles
 			m.resetLargeFilter()
@@ -510,6 +710,15 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if len(m.entriesAll) > 0 {
 			m.entryFiltering = true
 			m.status = "Filter: type to match, Enter to apply, Esc to clear"
+		}
+	case "s", "S":
+		if m.scanning && !m.inOverviewMode() {
+			m.liveSortMode = nextLiveSortMode(m.liveSortMode)
+			m.autoSortLiveEntries = m.liveSortMode == liveSortContinuous
+			if m.autoSortLiveEntries {
+				m.sortLiveEntriesForCurrentCursorMode()
+			}
+			m.status = fmt.Sprintf("Live sort: %s", liveSortModeLabel(m.liveSortMode))
 		}
 	case "o", "O":
 		// Open selected entries (multi-select aware).
@@ -623,6 +832,10 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case " ":
+		if m.scanning {
+			m.status = "Selection is available after the scan finishes"
+			return m, nil
+		}
 		// Toggle multi-select (paths as keys).
 		if m.showLargeFiles {
 			if len(m.largeFiles) > 0 && m.largeSelected < len(m.largeFiles) {
@@ -678,6 +891,10 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "delete", "backspace":
+		if m.scanning {
+			m.status = "Delete is available after the scan finishes"
+			return m, nil
+		}
 		if m.showLargeFiles {
 			if len(m.largeFiles) > 0 {
 				if len(m.largeMultiSelected) > 0 {
@@ -819,6 +1036,7 @@ func (m model) updateEntryFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) goBack() (tea.Model, tea.Cmd) {
+	m.cancelLiveScan()
 	if len(m.history) == 0 {
 		if !m.inOverviewMode() {
 			return m, m.switchToOverviewMode()
@@ -873,6 +1091,7 @@ func (m model) goBack() (tea.Model, tea.Cmd) {
 }
 
 func (m *model) switchToOverviewMode() tea.Cmd {
+	m.cancelLiveScan()
 	m.isOverview = true
 	m.path = "/"
 	m.scanning = false
@@ -903,6 +1122,7 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 	}
 	selected := m.entries[m.selected]
 	if selected.IsDir {
+		m.cancelLiveScan()
 		// Drilling in commits and drops any active directory filter so the parent
 		// is snapshotted in full. Remap the selection onto the unfiltered list so
 		// the entry we enter stays highlighted when we navigate back.

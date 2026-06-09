@@ -43,7 +43,7 @@ func snapshotFromModel(m model) historyEntry {
 		EntryOffset:   m.offset,
 		LargeSelected: m.largeSelected,
 		LargeOffset:   m.largeOffset,
-		NeedsRefresh:  m.viewNeedsRefresh,
+		NeedsRefresh:  m.viewNeedsRefresh || m.scanning,
 		IsOverview:    m.isOverview,
 	}
 }

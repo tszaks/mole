@@ -96,6 +96,8 @@ func newModel(path string, isOverview bool) model {
 		overviewScanningSet: make(map[string]bool),
 		multiSelected:       make(map[string]bool),
 		largeMultiSelected:  make(map[string]bool),
+		liveSortMode:        liveScanSortModeFromEnv(),
+		liveCursorMode:      liveScanCursorModeFromEnv(),
 	}
 
 	if isOverview {
