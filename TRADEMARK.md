@@ -8,6 +8,7 @@ you publish a fork, please:
 
 - Use your own name and icon, not "Mole" or the Mole logo.
 - Don't imply your fork is endorsed by or affiliated with Mole.
+- Don't use the Mole name to market a paid or competing product.
 
 Mole for Mac at https://mole.fit is a separate, proprietary product with its own
 reserved name and assets.

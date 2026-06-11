@@ -367,8 +367,6 @@ Real feedback from users who shared Mole on X.
 
 ## License
 
-The Mole CLI is open source under GPL-3.0. See [LICENSE](LICENSE). If you ship a modified version, GPL-3.0 requires you to release your full source under the same license.
+Mole is open source under GPL-3.0, see [LICENSE](LICENSE); a version you modify and share stays open under the same license. If you fork Mole into your own product, to avoid confusion please give it a different name and credit Mole as the source.
 
-The Mole name and logo are trademarks, so give any fork its own name and brand; [Mole for Mac](https://mole.fit) is a separate, proprietary app.
-
-Mole is actively maintained and here for the long run.
+[Mole for Mac](https://mole.fit) is a separate, proprietary app, and Mole is here for the long run.
