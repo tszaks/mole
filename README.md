@@ -6,7 +6,7 @@
 <p align="center">
   <a href="https://github.com/tw93/mole/stargazers"><img src="https://img.shields.io/github/stars/tw93/mole?style=flat-square" alt="Stars"></a>
   <a href="https://github.com/tw93/mole/releases"><img src="https://img.shields.io/github/v/tag/tw93/mole?label=version&style=flat-square" alt="Version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL_v3-blue.svg?style=flat-square" alt="License"></a>
   <a href="https://github.com/tw93/mole/commits"><img src="https://img.shields.io/github/commit-activity/m/tw93/mole?style=flat-square" alt="Commits"></a>
   <a href="https://twitter.com/HiTw93"><img src="https://img.shields.io/badge/follow-Tw93-red?style=flat-square&logo=Twitter" alt="Twitter"></a>
   <a href="https://t.me/+GclQS9ZnxyI2ODQ1"><img src="https://img.shields.io/badge/chat-Telegram-blueviolet?style=flat-square&logo=Telegram" alt="Telegram"></a>
@@ -367,4 +367,8 @@ Real feedback from users who shared Mole on X.
 
 ## License
 
-MIT License. Feel free to use Mole and contribute.
+The Mole CLI is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE). If you distribute a modified version, AGPL-3.0 requires you to release your complete source under the same license. Earlier releases published under the MIT License remain available under those terms.
+
+The "Mole" name, the Mole logo, and the mole.fit brand are trademarks and are not granted by the code license. Forks must rebrand and must not imply endorsement. See [TRADEMARK.md](TRADEMARK.md).
+
+[Mole for Mac](https://mole.fit) is a separate, proprietary product and is not covered by this license.
