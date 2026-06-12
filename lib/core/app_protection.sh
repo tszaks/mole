@@ -691,35 +691,45 @@ find_app_files() {
         bundle_id_valid="true"
     fi
 
-    # Standard path patterns for user-level files
-    local -a user_patterns=(
-        "$HOME/Library/Application Support/$app_name"
-        "$HOME/Library/Caches/$app_name"
-        "$HOME/Library/Logs/$app_name"
+    # Standard path patterns for user-level files. App-name templates must never
+    # be built from an empty display name, otherwise dotdir/XDG paths collapse to
+    # broad roots like "$HOME/." or "$HOME/.config/".
+    local -a user_patterns=()
+    if [[ -n "$app_name" && ${#app_name} -ge 2 ]]; then
+        user_patterns+=(
+            "$HOME/Library/Application Support/$app_name"
+            "$HOME/Library/Caches/$app_name"
+            "$HOME/Library/Logs/$app_name"
+            "$HOME/Library/Preferences/$app_name"
+            "$HOME/Library/Preferences/$app_name.plist"
+            "$HOME/Library/Saved Application State/$app_name.savedState"
 
-        "$HOME/Library/Services/$app_name.workflow"
-        "$HOME/Library/QuickLook/$app_name.qlgenerator"
-        "$HOME/Library/Internet Plug-Ins/$app_name.plugin"
-        "$HOME/Library/Audio/Plug-Ins/Components/$app_name.component"
-        "$HOME/Library/Audio/Plug-Ins/VST/$app_name.vst"
-        "$HOME/Library/Audio/Plug-Ins/VST3/$app_name.vst3"
-        "$HOME/Library/Audio/Plug-Ins/Digidesign/$app_name.dpm"
-        "$HOME/Library/PreferencePanes/$app_name.prefPane"
-        "$HOME/Library/Input Methods/$app_name.app"
-        "$HOME/Library/Screen Savers/$app_name.saver"
-        "$HOME/Library/Frameworks/$app_name.framework"
-        "$HOME/Library/Contextual Menu Items/$app_name.plugin"
-        "$HOME/Library/Spotlight/$app_name.mdimporter"
-        "$HOME/Library/ColorPickers/$app_name.colorPicker"
-        "$HOME/Library/Workflows/$app_name.workflow"
-        "$HOME/.config/$app_name"
-        "$HOME/.local/share/$app_name"
-        "$HOME/.$app_name"
-        "$HOME/.$app_name"rc
-        "$HOME/Library/Address Book Plug-Ins/$app_name.bundle"
-        "$HOME/Library/Accessibility/$app_name.bundle"
-        "$HOME/Library/Mail/Bundles/$app_name.mailbundle"
-    )
+            "$HOME/Library/Services/$app_name.workflow"
+            "$HOME/Library/QuickLook/$app_name.qlgenerator"
+            "$HOME/Library/Internet Plug-Ins/$app_name.plugin"
+            "$HOME/Library/Audio/Plug-Ins/Components/$app_name.component"
+            "$HOME/Library/Audio/Plug-Ins/VST/$app_name.vst"
+            "$HOME/Library/Audio/Plug-Ins/VST3/$app_name.vst3"
+            "$HOME/Library/Audio/Plug-Ins/Digidesign/$app_name.dpm"
+            "$HOME/Library/PreferencePanes/$app_name.prefPane"
+            "$HOME/Library/Input Methods/$app_name.app"
+            "$HOME/Library/Screen Savers/$app_name.saver"
+            "$HOME/Library/Frameworks/$app_name.framework"
+            "$HOME/Library/Contextual Menu Items/$app_name.plugin"
+            "$HOME/Library/Spotlight/$app_name.mdimporter"
+            "$HOME/Library/ColorPickers/$app_name.colorPicker"
+            "$HOME/Library/Workflows/$app_name.workflow"
+            "$HOME/.config/$app_name"
+            "$HOME/.cache/$app_name"
+            "$HOME/.cache/$lowercase_name"
+            "$HOME/.local/share/$app_name"
+            "$HOME/.$app_name"
+            "$HOME/.$app_name"rc
+            "$HOME/Library/Address Book Plug-Ins/$app_name.bundle"
+            "$HOME/Library/Accessibility/$app_name.bundle"
+            "$HOME/Library/Mail/Bundles/$app_name.mailbundle"
+        )
+    fi
 
     if [[ "$bundle_id_valid" == "true" ]]; then
         user_patterns+=(
@@ -748,12 +758,22 @@ find_app_files() {
             "$HOME/Library/Application Support/$nospace_name"
             "$HOME/Library/Caches/$nospace_name"
             "$HOME/Library/Logs/$nospace_name"
+            "$HOME/Library/Preferences/$nospace_name"
+            "$HOME/Library/Preferences/$nospace_name.plist"
+            "$HOME/Library/Saved Application State/$nospace_name.savedState"
             "$HOME/Library/Application Support/$underscore_name"
             "$HOME/Library/Application Support/$hyphen_name"
+            "$HOME/Library/Preferences/$underscore_name"
+            "$HOME/Library/Preferences/$underscore_name.plist"
+            "$HOME/Library/Preferences/$hyphen_name"
+            "$HOME/Library/Preferences/$hyphen_name.plist"
             # Lowercase variants (maestrostudio, maestro-studio, maestro_studio)
             "$HOME/.config/$lowercase_nospace"
             "$HOME/.config/$lowercase_hyphen"
             "$HOME/.config/$lowercase_underscore"
+            "$HOME/.cache/$lowercase_nospace"
+            "$HOME/.cache/$lowercase_hyphen"
+            "$HOME/.cache/$lowercase_underscore"
             "$HOME/.local/share/$lowercase_nospace"
             "$HOME/.local/share/$lowercase_hyphen"
             "$HOME/.local/share/$lowercase_underscore"
@@ -766,7 +786,11 @@ find_app_files() {
             "$HOME/Library/Application Support/$base_name"
             "$HOME/Library/Caches/$base_name"
             "$HOME/Library/Logs/$base_name"
+            "$HOME/Library/Preferences/$base_name"
+            "$HOME/Library/Preferences/$base_name.plist"
+            "$HOME/Library/Saved Application State/$base_name.savedState"
             "$HOME/.config/$base_lowercase"
+            "$HOME/.cache/$base_lowercase"
             "$HOME/.local/share/$base_lowercase"
             "$HOME/.$base_lowercase"
         )
@@ -780,8 +804,10 @@ find_app_files() {
         done < <(command find "$HOME/Library/HTTPStorages" -maxdepth 1 -name "dev.zed.Zed-*" -print0 2> /dev/null)
     fi
 
-    # Process standard patterns
-    for p in "${user_patterns[@]}"; do
+    # Process standard patterns. user_patterns can be empty when app_name is
+    # too short and bundle_id is invalid; bash 3.2 under set -u treats an empty
+    # "${arr[@]}" expansion as an unbound variable, so use the +-guard idiom.
+    for p in "${user_patterns[@]+"${user_patterns[@]}"}"; do
         local expanded_path="${p/#\~/$HOME}"
         # Skip if path doesn't exist
         [[ ! -e "$expanded_path" ]] && continue
@@ -792,12 +818,18 @@ find_app_files() {
             */Library/Application\ Support | */Library/Application\ Support/ | \
                 */Library/Caches | */Library/Caches/ | \
                 */Library/Logs | */Library/Logs/ | \
+                */Library/Preferences | */Library/Preferences/ | \
+                */Library/Preferences/ByHost | */Library/Preferences/ByHost/ | \
                 */Library/Containers | */Library/Containers/ | \
                 */Library/WebKit | */Library/WebKit/ | \
                 */Library/HTTPStorages | */Library/HTTPStorages/ | \
                 */Library/Application\ Scripts | */Library/Application\ Scripts/ | \
                 */Library/Autosave\ Information | */Library/Autosave\ Information/ | \
-                */Library/Group\ Containers | */Library/Group\ Containers/)
+                */Library/Group\ Containers | */Library/Group\ Containers/ | \
+                */.config | */.config/ | \
+                */.cache | */.cache/ | \
+                */.local/share | */.local/share/ | \
+                "$HOME" | "$HOME"/ | "$HOME"/.)
                 continue
                 ;;
         esac
@@ -1109,7 +1141,10 @@ find_app_system_files() {
     local nospace_name="${app_name// /}"
     local underscore_name="${app_name// /_}"
     local hyphen_name="${app_name// /-}"
+    local lowercase_name=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+    local lowercase_nospace=$(echo "$nospace_name" | tr '[:upper:]' '[:lower:]')
     local lowercase_hyphen=$(echo "$hyphen_name" | tr '[:upper:]' '[:lower:]')
+    local lowercase_underscore=$(echo "$underscore_name" | tr '[:upper:]' '[:lower:]')
 
     # Standard system path patterns
     local -a system_patterns=(
@@ -1118,6 +1153,8 @@ find_app_system_files() {
         "/Library/LaunchAgents/$bundle_id.plist"
         "/Library/LaunchDaemons/$bundle_id.plist"
         "/Library/Preferences/$bundle_id.plist"
+        "/Library/Preferences/$app_name"
+        "/Library/Preferences/$app_name.plist"
         "/Library/Receipts/$bundle_id.bom"
         "/Library/Receipts/$bundle_id.plist"
         "/Library/Frameworks/$app_name.framework"
@@ -1147,6 +1184,12 @@ find_app_system_files() {
             "/Library/Logs/$nospace_name"
             "/Library/Application Support/$underscore_name"
             "/Library/Application Support/$hyphen_name"
+            "/Library/Preferences/$nospace_name"
+            "/Library/Preferences/$nospace_name.plist"
+            "/Library/Preferences/$underscore_name"
+            "/Library/Preferences/$underscore_name.plist"
+            "/Library/Preferences/$hyphen_name"
+            "/Library/Preferences/$hyphen_name.plist"
             "/Library/Caches/$hyphen_name"
             "/Library/Caches/$lowercase_hyphen"
         )
@@ -1160,7 +1203,8 @@ find_app_system_files() {
         case "$p" in
             /Library/Application\ Support | /Library/Application\ Support/ | \
                 /Library/Caches | /Library/Caches/ | \
-                /Library/Logs | /Library/Logs/)
+                /Library/Logs | /Library/Logs/ | \
+                /Library/Preferences | /Library/Preferences/)
                 continue
                 ;;
         esac
@@ -1230,6 +1274,33 @@ find_app_system_files() {
                 system_files+=("$receipt")
             fi
         done < <(command find /private/var/db/receipts -maxdepth 1 -print0 2> /dev/null)
+    fi
+
+    # Some vendors name privileged helpers after the product rather than the
+    # bundle id. System remnants are review-only in the CLI, but keep
+    # conservative name guards to avoid noisy system matches: reject common app
+    # words case-insensitively and require each matched variant to be at least
+    # 5 characters, since nospace variants can be shorter than app_name itself.
+    local -a helper_name_variants=()
+    if ! _mole_uninstall_is_common_app_name "$app_name"; then
+        local name_variant
+        for name_variant in "$lowercase_name" "$lowercase_nospace" "$lowercase_hyphen" "$lowercase_underscore"; do
+            if [[ ${#name_variant} -ge 5 ]]; then
+                helper_name_variants+=("$name_variant")
+            fi
+        done
+    fi
+    if [[ ${#helper_name_variants[@]} -gt 0 && -d /Library/PrivilegedHelperTools ]]; then
+        while IFS= read -r -d '' helper; do
+            local helper_name
+            local helper_lower
+            helper_name=$(basename "$helper")
+            [[ "$helper_name" =~ ^com\.apple\. ]] && continue
+            helper_lower=$(_mole_uninstall_lower "$helper_name")
+            if _mole_uninstall_name_variant_matches "$helper_lower" "${helper_name_variants[@]}"; then
+                system_files+=("$helper")
+            fi
+        done < <(command find /Library/PrivilegedHelperTools -maxdepth 1 -print0 2> /dev/null)
     fi
 
     # Raycast system-level files
