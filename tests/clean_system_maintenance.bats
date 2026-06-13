@@ -412,6 +412,111 @@ EOF
     [[ "$output" == *"Homebrew cleanup"* ]]
 }
 
+@test "clean_homebrew prevents cleanup from implicitly autoremoving formulae" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/brew.sh"
+
+mkdir -p "$HOME/.cache/mole" "$HOME/Library/Caches/Homebrew"
+rm -f "$HOME/.cache/mole/brew_last_cleanup"
+calls="$HOME/brew_calls.log"
+: > "$calls"
+
+start_inline_spinner(){ :; }
+stop_inline_spinner(){ :; }
+note_activity(){ :; }
+run_with_timeout() {
+    local duration="$1"
+    shift
+    printf 'CALL:%s env_no_autoremove=%s\n' "$*" "${HOMEBREW_NO_AUTOREMOVE:-}" >> "$calls"
+    if [[ "$1" == "du" ]]; then
+        echo "51201 $3"
+        return 0
+    fi
+    "$@"
+}
+
+brew() {
+    case "$*" in
+        "cleanup --prune=30")
+            echo "Removing: package"
+            return 0
+            ;;
+        "autoremove --dry-run")
+            echo "==> Would autoremove 1 unneeded formula:"
+            echo "python@3.14"
+            return 0
+            ;;
+        "autoremove")
+            echo "REAL_AUTOREMOVE"
+            return 0
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+clean_homebrew
+cat "$calls"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CALL:brew cleanup --prune=30 env_no_autoremove=1"* ]]
+    [[ "$output" == *"Homebrew autoremove would remove"* ]]
+    [[ "$output" == *"python@3.14"* ]]
+    [[ "$output" == *"Homebrew autoremove skipped"* ]]
+    [[ "$output" == *"CALL:brew autoremove --dry-run"* ]]
+    [[ "$output" != *"REAL_AUTOREMOVE"* ]]
+}
+
+@test "clean_homebrew dry-run shows brew autoremove preview without removing formulae" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/brew.sh"
+
+calls="$HOME/brew_dry_run_calls.log"
+: > "$calls"
+
+DRY_RUN=true
+run_with_timeout() {
+    local duration="$1"
+    shift
+    printf 'CALL:%s\n' "$*" >> "$calls"
+    "$@"
+}
+brew() {
+    case "$*" in
+        "autoremove --dry-run")
+            echo "==> Would autoremove 1 unneeded formula:"
+            echo "python@3.14"
+            return 0
+            ;;
+        "autoremove")
+            echo "REAL_AUTOREMOVE"
+            return 0
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+clean_homebrew
+cat "$calls"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Homebrew · would cleanup"* ]]
+    [[ "$output" == *"Homebrew autoremove would remove"* ]]
+    [[ "$output" == *"python@3.14"* ]]
+    [[ "$output" == *"CALL:brew autoremove --dry-run"* ]]
+    [[ "$output" != *"CALL:brew cleanup --prune=30"* ]]
+    [[ "$output" != *"REAL_AUTOREMOVE"* ]]
+}
+
 @test "run_with_timeout succeeds without GNU timeout" {
     run bash --noprofile --norc -c '
         set -euo pipefail
