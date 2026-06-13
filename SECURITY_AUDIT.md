@@ -1,6 +1,6 @@
 # Mole Security Audit
 
-This document describes the security-relevant behavior of the current `main` branch, updated for V1.42.0 on 2026-06-08. It is intended as a public description of Mole's safety boundaries, destructive-operation controls, release integrity signals, and known limitations.
+This document describes the security-relevant behavior of the current `main` branch, updated for V1.43.0 on 2026-06-13. It is intended as a public description of Mole's safety boundaries, destructive-operation controls, release integrity signals, and known limitations.
 
 ## Executive Summary
 
@@ -55,6 +55,7 @@ Core controls include:
 - uninstall removal flows that move items to Trash use `mole_delete`, which validates the path again and records the operation result. `mole_delete` now also validates symlinks instead of skipping them, and normalizes the target by collapsing repeated slashes and stripping a trailing slash before the protected-path check, so equivalent path spellings cannot slip past protection.
 - incomplete download cleanup skips files currently open (lsof check) and uses quoted glob patterns to prevent word-splitting on filenames that contain spaces
 - stale LaunchServices cleanup in `mo clean` (`lib/clean/launch_services.sh`) only unregisters records with `lsregister -u` and never deletes files; it acts on an entry only when the dump marks it `Bundle node not found on disk` and the referenced `.app` is confirmed absent (`[[ ! -e ]]`), rejects `/System`, `/Library/Apple`, `..` traversal, and newline/carriage-return paths, honors dry-run, is bounded by `MOLE_LAUNCH_SERVICES_STALE_LIMIT` (default 50), and never performs a global `lsregister -r -f` rebuild
+- orphaned system-service cleanup in `mo clean` (`lib/clean/apps.sh` `clean_orphaned_system_services`) runs only when sudo is already available, scans `/Library/{LaunchDaemons,LaunchAgents,PrivilegedHelperTools}` while skipping `com.apple.*`, and flags an entry only when its launchd `Program`/`ProgramArguments[0]` path is absolute and missing, or a `PrivilegedHelperTools` helper whose parent app is uninstalled (`bundle_has_installed_app`). Package-manager and system binary locations, a known-helper protect list, mdfind-resolved installed apps, the whitelist, and `should_protect_path` (with `SYSTEM_CRITICAL_BUNDLES` still enforced) all exclude entries before removal. Root-owned plists are read with non-interactive sudo and fail closed, so an unreadable plist is never misread as a missing binary; removal runs `launchctl unload` then the guarded `safe_sudo_remove`, and honors dry-run (issue #1082)
 
 Blocked paths remain protected even with sudo. Examples include:
 
