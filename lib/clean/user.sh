@@ -822,7 +822,11 @@ clean_app_caches() {
     safe_clean ~/Library/Containers/com.apple.wallpaper.extension.aerials/Data/tmp/* "Wallpaper aerials temp files"
     safe_clean ~/Library/Containers/com.apple.geod/Data/tmp/* "Geod temp files"
     safe_clean ~/Library/Containers/com.apple.stocks/Data/Library/Caches/* "Stocks cache"
-    safe_clean ~/Library/Application\ Support/com.apple.wallpaper/aerials/thumbnails/* "Wallpaper aerials thumbnails"
+    # Do NOT clean ~/Library/Application Support/com.apple.wallpaper/aerials/
+    # thumbnails: those ~50KB PNGs are the wallpaper "cover" previews shown in
+    # System Settings > Wallpaper. Deleting them reclaims almost nothing yet
+    # blanks every cover into a cloud-download placeholder and forces a
+    # re-download on the next open (issue #1118).
     safe_clean ~/Library/Caches/com.apple.helpd/* "macOS Help system cache"
     safe_clean ~/Library/Caches/GeoServices/* "Maps geo tile cache"
     safe_clean ~/Library/Containers/com.apple.AvatarUI.AvatarPickerMemojiPicker/Data/Library/Caches/* "Memoji picker cache"
