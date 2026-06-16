@@ -39,6 +39,7 @@ readonly MOLE_UNINSTALL_EPOCH_FLOOR=978307200
 # Display-name mdls lookup budget during scan; overridable for slow disks or
 # cold Spotlight.
 readonly MOLE_UNINSTALL_INLINE_MDLS_DISPLAY_TIMEOUT_SEC="${MOLE_UNINSTALL_INLINE_MDLS_DISPLAY_TIMEOUT_SEC:-0.04}"
+readonly MOLE_UNINSTALL_INLINE_MDLS_SIZE_TIMEOUT_SEC="${MOLE_UNINSTALL_INLINE_MDLS_SIZE_TIMEOUT_SEC:-0.04}"
 
 uninstall_normalize_size_display() {
     local size="${1:-}"
@@ -58,6 +59,23 @@ uninstall_normalize_last_used_display() {
         return 0
     fi
     echo "$display"
+}
+
+uninstall_quick_app_size_kb() {
+    local app_path="$1"
+    [[ -n "$app_path" && -d "$app_path" ]] || {
+        echo "0"
+        return 0
+    }
+
+    local logical_size
+    logical_size=$(run_with_timeout "$MOLE_UNINSTALL_INLINE_MDLS_SIZE_TIMEOUT_SEC" mdls -name kMDItemLogicalSize -raw "$app_path" 2> /dev/null || echo "")
+    if [[ "$logical_size" =~ ^[0-9]+$ && "$logical_size" -gt 0 ]]; then
+        echo $(((logical_size + 1023) / 1024))
+        return 0
+    fi
+
+    echo "0"
 }
 
 uninstall_resolve_display_name() {
@@ -557,12 +575,14 @@ _scan_partition_cache() {
         local cached_app_mtime="$2"
         local cached_bundle_id="$3"
         local cached_display_name="$4"
+        local cached_size_kb="$5"
 
         [[ -n "$cached_bundle_id" && -n "$cached_display_name" ]] || return 1
+        [[ "$cached_size_kb" =~ ^[0-9]+$ && "$cached_size_kb" -gt 0 ]] || return 1
 
         cached_bundle_id=$(uninstall_resolve_eligible_bundle_id "$cached_app_path" "$cached_bundle_id") || return 1
 
-        printf "%s|%s|%s|%s\n" "$cached_app_path" "$cached_display_name" "$cached_bundle_id" "$cached_app_mtime" >> "$scan_raw_file"
+        printf "%s|%s|%s|%s|%s\n" "$cached_app_path" "$cached_display_name" "$cached_bundle_id" "$cached_app_mtime" "$cached_size_kb" >> "$scan_raw_file"
         return 0
     }
 
@@ -570,6 +590,7 @@ _scan_partition_cache() {
         awk -F'|' -v cached_out="$cached_rows_file" -v uncached_out="$uncached_rows_file" '
             FILENAME == ARGV[1] {
                 cache_mtime[$1] = $2
+                cache_size[$1] = $3
                 cache_bundle[$1] = $6
                 cache_display[$1] = $7
                 next
@@ -577,18 +598,18 @@ _scan_partition_cache() {
             {
                 path = $1
                 app_mtime = $3
-                if (cache_mtime[path] == app_mtime && cache_display[path] != "") {
+                if (cache_mtime[path] == app_mtime && cache_display[path] != "" && cache_size[path] ~ /^[0-9]+$/ && cache_size[path] > 0) {
                     cached_bundle = cache_bundle[path] == "" ? "unknown" : cache_bundle[path]
-                    print path "|" app_mtime "|" cached_bundle "|" cache_display[path] >> cached_out
+                    print path "|" app_mtime "|" cached_bundle "|" cache_display[path] "|" cache_size[path] >> cached_out
                 } else {
                     print path "|" $2 "|" app_mtime "|" cache_bundle[path] "|" cache_display[path] >> uncached_out
                 }
             }
         ' "$cache_source" "$discovered_file"
 
-        local cached_app_path cached_app_mtime cached_bundle_id cached_display_name
-        while IFS='|' read -r cached_app_path cached_app_mtime cached_bundle_id cached_display_name; do
-            use_cached_scan_metadata "$cached_app_path" "$cached_app_mtime" "$cached_bundle_id" "$cached_display_name" || true
+        local cached_app_path cached_app_mtime cached_bundle_id cached_display_name cached_size_kb
+        while IFS='|' read -r cached_app_path cached_app_mtime cached_bundle_id cached_display_name cached_size_kb; do
+            use_cached_scan_metadata "$cached_app_path" "$cached_app_mtime" "$cached_bundle_id" "$cached_display_name" "$cached_size_kb" || true
         done < "$cached_rows_file"
 
         local uncached_app_path uncached_app_name uncached_app_mtime uncached_bundle_id uncached_display_name
@@ -634,7 +655,11 @@ _scan_resolve_uncached() {
         display_name="${display_name//|/-}"
         display_name="${display_name//[$'\t\r\n']/}"
 
-        echo "${app_path}|${display_name}|${bundle_id}|${app_mtime}" >> "$output_file"
+        local quick_size_kb
+        quick_size_kb=$(uninstall_quick_app_size_kb "$app_path")
+        [[ "$quick_size_kb" =~ ^[0-9]+$ ]] || quick_size_kb=0
+
+        echo "${app_path}|${display_name}|${bundle_id}|${app_mtime}|${quick_size_kb}" >> "$output_file"
     }
 
     update_scan_status "Scanning applications..." "0" "$total_apps"
@@ -827,12 +852,23 @@ _scan_finalize_index() {
                 display_name = $2
                 bundle_id = $3
                 app_mtime = $4
-                cached_mtime = $5
-                cached_size_kb = $6
-                cached_epoch = $7
-                cached_updated_epoch = $8
-                cached_bundle_id = $9
-                cached_display_name = $10
+                if (NF >= 11) {
+                    inline_size_kb = $5
+                    cached_mtime = $6
+                    cached_size_kb = $7
+                    cached_epoch = $8
+                    cached_updated_epoch = $9
+                    cached_bundle_id = $10
+                    cached_display_name = $11
+                } else {
+                    inline_size_kb = 0
+                    cached_mtime = $5
+                    cached_size_kb = $6
+                    cached_epoch = $7
+                    cached_updated_epoch = $8
+                    cached_bundle_id = $9
+                    cached_display_name = $10
+                }
 
                 cache_match = (cached_mtime != "" && app_mtime != "" && cached_mtime == app_mtime)
 
@@ -845,6 +881,9 @@ _scan_finalize_index() {
                 }
 
                 final_size_kb = (isnum(cached_size_kb) && cached_size_kb > 0) ? cached_size_kb : 0
+                if ((!isnum(final_size_kb) || final_size_kb <= 0) && isnum(inline_size_kb) && inline_size_kb > 0) {
+                    final_size_kb = inline_size_kb
+                }
                 final_size = human_size(final_size_kb)
                 final_last_used = relative_time(final_epoch, now)
 

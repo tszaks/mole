@@ -86,7 +86,7 @@ PLIST
 	app_mtime="$(stat -f %m "$apps_root/TestApp.app")"
 	cache_dir="$HOME/.cache/mole"
 	mkdir -p "$cache_dir"
-	printf '%s|%s|0|0|0|com.test.TestApp|TestApp\n' \
+	printf '%s|%s|4|0|0|com.test.TestApp|TestApp\n' \
 		"$apps_root/TestApp.app" "$app_mtime" \
 		> "$cache_dir/uninstall_app_metadata_v1"
 
@@ -150,6 +150,42 @@ EOF
 	# the inverted status explicitly so the assertion is portable.
 	run grep -q 'unbound variable' "$HOME/scan.err"
 	[ "$status" -ne 0 ]
+}
+
+@test "scan_applications surfaces inline app size before deferred refresh (#1126)" {
+	src="$HOME/uninstall_source.sh"
+	sourceable_uninstall_sh "$src"
+
+	apps_root="$HOME/Applications"
+	app_path="$apps_root/SizedApp.app"
+	create_test_app_bundle "$app_path" "com.example.SizedApp" "SizedApp"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+		MOLE_TEST_NO_AUTH=1 APPS_ROOT="$apps_root" SRC_PATH="$src" \
+		MOLE_UNINSTALL_INLINE_MDLS_DISPLAY_TIMEOUT_SEC=0 \
+		MOLE_UNINSTALL_INLINE_MDLS_SIZE_TIMEOUT_SEC=0 \
+		/bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+# shellcheck source=/dev/null
+source "$SRC_PATH"
+
+uninstall_print_app_search_dirs() { printf '%s\n' "$APPS_ROOT"; }
+mdls() {
+    if [[ "${2:-}" == "kMDItemLogicalSize" ]]; then
+        printf '4096\n'
+        return 0
+    fi
+    printf '(null)\n'
+}
+
+apps_file=$(scan_applications)
+cat "$apps_file"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"|$app_path|SizedApp|com.example.SizedApp|4KB|"* ]]
+	[[ "$output" == *"|4" ]]
 }
 
 @test "scan_applications includes Artpaper's two-segment bundle id (#861)" {

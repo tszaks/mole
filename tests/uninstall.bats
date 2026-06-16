@@ -1649,6 +1649,89 @@ INNER
 	[[ "$output" != *"result=0"* ]]
 }
 
+@test "paginated menu skips Size sort when size metadata is unavailable (#1126)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/ui/menu_paginated.sh"
+
+key_state="$HOME/menu-no-size-state"
+read_key() {
+    local n
+    n=$(cat "$key_state" 2> /dev/null || echo 0)
+    n=$((n + 1))
+    printf '%s\n' "$n" > "$key_state"
+    case "$n" in
+        1 | 2) echo "CHAR:S" ;;
+        *) echo "ENTER" ;;
+    esac
+}
+
+MOLE_SELECTION_RESULT=""
+unset MOLE_MENU_SORT_MODE MOLE_MENU_SORT_REVERSE MOLE_MENU_META_SIZEKB
+set +e
+MOLE_MENU_META_EPOCHS="100,200" paginated_multi_select "Test Menu" "Alpha" "Beta" > "$HOME/menu.out" 2> "$HOME/menu.err"
+rc=$?
+set -e
+echo "rc=$rc"
+echo "mode=${MOLE_MENU_SORT_MODE:-}"
+echo "result=${MOLE_SELECTION_RESULT:-}"
+[[ $rc -eq 0 ]]
+INNER
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"rc=0"* ]]
+	[[ "$output" == *"mode=date"* ]]
+	[[ "$output" == *"result=0"* ]]
+}
+
+@test "paginated menu reverses Size order when size metadata is available (#1126)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/ui/menu_paginated.sh"
+
+key_state="$HOME/menu-size-state"
+read_key() {
+    local n
+    n=$(cat "$key_state" 2> /dev/null || echo 0)
+    n=$((n + 1))
+    printf '%s\n' "$n" > "$key_state"
+    case "$n" in
+        1) echo "${NEXT_KEY:-ENTER}" ;;
+        *) echo "ENTER" ;;
+    esac
+}
+
+MOLE_SELECTION_RESULT=""
+set +e
+MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-default.out" 2> "$HOME/menu-default.err"
+default_rc=$?
+set -e
+echo "default=${MOLE_SELECTION_RESULT:-}"
+
+: > "$key_state"
+MOLE_SELECTION_RESULT=""
+set +e
+NEXT_KEY="CHAR:O" MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-reverse.out" 2> "$HOME/menu-reverse.err"
+reverse_rc=$?
+set -e
+echo "default_rc=$default_rc"
+echo "reverse_rc=$reverse_rc"
+echo "reverse=${MOLE_SELECTION_RESULT:-}"
+[[ $default_rc -eq 0 ]]
+[[ $reverse_rc -eq 0 ]]
+INNER
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"default_rc=0"* ]]
+	[[ "$output" == *"reverse_rc=0"* ]]
+	[[ "$output" == *"default=1"* ]]
+	[[ "$output" == *"reverse=0"* ]]
+}
+
 @test "main rescans cleanly after returning from a completed uninstall (#866)" {
 	local first_cache second_cache
 	first_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-866-first.XXXXXX")"
@@ -1900,7 +1983,7 @@ INNER
 	[[ "${output: -1}" == "]" ]]
 	# Round-trip via python to confirm it parses as JSON.
 	if command -v python3 > /dev/null; then
-		echo "$output" | python3 -c 'import sys, json; d=json.load(sys.stdin); assert isinstance(d, list) and len(d)==1 and d[0]["name"]=="Slack"'
+		printf '%s\n' "$output" | python3 -c 'import sys, json; d=json.load(sys.stdin); assert isinstance(d, list) and len(d)==1 and d[0]["name"]=="Slack"'
 	fi
 }
 

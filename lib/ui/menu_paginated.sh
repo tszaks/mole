@@ -101,13 +101,22 @@ paginated_multi_select() {
     local -a sizekb=()
     local -a filter_names=()
     local has_metadata="false"
+    local has_epoch_metadata="false"
+    local has_size_metadata="false"
     local has_filter_names="false"
     if [[ -n "${MOLE_MENU_META_EPOCHS:-}" ]]; then
-        while IFS= read -r v; do epochs+=("${v:-0}"); done < <(_pm_parse_csv_to_array "$MOLE_MENU_META_EPOCHS")
-        has_metadata="true"
+        while IFS= read -r v; do
+            epochs+=("${v:-0}")
+            [[ "${v:-0}" =~ ^[0-9]+$ && "${v:-0}" -gt 0 ]] && has_epoch_metadata="true"
+        done < <(_pm_parse_csv_to_array "$MOLE_MENU_META_EPOCHS")
     fi
     if [[ -n "${MOLE_MENU_META_SIZEKB:-}" ]]; then
-        while IFS= read -r v; do sizekb+=("${v:-0}"); done < <(_pm_parse_csv_to_array "$MOLE_MENU_META_SIZEKB")
+        while IFS= read -r v; do
+            sizekb+=("${v:-0}")
+            [[ "${v:-0}" =~ ^[0-9]+$ && "${v:-0}" -gt 0 ]] && has_size_metadata="true"
+        done < <(_pm_parse_csv_to_array "$MOLE_MENU_META_SIZEKB")
+    fi
+    if [[ "$has_epoch_metadata" == "true" || "$has_size_metadata" == "true" ]]; then
         has_metadata="true"
     fi
     if [[ -n "${MOLE_MENU_FILTER_NAMES:-}" ]]; then
@@ -115,9 +124,49 @@ paginated_multi_select() {
         has_filter_names="true"
     fi
 
-    # If no metadata, force name sorting and disable sorting controls
-    if [[ "$has_metadata" == "false" && "$sort_mode" != "name" ]]; then
+    sort_mode_available() {
+        case "$1" in
+            date) [[ "$has_epoch_metadata" == "true" ]] ;;
+            size) [[ "$has_size_metadata" == "true" ]] ;;
+            name) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+
+    normalize_sort_mode() {
+        sort_mode_available "$sort_mode" && return 0
+        if [[ "$has_epoch_metadata" == "true" ]]; then
+            sort_mode="date"
+        elif [[ "$has_size_metadata" == "true" ]]; then
+            sort_mode="size"
+        else
+            sort_mode="name"
+        fi
+    }
+
+    cycle_sort_mode() {
+        local candidate
+        case "$sort_mode" in
+            date) set -- name size date ;;
+            name) set -- size date name ;;
+            size) set -- date name size ;;
+            *) set -- date name size ;;
+        esac
+
+        for candidate in "$@"; do
+            if sort_mode_available "$candidate"; then
+                sort_mode="$candidate"
+                return 0
+            fi
+        done
         sort_mode="name"
+    }
+
+    # If no metadata, force name sorting and disable sorting controls.
+    if [[ "$has_metadata" == "false" ]]; then
+        sort_mode="name"
+    else
+        normalize_sort_mode
     fi
 
     # Index mappings
@@ -260,7 +309,7 @@ paginated_multi_select() {
     local -a filter_cache_indices=()
 
     ensure_sorted_indices() {
-        local requested_key="${sort_mode}:${sort_reverse}:${has_metadata}"
+        local requested_key="${sort_mode}:${sort_reverse}:${has_epoch_metadata}:${has_size_metadata}"
         if [[ "$requested_key" == "$sort_cache_key" && ${#sorted_indices_cache[@]} -gt 0 ]]; then
             return
         fi
@@ -791,11 +840,7 @@ paginated_multi_select() {
                 if handle_filter_char "${key#CHAR:}"; then
                     : # Handled as filter input
                 elif [[ "$has_metadata" == "true" ]]; then
-                    case "$sort_mode" in
-                        date) sort_mode="name" ;;
-                        name) sort_mode="size" ;;
-                        size) sort_mode="date" ;;
-                    esac
+                    cycle_sort_mode
                     rebuild_view
                     need_full_redraw=true
                 fi
