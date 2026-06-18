@@ -648,10 +648,48 @@ _path_belongs_to_independent_cli() {
     return 1
 }
 
+_mole_uninstall_embedded_bundle_ids() {
+    local app_path="${1:-}"
+    local primary_bundle_id="${2:-}"
+    local max_info_plists=128
+    local scanned=0
+
+    [[ -n "$app_path" && -d "$app_path/Contents" ]] || return 0
+    [[ "$app_path" == /* && "$app_path" != *$'\n'* && "$app_path" != *"/.."* ]] || return 0
+
+    local info bundle_root bundle_name ext embedded_id
+    while IFS= read -r -d '' info; do
+        scanned=$((scanned + 1))
+        [[ $scanned -le $max_info_plists ]] || break
+
+        bundle_root="${info%/Contents/Info.plist}"
+        [[ "$bundle_root" != "$app_path" ]] || continue
+        bundle_name="${bundle_root##*/}"
+        ext=$(printf '%s' "${bundle_name##*.}" | tr '[:upper:]' '[:lower:]')
+
+        case "$ext" in
+            xpc | appex) ;;
+            app)
+                case "$bundle_root" in
+                    "$app_path/Contents/Library/LoginItems/"*) ;;
+                    *) continue ;;
+                esac
+                ;;
+            *) continue ;;
+        esac
+
+        embedded_id=$(plutil -extract CFBundleIdentifier raw "$info" 2> /dev/null || true)
+        mole_is_reverse_dns_bundle_id "$embedded_id" || continue
+        [[ "$embedded_id" == "$primary_bundle_id" ]] && continue
+        printf '%s\n' "$embedded_id"
+    done < <(command find "$app_path/Contents" -maxdepth 12 -type f -path "*/Contents/Info.plist" -print0 2> /dev/null || true) | sort -u
+}
+
 # Locate files associated with an application
 find_app_files() {
     local bundle_id="$1"
     local app_name="$2"
+    local app_path="${3:-}"
 
     # Early validation: require at least one valid identifier
     # Skip scanning if both bundle_id and app_name are invalid
@@ -919,12 +957,43 @@ find_app_files() {
         done
     fi
 
-    # Shared file lists (.sfl4 - recent documents etc.)
+    # Shared file lists (recent documents etc.). Keep the root exact: only
+    # per-app ApplicationRecentDocuments files named by bundle id are owned by
+    # the uninstall target.
     if [[ "$bundle_id_valid" == "true" ]] &&
-        [[ -d "$HOME/Library/Application Support/com.apple.sharedfilelist" ]]; then
-        while IFS= read -r -d '' sfl4_file; do
-            files_to_clean+=("$sfl4_file")
-        done < <(command find "$HOME/Library/Application Support/com.apple.sharedfilelist" -maxdepth 2 -name "${bundle_id}.sfl4" -print0 2> /dev/null)
+        [[ -d "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments" ]]; then
+        while IFS= read -r -d '' sfl_file; do
+            files_to_clean+=("$sfl_file")
+        done < <(command find "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments" \
+            -maxdepth 1 -type f \
+            \( -name "${bundle_id}.sfl2" -o -name "${bundle_id}.sfl3" -o -name "${bundle_id}.sfl4" \) \
+            -print0 2> /dev/null)
+    fi
+
+    # Helper extensions and XPC services can persist their own bundle-id keyed
+    # user data. Read only bounded embedded bundle ids from the selected app,
+    # then map them to exact ~/Library paths. Keep this stricter than the Mac
+    # app's review-only scanner because CLI leftovers are deletable after the
+    # single uninstall confirmation.
+    if [[ "$bundle_id_valid" == "true" && -n "$app_path" ]]; then
+        local embedded_id embedded_candidate
+        while IFS= read -r embedded_id; do
+            [[ -n "$embedded_id" ]] || continue
+            for embedded_candidate in \
+                "$HOME/Library/Application Scripts/$embedded_id" \
+                "$HOME/Library/Application Support/FileProvider/$embedded_id" \
+                "$HOME/Library/Caches/$embedded_id" \
+                "$HOME/Library/Containers/$embedded_id" \
+                "$HOME/Library/HTTPStorages/$embedded_id" \
+                "$HOME/Library/HTTPStorages/$embedded_id.binarycookies" \
+                "$HOME/Library/Preferences/$embedded_id.plist" \
+                "$HOME/Library/WebKit/$embedded_id"; do
+                [[ -e "$embedded_candidate" ]] && files_to_clean+=("$embedded_candidate")
+            done
+            [[ -d "$HOME/Library/Preferences/ByHost" ]] && while IFS= read -r -d '' embedded_candidate; do
+                files_to_clean+=("$embedded_candidate")
+            done < <(command find "$HOME/Library/Preferences/ByHost" -maxdepth 1 -type f -name "${embedded_id}.*.plist" -print0 2> /dev/null)
+        done < <(_mole_uninstall_embedded_bundle_ids "$app_path" "$bundle_id")
     fi
 
     # Launch Agents by name (special handling)

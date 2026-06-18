@@ -73,6 +73,65 @@ EOF
 	[[ "$result" == *".cache/testapp"* ]]
 }
 
+@test "find_app_files discovers recent-document shared file lists by bundle id" {
+	mkdir -p "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments"
+	touch "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments/com.rogueamoeba.soundsource.sfl2"
+	touch "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments/com.rogueamoeba.soundsource.sfl3"
+	touch "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments/com.rogueamoeba.soundsource.sfl4"
+	touch "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments/com.apple.systemsettings.sfl3"
+
+	result="$(
+		HOME="$HOME" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+find_app_files "com.rogueamoeba.soundsource" "SoundSource"
+EOF
+	)"
+
+	[[ "$result" == *"com.rogueamoeba.soundsource.sfl2"* ]]
+	[[ "$result" == *"com.rogueamoeba.soundsource.sfl3"* ]]
+	[[ "$result" == *"com.rogueamoeba.soundsource.sfl4"* ]]
+	[[ "$result" != *"com.apple.systemsettings.sfl3"* ]]
+}
+
+@test "find_app_files discovers nested XPC helper preferences from selected app" {
+	app="$HOME/Applications/SoundSource.app"
+	mkdir -p "$app/Contents/Frameworks/RemoteAU.framework/Versions/A/XPCServices/RemoteAUHost.xpc/Contents"
+	mkdir -p "$app/Contents/Frameworks/Sparkle.framework/Versions/A/Resources/Autoupdate.app/Contents"
+	mkdir -p "$HOME/Library/Caches/com.rogueamoeba.RemoteAUHost"
+	mkdir -p "$HOME/Library/Caches/com.rogueamoeba.RemoteAUHost.shared"
+	mkdir -p "$HOME/Library/Preferences"
+	cat > "$app/Contents/Frameworks/RemoteAU.framework/Versions/A/XPCServices/RemoteAUHost.xpc/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.rogueamoeba.RemoteAUHost</string>
+</dict></plist>
+PLIST
+	cat > "$app/Contents/Frameworks/Sparkle.framework/Versions/A/Resources/Autoupdate.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>org.sparkle-project.Sparkle.Autoupdate</string>
+</dict></plist>
+PLIST
+	touch "$HOME/Library/Preferences/com.rogueamoeba.RemoteAUHost.plist"
+	touch "$HOME/Library/Preferences/org.sparkle-project.Sparkle.Autoupdate.plist"
+
+	result="$(
+		HOME="$HOME" APP="$app" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+find_app_files "com.rogueamoeba.soundsource" "SoundSource" "$APP"
+EOF
+	)"
+
+	[[ "$result" == *"Library/Preferences/com.rogueamoeba.RemoteAUHost.plist"* ]]
+	[[ "$result" == *"Library/Caches/com.rogueamoeba.RemoteAUHost"* ]]
+	[[ "$result" != *"Library/Caches/com.rogueamoeba.RemoteAUHost.shared"* ]]
+	[[ "$result" != *"org.sparkle-project.Sparkle.Autoupdate.plist"* ]]
+}
+
 @test "find_app_system_files discovers bundle-id-prefixed LaunchDaemons" {
 	fakebin="$HOME/fakebin"
 	mkdir -p "$fakebin"
