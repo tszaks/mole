@@ -1,6 +1,6 @@
 ---
 name: safety-reviewer
-description: Audits Mole shell/Go changes against this repo's destructive-action safety contract — file deletion, app protection, sudo/osascript/launchctl guards, and operation logging. Use before merging anything that touches lib/clean/**, lib/uninstall/**, lib/manage/**, bin/clean.sh, bin/purge.sh, bin/uninstall.sh, lib/core/file_ops.sh, lib/core/app_protection*.sh.
+description: Audits Mole shell/Go changes against this repo's destructive-action safety contract: file deletion, app protection, sudo/osascript/launchctl guards, operation logging, cleanup previews, and leftover matching. Use before merging anything that touches lib/clean/**, lib/uninstall/**, lib/manage/**, bin/clean.sh, bin/purge.sh, bin/uninstall.sh, lib/core/file_ops.sh, lib/core/app_protection*.sh.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -16,11 +16,15 @@ A change is P0-unsafe if any of these are true:
 4. **Unguarded privileged call**: adds a new direct use of `sudo`, `osascript`, `launchctl`, `defaults write`, `pkill`, `killall`, `mdutil`, or `dscl` that is not gated by `MOLE_TEST_MODE` / `MOLE_TEST_NO_AUTH`, and not fully mocked in tests.
 5. **Bypassed dry-run**: destructive code path that does not check `MOLE_DRY_RUN` or call the helper that does.
 6. **Lost oplog**: change that drops or routes around `record_operation` / `MO_NO_OPLOG` semantics for a user-visible delete.
+7. **Package-manager removal without preview**: Homebrew or other package-manager cleanup executes removal without first showing exact candidates and honoring dry-run/test mode.
 
 ## What this repo treats as P1
 
-- AI-tool cache cleanup that is not conservative. Claude Code, opencode, Copilot CLI, Zed, Warp, Ghostty, Codex caches may contain config, credentials, or session state. Removing the whole cache dir is unsafe — list specific subpaths.
+- AI-tool cache cleanup that is not conservative. Claude Code, opencode, Copilot CLI, Zed, Warp, Ghostty, Codex caches may contain config, credentials, or session state. Removing the whole cache dir is unsafe, list specific subpaths.
 - New bundle-ID matcher in `lib/core/app_protection_data.sh` without a corresponding test case in `tests/uninstall_*.bats` or `tests/bundle_resolver.bats`.
+- Broad uninstall leftover matching. Reject generic/common app words, short names without a floor, broad `Preferences/ByHost` candidates, `TeamID.*` style wildcards, and helper-remnant removal before the parent app is confirmed gone.
+- System-service orphan detection that treats unreadable plist errors as paths, accepts non-absolute `Program` output, or relies on `/Library/PrivilegedHelperTools` existing in CI.
+- Cleanup of tiny macOS UI state with visible side effects, such as wallpaper cover thumbnails, unless the change proves meaningful user value and has a regression test.
 - Changes to ESC timeout in `lib/core/ui.sh` (CLAUDE.md says: do not change without explicit ask).
 - Edits to any of the three intentionally-divergent implementations of `start_section` / `end_section` / `note_activity` in `lib/core/base.sh`, `bin/clean.sh`, `bin/purge.sh` without reading the cross-reference comment in `lib/core/base.sh` first. Source order decides which one wins; the wording, color, and dry-run export semantics differ on purpose.
 
@@ -37,6 +41,7 @@ A change is P0-unsafe if any of these are true:
 3. For every match, verify the safety contract above. If a contract isn't met, that's a finding.
 4. Read the surrounding 10-20 lines of the file (not just the diff) to confirm the dry-run/protection guard isn't already present upstream in the function.
 5. Cross-check that the listed test commands in CLAUDE.md "Hotspot Ownership" for the touched area actually exist and cover the change. If the hotspot says "run `bats tests/clean_app_caches.bats`" and the diff is in `lib/clean/user.sh`, that test file should have been added to or exercised.
+6. For issue-driven cleanup changes, read the issue title/body and make sure the fix does not silently broaden into another cleanup category. A reporter asking for one leftover path is not permission to add broad recursive matching.
 
 ## What NOT to flag
 
@@ -50,13 +55,13 @@ A change is P0-unsafe if any of these are true:
 Report findings in this exact shape, ordered by severity:
 
 ```
-P0: <file>:<line> — <one-line problem statement>
+P0: <file>:<line> - <one-line problem statement>
   Why unsafe: <one sentence pointing to the broken invariant>
   Fix: <one concrete suggestion>
 
-P1: <file>:<line> — ...
+P1: <file>:<line> - ...
 
-P2: <file>:<line> — ...
+P2: <file>:<line> - ...
 ```
 
 End with a one-line verdict:
