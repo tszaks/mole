@@ -213,6 +213,37 @@ get_latest_commit_from_github() {
     echo "$sha"
 }
 
+mole_update_message_cache_is_current() {
+    local msg_cache="$1"
+    [[ -f "$msg_cache" && -s "$msg_cache" ]] || return 1
+
+    local mole_path
+    mole_path=$(resolve_mole_source_path || true)
+    [[ -n "$mole_path" && -e "$mole_path" ]] || return 0
+
+    local cache_mtime mole_mtime
+    cache_mtime=$(get_file_mtime "$msg_cache")
+    mole_mtime=$(get_file_mtime "$mole_path")
+
+    if [[ "$cache_mtime" =~ ^[0-9]+$ && "$mole_mtime" =~ ^[0-9]+$ &&
+        "$cache_mtime" -gt 0 && "$mole_mtime" -gt 0 &&
+        "$cache_mtime" -lt "$mole_mtime" ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+read_update_message_cache() {
+    local msg_cache="$1"
+    if mole_update_message_cache_is_current "$msg_cache"; then
+        cat "$msg_cache" 2> /dev/null || echo ""
+    else
+        : > "$msg_cache" 2> /dev/null || true
+        echo ""
+    fi
+}
+
 # Background update notice
 check_for_updates() {
     local msg_cache="$HOME/.cache/mole/update_message"
@@ -917,9 +948,7 @@ interactive_main_menu() {
     brand_banner="$(show_brand_banner)"
     MAIN_MENU_BANNER="$brand_banner"
 
-    if [[ -f "$msg_cache" && -s "$msg_cache" ]]; then
-        update_message="$(cat "$msg_cache" 2> /dev/null || echo "")"
-    fi
+    update_message="$(read_update_message_cache "$msg_cache")"
     MAIN_MENU_UPDATE_MESSAGE="$update_message"
     MAIN_MENU_SHOW_UPDATE="$([[ -n "$update_message" ]] && echo true || echo false)"
 

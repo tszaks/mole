@@ -681,6 +681,12 @@ _mole_uninstall_embedded_bundle_ids() {
         embedded_id=$(plutil -extract CFBundleIdentifier raw "$info" 2> /dev/null || true)
         mole_is_reverse_dns_bundle_id "$embedded_id" || continue
         [[ "$embedded_id" == "$primary_bundle_id" ]] && continue
+        # Shared framework services are not owned by every app that embeds them.
+        case "$embedded_id" in
+            org.sparkle-project.*)
+                continue
+                ;;
+        esac
         printf '%s\n' "$embedded_id"
     done < <(command find "$app_path/Contents" -maxdepth 12 -type f -path "*/Contents/Info.plist" -print0 2> /dev/null || true) | sort -u
 }

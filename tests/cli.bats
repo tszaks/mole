@@ -260,6 +260,24 @@ EOF
 	[[ "$output" != *"UPDATE_CALLED"* ]]
 }
 
+@test "read_update_message_cache ignores notices older than current script" {
+	run bash --noprofile --norc <<'EOF'
+set -euo pipefail
+HOME="$(mktemp -d)"
+export HOME MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1
+mkdir -p "$HOME/.cache/mole"
+msg_cache="$HOME/.cache/mole/update_message"
+printf 'Update 1.43.0 available, run mo update\n' > "$msg_cache"
+touch -t 200001010000 "$msg_cache"
+source "$PROJECT_ROOT/mole"
+message="$(read_update_message_cache "$msg_cache")"
+[[ -z "$message" ]]
+[[ ! -s "$msg_cache" ]]
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "interactive_main_menu accepts U shortcut when update notice is visible" {
 	run bash --noprofile --norc <<'EOF'
 set -euo pipefail

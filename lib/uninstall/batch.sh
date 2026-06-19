@@ -149,6 +149,19 @@ append_line() {
     fi
 }
 
+format_uninstall_preview_path() {
+    local path="$1"
+    local display_path="${path/$HOME/~}"
+    local size_kb
+    size_kb=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
+
+    if [[ "$size_kb" =~ ^[0-9]+$ && "$size_kb" -gt 0 ]]; then
+        printf '%s %s, %s%s' "$display_path" "$GRAY" "$(bytes_to_human "$((size_kb * 1024))")" "$NC"
+    else
+        printf '%s' "$display_path"
+    fi
+}
+
 discover_login_item_helper_bundle_ids() {
     local app_path="$1"
     local login_items_root="$app_path/Contents/Library/LoginItems"
@@ -607,25 +620,25 @@ _batch_preview_and_confirm() {
             echo "$diag_system_display"
         )
 
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${app_path/$HOME/~}"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $(format_uninstall_preview_path "$app_path")"
 
         # Show all related files so users can fully review before deletion.
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${file/$HOME/~}"
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $(format_uninstall_preview_path "$file")"
             fi
         done <<< "$related_files"
 
         # Show all system files so users can fully review before deletion.
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
-                echo -e "  ${BLUE}${ICON_WARNING}${NC} System: $file"
+                echo -e "  ${BLUE}${ICON_WARNING}${NC} System: $(format_uninstall_preview_path "$file")"
             fi
         done <<< "$system_files"
 
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
-                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Review only: $file"
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Review only: $(format_uninstall_preview_path "$file")"
             fi
         done <<< "$review_system_display"
     done

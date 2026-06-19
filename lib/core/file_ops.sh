@@ -977,14 +977,39 @@ get_path_size_kb() {
 calculate_total_size() {
     local files="$1"
     local total_kb=0
+    local -a unique_paths=()
 
     while IFS= read -r file; do
         if [[ -n "$file" && -e "$file" ]]; then
-            local size_kb
-            size_kb=$(get_path_size_kb "$file")
-            total_kb=$((total_kb + size_kb))
+            local normalized_file="${file%/}"
+            [[ -n "$normalized_file" ]] || normalized_file="$file"
+
+            local skip_file=false
+            local -a filtered_paths=()
+            local existing_file
+            for existing_file in "${unique_paths[@]+"${unique_paths[@]}"}"; do
+                if [[ "$normalized_file" == "$existing_file" || "$normalized_file" == "$existing_file"/* ]]; then
+                    skip_file=true
+                    break
+                fi
+                if [[ "$existing_file" == "$normalized_file"/* ]]; then
+                    continue
+                fi
+                filtered_paths+=("$existing_file")
+            done
+
+            if [[ "$skip_file" == "false" ]]; then
+                unique_paths=("${filtered_paths[@]+"${filtered_paths[@]}"}")
+                unique_paths+=("$normalized_file")
+            fi
         fi
     done <<< "$files"
+
+    for file in "${unique_paths[@]+"${unique_paths[@]}"}"; do
+        local size_kb
+        size_kb=$(get_path_size_kb "$file")
+        total_kb=$((total_kb + size_kb))
+    done
 
     echo "$total_kb"
 }
