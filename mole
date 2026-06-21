@@ -561,6 +561,11 @@ update_mole() {
         sudo_keepalive_pid=$(_start_sudo_keepalive)
     fi
 
+    local installer_assume_sudo_auth="0"
+    if [[ "$requires_sudo" == "true" ]]; then
+        installer_assume_sudo_auth="1"
+    fi
+
     if [[ -t 1 ]]; then
         start_inline_spinner "$install_label"
     else
@@ -605,7 +610,7 @@ update_mole() {
     fi
 
     if [[ "$nightly_update" == "true" ]]; then
-        if install_output=$(MOLE_VERSION="main" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+        if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="main" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -616,7 +621,7 @@ update_mole() {
             exit 1
         fi
     elif [[ "$force_update" == "true" || "$switch_to_stable_channel" == "true" ]]; then
-        if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+        if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -627,10 +632,10 @@ update_mole() {
             exit 1
         fi
     else
-        if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
+        if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
-            if install_output=$(MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+            if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
                 process_install_output "$install_output" "$latest" "$final_success_label"
             else
                 if [[ -t 1 ]]; then stop_inline_spinner; fi

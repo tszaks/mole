@@ -220,17 +220,21 @@ PLIST
 
 touch "$diag_dir/Foo.crash"
 touch "$diag_dir/Foo.diag"
+touch "$diag_dir/Foo Helper.diag"
 touch "$diag_dir/Foo_2026-01-01-120000_host.ips"
 touch "$diag_dir/Foobar.crash"
 touch "$diag_dir/Foobar.diag"
+touch "$diag_dir/Foobar Helper.diag"
 touch "$diag_dir/Foobar_2026-01-01-120001_host.ips"
 
 result=$(get_diagnostic_report_paths_for_app "$app_dir" "Foo" "$diag_dir")
 [[ "$result" == *"Foo.crash"* ]] || exit 1
 [[ "$result" == *"Foo.diag"* ]] || exit 1
+[[ "$result" == *"Foo Helper.diag"* ]] || exit 1
 [[ "$result" == *"Foo_2026-01-01-120000_host.ips"* ]] || exit 1
 [[ "$result" != *"Foobar.crash"* ]] || exit 1
 [[ "$result" != *"Foobar.diag"* ]] || exit 1
+[[ "$result" != *"Foobar Helper.diag"* ]] || exit 1
 [[ "$result" != *"Foobar_2026-01-01-120001_host.ips"* ]] || exit 1
 EOF
 

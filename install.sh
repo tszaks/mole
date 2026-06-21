@@ -114,13 +114,31 @@ needs_sudo() {
     [[ ! -w "$parent_dir" ]]
 }
 
+ensure_sudo_ready() {
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        log_error "Admin access required, blocked in test mode"
+        return 1
+    fi
+
+    if [[ "${MOLE_ASSUME_SUDO_AUTH:-0}" == "1" ]]; then
+        sudo -n -v
+        return
+    fi
+
+    sudo -v
+}
+
 maybe_sudo() {
     if needs_sudo; then
         if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
             log_error "Admin access required, blocked in test mode"
             return 1
         fi
-        sudo "$@"
+        if [[ "${MOLE_ASSUME_SUDO_AUTH:-0}" == "1" ]]; then
+            sudo -n "$@"
+        else
+            sudo "$@"
+        fi
     else
         "$@"
     fi
@@ -763,7 +781,7 @@ install_files() {
                     log_error "Admin access required, blocked in test mode"
                     return 1
                 fi
-                sudo -v
+                ensure_sudo_ready
             fi
 
             # Atomic update: copy to temporary name first, then move

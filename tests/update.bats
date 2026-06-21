@@ -92,6 +92,9 @@ if [[ -n "\$out" ]]; then
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
 printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
+if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
+	printf '%s\n' "\${MOLE_ASSUME_SUDO_AUTH:-}" > "\$INSTALLER_SUDO_AUTH_LOG"
+fi
 echo "Updated to latest version, \${MOLE_VERSION#V}"
 INSTALLER
 	exit 0
@@ -136,6 +139,9 @@ if [[ -n "\$out" ]]; then
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
 printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
+if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
+	printf '%s\n' "\${MOLE_ASSUME_SUDO_AUTH:-}" > "\$INSTALLER_SUDO_AUTH_LOG"
+fi
 echo "Updated to latest version, \${MOLE_VERSION#V}"
 INSTALLER
 	exit 0
@@ -253,6 +259,87 @@ SCRIPT
 	grep -q -- "--prefix" "$installer_args_log"
 	[ "$(cat "$installer_version_log")" = "main" ]
 	grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"
+}
+
+@test "mo update tells installer to reuse sudo after parent authentication" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local installer_version_log="$TEST_ROOT/installer.version"
+	local installer_sudo_auth_log="$TEST_ROOT/installer.sudo-auth"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local sudo_log="$TEST_ROOT/sudo.log"
+	local current_version
+
+	current_version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "$PROJECT_ROOT/mole" | head -1)"
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	make_update_curl_stub "$fake_bin" "$current_version"
+	chmod a-w "$manual_bin/mole"
+	cat > "$fake_bin/sudo" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$SUDO_LOG"
+exit 0
+SCRIPT
+	chmod +x "$fake_bin/sudo"
+	: > "$curl_url_log"
+	: > "$sudo_log"
+
+	run env \
+		HOME="$HOME" \
+		MOLE_TEST_MODE=0 \
+		MOLE_TEST_NO_AUTH=0 \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		INSTALLER_VERSION_LOG="$installer_version_log" \
+		INSTALLER_SUDO_AUTH_LOG="$installer_sudo_auth_log" \
+		SUDO_LOG="$sudo_log" \
+		"$manual_bin/mo" update --force
+
+	chmod u+w "$manual_bin/mole"
+
+	[ "$status" -eq 0 ]
+	[ -f "$installer_sudo_auth_log" ]
+	[ "$(cat "$installer_sudo_auth_log")" = "1" ]
+	grep -q -- "-n true" "$sudo_log"
+	grep -q "raw.githubusercontent.com/tw93/mole/V${current_version#V}/install.sh" "$curl_url_log"
+}
+
+@test "installer sudo reuse uses non-interactive sudo checks" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+INSTALL_DIR="$HOME/install"
+CONFIG_DIR="$HOME/config"
+SOURCE_DIR="$HOME/source"
+VERBOSE=1
+GREEN='' BLUE='' YELLOW='' RED='' NC=''
+ICON_ERROR='err'
+SUDO_LOG="$HOME/sudo.log"
+mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$SOURCE_DIR"
+chmod a-w "$INSTALL_DIR"
+
+eval "$(sed -n '/^needs_sudo()/,/^resolve_source_dir()/p' "$PROJECT_ROOT/install.sh" | sed '$d')"
+
+log_error() { echo "ERROR:$*"; }
+sudo() {
+	printf '%s\n' "$*" >> "$SUDO_LOG"
+	return 0
+}
+
+MOLE_ASSUME_SUDO_AUTH=1 ensure_sudo_ready
+grep -qx -- "-n -v" "$SUDO_LOG" || { echo "WRONG: sudo validation was interactive"; cat "$SUDO_LOG"; exit 1; }
+
+: > "$SUDO_LOG"
+MOLE_ASSUME_SUDO_AUTH=1 maybe_sudo true
+grep -qx -- "-n true" "$SUDO_LOG" || { echo "WRONG: sudo command was interactive"; cat "$SUDO_LOG"; exit 1; }
+
+chmod u+w "$INSTALL_DIR"
+EOF
+
+	[ "$status" -eq 0 ]
 }
 
 @test "mo update keeps Homebrew installs on the Homebrew update path" {

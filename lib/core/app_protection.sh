@@ -1182,6 +1182,10 @@ get_diagnostic_report_paths_for_app() {
     fi
     prefix="${exec_name:-$nospace_name}"
     [[ -z "$prefix" || ${#prefix} -lt 3 ]] && return 0
+    local -a prefixes=("$prefix")
+    if [[ "$prefix" != *" Helper" ]]; then
+        prefixes+=("$prefix Helper")
+    fi
 
     local dir_abs
     dir_abs=$(cd "$directory" 2> /dev/null && pwd -P 2> /dev/null) || return 0
@@ -1189,19 +1193,24 @@ get_diagnostic_report_paths_for_app() {
         [[ -z "$f" ]] && continue
         local base
         base=$(basename "$f" 2> /dev/null)
-        case "$base" in
-            "$prefix".* | "$prefix"_* | "$prefix"-*) ;;
-            *) continue ;;
-        esac
+        local matched_prefix=false
+        local report_prefix
+        for report_prefix in "${prefixes[@]}"; do
+            case "$base" in
+                "$report_prefix".* | "$report_prefix"_* | "$report_prefix"-*)
+                    matched_prefix=true
+                    break
+                    ;;
+            esac
+        done
+        [[ "$matched_prefix" == "true" ]] || continue
         case "$base" in
             *.ips | *.crash | *.spin | *.diag) ;;
             *) continue ;;
         esac
         printf '%s\n' "$f"
     done < <(
-        find "$dir_abs" -maxdepth 1 -type f \
-            \( -name "${prefix}.*" -o -name "${prefix}_*" -o -name "${prefix}-*" \) \
-            -print0 2> /dev/null || true
+        find "$dir_abs" -maxdepth 1 -type f -print0 2> /dev/null || true
     )
     return 0
 }
