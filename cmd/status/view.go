@@ -36,6 +36,10 @@ const (
 	iconBattery = "◪"
 	iconSensors = "◈"
 	iconProcs   = "❊"
+
+	metricLabelWidth    = 6
+	processMemoryWidth  = 7
+	processWideMinWidth = 46
 )
 
 // Mole body frames (facing right).
@@ -310,7 +314,7 @@ func renderCPUCard(cpu CPUStatus, thermal ThermalStatus) cardData {
 		}
 		sort.Slice(cores, func(i, j int) bool { return cores[i].val > cores[j].val })
 
-		maxCores := min(len(cores), 3)
+		maxCores := min(len(cores), 2)
 		for i := range maxCores {
 			c := cores[i]
 			lines = append(lines, fmt.Sprintf("Core%-2d %s  %5.1f%%", c.idx+1, progressBar(c.val), c.val))
@@ -347,8 +351,7 @@ func renderMemoryCard(mem MemoryStatus, cardWidth int) cardData {
 	if hasSwap {
 		// Layout with Swap:
 		// 3. Swap (progress bar + text)
-		// 4. Total
-		// 5. Avail
+		// 4. Total + Avail
 		var swapPercent float64
 		if mem.SwapTotal > 0 {
 			swapPercent = (float64(mem.SwapUsed) / float64(mem.SwapTotal)) * 100.0
@@ -364,19 +367,18 @@ func renderMemoryCard(mem MemoryStatus, cardWidth int) cardData {
 			lines = append(lines, swapLine)
 		}
 
-		lines = append(lines, fmt.Sprintf("Total  %s / %s", humanBytes(mem.Used), humanBytes(mem.Total)))
-		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(mem.Available)))
+		lines = append(lines, formatMemoryDetailLine("Total", humanBytes(mem.Used)+" / "+humanBytes(mem.Total), mem.Available, cardWidth))
 	} else {
 		// Layout without Swap:
 		// 3. Total
-		// 4. Cached (if > 0)
-		// 5. Avail
+		// 4. Cache + Avail
 		lines = append(lines, fmt.Sprintf("Total  %s / %s", humanBytes(mem.Used), humanBytes(mem.Total)))
 
 		if mem.Cached > 0 {
-			lines = append(lines, fmt.Sprintf("Cached %s", humanBytes(mem.Cached)))
+			lines = append(lines, formatMemoryDetailLine("Cache", humanBytes(mem.Cached), mem.Available, cardWidth))
+		} else {
+			lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(mem.Available)))
 		}
-		lines = append(lines, fmt.Sprintf("Avail  %s", humanBytes(mem.Available)))
 	}
 	// Memory pressure status.
 	if mem.Pressure != "" {
@@ -393,7 +395,15 @@ func renderMemoryCard(mem MemoryStatus, cardWidth int) cardData {
 	return cardData{icon: iconMemory, title: "Memory", lines: lines}
 }
 
-func renderDiskCard(disks []DiskStatus, io DiskIOStatus, trashSize uint64, trashApprox bool) cardData {
+func formatMemoryDetailLine(label string, value string, available uint64, cardWidth int) string {
+	line := fmt.Sprintf("%-6s %s · Avail %s", label, value, humanBytes(available))
+	if cardWidth <= 0 || lipgloss.Width(line) <= cardWidth {
+		return line
+	}
+	return fmt.Sprintf("%-6s %s · Avail %s", label, value, humanBytesCompact(available))
+}
+
+func renderDiskCard(disks []DiskStatus, io DiskIOStatus, _ uint64, _ bool) cardData {
 	var lines []string
 	if len(disks) == 0 {
 		lines = append(lines, subtleStyle.Render("Collecting..."))
@@ -416,17 +426,7 @@ func renderDiskCard(disks []DiskStatus, io DiskIOStatus, trashSize uint64, trash
 			lines = append(lines, formatDiskMetaLine(disks[0]))
 		}
 	}
-	if trashSize > 0 {
-		prefix := ""
-		if trashApprox {
-			prefix = "~"
-		}
-		lines = append(lines, fmt.Sprintf("%-6s %s%s", "Trash", prefix, humanBytesShort(trashSize)))
-	}
-	readBar := ioBar(io.ReadRate)
-	writeBar := ioBar(io.WriteRate)
-	lines = append(lines, fmt.Sprintf("Read   %s  %.1f MB/s", readBar, io.ReadRate))
-	lines = append(lines, fmt.Sprintf("Write  %s  %.1f MB/s", writeBar, io.WriteRate))
+	lines = append(lines, formatDiskIOLine(io))
 	return cardData{icon: iconDisk, title: "Disk", lines: lines}
 }
 
@@ -469,6 +469,16 @@ func formatDiskMetaLine(d DiskStatus) string {
 	return fmt.Sprintf("Total  %s", strings.Join(parts, " · "))
 }
 
+func formatDiskIOLine(io DiskIOStatus) string {
+	text := fmt.Sprintf("%s R %s · %s W %s MB/s",
+		ioBar(io.ReadRate),
+		formatRateCompact(io.ReadRate),
+		ioBar(io.WriteRate),
+		formatRateCompact(io.WriteRate),
+	)
+	return fmt.Sprintf("%-*s %s", metricLabelWidth, "I/O", text)
+}
+
 func ioBar(rate float64) string {
 	filled := max(min(int(rate/10.0), 5), 0)
 	bar := strings.Repeat("▮", filled) + strings.Repeat("▯", 5-filled)
@@ -481,36 +491,48 @@ func ioBar(rate float64) string {
 	return okStyle.Render(bar)
 }
 
-func renderProcessCard(procs []ProcessInfo) cardData {
+func renderProcessCard(procs []ProcessInfo, cardWidth int) cardData {
 	var lines []string
 	maxProcs := 3
 	for i, p := range procs {
 		if i >= maxProcs {
 			break
 		}
-		name := shorten(p.Name, 12)
-		cpuBar := miniBar(p.CPU)
-		lines = append(lines, fmt.Sprintf("%-12s  %s  %5.1f%%%s", name, cpuBar, p.CPU, processHint(p)))
+		rank := fmt.Sprintf("#%d", i+1)
+		cpuBar := processBar(p.CPU, cardWidth)
+		line := fmt.Sprintf(
+			"%-*s %s %5.1f%% %*s",
+			metricLabelWidth,
+			rank,
+			cpuBar,
+			p.CPU,
+			processMemoryWidth,
+			processMemoryText(p),
+		)
+		if nameWidth := remainingLineWidth(cardWidth, line); nameWidth > 0 {
+			line += " " + shorten(p.Name, nameWidth)
+		}
+		lines = append(lines, strings.TrimRight(line, " "))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, subtleStyle.Render("No data"))
+		lines = append(lines, subtleStyle.Render("Collecting..."))
 	}
 	return cardData{icon: iconProcs, title: "Processes", lines: lines}
 }
 
-func processHint(p ProcessInfo) string {
+func processBar(percent float64, cardWidth int) string {
+	if cardWidth >= processWideMinWidth {
+		return progressBar(percent)
+	}
+	return miniBar(percent)
+}
+
+func processMemoryText(p ProcessInfo) string {
 	if p.MemoryBytes > 0 {
-		hint := " " + humanBytesCompact(p.MemoryBytes)
-		if p.CPU >= cpuHighThreshold {
-			hint += " hot"
-		}
-		return hint
+		return humanBytesCompact(p.MemoryBytes)
 	}
 	if p.Memory >= 10 {
-		return fmt.Sprintf(" M%.0f%%", p.Memory)
-	}
-	if p.CPU >= cpuHighThreshold {
-		return " hot"
+		return fmt.Sprintf("M%.0f%%", p.Memory)
 	}
 	return ""
 }
@@ -521,7 +543,7 @@ func buildCards(m MetricsSnapshot, width int) []cardData {
 		renderMemoryCard(m.Memory, width),
 		renderDiskCard(m.Disks, m.DiskIO, m.TrashSize, m.TrashApprox),
 		renderBatteryCard(m.Batteries, m.Thermal),
-		renderProcessCard(m.TopProcesses),
+		renderProcessCard(m.TopProcesses, width),
 		renderNetworkCard(m.Network, m.NetworkHistory, m.Proxy, width),
 	}
 	// Sensors card disabled - redundant with CPU temp
@@ -664,13 +686,9 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 			statusStyle = dangerStyle
 		}
 		statusText := formatBatteryStatus(b.Status)
-		if b.TimeLeft != "" {
+		if b.TimeLeft != "" && b.TimeLeft != "0:00" {
 			statusText += " · " + b.TimeLeft
 		}
-		if thermal.AdapterPower > 0 && isPoweredByAC(statusLower) {
-			statusText += fmt.Sprintf(" · %.0fW adapter", thermal.AdapterPower)
-		}
-		lines = append(lines, statusStyle.Render(statusText))
 
 		healthParts := []string{}
 
@@ -700,7 +718,7 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 		}
 
 		if thermal.BatteryTemp > 0 {
-			tempText := "Battery " + colorizeTemp(thermal.BatteryTemp) + "°C"
+			tempText := colorizeTemp(thermal.BatteryTemp) + "°C"
 			healthParts = append(healthParts, tempText)
 		}
 
@@ -708,9 +726,8 @@ func renderBatteryCard(batts []BatteryStatus, thermal ThermalStatus) cardData {
 			healthParts = append(healthParts, fmt.Sprintf("%d RPM", thermal.FanSpeed))
 		}
 
-		if len(healthParts) > 0 {
-			lines = append(lines, strings.Join(healthParts, " · "))
-		}
+		summaryParts := append([]string{statusStyle.Render(statusText)}, healthParts...)
+		lines = append(lines, strings.Join(summaryParts, " · "))
 	}
 
 	return cardData{icon: iconBattery, title: "Power", lines: lines}
@@ -866,6 +883,16 @@ func formatRate(mb float64) string {
 	return fmt.Sprintf("%.0f MB/s", mb)
 }
 
+func formatRateCompact(mb float64) string {
+	if mb < 0.01 {
+		return "0"
+	}
+	if mb < 10 {
+		return fmt.Sprintf("%.1f", mb)
+	}
+	return fmt.Sprintf("%.0f", mb)
+}
+
 func humanBytes(v uint64) string {
 	return units.BytesBin(v)
 }
@@ -883,6 +910,13 @@ func shorten(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-1] + "…"
+}
+
+func remainingLineWidth(width int, prefix string) int {
+	if width <= 0 {
+		width = colWidth
+	}
+	return max(width-lipgloss.Width(prefix)-1, 0)
 }
 
 func renderTwoColumns(cards []cardData, width int) string {

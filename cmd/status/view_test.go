@@ -572,14 +572,23 @@ func TestRenderBatteryCardShowsAdapterInputOnly(t *testing.T) {
 	}
 	got := strings.Join(joined, "\n")
 
+	if len(card.lines) != 4 {
+		t.Fatalf("expected compact 4-line power card, got %d lines:\n%s", len(card.lines), got)
+	}
 	if !strings.Contains(got, "Input") || !strings.Contains(got, "94W max") {
 		t.Fatalf("expected input line with adapter max watts, got:\n%s", got)
 	}
 	if strings.Contains(got, "Draw") || strings.Contains(got, "Charge") {
 		t.Fatalf("expected no live draw or charge watt row, got:\n%s", got)
 	}
-	if !strings.Contains(got, "AC · 94W adapter") {
-		t.Fatalf("expected AC adapter status, got:\n%s", got)
+	if strings.Contains(got, "94W adapter") {
+		t.Fatalf("expected adapter watts only on the Input line, got:\n%s", got)
+	}
+	if !strings.Contains(got, "AC · Healthy · 4 cycles · 30.7°C") {
+		t.Fatalf("expected compact AC health summary, got:\n%s", got)
+	}
+	if strings.Contains(got, "Battery 30.7°C") {
+		t.Fatalf("expected compact temperature without Battery prefix, got:\n%s", got)
 	}
 	if strings.Contains(got, "Ac") {
 		t.Fatalf("expected AC to stay uppercase, got:\n%s", got)
@@ -615,6 +624,37 @@ func TestColorizeTemp(t *testing.T) {
 	}
 }
 
+func TestMiniBar(t *testing.T) {
+	tests := []struct {
+		name    string
+		percent float64
+	}{
+		{"zero", 0},
+		{"negative", -5},
+		{"low", 15},
+		{"at first step", 20},
+		{"mid", 50},
+		{"high", 75},
+		{"full", 100},
+		{"over 100", 120},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := miniBar(tt.percent)
+			if got == "" {
+				t.Errorf("miniBar(%v) returned empty string", tt.percent)
+				return
+			}
+			gotClean := stripANSI(got)
+			gotRuneCount := len([]rune(gotClean))
+			if gotRuneCount != 5 {
+				t.Errorf("miniBar(%v) rune count = %d, want 5", tt.percent, gotRuneCount)
+			}
+		})
+	}
+}
+
 func TestIoBar(t *testing.T) {
 	tests := []struct {
 		name string
@@ -642,37 +682,6 @@ func TestIoBar(t *testing.T) {
 			gotRuneCount := len([]rune(gotClean))
 			if gotRuneCount != 5 {
 				t.Errorf("ioBar(%v) rune count = %d, want 5", tt.rate, gotRuneCount)
-			}
-		})
-	}
-}
-
-func TestMiniBar(t *testing.T) {
-	tests := []struct {
-		name    string
-		percent float64
-	}{
-		{"zero", 0},
-		{"negative", -5},
-		{"low", 15},
-		{"at first step", 20},
-		{"mid", 50},
-		{"high", 75},
-		{"full", 100},
-		{"over 100", 120},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := miniBar(tt.percent)
-			if got == "" {
-				t.Errorf("miniBar(%v) returned empty string", tt.percent)
-				return
-			}
-			gotClean := stripANSI(got)
-			gotRuneCount := len([]rune(gotClean))
-			if gotRuneCount != 5 {
-				t.Errorf("miniBar(%v) rune count = %d, want 5", tt.percent, gotRuneCount)
 			}
 		})
 	}
@@ -764,8 +773,8 @@ func TestRenderDiskCardAddsMetaLineForSingleDisk(t *testing.T) {
 		Fstype:      "apfs",
 	}}, DiskIOStatus{ReadRate: 0, WriteRate: 0.1}, 0, false)
 
-	if len(card.lines) != 4 {
-		t.Fatalf("renderDiskCard() single disk expected 4 lines, got %d", len(card.lines))
+	if len(card.lines) != 3 {
+		t.Fatalf("renderDiskCard() single disk expected 3 lines, got %d", len(card.lines))
 	}
 
 	meta := stripANSI(card.lines[1])
@@ -780,8 +789,8 @@ func TestRenderDiskCardDoesNotAddMetaLineForMultipleDisks(t *testing.T) {
 		{UsedPercent: 50.0, Used: 500 << 30, Total: 1000 << 30, Fstype: "apfs"},
 	}, DiskIOStatus{}, 0, false)
 
-	if len(card.lines) != 4 {
-		t.Fatalf("renderDiskCard() multiple disks expected 4 lines, got %d", len(card.lines))
+	if len(card.lines) != 3 {
+		t.Fatalf("renderDiskCard() multiple disks expected 3 lines, got %d", len(card.lines))
 	}
 
 	for _, line := range card.lines {
@@ -791,35 +800,53 @@ func TestRenderDiskCardDoesNotAddMetaLineForMultipleDisks(t *testing.T) {
 	}
 }
 
-func TestRenderDiskCardTrashLine(t *testing.T) {
+func TestRenderDiskCardOmitsTrashFromMainView(t *testing.T) {
 	disk := DiskStatus{UsedPercent: 50, Used: 500 << 30, Total: 1000 << 30, Fstype: "apfs"}
 	tests := []struct {
 		name      string
 		trashSize uint64
 		approx    bool
-		wantLine  string
 	}{
-		{"no trash", 0, false, ""},
-		{"1.5 GB exact", 1536 << 20, false, "Trash  2G"},
-		{"approx 12 GB", 12 << 30, true, "Trash  ~12G"},
+		{"no trash", 0, false},
+		{"1.5 GB exact", 1536 << 20, false},
+		{"approx 12 GB", 12 << 30, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			card := renderDiskCard([]DiskStatus{disk}, DiskIOStatus{}, tt.trashSize, tt.approx)
-			found := ""
+			ioLine := ""
+			trashLine := ""
 			for _, line := range card.lines {
-				if s := stripANSI(line); len(s) > 5 && s[:5] == "Trash" {
-					found = s
-					break
+				s := stripANSI(line)
+				if strings.HasPrefix(s, "I/O") {
+					ioLine = s
+				}
+				if strings.HasPrefix(s, "Trash") {
+					trashLine = s
 				}
 			}
-			if tt.wantLine == "" && found != "" {
-				t.Fatalf("expected no trash line, got %q", found)
+			if ioLine == "" {
+				t.Fatal("expected I/O line")
 			}
-			if tt.wantLine != "" && found != tt.wantLine {
-				t.Fatalf("trash line = %q, want %q", found, tt.wantLine)
+			if trashLine != "" {
+				t.Fatalf("expected no trash line in main view, got %q", trashLine)
 			}
 		})
+	}
+}
+
+func TestRenderDiskCardUsesGraphicIOLine(t *testing.T) {
+	card := renderDiskCard([]DiskStatus{
+		{UsedPercent: 50.0, Used: 500 << 30, Total: 1000 << 30},
+		{UsedPercent: 95.0, Used: 18 << 30, Total: 18<<30 + 472<<20, External: true},
+		{UsedPercent: 95.0, Used: 16 << 30, Total: 16<<30 + 444<<20, External: true},
+	}, DiskIOStatus{ReadRate: 0, WriteRate: 24.6}, 101<<20, false)
+
+	if len(card.lines) != 4 {
+		t.Fatalf("renderDiskCard() expected 4 lines without trash, got %d", len(card.lines))
+	}
+	if got := stripANSI(card.lines[3]); got != "I/O    ▯▯▯▯▯ R 0 · ▮▮▯▯▯ W 25 MB/s" {
+		t.Fatalf("I/O line = %q", got)
 	}
 }
 
@@ -1013,11 +1040,11 @@ func TestStatusDiagnosisLineFallsBackToAllClear(t *testing.T) {
 	}
 }
 
-func TestRenderProcessCardAddsInlineHintWithoutExtraRows(t *testing.T) {
+func TestRenderProcessCardAddsInlineMemoryWithoutExtraRows(t *testing.T) {
 	card := renderProcessCard([]ProcessInfo{
 		{Name: "Chrome", CPU: 12, Memory: 22, MemoryBytes: 2 * 1024 * 1024 * 1024},
 		{Name: "Xcode", CPU: 95, Memory: 8, MemoryBytes: 512 * 1024 * 1024},
-	})
+	}, colWidth)
 
 	if len(card.lines) != 2 {
 		t.Fatalf("renderProcessCard() lines = %d, want 2", len(card.lines))
@@ -1026,15 +1053,78 @@ func TestRenderProcessCardAddsInlineHintWithoutExtraRows(t *testing.T) {
 	if !strings.Contains(plain, "2.0G") {
 		t.Fatalf("renderProcessCard() missing resident memory hint, got %q", plain)
 	}
-	if !strings.Contains(plain, "hot") {
-		t.Fatalf("renderProcessCard() missing cpu hint, got %q", plain)
+	if !strings.Contains(plain, "95.0%") {
+		t.Fatalf("renderProcessCard() missing cpu value, got %q", plain)
+	}
+}
+
+func TestRenderProcessCardShowsCollectingWhenEmpty(t *testing.T) {
+	card := renderProcessCard(nil, colWidth)
+
+	if len(card.lines) != 1 {
+		t.Fatalf("renderProcessCard() empty lines = %d, want 1", len(card.lines))
+	}
+	if got := stripANSI(card.lines[0]); got != "Collecting..." {
+		t.Fatalf("renderProcessCard() empty line = %q", got)
+	}
+}
+
+func TestRenderProcessCardAlignsMetricColumns(t *testing.T) {
+	const wideCardWidth = 56
+	card := renderProcessCard([]ProcessInfo{
+		{Name: "duetexpertd", CPU: 97.3, MemoryBytes: 75 << 20},
+		{Name: "WindowServer", CPU: 46.8, MemoryBytes: 352 << 20},
+		{Name: "Xcode", CPU: 24.3, MemoryBytes: 1018 << 20},
+	}, wideCardWidth)
+
+	if len(card.lines) != 3 {
+		t.Fatalf("renderProcessCard() lines = %d, want 3", len(card.lines))
+	}
+	lines := make([]string, 0, len(card.lines))
+	for _, line := range card.lines {
+		lines = append(lines, stripANSI(line))
+	}
+
+	barText := []string{
+		"███████████████░",
+		"███████░░░░░░░░░",
+		"███░░░░░░░░░░░░░",
+	}
+	memoryText := []string{"75.0M", "352.0M", "1018.0M"}
+	barCol := strings.Index(lines[0], barText[0])
+	if barCol != metricLabelWidth+1 {
+		t.Fatalf("process bar column = %d, want %d in %q", barCol, metricLabelWidth+1, lines[0])
+	}
+	afterBar := lines[0][barCol+len(barText[0]):]
+	if !strings.HasPrefix(afterBar, "  97.3%") {
+		t.Fatalf("process percent should sit one column closer to the bar, got %q", lines[0])
+	}
+	percentCol := strings.Index(lines[0], "%")
+	memoryEndCol := strings.Index(lines[0], memoryText[0]) + len(memoryText[0])
+	for i, line := range lines {
+		if got := strings.Index(line, barText[i]); got != barCol {
+			t.Fatalf("process bar column line %d = %d, want %d in %q", i, got, barCol, line)
+		}
+		if got := strings.Index(line, "%"); got != percentCol {
+			t.Fatalf("process percent column line %d = %d, want %d in %q", i, got, percentCol, line)
+		}
+		gotMemoryEnd := strings.Index(line, memoryText[i]) + len(memoryText[i])
+		if gotMemoryEnd != memoryEndCol {
+			t.Fatalf("process memory column line %d ends at %d, want %d in %q", i, gotMemoryEnd, memoryEndCol, line)
+		}
+	}
+	if lipgloss.Width(lines[0]) > wideCardWidth {
+		t.Fatalf("renderProcessCard() line exceeds card width: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "duet") {
+		t.Fatalf("renderProcessCard() should keep process name after metrics, got %q", lines[0])
 	}
 }
 
 func TestRenderProcessCardFallsBackToMemoryPercent(t *testing.T) {
 	card := renderProcessCard([]ProcessInfo{
 		{Name: "Chrome", CPU: 12, Memory: 22},
-	})
+	}, colWidth)
 
 	plain := stripANSI(strings.Join(card.lines, "\n"))
 	if !strings.Contains(plain, "M22%") {
@@ -1151,6 +1241,49 @@ func TestRenderCardWrapsOnNarrowWidth(t *testing.T) {
 	}
 }
 
+func TestRenderCPUCardKeepsOnlyTwoHotCores(t *testing.T) {
+	card := renderCPUCard(CPUStatus{
+		Usage:      6.1,
+		PerCore:    []float64{8.0, 27.9, 18.9, 16.8},
+		Load1:      2.30,
+		Load5:      2.27,
+		Load15:     2.16,
+		LogicalCPU: 4,
+	}, ThermalStatus{})
+
+	plain := stripANSI(strings.Join(card.lines, "\n"))
+	if len(card.lines) != 4 {
+		t.Fatalf("renderCPUCard() lines = %d, want 4", len(card.lines))
+	}
+	if strings.Count(plain, "Core") != 2 {
+		t.Fatalf("renderCPUCard() should render two core rows, got %q", plain)
+	}
+	if !strings.Contains(plain, "Core2") || !strings.Contains(plain, "Core3") {
+		t.Fatalf("renderCPUCard() should keep the two hottest cores, got %q", plain)
+	}
+}
+
+func TestRenderTwoColumnsInsertsRowGap(t *testing.T) {
+	cards := []cardData{
+		{icon: iconCPU, title: "CPU", lines: []string{"Total  ok"}},
+		{icon: iconMemory, title: "Memory", lines: []string{"Used   ok"}},
+		{icon: iconDisk, title: "Disk", lines: []string{"INTR   ok"}},
+		{icon: iconNetwork, title: "Network", lines: []string{"Down   ok"}},
+	}
+
+	rendered := stripANSI(renderTwoColumns(cards, 120))
+	hasBlankRow := false
+	for line := range strings.Lines(rendered) {
+		if strings.TrimSpace(line) == "" {
+			hasBlankRow = true
+			break
+		}
+	}
+	if !hasBlankRow {
+		t.Fatalf("renderTwoColumns() should insert one blank row between card rows, got %q", rendered)
+	}
+}
+
 func TestRenderMemoryCardHidesSwapSizeOnNarrowWidth(t *testing.T) {
 	card := renderMemoryCard(MemoryStatus{
 		Used:        8 << 30,
@@ -1205,6 +1338,24 @@ func TestRenderMemoryCardUsesCollectedAvailableMemory(t *testing.T) {
 	}
 	if !strings.Contains(plain, "Avail  9.0 GB") {
 		t.Fatalf("renderMemoryCard() should render collected Available memory, got %q", plain)
+	}
+}
+
+func TestRenderMemoryCardCombinesCacheAndAvailable(t *testing.T) {
+	card := renderMemoryCard(MemoryStatus{
+		Used:        12 << 30,
+		Total:       16 << 30,
+		Available:   9 << 30,
+		Cached:      2 << 30,
+		UsedPercent: 75.0,
+	}, 60)
+
+	plain := stripANSI(strings.Join(card.lines, "\n"))
+	if len(card.lines) != 4 {
+		t.Fatalf("renderMemoryCard() lines = %d, want 4", len(card.lines))
+	}
+	if !strings.Contains(plain, "Cache  2.0 GB · Avail 9.0 GB") {
+		t.Fatalf("renderMemoryCard() should combine cache and available memory, got %q", plain)
 	}
 }
 
