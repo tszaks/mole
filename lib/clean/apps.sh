@@ -763,10 +763,15 @@ clean_orphaned_system_services() {
                 if [[ "$orphan_file" == *.plist ]]; then
                     sudo -n launchctl unload "$orphan_file" 2> /dev/null || true
                 fi
-                if safe_sudo_remove "$orphan_file"; then
+                local remove_rc=0
+                safe_sudo_remove "$orphan_file" || remove_rc=$?
+                if [[ $remove_rc -eq 0 ]]; then
                     debug_log "Removed orphaned service: $orphan_file"
                     removed_count=$((removed_count + 1))
                     removed_kb=$((removed_kb + file_size_kb))
+                elif [[ $remove_rc -eq $MOLE_ERR_PROTECTED_PATH ]]; then
+                    debug_log "Skipping protected orphaned service: $orphan_file"
+                    skipped_protected_count=$((skipped_protected_count + 1))
                 else
                     debug_log "Failed to remove orphaned service: $orphan_file"
                     failed_count=$((failed_count + 1))

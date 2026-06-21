@@ -315,6 +315,23 @@ SCRIPT
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
 }
 
+@test "safe_sudo_remove returns protected-path code for safety skips" {
+    local target_dir="$TEST_DIR/protected-sudo-target"
+    mkdir -p "$target_dir"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+should_protect_path() { return 0; }
+
+safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
+echo "RC=$rc"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=13"* ]]
+}
+
 @test "safe_sudo_find_delete never opens an interactive sudo prompt" {
     local target_dir="$TEST_DIR/sudo-find-target"
     local script="$TEST_DIR/sudo-find-delete-test.sh"

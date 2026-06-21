@@ -14,6 +14,7 @@ readonly MOLE_FILE_OPS_LOADED=1
 readonly MOLE_ERR_SIP_PROTECTED=10
 readonly MOLE_ERR_AUTH_FAILED=11
 readonly MOLE_ERR_READONLY_FS=12
+readonly MOLE_ERR_PROTECTED_PATH=13
 
 # Ensure dependencies are loaded
 _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -360,6 +361,7 @@ safe_sudo_remove() {
     if ! validate_path_for_deletion "$path"; then
         if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$path"; then
             debug_log "Skipped sudo remove for protected path: $path"
+            return "$MOLE_ERR_PROTECTED_PATH"
         else
             log_error "Path validation failed for sudo remove: $path"
         fi
@@ -1037,6 +1039,9 @@ diagnose_removal_failure() {
         "$MOLE_ERR_READONLY_FS")
             reason="filesystem is read-only"
             suggestion="Check if disk needs repair"
+            ;;
+        "$MOLE_ERR_PROTECTED_PATH")
+            reason="protected by Mole safety rules"
             ;;
         *)
             reason="permission denied"
