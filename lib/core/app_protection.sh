@@ -216,6 +216,35 @@ should_protect_data() {
     return 1
 }
 
+# Endpoint security / EDR / MDM agents (CrowdStrike Falcon, SentinelOne, ESET,
+# Jamf, GlobalProtect, Cisco Secure Client) tamper-protect their on-disk state.
+# Deleting anything that belongs to them under the per-user Darwin folder -- a
+# rebuildable Metal/GPU shader cache (.../C/...), a code-signature clone
+# (.../X/<bundle-id>.code_sign_clone), or temp (.../T/...) -- trips sensor tamper
+# detection (e.g. CrowdStrike "MacFalconSensorTamper", MITRE T1562.001) that
+# corporate security reports as malware. Reclaim is only a few MB, so never touch
+# these. The vendor prefixes live in ENDPOINT_SECURITY_BUNDLE_PREFIXES
+# (app_protection_data.sh); matching a vendor id anywhere under var/folders is
+# protection-only, so a wide match is safe. Shared by should_protect_path() and
+# the cache/clone sweeps in lib/clean/system.sh and lib/clean/user.sh.
+is_endpoint_security_cache_path() {
+    local path="$1"
+    # Fast reject: only the per-user Darwin folders are in scope (the real
+    # /private/var/folders and its /var/folders symlink form). Anchored to the
+    # absolute root so an unrelated ".../var/folders/..." path cannot match.
+    case "$path" in
+        /private/var/folders/* | /var/folders/*) ;;
+        *) return 1 ;;
+    esac
+    local prefix
+    for prefix in "${ENDPOINT_SECURITY_BUNDLE_PREFIXES[@]}"; do
+        case "$path" in
+            *"$prefix"*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 # Check if a path is protected from deletion
 # Centralized logic to protect system settings, control center, and critical apps
 #
@@ -292,6 +321,13 @@ should_protect_path() {
             return 0
             ;;
     esac
+
+    # 4b. Endpoint security / EDR agent caches (CrowdStrike Falcon, SentinelOne,
+    # etc.). Dedicated predicate so the same vendor list is reused by the
+    # GPU-cache sweep in lib/clean/system.sh and matches deterministically.
+    if is_endpoint_security_cache_path "$path"; then
+        return 0
+    fi
 
     # 5. Protect critical preference files and user data
     case "$path" in

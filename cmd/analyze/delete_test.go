@@ -115,6 +115,45 @@ func TestValidateTrashTargetRejectsOrbStackLiveData(t *testing.T) {
 	}
 }
 
+func TestValidateTrashTargetRejectsEndpointSecurityCaches(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []string{
+		"/private/var/folders/zz/aa/C/com.crowdstrike.falcon.App/com.apple.metalfe",
+		"/private/var/folders/zz/aa/X/com.sentinelone.agent.code_sign_clone",
+		"/var/folders/zz/aa/C/com.jamf.management/cache",
+	}
+
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+				t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", path, err)
+			}
+		})
+	}
+}
+
+func TestValidateTrashTargetAllowsNonEDRDarwinCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// A normal app's rebuildable GPU cache under var/folders stays deletable.
+	path := "/private/var/folders/zz/aa/C/com.example.App/com.apple.metalfe"
+	if err := validateTrashTarget(path); err != nil {
+		t.Fatalf("validateTrashTarget(%q) error = %v, want nil", path, err)
+	}
+}
+
+func TestValidateTrashTargetRejectsEndpointSecurityCachesWithoutHOME(t *testing.T) {
+	// The EDR check must not depend on HOME (e.g. `env -u HOME mo analyze`).
+	t.Setenv("HOME", "")
+	path := "/private/var/folders/zz/aa/C/com.crowdstrike.falcon.App/com.apple.metalfe"
+	if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("validateTrashTarget(%q) with empty HOME error = %v, want protected path error", path, err)
+	}
+}
+
 func TestValidateTrashTargetAllowsRegularUserPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

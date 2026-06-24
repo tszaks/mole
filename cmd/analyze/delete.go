@@ -169,12 +169,24 @@ func validateTrashTarget(path string) error {
 }
 
 func isProtectedAnalyzeDeletePath(path string) bool {
-	home := os.Getenv("HOME")
-	if home == "" || path == "" {
+	if path == "" {
 		return false
 	}
 
 	cleanPath := filepath.Clean(path)
+
+	// EDR / Darwin-cache protection is based on the absolute path and does not
+	// depend on HOME, so check it first: an unset HOME must not let a Falcon
+	// cache slip through (e.g. `env -u HOME mo analyze`).
+	if isEndpointSecurityCachePath(cleanPath) {
+		return true
+	}
+
+	home := os.Getenv("HOME")
+	if home == "" {
+		return false
+	}
+
 	orbstackState := filepath.Join(home, ".orbstack")
 	if cleanPath == orbstackState || strings.HasPrefix(cleanPath, orbstackState+string(filepath.Separator)) {
 		return true
@@ -191,6 +203,38 @@ func isProtectedAnalyzeDeletePath(path string) bool {
 		containerName = containerName[:idx]
 	}
 	return strings.HasSuffix(containerName, "dev.orbstack")
+}
+
+// endpointSecurityBundlePrefixes mirrors ENDPOINT_SECURITY_BUNDLE_PREFIXES in
+// lib/core/app_protection_data.sh. Deleting anything inside one of these EDR/MDM
+// agents' per-user Darwin caches trips sensor tamper detection (e.g. CrowdStrike
+// MacFalconSensorTamper, MITRE T1562.001), so analyze must never Trash them.
+var endpointSecurityBundlePrefixes = []string{
+	"com.crowdstrike.",
+	"com.sentinelone.",
+	"com.sentinel-labs.",
+	"com.eset.",
+	"com.jamf.",
+	"com.jamfsoftware.",
+	"com.paloaltonetworks.",
+	"com.cisco.anyconnect",
+	"com.cisco.secureclient",
+}
+
+// isEndpointSecurityCachePath reports whether path is an endpoint-security / EDR
+// agent file under the per-user Darwin folder (/private/var/folders or its
+// /var/folders symlink form). Mirror of is_endpoint_security_cache_path() in
+// lib/core/app_protection.sh.
+func isEndpointSecurityCachePath(path string) bool {
+	if !strings.HasPrefix(path, "/private/var/folders/") && !strings.HasPrefix(path, "/var/folders/") {
+		return false
+	}
+	for _, prefix := range endpointSecurityBundlePrefixes {
+		if strings.Contains(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // validatePath checks path safety for external commands.

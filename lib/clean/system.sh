@@ -207,6 +207,11 @@ clean_deep_system() {
     start_section_spinner "Scanning browser code signature caches..."
     local code_sign_cleaned=0
     while IFS= read -r -d '' cache_dir; do
+        # Never delete an EDR agent's code-signature clone -- same sensor-tamper
+        # risk as its caches below. Browsers are the intended target here.
+        if is_endpoint_security_cache_path "$cache_dir"; then
+            continue
+        fi
         if safe_sudo_remove "$cache_dir"; then
             code_sign_cleaned=$((code_sign_cleaned + 1))
         fi
@@ -239,6 +244,17 @@ clean_deep_system() {
     local gpu_cache_dir=""
     while IFS= read -r -d '' gpu_cache_dir; do
         is_rebuildable_gpu_cache_dir "$gpu_cache_dir" || continue
+        # Endpoint-security/EDR agents (CrowdStrike Falcon, SentinelOne, ...)
+        # tamper-protect their cache container, so deleting even a rebuildable
+        # Metal shader cache inside it raises a sensor-tamper alert reported as
+        # malware. Skip only those; every other app's GPU cache stays cleanable.
+        # Use the dedicated EDR predicate here, not should_protect_path(): this
+        # loop targets com.apple.metal* dirs, and should_protect_path() can treat
+        # those rebuildable cache names as protected (via should_protect_data),
+        # which would suppress the whole sweep.
+        if is_endpoint_security_cache_path "$gpu_cache_dir"; then
+            continue
+        fi
         gpu_cache_dir_is_stale "$gpu_cache_dir" "$MOLE_GPU_CACHE_AGE_DAYS" || continue
         if safe_sudo_remove "$gpu_cache_dir"; then
             gpu_cache_cleaned=$((gpu_cache_cleaned + 1))
