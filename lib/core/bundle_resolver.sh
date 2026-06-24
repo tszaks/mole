@@ -57,7 +57,7 @@ bundle_has_installed_app() {
     #     ARMDC helpers shipped inside Adobe Acrobat DC.app) -- issue #733
     local parent_id=""
     local suffix
-    for suffix in ".helper" ".daemon" ".agent" ".xpc"; do
+    for suffix in ".helper" ".daemon" ".agent" ".xpc" ".service"; do
         if [[ "$bundle_id" == *"$suffix" ]]; then
             parent_id="${bundle_id%"$suffix"}"
             break
