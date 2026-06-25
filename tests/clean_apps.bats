@@ -768,13 +768,18 @@ EOF
     [[ "$output" != *"unexpected-launchctl"* ]]
 }
 
-@test "_privileged_helper_bundle_id_from_binary prefers the bundle ID over the executable name" {
+@test "_privileged_helper_bundle_id_from_binary prefers Info.plist bundle ID over directory and executable names" {
     run env PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
 
-result=$(_privileged_helper_bundle_id_from_binary "/Library/PrivilegedHelperTools/io.github.clash-verge-rev.clash-verge-rev.service.bundle/Contents/MacOS/clash-verge-service")
+plutil() {
+  [[ "$*" == *"/Library/PrivilegedHelperTools/com.example.directory.bundle/Contents/Info.plist"* ]] || return 1
+  printf '%s\n' "io.github.clash-verge-rev.clash-verge-rev.service"
+}
+
+result=$(_privileged_helper_bundle_id_from_binary "/Library/PrivilegedHelperTools/com.example.directory.bundle/Contents/MacOS/clash-verge-service")
 printf '%s\n' "$result"
 EOF
 
