@@ -243,6 +243,12 @@ _clean_darwin_user_runtime_dir() {
                 ;;
         esac
 
+        # Never touch endpoint-security/EDR agent caches (tamper detection),
+        # even when the file is user-owned and old enough to qualify here.
+        if is_endpoint_security_cache_path "$item"; then
+            continue
+        fi
+
         local item_size_kb=0
         item_size_kb=$(get_path_size_kb "$item" 2> /dev/null || echo "0")
         [[ "$item_size_kb" =~ ^[0-9]+$ ]] || item_size_kb=0
@@ -270,6 +276,9 @@ _clean_darwin_user_runtime_dir() {
         # still validates. Do not re-add per-item should_protect_path here.
         while IFS= read -r -d '' item; do
             [[ -d "$item" && ! -L "$item" ]] || continue
+            if is_endpoint_security_cache_path "$item"; then
+                continue
+            fi
             if [[ "${DRY_RUN:-false}" == "true" ]] || safe_remove "$item" true "0" > /dev/null 2>&1; then
                 found_any=true
                 count=$((count + 1))

@@ -125,6 +125,17 @@ teardown() {
     [[ "$output" == *"critical system path"* ]]
 }
 
+@test "validate_path_for_deletion rejects endpoint-security agent var/folders caches" {
+    # Central chokepoint: every safe_remove / safe_sudo_remove caller is covered,
+    # not only the cleanup sweeps that pre-check the predicate.
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe'"
+    [ "$status" -eq 1 ]
+
+    # A normal app's Darwin cache shard stays deletable.
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.example.App/com.apple.metalfe'"
+    [ "$status" -eq 0 ]
+}
+
 @test "should_protect_path applies high-risk cleanup denylist" {
     run bash -c "
         source '$PROJECT_ROOT/lib/core/common.sh'
@@ -137,6 +148,55 @@ teardown() {
         should_protect_data 'com.native-instruments.NativeAccess'
         ! should_protect_path '$HOME/Library/Application Support/Example/Cache/item'
     "
+    [ "$status" -eq 0 ]
+}
+
+@test "is_endpoint_security_cache_path matches only EDR agent var/folders caches" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+# Deleting anything an EDR agent owns under the per-user Darwin folder trips
+# sensor tamper detection (CrowdStrike MacFalconSensorTamper, MITRE T1562.001).
+# The matcher covers the vendor bundle id anywhere under var/folders: the C/
+# shader cache that triggered the real corporate alert, the X/ code-signature
+# clone, and T/ temp. Protection-only, so a wide match within var/folders is
+# intentional.
+is_endpoint_security_cache_path "/private/var/folders/9d/abc123/C/com.crowdstrike.falcon.App/com.apple.metalfe"
+is_endpoint_security_cache_path "/private/var/folders/9d/abc123/X/com.crowdstrike.falcon.App.code_sign_clone"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/T/com.crowdstrike.falcon.App/scratch"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.sentinelone.agent/com.apple.metal"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.jamf.management/com.apple.gpuarchiver"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.paloaltonetworks.GlobalProtect/com.apple.metalfe"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.eset.endpoint/com.apple.metal"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.sentinel-labs.agent/com.apple.metalfe"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.jamfsoftware.selfservice/com.apple.gpuarchiver"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/X/com.cisco.anyconnect.gui.code_sign_clone"
+is_endpoint_security_cache_path "/private/var/folders/aa/bb/X/com.cisco.secureclient.gui.code_sign_clone"
+# A normal third-party app's cache is not an EDR cache.
+! is_endpoint_security_cache_path "/private/var/folders/aa/bb/C/com.example.App/com.apple.metalfe"
+# Non-security Cisco products (e.g. Webex) are not matched; only the secure-access clients are.
+! is_endpoint_security_cache_path "/private/var/folders/aa/bb/X/com.cisco.webex.code_sign_clone"
+# Paths outside var/folders are out of scope for this predicate.
+! is_endpoint_security_cache_path "/Applications/Falcon.app"
+# A non-Darwin path that merely contains "var/folders" must NOT match (anchored).
+! is_endpoint_security_cache_path "/Users/me/project/var/folders/com.crowdstrike.fixture/cache"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "should_protect_path protects endpoint-security / EDR agent caches (CrowdStrike Falcon tamper)" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+# Matched by the dedicated EDR predicate before any bundle/filename fallback,
+# so the result is deterministic regardless of nounset/source order.
+should_protect_path "/private/var/folders/9d/abc123/C/com.crowdstrike.falcon.App/com.apple.metalfe"
+should_protect_path "/private/var/folders/aa/bb/C/com.sentinelone.agent/com.apple.metal"
+EOF
+
     [ "$status" -eq 0 ]
 }
 
@@ -316,13 +376,11 @@ SCRIPT
 }
 
 @test "safe_sudo_remove returns protected-path code for safety skips" {
-    local target_dir="$TEST_DIR/protected-sudo-target"
-    mkdir -p "$target_dir"
+    local target_dir="/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-should_protect_path() { return 0; }
 
 safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
 echo "RC=$rc"

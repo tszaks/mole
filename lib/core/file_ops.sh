@@ -176,6 +176,18 @@ validate_path_for_deletion() {
             ;;
     esac
 
+    # Endpoint-security/EDR agent caches under var/folders look like ordinary
+    # rebuildable caches, but deleting anything in a sensor's container trips
+    # tamper detection (reported as malware). Reject here, before the
+    # /private/var/folders allowlist below, so every deletion caller is covered,
+    # not only the cleanup sweeps that pre-check the predicate.
+    if declare -f is_endpoint_security_cache_path > /dev/null 2>&1 && is_endpoint_security_cache_path "$policy_path"; then
+        if [[ "${MO_DEBUG:-0}" == "1" ]]; then
+            log_warning "Path validation: endpoint-security agent cache skipped: $policy_path"
+        fi
+        return 1
+    fi
+
     # Allow known safe paths under /private
     case "$policy_path" in
         /private/tmp | /private/tmp/* | \

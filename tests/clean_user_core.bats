@@ -505,6 +505,40 @@ EOF
     [[ "$output" == *"PASS"* ]]
 }
 
+@test "_clean_darwin_user_runtime_dir skips endpoint-security (EDR) agent caches" {
+    local runtime_home="$HOME/darwin-runtime-edr"
+    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+mkdir -p "$HOME/runtime/C/com.crowdstrike.falcon.App" "$HOME/runtime/C/com.example.App"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+_darwin_user_runtime_dir_is_safe() { return 0; }
+# Isolate the loop's use of the guard from the predicate's real var/folders
+# anchoring (which is covered in core_safe_functions.bats): treat the Falcon
+# fixture as an EDR path regardless of the test sandbox location.
+is_endpoint_security_cache_path() { case "$1" in *com.crowdstrike.*) return 0 ;; *) return 1 ;; esac; }
+note_activity() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+echo edr > "$HOME/runtime/C/com.crowdstrike.falcon.App/cache.bin"
+echo norm > "$HOME/runtime/C/com.example.App/cache.bin"
+touch -t 202301010000 "$HOME/runtime/C/com.crowdstrike.falcon.App/cache.bin" "$HOME/runtime/C/com.example.App/cache.bin"
+
+_clean_darwin_user_runtime_dir "$HOME/runtime/C" "cache" "Darwin user cache files"
+
+# The EDR agent's user-owned cache is never deleted (tamper protection)...
+[[ -e "$HOME/runtime/C/com.crowdstrike.falcon.App/cache.bin" ]]
+# ...while a normal app's old cache file still gets reclaimed.
+[[ ! -e "$HOME/runtime/C/com.example.App/cache.bin" ]]
+echo "PASS"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
+}
+
 @test "app_support_entry_count_capped stops at cap without failing under pipefail" {
     local support_home="$HOME/support-appsupport-cap"
     run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'

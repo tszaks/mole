@@ -115,6 +115,89 @@ func TestValidateTrashTargetRejectsOrbStackLiveData(t *testing.T) {
 	}
 }
 
+func TestValidateTrashTargetRejectsEndpointSecurityCaches(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []string{
+		"/private/var/folders/zz/aa/C/com.crowdstrike.falcon.App/com.apple.metalfe",
+		"/private/var/folders/zz/aa/X/com.sentinelone.agent.code_sign_clone",
+		"/var/folders/zz/aa/C/com.jamf.management/cache",
+	}
+
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+				t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", path, err)
+			}
+		})
+	}
+}
+
+func TestValidateTrashTargetAllowsNonEDRDarwinCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// A normal app's rebuildable GPU cache under var/folders stays deletable.
+	path := "/private/var/folders/zz/aa/C/com.example.App/com.apple.metalfe"
+	if err := validateTrashTarget(path); err != nil {
+		t.Fatalf("validateTrashTarget(%q) error = %v, want nil", path, err)
+	}
+}
+
+func TestValidateTrashTargetRejectsEndpointSecurityCachesWithoutHOME(t *testing.T) {
+	// The EDR check must not depend on HOME (e.g. `env -u HOME mo analyze`).
+	t.Setenv("HOME", "")
+	path := "/private/var/folders/zz/aa/C/com.crowdstrike.falcon.App/com.apple.metalfe"
+	if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("validateTrashTarget(%q) with empty HOME error = %v, want protected path error", path, err)
+	}
+}
+
+func TestEndpointSecurityBundlePrefixesMirrorShellData(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "lib", "core", "app_protection_data.sh"))
+	if err != nil {
+		t.Fatalf("read app_protection_data.sh: %v", err)
+	}
+
+	shellPrefixes := endpointSecurityPrefixesFromShellData(t, string(data))
+	if len(shellPrefixes) != len(endpointSecurityBundlePrefixes) {
+		t.Fatalf("endpointSecurityBundlePrefixes length = %d, shell ENDPOINT_SECURITY_BUNDLE_PREFIXES length = %d",
+			len(endpointSecurityBundlePrefixes), len(shellPrefixes))
+	}
+	for i, prefix := range endpointSecurityBundlePrefixes {
+		if prefix != shellPrefixes[i] {
+			t.Fatalf("endpointSecurityBundlePrefixes[%d] = %q, shell ENDPOINT_SECURITY_BUNDLE_PREFIXES[%d] = %q",
+				i, prefix, i, shellPrefixes[i])
+		}
+	}
+}
+
+func endpointSecurityPrefixesFromShellData(t *testing.T, data string) []string {
+	t.Helper()
+
+	const marker = "readonly ENDPOINT_SECURITY_BUNDLE_PREFIXES=("
+	_, body, ok := strings.Cut(data, marker)
+	if !ok {
+		t.Fatalf("ENDPOINT_SECURITY_BUNDLE_PREFIXES array not found")
+	}
+
+	body, _, ok = strings.Cut(body, "\n)")
+	if !ok {
+		t.Fatalf("ENDPOINT_SECURITY_BUNDLE_PREFIXES array terminator not found")
+	}
+
+	var prefixes []string
+	for line := range strings.SplitSeq(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		prefixes = append(prefixes, strings.Trim(line, "\""))
+	}
+	return prefixes
+}
+
 func TestValidateTrashTargetAllowsRegularUserPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

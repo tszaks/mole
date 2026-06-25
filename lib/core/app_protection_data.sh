@@ -150,6 +150,24 @@ readonly OFFICIAL_UNINSTALLER_RULES=(
     "Cisco|com.cisco.anyconnect,com.cisco.secureclient|cisco secure client,cisco anyconnect"
 )
 
+# Endpoint-security / EDR / MDM agent bundle-id prefixes. Their per-user Darwin
+# caches under /private/var/folders must never be deleted: removing anything
+# inside a sensor's container trips tamper detection (e.g. CrowdStrike
+# "MacFalconSensorTamper", MITRE T1562.001) that corporate security reports as
+# malware. Keep in sync with the vendors in OFFICIAL_UNINSTALLER_RULES above.
+# Consumed by is_endpoint_security_cache_path() in app_protection.sh.
+readonly ENDPOINT_SECURITY_BUNDLE_PREFIXES=(
+    "com.crowdstrike."
+    "com.sentinelone."
+    "com.sentinel-labs."
+    "com.eset."
+    "com.jamf."
+    "com.jamfsoftware."
+    "com.paloaltonetworks."
+    "com.cisco.anyconnect"
+    "com.cisco.secureclient"
+)
+
 # Applications with sensitive data; protected during cleanup but removable
 readonly DATA_PROTECTED_BUNDLES=(
     # Input Methods (protected during cleanup, uninstall allowed)

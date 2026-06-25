@@ -936,6 +936,55 @@ EOF
     [[ "$output" != *"SUCCESS:Browser code signature caches"* ]]
 }
 
+@test "clean_deep_system skips EDR code_sign clones (CrowdStrike Falcon tamper)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/edr_code_sign_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 1
+    fi
+    if [[ "$1" == "find" ]]; then
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() { return 0; }
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+find() { return 0; }
+run_with_timeout() {
+    local _timeout="$1"
+    shift
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+        printf '%s\0' \
+            "/private/var/folders/test/a/X/com.crowdstrike.falcon.App.code_sign_clone" \
+            "/private/var/folders/test/a/X/demo.code_sign_clone"
+        return 0
+    fi
+    "$@"
+}
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    # A normal (browser-style) code-sign clone is still reclaimed.
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/X/demo.code_sign_clone"* ]] || return 1
+    # The EDR agent's code-sign clone must never be deleted.
+    [[ "$output" != *"com.crowdstrike"* ]] || return 1
+}
+
 @test "clean_deep_system cleans CleanMyMac-observed rebuildable system caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -1069,6 +1118,61 @@ EOF
     [[ "$output" != *"not-a-gpu-cache"* ]]
     [[ "$output" != *"-mtime +1"* ]]
     [[ "$output" == *"SUCCESS:Accessible rebuildable GPU caches, 3 items"* ]]
+}
+
+@test "clean_deep_system skips EDR/security-agent GPU caches (CrowdStrike Falcon tamper)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/gpu_cache_edr_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    if [[ "$1" == "test" ]]; then
+        return 1
+    fi
+    return 0
+}
+safe_sudo_find_delete() { return 0; }
+safe_sudo_remove() {
+    echo "safe_sudo_remove:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+find() { return 0; }
+gpu_cache_dir_is_stale() { return 0; }
+run_with_timeout() {
+    local _timeout="$1"
+    shift
+    # The GPU-cache sweep is the deep walk (maxdepth 8); feed candidates only to
+    # it and let every other find scan return nothing so this exercises just it.
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${5:-}" == "8" ]]; then
+        printf '%s\0' \
+            "/private/var/folders/test/a/C/com.crowdstrike.falcon.App/com.apple.metalfe" \
+            "/private/var/folders/test/a/C/com.sentinelone.agent/com.apple.metal" \
+            "/private/var/folders/test/a/C/com.example.App/com.apple.metalfe"
+        return 0
+    fi
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" ]]; then
+        return 0
+    fi
+    "$@"
+}
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    # The normal third-party GPU cache is still reclaimed.
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.metalfe"* ]] || return 1
+    # EDR agent caches must never be touched (tamper alert -> corporate malware report).
+    [[ "$output" != *"com.crowdstrike"* ]] || return 1
+    [[ "$output" != *"com.sentinelone"* ]] || return 1
+    [[ "$output" == *"SUCCESS:Accessible rebuildable GPU caches, 1 item"* ]] || return 1
 }
 
 @test "opt_memory_pressure_relief skips when pressure is normal" {
