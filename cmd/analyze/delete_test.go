@@ -154,6 +154,50 @@ func TestValidateTrashTargetRejectsEndpointSecurityCachesWithoutHOME(t *testing.
 	}
 }
 
+func TestEndpointSecurityBundlePrefixesMirrorShellData(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "lib", "core", "app_protection_data.sh"))
+	if err != nil {
+		t.Fatalf("read app_protection_data.sh: %v", err)
+	}
+
+	shellPrefixes := endpointSecurityPrefixesFromShellData(t, string(data))
+	if len(shellPrefixes) != len(endpointSecurityBundlePrefixes) {
+		t.Fatalf("endpointSecurityBundlePrefixes length = %d, shell ENDPOINT_SECURITY_BUNDLE_PREFIXES length = %d",
+			len(endpointSecurityBundlePrefixes), len(shellPrefixes))
+	}
+	for i, prefix := range endpointSecurityBundlePrefixes {
+		if prefix != shellPrefixes[i] {
+			t.Fatalf("endpointSecurityBundlePrefixes[%d] = %q, shell ENDPOINT_SECURITY_BUNDLE_PREFIXES[%d] = %q",
+				i, prefix, i, shellPrefixes[i])
+		}
+	}
+}
+
+func endpointSecurityPrefixesFromShellData(t *testing.T, data string) []string {
+	t.Helper()
+
+	const marker = "readonly ENDPOINT_SECURITY_BUNDLE_PREFIXES=("
+	_, body, ok := strings.Cut(data, marker)
+	if !ok {
+		t.Fatalf("ENDPOINT_SECURITY_BUNDLE_PREFIXES array not found")
+	}
+
+	body, _, ok = strings.Cut(body, "\n)")
+	if !ok {
+		t.Fatalf("ENDPOINT_SECURITY_BUNDLE_PREFIXES array terminator not found")
+	}
+
+	var prefixes []string
+	for line := range strings.SplitSeq(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		prefixes = append(prefixes, strings.Trim(line, "\""))
+	}
+	return prefixes
+}
+
 func TestValidateTrashTargetAllowsRegularUserPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

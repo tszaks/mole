@@ -376,13 +376,11 @@ SCRIPT
 }
 
 @test "safe_sudo_remove returns protected-path code for safety skips" {
-    local target_dir="$TEST_DIR/protected-sudo-target"
-    mkdir -p "$target_dir"
+    local target_dir="/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-should_protect_path() { return 0; }
 
 safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
 echo "RC=$rc"
