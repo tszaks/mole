@@ -154,6 +154,17 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "bundle_has_installed_app finds parent app via .service suffix" {
+    make_app "$FAKE_APPS/Clash Verge.app" "io.github.clash-verge-rev.clash-verge-rev"
+
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+$(prelude)
+bundle_has_installed_app "io.github.clash-verge-rev.clash-verge-rev.service"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "bundle_has_installed_app returns non-zero for .helper when parent app absent" {
     make_app "$FAKE_APPS/Other.app" "com.example.other"
 

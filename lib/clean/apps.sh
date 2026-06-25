@@ -426,6 +426,27 @@ clean_orphaned_app_data() {
     rm -f "$installed_bundles"
 }
 
+_privileged_helper_bundle_id_from_binary() {
+    local binary="$1"
+    local helper_bundle_id=""
+
+    case "$binary" in
+        /Library/PrivilegedHelperTools/*.bundle/Contents/MacOS/*)
+            local helper_bundle_dir info_plist
+            helper_bundle_dir="${binary%/Contents/MacOS/*}"
+            info_plist="$helper_bundle_dir/Contents/Info.plist"
+            helper_bundle_id=$(plutil -extract CFBundleIdentifier raw "$info_plist" 2> /dev/null || true)
+            [[ -n "$helper_bundle_id" ]] || helper_bundle_id=$(basename "$helper_bundle_dir" .bundle)
+            ;;
+        *)
+            helper_bundle_id=$(basename "$binary")
+            helper_bundle_id="${helper_bundle_id%.plist}"
+            ;;
+    esac
+
+    printf '%s\n' "$helper_bundle_id"
+}
+
 # Clean orphaned system-level services (LaunchDaemons, LaunchAgents, PrivilegedHelperTools)
 # These are left behind when apps are uninstalled but their system services remain
 clean_orphaned_system_services() {
@@ -589,8 +610,7 @@ clean_orphaned_system_services() {
         if [[ -e "$binary" ]]; then
             if [[ "$binary" == /Library/PrivilegedHelperTools/* ]]; then
                 local helper_bundle_id
-                helper_bundle_id=$(basename "$binary")
-                helper_bundle_id="${helper_bundle_id%.plist}"
+                helper_bundle_id=$(_privileged_helper_bundle_id_from_binary "$binary")
                 if bundle_has_installed_app "$helper_bundle_id"; then
                     return 1 # Parent app still installed, plist is healthy
                 fi
