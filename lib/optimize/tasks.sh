@@ -1007,7 +1007,7 @@ opt_shared_file_list_repair() {
     fi
 
     local repaired=0
-    while IFS= read -r sfl_file; do
+    while IFS= read -r -d '' sfl_file; do
         [[ -f "$sfl_file" ]] || continue
         # Skip recent-documents list (user data, not a cache)
         [[ "$sfl_file" == *"ApplicationRecentDocuments"* ]] && continue
@@ -1017,7 +1017,7 @@ opt_shared_file_list_repair() {
             fi
             repaired=$((repaired + 1))
         fi
-    done < <(command find "$sfl_dir" \( -name "*.sfl2" -o -name "*.sfl3" \) -type f ! -path "*ApplicationRecentDocuments*" 2> /dev/null || true)
+    done < <(command find "$sfl_dir" \( -name "*.sfl2" -o -name "*.sfl3" \) -type f ! -path "*ApplicationRecentDocuments*" -print0 2> /dev/null || true)
 
     if [[ $repaired -gt 0 ]]; then
         opt_msg "Repaired $repaired corrupted shared file list(s)"
