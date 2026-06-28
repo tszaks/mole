@@ -777,23 +777,12 @@ func TestScanCmdTreatsWarmedCacheAsStale(t *testing.T) {
 	}
 }
 
-func TestLiveScanUXConfigFromEnv(t *testing.T) {
+func TestLiveScanSortConfigFromEnv(t *testing.T) {
 	t.Setenv(liveSortModeEnv, "freeze-on-move")
-	t.Setenv(liveCursorModeEnv, "index")
 
 	m := newModel(t.TempDir(), false)
 	if m.liveSortMode != liveSortFreezeOnMove {
 		t.Fatalf("expected freeze-on-move sort mode, got %v", m.liveSortMode)
-	}
-	if m.liveCursorMode != liveCursorByIndex {
-		t.Fatalf("expected index cursor mode, got %v", m.liveCursorMode)
-	}
-}
-
-func TestLiveScanDefaultsToPathCursor(t *testing.T) {
-	m := newModel(t.TempDir(), false)
-	if m.liveCursorMode != liveCursorByPath {
-		t.Fatalf("expected default path cursor mode, got %v", m.liveCursorMode)
 	}
 }
 
@@ -1136,7 +1125,7 @@ func TestLiveScanProgressUpdatesRowBarAndPercent(t *testing.T) {
 	}
 }
 
-func TestLiveScanContinuousSortKeepsCursorByIndex(t *testing.T) {
+func TestLiveScanContinuousSortKeepsCursorByPath(t *testing.T) {
 	root := t.TempDir()
 	a := filepath.Join(root, "a")
 	b := filepath.Join(root, "b")
@@ -1147,66 +1136,6 @@ func TestLiveScanContinuousSortKeepsCursorByIndex(t *testing.T) {
 	m.scanning = true
 	m.autoSortLiveEntries = true
 	m.liveSortMode = liveSortContinuous
-	m.liveCursorMode = liveCursorByIndex
-	m.liveScanningPaths = map[string]bool{a: true, b: true}
-	m.entries = []dirEntry{
-		{Name: "a", Path: a, Size: -1, IsDir: true},
-		{Name: "b", Path: b, Size: -1, IsDir: true},
-	}
-
-	updated, _ := m.Update(liveScanEventMsg{
-		id:     1,
-		path:   root,
-		kind:   liveScanChildDone,
-		entry:  dirEntry{Name: "b", Path: b, Size: 10, IsDir: true},
-		result: scanResult{TotalSize: 10},
-	})
-	m = updated.(model)
-	if m.entries[0].Path != b {
-		t.Fatalf("expected live auto-sort to move larger row first, got %+v", m.entries)
-	}
-
-	updated, _ = m.updateKey(tea.KeyMsg{Type: tea.KeyDown})
-	m = updated.(model)
-	if !m.autoSortLiveEntries {
-		t.Fatalf("expected navigation key to keep live sort enabled")
-	}
-	if m.entries[m.selected].Path != a {
-		t.Fatalf("expected selection to move to a before reorder, got selected=%d entries=%+v", m.selected, m.entries)
-	}
-	selectedIndex := m.selected
-
-	updated, _ = m.Update(liveScanEventMsg{
-		id:     1,
-		path:   root,
-		kind:   liveScanChildDone,
-		entry:  dirEntry{Name: "a", Path: a, Size: 100, IsDir: true},
-		result: scanResult{TotalSize: 100},
-	})
-	m = updated.(model)
-	if got := []string{m.entries[0].Path, m.entries[1].Path}; !slices.Equal(got, []string{a, b}) {
-		t.Fatalf("expected live sort to continue after navigation, got %v", got)
-	}
-	if m.selected != selectedIndex {
-		t.Fatalf("expected selection index to stay %d, got %d", selectedIndex, m.selected)
-	}
-	if m.entries[m.selected].Path != b {
-		t.Fatalf("expected cursor-by-index to now point at row %d (%s), selected entries=%+v", selectedIndex, b, m.entries)
-	}
-}
-
-func TestLiveScanContinuousSortCanKeepCursorByPath(t *testing.T) {
-	root := t.TempDir()
-	a := filepath.Join(root, "a")
-	b := filepath.Join(root, "b")
-
-	m := newModel(root, false)
-	m.liveScanID = 1
-	m.liveScanEvents = make(chan liveScanEventMsg)
-	m.scanning = true
-	m.autoSortLiveEntries = true
-	m.liveSortMode = liveSortContinuous
-	m.liveCursorMode = liveCursorByPath
 	m.liveScanningPaths = map[string]bool{a: true, b: true}
 	m.entries = []dirEntry{
 		{Name: "a", Path: a, Size: -1, IsDir: true},
@@ -1254,7 +1183,6 @@ func TestLiveScanSortCanFreezeAfterNavigationKey(t *testing.T) {
 	m.scanning = true
 	m.autoSortLiveEntries = true
 	m.liveSortMode = liveSortFreezeOnMove
-	m.liveCursorMode = liveCursorByIndex
 	m.liveScanningPaths = map[string]bool{a: true, b: true}
 	m.entries = []dirEntry{
 		{Name: "a", Path: a, Size: -1, IsDir: true},

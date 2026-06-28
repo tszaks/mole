@@ -7,10 +7,7 @@ import (
 	"strings"
 )
 
-const (
-	liveSortModeEnv   = "MOLE_ANALYZE_LIVE_SORT"
-	liveCursorModeEnv = "MOLE_ANALYZE_LIVE_CURSOR"
-)
+const liveSortModeEnv = "MOLE_ANALYZE_LIVE_SORT"
 
 func liveScanSortModeFromEnv() liveSortMode {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(liveSortModeEnv))) {
@@ -18,15 +15,6 @@ func liveScanSortModeFromEnv() liveSortMode {
 		return liveSortFreezeOnMove
 	default:
 		return liveSortContinuous
-	}
-}
-
-func liveScanCursorModeFromEnv() liveCursorMode {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(liveCursorModeEnv))) {
-	case "index":
-		return liveCursorByIndex
-	default:
-		return liveCursorByPath
 	}
 }
 

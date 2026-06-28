@@ -184,7 +184,7 @@ func (m *model) applyLiveChildSize(entry dirEntry, complete bool, result scanRes
 		m.cache[entry.Path] = historyEntryFromScanResult(entry.Path, childResult, m.cache[entry.Path], true)
 	}
 	if m.autoSortLiveEntries {
-		m.sortLiveEntriesForCurrentCursorMode()
+		m.sortLiveEntriesPreservingSelection()
 	} else {
 		m.applyEntryFilter()
 	}
@@ -239,19 +239,9 @@ func (m *model) finishCanceledLiveScan() {
 	m.status = "Scan cancelled"
 }
 
-func (m *model) sortLiveEntriesForCurrentCursorMode() {
+func (m *model) sortLiveEntriesPreservingSelection() {
 	m.ensureLiveEntryBacking()
-	selectedPath := ""
-	if m.liveCursorMode == liveCursorByPath {
-		selectedPath = m.selectedEntryPath()
-	}
-
-	if m.liveCursorMode == liveCursorByIndex {
-		sortDirEntriesBySize(m.entriesAll)
-		m.applyEntryFilter()
-		m.clampEntrySelection()
-		return
-	}
+	selectedPath := m.selectedEntryPath()
 	sortDirEntriesBySize(m.entriesAll)
 	m.applyEntryFilter()
 	if selectedPath == "" {
@@ -417,7 +407,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewNeedsRefresh = false
 		m.scanning = true
 		m.status = fmt.Sprintf("Scanning %s...", displayPath(m.path))
-		m.sortLiveEntriesForCurrentCursorMode()
+		m.sortLiveEntriesPreservingSelection()
 		m.applyLargeFilter()
 		if selectedPath != "" {
 			m.selectEntryPath(selectedPath)
@@ -716,7 +706,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.liveSortMode = nextLiveSortMode(m.liveSortMode)
 			m.autoSortLiveEntries = m.liveSortMode == liveSortContinuous
 			if m.autoSortLiveEntries {
-				m.sortLiveEntriesForCurrentCursorMode()
+				m.sortLiveEntriesPreservingSelection()
 			}
 			m.status = fmt.Sprintf("Live sort: %s", liveSortModeLabel(m.liveSortMode))
 		}

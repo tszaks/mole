@@ -110,13 +110,6 @@ const (
 	liveSortFreezeOnMove
 )
 
-type liveCursorMode int
-
-const (
-	liveCursorByIndex liveCursorMode = iota
-	liveCursorByPath
-)
-
 type overviewSizeMsg struct {
 	Path  string
 	Index int
@@ -187,7 +180,6 @@ type model struct {
 	liveScanningPaths   map[string]bool
 	autoSortLiveEntries bool
 	liveSortMode        liveSortMode
-	liveCursorMode      liveCursorMode
 }
 
 func (m model) inOverviewMode() bool {

@@ -173,6 +173,17 @@ func TestEndpointSecurityBundlePrefixesMirrorShellData(t *testing.T) {
 	}
 }
 
+func TestEndpointSecurityBundlePrefixesAllProtectDarwinCaches(t *testing.T) {
+	for _, prefix := range endpointSecurityBundlePrefixes {
+		t.Run(prefix, func(t *testing.T) {
+			path := "/private/var/folders/zz/aa/C/" + prefix + "agent/cache"
+			if !isEndpointSecurityCachePath(path) {
+				t.Fatalf("isEndpointSecurityCachePath(%q) = false, want true", path)
+			}
+		})
+	}
+}
+
 func endpointSecurityPrefixesFromShellData(t *testing.T, data string) []string {
 	t.Helper()
 

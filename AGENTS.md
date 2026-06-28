@@ -50,7 +50,7 @@ If the answer is no or unclear, decline the feature, narrow it, or park it until
 - `lib/core/` - shared shell safety, UI, file operations, operation logs, app protection logic, and centralized timeout constants (`timeouts.sh`).
 - `lib/core/app_protection_data.sh` - readonly bundle ID and pattern arrays consumed by `app_protection.sh`. Data only, no logic.
 - `lib/clean/` - cleanup flows.
-- `lib/manage/` - whitelist, update, autofix, and purge path management.
+- `lib/manage/` - whitelist and purge path management.
 - `lib/optimize/` - optimization tasks.
 - `lib/check/` - health, diagnostics, and dev environment checks.
 - `lib/uninstall/` - app uninstall flows and package-manager removal helpers.
