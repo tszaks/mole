@@ -50,8 +50,14 @@ clean_corepack_cache() {
             return 0
             ;;
     esac
-    if command -v corepack > /dev/null 2>&1 && run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" corepack --version > /dev/null 2>&1; then
-        clean_tool_cache "Corepack cache" "$corepack_home" run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" corepack cache clean
+    # COREPACK_ENABLE_DOWNLOAD_PROMPT=0 mirrors the pnpm path above: without it
+    # corepack can stop on an interactive "download? [Y/n]" prompt. Because the
+    # call is wrapped with stdout/stderr to /dev/null, that prompt is invisible
+    # and the command looks frozen until the timeout fires (seen on a Node setup
+    # where corepack is installed; machines without corepack take the else
+    # branch and never hit this).
+    if command -v corepack > /dev/null 2>&1 && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" corepack --version > /dev/null 2>&1; then
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "Corepack cache" "$corepack_home" run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" corepack cache clean
     else
         safe_clean "$corepack_home"/* "Corepack cache"
     fi
