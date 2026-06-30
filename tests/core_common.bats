@@ -424,6 +424,14 @@ EOF
     # But the app itself is a third-party app, not a system component, so it can be uninstalled
     result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'org.pqrs.Karabiner-Elements.Settings' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
+
+    # The main app bundle id (the actual `mo uninstall --list` key) behaves the same:
+    # removable from uninstall, still data-protected during clean.
+    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'org.pqrs.Karabiner-Elements' && echo 'protected' || echo 'not-protected'")
+    [ "$result" = "not-protected" ]
+
+    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.pqrs.Karabiner-Elements' && echo 'protected' || echo 'not-protected'")
+    [ "$result" = "protected" ]
 }
 
 @test "Apple apps from App Store can be uninstalled (Issue #386)" {
