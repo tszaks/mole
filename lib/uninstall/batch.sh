@@ -452,6 +452,14 @@ remove_file_list() {
 # stays on disk and is not part of the current selection, bundle-id-derived
 # leftovers (caches, preferences, containers, launch services) still belong to
 # the surviving install and must not be touched by this uninstall.
+#
+# Siblings under /Volumes/* count on purpose. Exact mirror clones never reach
+# this check (the scan dedupe collapses same-basename rows and keeps the live
+# path), so a /Volumes row here means a same-bundle app the scan considers a
+# distinct install. Apps genuinely run from an external volume use the same
+# $HOME bundle-id data, and skipping that data is the safe failure mode: worst
+# case a few leftover files stay behind, versus deleting state a real install
+# still uses.
 # Reads apps_data and selected_apps from the caller's scope via dynamic
 # scoping; both may be unset when batch.sh is exercised standalone in tests.
 uninstall_bundle_id_has_surviving_sibling() {
