@@ -342,6 +342,97 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "uninstall_bundle_id_has_surviving_sibling detects unselected same-bundle install" {
+	mkdir -p "$HOME/Applications/Shared.app" "$HOME/Applications/Shared-beta.app"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+apps_data=(
+	"0|$HOME/Applications/Shared.app|Shared|com.example.Shared|0|Never|0"
+	"0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never|0"
+)
+
+# Only the beta variant is selected; the stable install survives.
+selected_apps=("0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never")
+uninstall_bundle_id_has_surviving_sibling "com.example.Shared" "$HOME/Applications/Shared-beta.app" || {
+	echo "WRONG: surviving sibling not detected"
+	exit 1
+}
+
+# Both variants selected: no survivor, bundle-id cleanup is safe.
+selected_apps=(
+	"0|$HOME/Applications/Shared.app|Shared|com.example.Shared|0|Never"
+	"0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never"
+)
+if uninstall_bundle_id_has_surviving_sibling "com.example.Shared" "$HOME/Applications/Shared-beta.app"; then
+	echo "WRONG: sibling reported although both installs are selected"
+	exit 1
+fi
+
+# Unknown bundle id never reports a sibling.
+if uninstall_bundle_id_has_surviving_sibling "unknown" "$HOME/Applications/Shared-beta.app"; then
+	echo "WRONG: unknown bundle id reported a sibling"
+	exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "batch_uninstall_applications keeps shared bundle-id leftovers when a sibling install survives" {
+	# Xcode.app and Xcode-beta.app both use com.apple.dt.Xcode. Uninstalling
+	# only the beta must not delete bundle-id-keyed files still owned by the
+	# surviving stable install.
+	mkdir -p "$HOME/Applications/Shared.app" "$HOME/Applications/Shared-beta.app"
+	mkdir -p "$HOME/Library/Caches/com.example.Shared"
+	mkdir -p "$HOME/Library/Preferences"
+	touch "$HOME/Library/Preferences/com.example.Shared.plist"
+	mkdir -p "$HOME/Library/Caches/Shared-beta"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+sudo() { return 0; }
+
+apps_data=(
+	"0|$HOME/Applications/Shared.app|Shared|com.example.Shared|0|Never|0"
+	"0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications
+
+# The selected bundle and its name-keyed leftovers are gone.
+[[ ! -d "$HOME/Applications/Shared-beta.app" ]] || { echo "WRONG: beta bundle preserved"; exit 1; }
+[[ ! -d "$HOME/Library/Caches/Shared-beta" ]] || { echo "WRONG: beta name cache preserved"; exit 1; }
+
+# The surviving install and every bundle-id-keyed path are untouched.
+[[ -d "$HOME/Applications/Shared.app" ]] || { echo "WRONG: surviving install removed"; exit 1; }
+[[ -d "$HOME/Library/Caches/com.example.Shared" ]] || { echo "WRONG: shared bundle-id cache removed"; exit 1; }
+[[ -f "$HOME/Library/Preferences/com.example.Shared.plist" ]] || { echo "WRONG: shared bundle-id prefs removed"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "batch_uninstall_applications blocks official-uninstaller apps" {
 	mkdir -p "$HOME/Applications/Falcon.app"
 
@@ -1782,7 +1873,7 @@ read_key() {
 MOLE_SELECTION_RESULT=""
 unset MOLE_MENU_SORT_MODE MOLE_MENU_SORT_REVERSE MOLE_MENU_META_SIZEKB
 set +e
-MOLE_MENU_META_EPOCHS="100,200" paginated_multi_select "Test Menu" "Alpha" "Beta" > "$HOME/menu.out" 2> "$HOME/menu.err"
+MOLE_MENU_META_EPOCHS="100,200" paginated_multi_select "Test Menu" "Alpha" "Beta" > "$HOME/menu.out" 2> "$HOME/menu.err" < /dev/null
 rc=$?
 set -e
 echo "rc=$rc"
@@ -1818,7 +1909,7 @@ read_key() {
 
 MOLE_SELECTION_RESULT=""
 set +e
-MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-default.out" 2> "$HOME/menu-default.err"
+MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-default.out" 2> "$HOME/menu-default.err" < /dev/null
 default_rc=$?
 set -e
 echo "default=${MOLE_SELECTION_RESULT:-}"
@@ -1826,7 +1917,7 @@ echo "default=${MOLE_SELECTION_RESULT:-}"
 : > "$key_state"
 MOLE_SELECTION_RESULT=""
 set +e
-NEXT_KEY="CHAR:O" MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-reverse.out" 2> "$HOME/menu-reverse.err"
+NEXT_KEY="CHAR:O" MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-reverse.out" 2> "$HOME/menu-reverse.err" < /dev/null
 reverse_rc=$?
 set -e
 echo "default_rc=$default_rc"

@@ -151,7 +151,10 @@ append_line() {
 
 format_uninstall_preview_path() {
     local path="$1"
-    local display_path="${path/$HOME/~}"
+    # Replacement must come from a variable: bash 5.3+ tilde-expands a literal
+    # unquoted ~ in the patsub replacement, turning this into a no-op.
+    local tilde='~'
+    local display_path="${path/#$HOME/$tilde}"
     local size_kb
     size_kb=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
 
@@ -444,6 +447,43 @@ remove_file_list() {
     echo "$count"
 }
 
+# Distinct installs can share one bundle id (Xcode.app and Xcode-beta.app are
+# both com.apple.dt.Xcode). When a sibling install with the same bundle id
+# stays on disk and is not part of the current selection, bundle-id-derived
+# leftovers (caches, preferences, containers, launch services) still belong to
+# the surviving install and must not be touched by this uninstall.
+# Reads apps_data and selected_apps from the caller's scope via dynamic
+# scoping; both may be unset when batch.sh is exercised standalone in tests.
+uninstall_bundle_id_has_surviving_sibling() {
+    local bundle_id="$1"
+    local app_path="$2"
+
+    [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && return 1
+
+    local row other_path other_bundle
+    # shellcheck disable=SC2154 # apps_data is provided by bin/uninstall.sh via dynamic scope.
+    for row in "${apps_data[@]+"${apps_data[@]}"}"; do
+        IFS='|' read -r _ other_path _ other_bundle _ _ _ <<< "$row"
+        [[ "$other_bundle" == "$bundle_id" ]] || continue
+        [[ "$other_path" == "$app_path" ]] && continue
+        [[ -d "$other_path" ]] || continue
+
+        local sel selected_path is_selected=false
+        for sel in "${selected_apps[@]+"${selected_apps[@]}"}"; do
+            IFS='|' read -r _ selected_path _ _ _ _ <<< "$sel"
+            if [[ "$selected_path" == "$other_path" ]]; then
+                is_selected=true
+                break
+            fi
+        done
+        [[ "$is_selected" == true ]] && continue
+
+        return 0
+    done
+
+    return 1
+}
+
 # Internal helpers for batch_uninstall_applications. They read and write
 # locals declared in the orchestrator's scope via bash dynamic scoping; do
 # not call them outside batch_uninstall_applications.
@@ -468,6 +508,16 @@ _batch_scan_app_details() {
         if official_vendor=$(official_uninstaller_vendor "$bundle_id" "$app_name" "$app_path" 2> /dev/null); then
             blocked_apps+=("$app_name|$official_vendor")
             continue
+        fi
+
+        # A surviving install sharing this bundle id (e.g. Xcode.app when
+        # uninstalling Xcode-beta.app) still owns every bundle-id-keyed path.
+        # Demote the bundle id to "unknown" so leftover discovery and the
+        # bundle-id-keyed removal steps all fall back to name/path matching,
+        # which is unique per install.
+        if uninstall_bundle_id_has_surviving_sibling "$bundle_id" "$app_path"; then
+            debug_log "Bundle id $bundle_id shared with a surviving install; restricting $app_name leftovers to name/path matches"
+            bundle_id="unknown"
         fi
 
         # Check running app by bundle executable if available
@@ -711,6 +761,9 @@ _batch_preview_and_confirm() {
 #         total_size_freed, brew_apps_removed,
 #         files_cleaned, total_items (the latter two via dynamic scope)
 _batch_execute_removals() {
+    # See format_uninstall_preview_path: literal ~ in a patsub replacement is
+    # tilde-expanded by bash 5.3+, so route it through a variable.
+    local tilde_display='~'
     local current_index=0
     for detail in "${app_details[@]}"; do
         current_index=$((current_index + 1))
@@ -943,7 +996,7 @@ _batch_execute_removals() {
             # Warn about files that could not be removed and exclude them from freed total.
             if [[ ${#leftover_paths[@]} -gt 0 ]]; then
                 for _lpath in "${leftover_paths[@]}"; do
-                    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Could not remove: ${_lpath/$HOME/~}"
+                    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Could not remove: ${_lpath/#$HOME/$tilde_display}"
                 done
                 total_kb=$((total_kb - leftover_kb))
                 ((total_kb < 0)) && total_kb=0
