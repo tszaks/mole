@@ -492,6 +492,66 @@ uninstall_bundle_id_has_surviving_sibling() {
     return 1
 }
 
+# Print the lowercased display names and .app basenames of every surviving
+# same-bundle sibling (same filter as uninstall_bundle_id_has_surviving_sibling),
+# one per line. Used to detect when the selected app's own names collide with
+# the survivor's, in which case name-derived cleanup must be suppressed too.
+uninstall_surviving_sibling_names() {
+    local bundle_id="$1"
+    local app_path="$2"
+
+    [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && return 0
+
+    local row other_path other_name other_bundle
+    for row in "${apps_data[@]+"${apps_data[@]}"}"; do
+        IFS='|' read -r _ other_path other_name other_bundle _ _ _ <<< "$row"
+        [[ "$other_bundle" == "$bundle_id" ]] || continue
+        [[ "$other_path" == "$app_path" ]] && continue
+        [[ -d "$other_path" ]] || continue
+
+        local sel selected_path is_selected=false
+        for sel in "${selected_apps[@]+"${selected_apps[@]}"}"; do
+            IFS='|' read -r _ selected_path _ _ _ _ <<< "$sel"
+            if [[ "$selected_path" == "$other_path" ]]; then
+                is_selected=true
+                break
+            fi
+        done
+        [[ "$is_selected" == true ]] && continue
+
+        local other_base="${other_path##*/}"
+        other_base="${other_base%.app}"
+
+        # Emit each identifier plus its version-suffix-stripped base: a
+        # survivor named "Foo Beta.app" also claims "Foo"-keyed dirs via the
+        # stripper in find_app_files, so uninstalling "Foo.app" must treat
+        # "foo" as taken.
+        local candidate
+        for candidate in "$other_name" "$other_base"; do
+            [[ -z "$candidate" ]] && continue
+            printf '%s\n' "$candidate" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+            uninstall_strip_version_suffix "$candidate" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+        done
+    done
+
+    return 0
+}
+
+# Mirror of the version-suffix stripping inside find_app_files. Needed here
+# because find_app_files derives extra patterns from the stripped base name
+# ("Zed Nightly" also matches "Zed" paths), so a collision check against the
+# survivor must consider the stripped form as well.
+uninstall_strip_version_suffix() {
+    local name="$1"
+    local version_suffixes="Nightly|Beta|Alpha|Dev|Canary|Preview|Insider|Edge|Stable|Release|RC|LTS"
+    version_suffixes+="|Developer Edition|Technology Preview"
+    if [[ "$name" =~ ^(.+)[[:space:]]+(${version_suffixes})$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    else
+        printf '%s\n' "$name"
+    fi
+}
+
 # Internal helpers for batch_uninstall_applications. They read and write
 # locals declared in the orchestrator's scope via bash dynamic scoping; do
 # not call them outside batch_uninstall_applications.
@@ -521,10 +581,50 @@ _batch_scan_app_details() {
         # A surviving install sharing this bundle id (e.g. Xcode.app when
         # uninstalling Xcode-beta.app) still owns every bundle-id-keyed path.
         # Demote the bundle id to "unknown" so leftover discovery and the
-        # bundle-id-keyed removal steps all fall back to name/path matching,
-        # which is unique per install.
+        # bundle-id-keyed removal steps all fall back to name/path matching.
+        # Name matching gets the same treatment: discovery keys on the .app
+        # basename (unique even when both installs resolve to one display
+        # name, which happens when mdls has no index and CFBundleName says
+        # "Xcode" for the beta), and if even that collides with the survivor,
+        # or its version-suffix-stripped base does, name discovery is dropped
+        # entirely so the fallback can never be broader than the primary path.
+        local sibling_guard="none"
+        local discovery_app_name="$app_name"
         if uninstall_bundle_id_has_surviving_sibling "$bundle_id" "$app_path"; then
-            debug_log "Bundle id $bundle_id shared with a surviving install; restricting $app_name leftovers to name/path matches"
+            sibling_guard="guard"
+            discovery_app_name="${app_path##*/}"
+            discovery_app_name="${discovery_app_name%.app}"
+
+            local survivor_names
+            survivor_names=$(uninstall_surviving_sibling_names "$bundle_id" "$app_path")
+            local discovery_lower discovery_base_lower display_lower
+            discovery_lower=$(printf '%s' "$discovery_app_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+            discovery_base_lower=$(uninstall_strip_version_suffix "$discovery_app_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+            display_lower=$(printf '%s' "$app_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+
+            local survivor_name login_name_collides=false
+            while IFS= read -r survivor_name; do
+                [[ -z "$survivor_name" ]] && continue
+                if [[ "$discovery_lower" == "$survivor_name" || "$discovery_base_lower" == "$survivor_name" ]]; then
+                    discovery_app_name=""
+                fi
+                # Login items are registered under the display name; when that
+                # string also belongs to the survivor, deleting it by name
+                # would remove the survivor's login item.
+                if [[ "$display_lower" == "$survivor_name" ]]; then
+                    login_name_collides=true
+                fi
+            done <<< "$survivor_names"
+            if [[ -z "$discovery_app_name" ]]; then
+                login_name_collides=true
+            fi
+            [[ "$login_name_collides" == true ]] && sibling_guard="guard_login"
+
+            if [[ -n "$discovery_app_name" ]]; then
+                debug_log "Bundle id $bundle_id shared with a surviving install; restricting $app_name leftovers to name/path matches for '$discovery_app_name'"
+            else
+                debug_log "Bundle id $bundle_id shared with a surviving install and names collide; removing only the app bundle for $app_name"
+            fi
             bundle_id="unknown"
         fi
 
@@ -568,19 +668,32 @@ _batch_scan_app_details() {
         fi
 
         local app_size_kb=$(get_path_size_kb "$app_path" || echo "0")
-        local related_files=$(find_app_files "$bundle_id" "$app_name" "$app_path" || true)
-        local diag_user
-        diag_user=$(get_diagnostic_report_paths_for_app "$app_path" "$app_name" "$HOME/Library/Logs/DiagnosticReports" || true)
-        [[ -n "$diag_user" ]] && related_files=$(
-            [[ -n "$related_files" ]] && echo "$related_files"
-            echo "$diag_user"
-        )
-        local related_size_kb=$(calculate_total_size "$related_files" || echo "0")
+        local related_files="" diag_user="" diag_system=""
         # system_files is a newline-separated string, not an array.
         # shellcheck disable=SC2178,SC2128
-        local system_files=$(find_app_system_files "$bundle_id" "$app_name" || true)
-        local diag_system
-        diag_system=$(get_diagnostic_report_paths_for_app "$app_path" "$app_name" "/Library/Logs/DiagnosticReports" || true)
+        local system_files=""
+        # discovery_app_name is empty only in the sibling-guard name-collision
+        # case: every name-derived pattern would belong to the survivor, and
+        # find_app_system_files has no empty-name guard (it would emit root
+        # dirs like "/Library/Application Support/"). Skip discovery entirely
+        # and remove just the app bundle.
+        if [[ -n "$discovery_app_name" ]]; then
+            # Under the sibling guard, also disable the regex-keyed toolchain
+            # heuristics in find_app_files (DerivedData, DeviceSupport, ...):
+            # they match "Xcode-beta" by substring and would still queue
+            # caches the surviving install uses.
+            local sibling_survives=0
+            [[ "$sibling_guard" != "none" ]] && sibling_survives=1
+            related_files=$(MOLE_UNINSTALL_SIBLING_SURVIVES="$sibling_survives" find_app_files "$bundle_id" "$discovery_app_name" "$app_path" || true)
+            diag_user=$(get_diagnostic_report_paths_for_app "$app_path" "$discovery_app_name" "$HOME/Library/Logs/DiagnosticReports" || true)
+            [[ -n "$diag_user" ]] && related_files=$(
+                [[ -n "$related_files" ]] && echo "$related_files"
+                echo "$diag_user"
+            )
+            system_files=$(find_app_system_files "$bundle_id" "$discovery_app_name" || true)
+            diag_system=$(get_diagnostic_report_paths_for_app "$app_path" "$discovery_app_name" "/Library/Logs/DiagnosticReports" || true)
+        fi
+        local related_size_kb=$(calculate_total_size "$related_files" || echo "0")
         local review_only_system_files="$system_files"
         review_only_system_files=$(append_line "$review_only_system_files" "$diag_system")
         # System-level remnants are review-only in the CLI: shown in the preview
@@ -622,7 +735,7 @@ _batch_scan_app_details() {
         login_item_helpers=$(discover_login_item_helper_bundle_ids "$app_path" || true)
         local encoded_login_item_helpers
         encoded_login_item_helpers=$(printf '%s' "$login_item_helpers" | base64 | tr -d '\n' || echo "")
-        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system|$has_local_network_usage|$encoded_review_system|$encoded_login_item_helpers")
+        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system|$has_local_network_usage|$encoded_review_system|$encoded_login_item_helpers|$sibling_guard")
     done
     if [[ -t 1 ]]; then stop_inline_spinner; fi
 
@@ -648,18 +761,27 @@ _batch_preview_and_confirm() {
 
     echo -e "\n${PURPLE_BOLD}Files to be removed:${NC}"
 
-    # Warn if brew cask apps are present.
-    local has_brew_cask=false
-    [[ ${#brew_cask_apps[@]} -gt 0 ]] && has_brew_cask=true
+    # Warn if brew cask apps are present. The --zap wording only applies to
+    # casks that will actually zap; sibling-guarded casks run a plain
+    # uninstall so their shared configs and data stay.
+    local has_zap_cask=false
+    local zap_detail zap_is_brew zap_guard
+    for zap_detail in "${app_details[@]}"; do
+        IFS='|' read -r _ _ _ _ _ _ _ _ zap_is_brew _ _ _ _ _ zap_guard <<< "$zap_detail"
+        if [[ "$zap_is_brew" == "true" && "${zap_guard:-none}" == "none" ]]; then
+            has_zap_cask=true
+            break
+        fi
+    done
 
-    if [[ "$has_brew_cask" == "true" ]]; then
+    if [[ "$has_zap_cask" == "true" ]]; then
         echo -e "${GRAY}${ICON_WARNING} Homebrew apps will be fully cleaned, --zap removes configs and data${NC}"
     fi
 
     echo ""
 
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system has_local_network_usage encoded_review_system encoded_login_item_helpers <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system has_local_network_usage encoded_review_system encoded_login_item_helpers sibling_guard <<< "$detail"
         local app_size_display=$(bytes_to_human "$((total_kb * 1024))")
 
         local brew_tag=""
@@ -775,7 +897,7 @@ _batch_execute_removals() {
     local current_index=0
     for detail in "${app_details[@]}"; do
         current_index=$((current_index + 1))
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system has_local_network_usage encoded_review_system encoded_login_item_helpers <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system has_local_network_usage encoded_review_system encoded_login_item_helpers sibling_guard <<< "$detail"
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local diag_system=$(decode_file_list "$encoded_diag_system" "$app_name")
@@ -801,8 +923,15 @@ _batch_execute_removals() {
         stop_launch_services "$bundle_id" "$has_system_files" "$app_path"
         unregister_app_bundle "$app_path"
 
-        # Remove from Login Items
-        remove_login_item "$app_name" "$bundle_id"
+        # Remove from Login Items. Skipped when the sibling guard flagged a
+        # name collision: login items are matched by display name only, and
+        # deleting "Xcode" by name would take out the surviving install's
+        # login item along with the beta's.
+        if [[ "${sibling_guard:-none}" != "guard_login" ]]; then
+            remove_login_item "$app_name" "$bundle_id"
+        else
+            debug_log "Skipping login item removal for $app_name: name is shared with a surviving install"
+        fi
 
         # Best-effort termination. macOS allows removing a running app bundle
         # (the running process keeps using its mmap'd code), so a stuck app
@@ -830,8 +959,13 @@ _batch_execute_removals() {
         local used_brew_successfully=false
         if [[ -z "$reason" ]]; then
             if [[ "$is_brew_cask" == "true" && -n "$cask_name" ]]; then
+                # Zap stanzas delete bundle-id-keyed prefs/caches. When the
+                # sibling guard is active those paths still belong to the
+                # surviving same-bundle install, so run a plain uninstall.
+                local cask_zap_mode="zap"
+                [[ "${sibling_guard:-none}" != "none" ]] && cask_zap_mode="nozap"
                 # Use brew_uninstall_cask helper (handles env vars, timeout, verification)
-                if brew_uninstall_cask "$cask_name" "$app_path"; then
+                if brew_uninstall_cask "$cask_name" "$app_path" "$cask_zap_mode"; then
                     used_brew_successfully=true
                 else
                     # Only fall back to manual app removal when Homebrew no longer
@@ -853,7 +987,11 @@ _batch_execute_removals() {
                         fi
                     elif [[ $cask_state -eq 0 ]]; then
                         reason="brew uninstall failed, package still installed"
-                        suggestion="Run brew uninstall --cask --zap $cask_name"
+                        if [[ "$cask_zap_mode" == "nozap" ]]; then
+                            suggestion="Run brew uninstall --cask $cask_name"
+                        else
+                            suggestion="Run brew uninstall --cask --zap $cask_name"
+                        fi
                     else
                         reason="brew uninstall failed, package state unknown"
                         suggestion="Run brew uninstall --cask --zap $cask_name"

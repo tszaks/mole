@@ -433,6 +433,98 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "batch_uninstall_applications keeps name-keyed leftovers when sibling installs share a display name" {
+	# On unindexed volumes mdls returns (null) and CFBundleName collapses both
+	# installs to one display name ("Xcode" for Xcode-beta.app). Discovery must
+	# fall back to the .app basename; when even that collides with the
+	# survivor, name cleanup and login-item removal must be suppressed.
+	mkdir -p "$HOME/Applications/SharedName-beta.app" "$HOME/Applications/SharedName.app"
+	mkdir -p "$HOME/OtherApps/SharedName.app"
+	mkdir -p "$HOME/Library/Application Support/SharedName"
+	mkdir -p "$HOME/Library/Caches/SharedName"
+	mkdir -p "$HOME/Library/Preferences"
+	touch "$HOME/Library/Preferences/SharedName.plist"
+	mkdir -p "$HOME/Library/Caches/SharedName-beta"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+sudo() { return 0; }
+remove_login_item() { printf 'LOGIN_ITEM:%s\n' "$1" >> "$HOME/login.log"; }
+
+# Case 1: display names collide ("SharedName" for both) but basenames differ.
+# Discovery must use the basename (SharedName-beta) so the survivor's
+# name-keyed dirs stay, and login-item removal must be skipped.
+apps_data=(
+	"0|$HOME/Applications/SharedName.app|SharedName|com.example.sharedname|0|Never|0"
+	"0|$HOME/Applications/SharedName-beta.app|SharedName|com.example.sharedname|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/SharedName-beta.app|SharedName|com.example.sharedname|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+[[ ! -d "$HOME/Applications/SharedName-beta.app" ]] || { echo "WRONG: beta bundle preserved"; exit 1; }
+[[ ! -d "$HOME/Library/Caches/SharedName-beta" ]] || { echo "WRONG: beta's own cache preserved"; exit 1; }
+[[ -d "$HOME/Applications/SharedName.app" ]] || { echo "WRONG: survivor removed"; exit 1; }
+[[ -d "$HOME/Library/Application Support/SharedName" ]] || { echo "WRONG: survivor app support removed"; exit 1; }
+[[ -d "$HOME/Library/Caches/SharedName" ]] || { echo "WRONG: survivor cache removed"; exit 1; }
+[[ -f "$HOME/Library/Preferences/SharedName.plist" ]] || { echo "WRONG: survivor prefs removed"; exit 1; }
+[[ ! -f "$HOME/login.log" ]] || { echo "WRONG: login item removed on colliding name"; cat "$HOME/login.log"; exit 1; }
+
+# Case 2: basenames collide too (same SharedName.app in two folders).
+# Name discovery must be suppressed entirely: only the bundle goes.
+apps_data=(
+	"0|$HOME/OtherApps/SharedName.app|SharedName|com.example.sharedname|0|Never|0"
+	"0|$HOME/Applications/SharedName.app|SharedName|com.example.sharedname|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/SharedName.app|SharedName|com.example.sharedname|0|Never")
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+[[ ! -d "$HOME/Applications/SharedName.app" ]] || { echo "WRONG: selected bundle preserved"; exit 1; }
+[[ -d "$HOME/OtherApps/SharedName.app" ]] || { echo "WRONG: survivor removed (case 2)"; exit 1; }
+[[ -d "$HOME/Library/Application Support/SharedName" ]] || { echo "WRONG: shared-name app support removed (case 2)"; exit 1; }
+[[ -d "$HOME/Library/Caches/SharedName" ]] || { echo "WRONG: shared-name cache removed (case 2)"; exit 1; }
+[[ -f "$HOME/Library/Preferences/SharedName.plist" ]] || { echo "WRONG: shared-name prefs removed (case 2)"; exit 1; }
+[[ ! -f "$HOME/login.log" ]] || { echo "WRONG: login item removed on colliding name (case 2)"; exit 1; }
+
+# Case 3: the Xcode toolchain heuristic matches by regex substring, so even
+# a non-colliding basename ("XcodeClone-beta") would sweep DerivedData that
+# the surviving install still uses. The sibling guard must disable it.
+mkdir -p "$HOME/Applications/XcodeClone.app" "$HOME/Applications/XcodeClone-beta.app"
+mkdir -p "$HOME/Library/Developer/Xcode/DerivedData"
+
+apps_data=(
+	"0|$HOME/Applications/XcodeClone.app|XcodeClone|com.example.xcodeclone|0|Never|0"
+	"0|$HOME/Applications/XcodeClone-beta.app|XcodeClone|com.example.xcodeclone|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/XcodeClone-beta.app|XcodeClone|com.example.xcodeclone|0|Never")
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+[[ ! -d "$HOME/Applications/XcodeClone-beta.app" ]] || { echo "WRONG: beta bundle preserved (case 3)"; exit 1; }
+[[ -d "$HOME/Applications/XcodeClone.app" ]] || { echo "WRONG: survivor removed (case 3)"; exit 1; }
+[[ -d "$HOME/Library/Developer/Xcode/DerivedData" ]] || { echo "WRONG: DerivedData swept despite surviving sibling (case 3)"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "batch_uninstall_applications blocks official-uninstaller apps" {
 	mkdir -p "$HOME/Applications/Falcon.app"
 
