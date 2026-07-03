@@ -1371,6 +1371,11 @@ clean_browsers() {
         safe_clean ~/Library/Application\ Support/Google/Chrome/GrShaderCache/* "Chrome GR shader cache"
         safe_clean ~/Library/Application\ Support/Google/Chrome/GraphiteDawnCache/* "Chrome Dawn cache"
         safe_clean ~/Library/Application\ Support/Google/Chrome/Crashpad/completed/* "Chrome crash reports"
+        # On-device AI model stores managed by Chrome's component updater;
+        # re-downloaded on demand and often multiple GB (#1179).
+        safe_clean ~/Library/Application\ Support/Google/Chrome/OptGuideOnDeviceModel/* "Chrome on-device model cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/OptGuideOnDeviceClassifierModel/* "Chrome on-device classifier cache"
+        safe_clean ~/Library/Application\ Support/Google/Chrome/optimization_guide_model_store/* "Chrome optimization guide models"
     else
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome is running · Application Support cache cleanup skipped"
     fi
@@ -2031,6 +2036,35 @@ check_ios_device_backups() {
     return 0
 }
 
+# List JetBrains per-version data dirs that are not the newest version of
+# their IDE (e.g. GoLand2025.1 when GoLand2025.2 exists). Prints one dir name
+# per line; never prints the newest version, unversioned dirs, or Toolbox.
+# Data source for the review-only large-dir report (#1179).
+jetbrains_stale_version_dirs() {
+    local jetbrains_support="$1"
+    [[ -d "$jetbrains_support" ]] || return 0
+    command find "$jetbrains_support" -mindepth 1 -maxdepth 1 -type d 2> /dev/null |
+        awk -F'/' '
+            {
+                name = $NF
+                if (match(name, /[0-9][0-9][0-9][0-9]\.[0-9]+$/) && RSTART > 1) {
+                    base = substr(name, 1, RSTART - 1)
+                    split(substr(name, RSTART), v, ".")
+                    key = v[1] * 100 + v[2]
+                    n[base]++
+                    names[base, n[base]] = name
+                    keys[base, n[base]] = key
+                    if (key > maxk[base]) maxk[base] = key
+                }
+            }
+            END {
+                for (b in n)
+                    for (i = 1; i <= n[b]; i++)
+                        if (keys[b, i] < maxk[b]) print names[b, i]
+            }
+        '
+}
+
 # Large file candidates (report only, no deletion).
 check_large_file_candidates() {
     local threshold_kb=$((1024 * 1024)) # 1GB
@@ -2156,6 +2190,18 @@ check_large_file_candidates() {
     _report_large_review_dir "pnpm store (review only)" "$HOME/Library/pnpm/store"
     _report_large_review_dir "Conda packages (review only)" "$HOME/.conda/pkgs"
     _report_large_review_dir "Anaconda packages (review only)" "$HOME/anaconda3/pkgs"
+
+    # JetBrains keeps one data dir per IDE version (GoLand2025.1, ...). After
+    # an upgrade the previous version's dir lingers forever with plugins and
+    # settings inside. Report every dir that is not the newest version of its
+    # IDE, review-only: these enable downgrades and must never be auto-deleted
+    # (#1179).
+    local jetbrains_support="$HOME/Library/Application Support/JetBrains"
+    local jb_stale
+    while IFS= read -r jb_stale; do
+        [[ -n "$jb_stale" ]] || continue
+        _report_large_review_dir "JetBrains old version data (review only)" "$jetbrains_support/$jb_stale"
+    done < <(jetbrains_stale_version_dirs "$jetbrains_support")
 
     if [[ "$found_any" == "false" ]]; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No large items detected in common locations"

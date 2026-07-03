@@ -205,7 +205,28 @@ EOF
     [[ "$output" == *"ChatGPT cache"* ]]
     [[ "$output" == *"Claude desktop cache"* ]]
     [[ "$output" == *"Google Clearcut logs"* ]]
+    [[ "$output" == *"LM Studio cache"* ]] || return 1
     [[ "$output" != *"Codex"* ]]
+}
+
+@test "clean_ai_apps targets LM Studio ~/.cache leftover but never the models dir (#1179)" {
+    mkdir -p "$HOME/.cache/lm-studio/downloads"
+    echo "blob" > "$HOME/.cache/lm-studio/downloads/model.part"
+    mkdir -p "$HOME/.lmstudio/models"
+    echo "model" > "$HOME/.lmstudio/models/keep.gguf"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { printf 'CLEAN:%s\n' "${@:1:$#-1}"; }
+note_activity() { :; }
+clean_ai_apps
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CLEAN:$HOME/.cache/lm-studio/downloads"* ]] || return 1
+    [[ "$output" != *"$HOME/.lmstudio"* ]] || return 1
 }
 
 @test "clean_ai_apps skips Codex Desktop state by default" {

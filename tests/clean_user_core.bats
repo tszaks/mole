@@ -667,6 +667,31 @@ EOF
     [[ "$output" == *"PASS"* ]] || return 1
 }
 
+@test "jetbrains_stale_version_dirs reports only superseded IDE version dirs (#1179)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+
+jb="$HOME/Library/Application Support/JetBrains"
+mkdir -p "$jb/GoLand2024.3" "$jb/GoLand2025.1" "$jb/GoLand2025.2" \
+    "$jb/PyCharm2025.1" "$jb/IntelliJIdea2024.2" "$jb/IntelliJIdea2024.10" \
+    "$jb/Toolbox"
+
+jetbrains_stale_version_dirs "$jb" | sort
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"GoLand2024.3"* ]] || return 1
+    [[ "$output" == *"GoLand2025.1"* ]] || return 1
+    # Minor version 10 outranks 2: 2024.2 is stale, 2024.10 is the newest.
+    [[ "$output" == *"IntelliJIdea2024.2"* ]] || return 1
+    [[ "$output" != *"GoLand2025.2"* ]] || return 1
+    [[ "$output" != *"PyCharm"* ]] || return 1
+    [[ "$output" != *"IntelliJIdea2024.10"* ]] || return 1
+    [[ "$output" != *"Toolbox"* ]] || return 1
+}
+
 @test "clean_group_container_caches skips Apple Notes group container" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
