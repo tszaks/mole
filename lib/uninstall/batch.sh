@@ -605,7 +605,17 @@ _batch_scan_app_details() {
             local survivor_name login_name_collides=false
             while IFS= read -r survivor_name; do
                 [[ -z "$survivor_name" ]] && continue
-                if [[ "$discovery_lower" == "$survivor_name" || "$discovery_base_lower" == "$survivor_name" ]]; then
+                # Equality catches the display-name collapse. The substring
+                # direction catches the inverse case: uninstalling "Foo.app"
+                # while "Foo-beta.app" survives. Downstream matchers are
+                # substring-based (the LaunchAgents scan globs
+                # "*<name>*.plist"), so a discovery name contained anywhere
+                # in a survivor identifier can still reach survivor data.
+                # Reverse containment (survivor inside discovery) stays
+                # allowed: patterns keyed on the longer "Foo-beta" cannot
+                # match the survivor's shorter "Foo"-keyed paths.
+                if [[ "$discovery_lower" == "$survivor_name" || "$discovery_base_lower" == "$survivor_name" ||
+                    "$survivor_name" == *"$discovery_lower"* || "$survivor_name" == *"$discovery_base_lower"* ]]; then
                     discovery_app_name=""
                 fi
                 # Login items are registered under the display name; when that
@@ -685,13 +695,21 @@ _batch_scan_app_details() {
             local sibling_survives=0
             [[ "$sibling_guard" != "none" ]] && sibling_survives=1
             related_files=$(MOLE_UNINSTALL_SIBLING_SURVIVES="$sibling_survives" find_app_files "$bundle_id" "$discovery_app_name" "$app_path" || true)
-            diag_user=$(get_diagnostic_report_paths_for_app "$app_path" "$discovery_app_name" "$HOME/Library/Logs/DiagnosticReports" || true)
-            [[ -n "$diag_user" ]] && related_files=$(
-                [[ -n "$related_files" ]] && echo "$related_files"
-                echo "$diag_user"
-            )
+            # Diagnostic-report discovery prefers CFBundleExecutable from the
+            # selected bundle, and same-bundle-id siblings ship the same
+            # executable name ("Xcode" for Xcode-beta.app), so under the
+            # guard it would collect the survivor's crash reports no matter
+            # which name is passed in. Leaving crash logs behind is the
+            # fail-safe direction.
+            if [[ "$sibling_guard" == "none" ]]; then
+                diag_user=$(get_diagnostic_report_paths_for_app "$app_path" "$discovery_app_name" "$HOME/Library/Logs/DiagnosticReports" || true)
+                [[ -n "$diag_user" ]] && related_files=$(
+                    [[ -n "$related_files" ]] && echo "$related_files"
+                    echo "$diag_user"
+                )
+                diag_system=$(get_diagnostic_report_paths_for_app "$app_path" "$discovery_app_name" "/Library/Logs/DiagnosticReports" || true)
+            fi
             system_files=$(find_app_system_files "$bundle_id" "$discovery_app_name" || true)
-            diag_system=$(get_diagnostic_report_paths_for_app "$app_path" "$discovery_app_name" "/Library/Logs/DiagnosticReports" || true)
         fi
         local related_size_kb=$(calculate_total_size "$related_files" || echo "0")
         local review_only_system_files="$system_files"
@@ -937,8 +955,17 @@ _batch_execute_removals() {
         # (the running process keeps using its mmap'd code), so a stuck app
         # process must NOT block the uninstall. Track it so we can surface a
         # warning at the end without scaring the user with a "failed" status.
-        if ! force_kill_app "$app_name" "$app_path"; then
-            running_at_uninstall_apps+=("$app_name")
+        # Skipped under the sibling guard: force_kill_app quits by bundle id
+        # and matches processes by CFBundleExecutable, and both identifiers
+        # can belong to the surviving install (Xcode-beta.app ships the
+        # executable "Xcode"), so the kill ladder could SIGKILL the
+        # survivor's running process instead.
+        if [[ "${sibling_guard:-none}" == "none" ]]; then
+            if ! force_kill_app "$app_name" "$app_path"; then
+                running_at_uninstall_apps+=("$app_name")
+            fi
+        else
+            debug_log "Skipping process termination for $app_name: identifiers are shared with a surviving install"
         fi
 
         # Keep the spinner alive through the heavy work. For large apps the
@@ -1124,7 +1151,15 @@ _batch_execute_removals() {
                 fi
             fi
 
-            bootout_login_item_helpers "$login_item_helpers"
+            # Login item helper ids are read from the selected bundle and are
+            # identical across same-bundle-id siblings, so booting them out
+            # under the guard would stop the surviving install's running
+            # helper.
+            if [[ "${sibling_guard:-none}" == "none" ]]; then
+                bootout_login_item_helpers "$login_item_helpers"
+            else
+                debug_log "Skipping login item helper bootout for $app_name: helper ids are shared with a surviving install"
+            fi
 
             # All per-app side effects done; tear the spinner down before
             # any echo so the success line does not collide with the spinner.
