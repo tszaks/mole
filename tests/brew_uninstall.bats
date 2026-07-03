@@ -172,6 +172,75 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "batch_uninstall_applications drops --zap when a sibling install shares the cask bundle id" {
+    # iterm2 and iterm2-beta both zap com.googlecode.iterm2. When the stable
+    # install survives, uninstalling the beta cask must not run the zap
+    # stanza, or brew deletes the survivor's prefs/caches behind the guard.
+    mkdir -p "$HOME/Applications/BrewShared.app" "$HOME/Applications/BrewShared-beta.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+get_file_owner() { whoami; }
+get_path_size_kb() { echo "100"; }
+bytes_to_human() { echo "$1"; }
+drain_pending_input() { :; }
+print_summary_block() { :; }
+remove_apps_from_dock() { :; }
+force_kill_app() { return 0; }
+run_with_timeout() { shift; "$@"; }
+export -f run_with_timeout
+ensure_sudo_session() { return 0; }
+
+brew() {
+    echo "brew call: $*" >> "$HOME/brew_shared_calls.log"
+    # Make the uninstall "work" so verification passes and no manual
+    # fallback path runs.
+    if [[ "$1" == "uninstall" ]]; then
+        rm -rf "$HOME/Applications/BrewShared-beta.app"
+    fi
+    return 0
+}
+export -f brew
+
+get_brew_cask_name() { echo "brewshared-beta"; return 0; }
+export -f get_brew_cask_name
+
+apps_data=(
+    "0|$HOME/Applications/BrewShared.app|BrewShared|com.example.brewshared|0|Never|0"
+    "0|$HOME/Applications/BrewShared-beta.app|BrewShared-beta|com.example.brewshared|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/BrewShared-beta.app|BrewShared-beta|com.example.brewshared|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+grep -q "uninstall --cask brewshared-beta" "$HOME/brew_shared_calls.log" || {
+    echo "WRONG: plain cask uninstall not invoked"
+    cat "$HOME/brew_shared_calls.log"
+    exit 1
+}
+if grep -q -- "--zap" "$HOME/brew_shared_calls.log"; then
+    echo "WRONG: --zap used despite surviving same-bundle sibling"
+    cat "$HOME/brew_shared_calls.log"
+    exit 1
+fi
+[[ -d "$HOME/Applications/BrewShared.app" ]] || {
+    echo "WRONG: surviving install removed"
+    exit 1
+}
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "batch_uninstall_applications pre-auths sudo for brew-only casks" {
     local app_bundle="$HOME/Applications/BrewPreAuth.app"
     mkdir -p "$app_bundle"

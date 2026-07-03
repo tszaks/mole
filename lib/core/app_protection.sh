@@ -1066,8 +1066,21 @@ find_app_files() {
     # tokens, AVD images, SDK installs, or other manually-curated data. Only
     # regenerable cache/derived paths belong here. If a toolchain dir is mixed
     # (config + cache), skip the whole tree rather than guess.
+    #
+    # MOLE_UNINSTALL_SIBLING_SURVIVES=1 skips the whole heuristic section
+    # below (through Raycast). The batch uninstall sibling guard sets it when
+    # another install sharing this bundle id stays on disk (Xcode.app vs
+    # Xcode-beta.app): these blocks match by regex substring, so the demoted
+    # bundle id alone does not stop them, and every path they collect is a
+    # toolchain cache the surviving install still uses.
+    local collect_toolchain_leftovers=true
+    if [[ "${MOLE_UNINSTALL_SIBLING_SURVIVES:-0}" == "1" ]]; then
+        collect_toolchain_leftovers=false
+    fi
+
     # 1. DevEco-Studio (Huawei)
-    if [[ "$app_name" =~ DevEco|deveco ]] || [[ "$bundle_id" =~ huawei.*deveco ]]; then
+    if [[ "$collect_toolchain_leftovers" == "true" ]] &&
+        { [[ "$app_name" =~ DevEco|deveco ]] || [[ "$bundle_id" =~ huawei.*deveco ]]; }; then
         # Skipped: ~/DevEcoStudioProjects, ~/HarmonyOS, ~/Huawei (project
         # source); ~/DevEco-Studio (IDE config + license state); ~/Library/
         # Application Support/Huawei, ~/Library/Huawei, ~/.huawei, ~/.ohos
@@ -1079,7 +1092,8 @@ find_app_files() {
     fi
 
     # 2. Android Studio (Google)
-    if [[ "$app_name" =~ Android.*Studio|android.*studio ]] || [[ "$bundle_id" =~ google.*android.*studio|jetbrains.*android ]]; then
+    if [[ "$collect_toolchain_leftovers" == "true" ]] &&
+        { [[ "$app_name" =~ Android.*Studio|android.*studio ]] || [[ "$bundle_id" =~ google.*android.*studio|jetbrains.*android ]]; }; then
         # Skipped: ~/AndroidStudioProjects (project source), ~/Library/Android
         # (SDK installs, multi-GB), ~/.android root (debug.keystore signing
         # key, adbkey device pairing, avd/ images). Only sweep regenerable
@@ -1091,7 +1105,8 @@ find_app_files() {
     fi
 
     # 3. Xcode (Apple)
-    if [[ "$app_name" =~ Xcode|xcode ]] || [[ "$bundle_id" =~ apple.*xcode ]]; then
+    if [[ "$collect_toolchain_leftovers" == "true" ]] &&
+        { [[ "$app_name" =~ Xcode|xcode ]] || [[ "$bundle_id" =~ apple.*xcode ]]; }; then
         # Skipped: ~/Library/Developer root (Toolchains, Archives, UserData,
         # CoreSimulator/Devices, provisioning profiles). Only sweep
         # regenerable build/device caches.
@@ -1109,16 +1124,19 @@ find_app_files() {
     fi
 
     # 4. JetBrains (IDE settings)
-    if [[ "$bundle_id" =~ jetbrains ]] || [[ "$app_name" =~ IntelliJ|PyCharm|WebStorm|GoLand|RubyMine|PhpStorm|CLion|DataGrip|Rider ]]; then
+    if [[ "$collect_toolchain_leftovers" == "true" ]] &&
+        { [[ "$bundle_id" =~ jetbrains ]] || [[ "$app_name" =~ IntelliJ|PyCharm|WebStorm|GoLand|RubyMine|PhpStorm|CLion|DataGrip|Rider ]]; }; then
         for base in ~/Library/Application\ Support/JetBrains ~/Library/Caches/JetBrains ~/Library/Logs/JetBrains; do
             [[ -d "$base" ]] && while IFS= read -r -d '' d; do files_to_clean+=("$d"); done < <(command find "$base" -maxdepth 1 -name "${app_name}*" -print0 2> /dev/null)
         done
     fi
 
     # 5. Unity / Unreal / Godot
-    [[ "$app_name" =~ Unity|unity ]] && [[ -d ~/Library/Unity ]] && files_to_clean+=("$HOME/Library/Unity")
-    [[ "$app_name" =~ Unreal|unreal ]] && [[ -d ~/Library/Application\ Support/Epic ]] && files_to_clean+=("$HOME/Library/Application Support/Epic")
-    [[ "$app_name" =~ Godot|godot ]] && [[ -d ~/Library/Application\ Support/Godot ]] && files_to_clean+=("$HOME/Library/Application Support/Godot")
+    if [[ "$collect_toolchain_leftovers" == "true" ]]; then
+        [[ "$app_name" =~ Unity|unity ]] && [[ -d ~/Library/Unity ]] && files_to_clean+=("$HOME/Library/Unity")
+        [[ "$app_name" =~ Unreal|unreal ]] && [[ -d ~/Library/Application\ Support/Epic ]] && files_to_clean+=("$HOME/Library/Application Support/Epic")
+        [[ "$app_name" =~ Godot|godot ]] && [[ -d ~/Library/Application\ Support/Godot ]] && files_to_clean+=("$HOME/Library/Application Support/Godot")
+    fi
 
     # 6. Tools
     # VS Code stores user data under folder names that don't match the app name
@@ -1141,20 +1159,22 @@ find_app_files() {
     # Docker: ~/.docker holds config.json (Docker Hub auth tokens), contexts/
     # (kubeconfig-style endpoints, possibly with credentials), and cli-plugins.
     # Only sweep regenerable cache subtrees, never the whole tree.
-    if [[ "$app_name" =~ Docker ]]; then
+    if [[ "$collect_toolchain_leftovers" == "true" ]] && [[ "$app_name" =~ Docker ]]; then
         for d in ~/.docker/buildx ~/.docker/scan; do
             [[ -d "$d" ]] && files_to_clean+=("$d")
         done
     fi
 
     # 6.1 Maestro Studio
-    if [[ "$bundle_id" == "com.maestro.studio" ]] || [[ "$lowercase_name" =~ maestro[[:space:]]*studio ]]; then
+    if [[ "$collect_toolchain_leftovers" == "true" ]] &&
+        { [[ "$bundle_id" == "com.maestro.studio" ]] || [[ "$lowercase_name" =~ maestro[[:space:]]*studio ]]; }; then
         [[ -d ~/.mobiledev ]] && files_to_clean+=("$HOME/.mobiledev")
     fi
 
     # Anki's profile directory (Anki2) contains decks, media, and backups.
     # Only collect the launcher-managed support files here.
-    if [[ "$bundle_id" == "net.ankiweb.anki" ]] || [[ "$app_name" == "Anki" ]]; then
+    if [[ "$collect_toolchain_leftovers" == "true" ]] &&
+        { [[ "$bundle_id" == "net.ankiweb.anki" ]] || [[ "$app_name" == "Anki" ]]; }; then
         [[ -d "$HOME/Library/Application Support/AnkiProgramFiles" ]] && files_to_clean+=("$HOME/Library/Application Support/AnkiProgramFiles")
     fi
 

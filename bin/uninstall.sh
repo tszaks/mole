@@ -688,6 +688,9 @@ _scan_resolve_uncached() {
 
 # Phase 6: collapse duplicate bundle IDs discovered from backup volumes or
 # mirrored Applications folders. Keep the live app locations first.
+# The dedupe key includes the .app basename so distinct installs that share a
+# bundle ID (e.g. Xcode.app and Xcode-beta.app, both com.apple.dt.Xcode) are
+# kept, while true clones of the same bundle name in mirrored roots collapse.
 _scan_dedupe_bundle_ids() {
     [[ -s "$scan_raw_file" ]] || return 0
 
@@ -715,6 +718,10 @@ _scan_dedupe_bundle_ids() {
             }
             return 3
         }
+        function app_basename(path, n, parts) {
+            n = split(path, parts, "/")
+            return parts[n]
+        }
         {
             bundle_id = $3
             if (bundle_id == "" || bundle_id == "unknown") {
@@ -724,16 +731,17 @@ _scan_dedupe_bundle_ids() {
                 next
             }
 
+            key = bundle_id "|" app_basename($1)
             rank = path_rank($1)
-            if (!(bundle_id in rows)) {
-                rows[bundle_id] = $0
-                ranks[bundle_id] = rank
-                order[++count] = bundle_id
+            if (!(key in rows)) {
+                rows[key] = $0
+                ranks[key] = rank
+                order[++count] = key
                 next
             }
-            if (rank < ranks[bundle_id]) {
-                rows[bundle_id] = $0
-                ranks[bundle_id] = rank
+            if (rank < ranks[key]) {
+                rows[key] = $0
+                ranks[key] = rank
             }
         }
         END {

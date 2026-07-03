@@ -342,6 +342,241 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "uninstall_bundle_id_has_surviving_sibling detects unselected same-bundle install" {
+	mkdir -p "$HOME/Applications/Shared.app" "$HOME/Applications/Shared-beta.app"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+apps_data=(
+	"0|$HOME/Applications/Shared.app|Shared|com.example.Shared|0|Never|0"
+	"0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never|0"
+)
+
+# Only the beta variant is selected; the stable install survives.
+selected_apps=("0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never")
+uninstall_bundle_id_has_surviving_sibling "com.example.Shared" "$HOME/Applications/Shared-beta.app" || {
+	echo "WRONG: surviving sibling not detected"
+	exit 1
+}
+
+# Both variants selected: no survivor, bundle-id cleanup is safe.
+selected_apps=(
+	"0|$HOME/Applications/Shared.app|Shared|com.example.Shared|0|Never"
+	"0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never"
+)
+if uninstall_bundle_id_has_surviving_sibling "com.example.Shared" "$HOME/Applications/Shared-beta.app"; then
+	echo "WRONG: sibling reported although both installs are selected"
+	exit 1
+fi
+
+# Unknown bundle id never reports a sibling.
+if uninstall_bundle_id_has_surviving_sibling "unknown" "$HOME/Applications/Shared-beta.app"; then
+	echo "WRONG: unknown bundle id reported a sibling"
+	exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "batch_uninstall_applications keeps shared bundle-id leftovers when a sibling install survives" {
+	# Xcode.app and Xcode-beta.app both use com.apple.dt.Xcode. Uninstalling
+	# only the beta must not delete bundle-id-keyed files still owned by the
+	# surviving stable install.
+	mkdir -p "$HOME/Applications/Shared.app" "$HOME/Applications/Shared-beta.app"
+	mkdir -p "$HOME/Library/Caches/com.example.Shared"
+	mkdir -p "$HOME/Library/Preferences"
+	touch "$HOME/Library/Preferences/com.example.Shared.plist"
+	mkdir -p "$HOME/Library/Caches/Shared-beta"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+sudo() { return 0; }
+
+apps_data=(
+	"0|$HOME/Applications/Shared.app|Shared|com.example.Shared|0|Never|0"
+	"0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.Shared|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications
+
+# The selected bundle and its name-keyed leftovers are gone.
+[[ ! -d "$HOME/Applications/Shared-beta.app" ]] || { echo "WRONG: beta bundle preserved"; exit 1; }
+[[ ! -d "$HOME/Library/Caches/Shared-beta" ]] || { echo "WRONG: beta name cache preserved"; exit 1; }
+
+# The surviving install and every bundle-id-keyed path are untouched.
+[[ -d "$HOME/Applications/Shared.app" ]] || { echo "WRONG: surviving install removed"; exit 1; }
+[[ -d "$HOME/Library/Caches/com.example.Shared" ]] || { echo "WRONG: shared bundle-id cache removed"; exit 1; }
+[[ -f "$HOME/Library/Preferences/com.example.Shared.plist" ]] || { echo "WRONG: shared bundle-id prefs removed"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "batch_uninstall_applications keeps name-keyed leftovers when sibling installs share a display name" {
+	# On unindexed volumes mdls returns (null) and CFBundleName collapses both
+	# installs to one display name ("Xcode" for Xcode-beta.app). Discovery must
+	# fall back to the .app basename; when even that collides with the
+	# survivor, name cleanup and login-item removal must be suppressed.
+	mkdir -p "$HOME/Applications/SharedName-beta.app" "$HOME/Applications/SharedName.app"
+	mkdir -p "$HOME/OtherApps/SharedName.app"
+	mkdir -p "$HOME/Library/Application Support/SharedName"
+	mkdir -p "$HOME/Library/Caches/SharedName"
+	mkdir -p "$HOME/Library/Preferences"
+	touch "$HOME/Library/Preferences/SharedName.plist"
+	mkdir -p "$HOME/Library/Caches/SharedName-beta"
+	# Same-bundle siblings ship the same CFBundleExecutable (Xcode-beta.app
+	# ships "Xcode"); diagnostic-report discovery keys on it, so the beta's
+	# Info.plist points at the shared executable name.
+	mkdir -p "$HOME/Applications/SharedName-beta.app/Contents"
+	printf '%s' '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>SharedName</string></dict></plist>' > "$HOME/Applications/SharedName-beta.app/Contents/Info.plist"
+	mkdir -p "$HOME/Library/Logs/DiagnosticReports"
+	touch "$HOME/Library/Logs/DiagnosticReports/SharedName-2026-07-03-101010.ips"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+request_sudo_access() { return 0; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+enter_alt_screen() { :; }
+leave_alt_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+remove_apps_from_dock() { :; }
+pgrep() { return 1; }
+pkill() { return 0; }
+sudo() { return 0; }
+remove_login_item() { printf 'LOGIN_ITEM:%s\n' "$1" >> "$HOME/login.log"; }
+force_kill_app() { printf 'KILL:%s\n' "$1" >> "$HOME/kill.log"; return 0; }
+
+# Case 1: display names collide ("SharedName" for both) but basenames differ.
+# Discovery must use the basename (SharedName-beta) so the survivor's
+# name-keyed dirs stay, and login-item removal must be skipped.
+apps_data=(
+	"0|$HOME/Applications/SharedName.app|SharedName|com.example.sharedname|0|Never|0"
+	"0|$HOME/Applications/SharedName-beta.app|SharedName|com.example.sharedname|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/SharedName-beta.app|SharedName|com.example.sharedname|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+[[ ! -d "$HOME/Applications/SharedName-beta.app" ]] || { echo "WRONG: beta bundle preserved"; exit 1; }
+[[ ! -d "$HOME/Library/Caches/SharedName-beta" ]] || { echo "WRONG: beta's own cache preserved"; exit 1; }
+[[ -d "$HOME/Applications/SharedName.app" ]] || { echo "WRONG: survivor removed"; exit 1; }
+[[ -d "$HOME/Library/Application Support/SharedName" ]] || { echo "WRONG: survivor app support removed"; exit 1; }
+[[ -d "$HOME/Library/Caches/SharedName" ]] || { echo "WRONG: survivor cache removed"; exit 1; }
+[[ -f "$HOME/Library/Preferences/SharedName.plist" ]] || { echo "WRONG: survivor prefs removed"; exit 1; }
+[[ ! -f "$HOME/login.log" ]] || { echo "WRONG: login item removed on colliding name"; cat "$HOME/login.log"; exit 1; }
+[[ -f "$HOME/Library/Logs/DiagnosticReports/SharedName-2026-07-03-101010.ips" ]] || { echo "WRONG: survivor crash reports deleted under sibling guard"; exit 1; }
+
+# Case 2: basenames collide too (same SharedName.app in two folders).
+# Name discovery must be suppressed entirely: only the bundle goes.
+apps_data=(
+	"0|$HOME/OtherApps/SharedName.app|SharedName|com.example.sharedname|0|Never|0"
+	"0|$HOME/Applications/SharedName.app|SharedName|com.example.sharedname|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/SharedName.app|SharedName|com.example.sharedname|0|Never")
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+[[ ! -d "$HOME/Applications/SharedName.app" ]] || { echo "WRONG: selected bundle preserved"; exit 1; }
+[[ -d "$HOME/OtherApps/SharedName.app" ]] || { echo "WRONG: survivor removed (case 2)"; exit 1; }
+[[ -d "$HOME/Library/Application Support/SharedName" ]] || { echo "WRONG: shared-name app support removed (case 2)"; exit 1; }
+[[ -d "$HOME/Library/Caches/SharedName" ]] || { echo "WRONG: shared-name cache removed (case 2)"; exit 1; }
+[[ -f "$HOME/Library/Preferences/SharedName.plist" ]] || { echo "WRONG: shared-name prefs removed (case 2)"; exit 1; }
+[[ ! -f "$HOME/login.log" ]] || { echo "WRONG: login item removed on colliding name (case 2)"; exit 1; }
+
+# Case 3: the Xcode toolchain heuristic matches by regex substring, so even
+# a non-colliding basename ("XcodeClone-beta") would sweep DerivedData that
+# the surviving install still uses. The sibling guard must disable it.
+mkdir -p "$HOME/Applications/XcodeClone.app" "$HOME/Applications/XcodeClone-beta.app"
+mkdir -p "$HOME/Library/Developer/Xcode/DerivedData"
+
+apps_data=(
+	"0|$HOME/Applications/XcodeClone.app|XcodeClone|com.example.xcodeclone|0|Never|0"
+	"0|$HOME/Applications/XcodeClone-beta.app|XcodeClone|com.example.xcodeclone|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/XcodeClone-beta.app|XcodeClone|com.example.xcodeclone|0|Never")
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+[[ ! -d "$HOME/Applications/XcodeClone-beta.app" ]] || { echo "WRONG: beta bundle preserved (case 3)"; exit 1; }
+[[ -d "$HOME/Applications/XcodeClone.app" ]] || { echo "WRONG: survivor removed (case 3)"; exit 1; }
+[[ -d "$HOME/Library/Developer/Xcode/DerivedData" ]] || { echo "WRONG: DerivedData swept despite surviving sibling (case 3)"; exit 1; }
+
+# Case 4: inverse direction: uninstalling the base-named install while the
+# hyphen-suffixed sibling survives. The discovery name ("RevBase") is
+# contained in the survivor's identifiers ("RevBase-beta"), and downstream
+# matchers are substring-based (the LaunchAgents scan globs "*<name>*.plist"),
+# so name discovery must be suppressed entirely.
+mkdir -p "$HOME/Applications/RevBase.app" "$HOME/Applications/RevBase-beta.app"
+mkdir -p "$HOME/Library/Application Support/RevBase"
+mkdir -p "$HOME/Library/LaunchAgents"
+touch "$HOME/Library/LaunchAgents/com.example.RevBase-beta.agent.plist"
+
+apps_data=(
+	"0|$HOME/Applications/RevBase.app|RevBase|com.example.revbase|0|Never|0"
+	"0|$HOME/Applications/RevBase-beta.app|RevBase-beta|com.example.revbase|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/RevBase.app|RevBase|com.example.revbase|0|Never")
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+[[ ! -d "$HOME/Applications/RevBase.app" ]] || { echo "WRONG: selected base bundle preserved (case 4)"; exit 1; }
+[[ -d "$HOME/Applications/RevBase-beta.app" ]] || { echo "WRONG: suffixed survivor removed (case 4)"; exit 1; }
+[[ -f "$HOME/Library/LaunchAgents/com.example.RevBase-beta.agent.plist" ]] || { echo "WRONG: survivor launch agent removed (case 4)"; exit 1; }
+[[ -d "$HOME/Library/Application Support/RevBase" ]] || { echo "WRONG: shared app support removed (case 4)"; exit 1; }
+[[ ! -f "$HOME/login.log" ]] || { echo "WRONG: login item removed (case 4)"; exit 1; }
+
+# Across all four guard cases process termination must never run:
+# force_kill_app quits by bundle id and matches by CFBundleExecutable, and
+# both can belong to the surviving install.
+[[ ! -f "$HOME/kill.log" ]] || { echo "WRONG: process termination attempted under sibling guard"; cat "$HOME/kill.log"; exit 1; }
+
+# Case 5 (control): without a surviving sibling the termination and
+# diagnostic-report paths must still run, proving the negative assertions
+# above are not vacuous.
+mkdir -p "$HOME/Applications/SoloApp.app"
+touch "$HOME/Library/Logs/DiagnosticReports/SoloApp-2026-07-03-101010.ips"
+apps_data=("0|$HOME/Applications/SoloApp.app|SoloApp|com.example.soloapp|0|Never|0")
+selected_apps=("0|$HOME/Applications/SoloApp.app|SoloApp|com.example.soloapp|0|Never")
+
+printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+
+[[ ! -d "$HOME/Applications/SoloApp.app" ]] || { echo "WRONG: solo bundle preserved (case 5)"; exit 1; }
+grep -q "KILL:SoloApp" "$HOME/kill.log" 2> /dev/null || { echo "WRONG: termination skipped without sibling guard (case 5)"; exit 1; }
+[[ ! -f "$HOME/Library/Logs/DiagnosticReports/SoloApp-2026-07-03-101010.ips" ]] || { echo "WRONG: diagnostic reports not collected without sibling guard (case 5)"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "batch_uninstall_applications blocks official-uninstaller apps" {
 	mkdir -p "$HOME/Applications/Falcon.app"
 
@@ -1782,7 +2017,7 @@ read_key() {
 MOLE_SELECTION_RESULT=""
 unset MOLE_MENU_SORT_MODE MOLE_MENU_SORT_REVERSE MOLE_MENU_META_SIZEKB
 set +e
-MOLE_MENU_META_EPOCHS="100,200" paginated_multi_select "Test Menu" "Alpha" "Beta" > "$HOME/menu.out" 2> "$HOME/menu.err"
+MOLE_MENU_META_EPOCHS="100,200" paginated_multi_select "Test Menu" "Alpha" "Beta" > "$HOME/menu.out" 2> "$HOME/menu.err" < /dev/null
 rc=$?
 set -e
 echo "rc=$rc"
@@ -1818,7 +2053,7 @@ read_key() {
 
 MOLE_SELECTION_RESULT=""
 set +e
-MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-default.out" 2> "$HOME/menu-default.err"
+MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-default.out" 2> "$HOME/menu-default.err" < /dev/null
 default_rc=$?
 set -e
 echo "default=${MOLE_SELECTION_RESULT:-}"
@@ -1826,7 +2061,7 @@ echo "default=${MOLE_SELECTION_RESULT:-}"
 : > "$key_state"
 MOLE_SELECTION_RESULT=""
 set +e
-NEXT_KEY="CHAR:O" MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-reverse.out" 2> "$HOME/menu-reverse.err"
+NEXT_KEY="CHAR:O" MOLE_MENU_META_SIZEKB="1,100" MOLE_MENU_SORT_MODE=size MOLE_MENU_SORT_REVERSE=false paginated_multi_select "Test Menu" "Small" "Large" > "$HOME/menu-reverse.out" 2> "$HOME/menu-reverse.err" < /dev/null
 reverse_rc=$?
 set -e
 echo "default_rc=$default_rc"

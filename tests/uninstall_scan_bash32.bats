@@ -296,6 +296,35 @@ EOF
 	[[ "$output" != *"|$backup_app|Dupe|com.example.Dupe|"* ]]
 }
 
+@test "scan_applications keeps distinct installs sharing a bundle id (Xcode vs Xcode-beta)" {
+	src="$HOME/uninstall_source.sh"
+	sourceable_uninstall_sh "$src"
+
+	apps_root="$HOME/Applications"
+	stable_app="$apps_root/Xcode.app"
+	beta_app="$apps_root/Xcode-beta.app"
+	create_test_app_bundle "$stable_app" "com.apple.dt.Xcode" "Xcode"
+	create_test_app_bundle "$beta_app" "com.apple.dt.Xcode" "Xcode"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+		MOLE_TEST_NO_AUTH=1 APPS_ROOT="$apps_root" SRC_PATH="$src" \
+		/bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+# shellcheck source=/dev/null
+source "$SRC_PATH"
+
+uninstall_print_app_search_dirs() { printf '%s\n' "$APPS_ROOT"; }
+
+apps_file=$(scan_applications)
+cat "$apps_file"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"|$stable_app|"* ]]
+	[[ "$output" == *"|$beta_app|"* ]]
+}
+
 @test "scan_applications keeps unique apps from backup Applications roots (#975)" {
 	src="$HOME/uninstall_source.sh"
 	sourceable_uninstall_sh "$src"
