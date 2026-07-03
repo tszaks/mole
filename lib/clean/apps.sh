@@ -487,6 +487,10 @@ clean_orphaned_system_services() {
         "com.docker.*:/Applications/Docker.app"
         # NetBird / Wiretrustee – CLI-managed daemon (binary in /usr/local/bin)
         "netbird:/usr/local/bin/netbird"
+        # Intego (One, VirusBarrier, NetBarrier) – self-protecting AV whose
+        # /Library/Intego tree is root-only readable; never treat its services
+        # as orphans while any Intego install evidence exists. See #1188.
+        "com.intego.*:/Library/Intego|/Applications/Intego|/Library/Application Support/Intego"
         # Homebrew-managed services (managed by brew services, not .app bundles)
         "homebrew.mxcl.*:"
     )
@@ -604,10 +608,22 @@ clean_orphaned_system_services() {
         local binary
         binary=$(_plist_binary_path "$plist") || return 1 # no Program key → skip
 
+        # Self-protecting software (Intego and similar antivirus / endpoint
+        # agents) makes its install directories root-only readable, so an
+        # unprivileged -e probe reports the daemon binary missing even though
+        # it exists. The plist was discovered with sudo; re-probe the binary
+        # with sudo before treating it as missing. See #1188.
+        local binary_exists=false
+        if [[ -e "$binary" ]]; then
+            binary_exists=true
+        elif sudo -n test -e "$binary" 2> /dev/null; then
+            binary_exists=true
+        fi
+
         # If the binary still exists, check if it's in PrivilegedHelperTools.
         # If so, verify the parent app is still installed. If the parent app
         # is gone, the binary itself is orphaned, so this plist is too. See #1082.
-        if [[ -e "$binary" ]]; then
+        if [[ "$binary_exists" == "true" ]]; then
             if [[ "$binary" == /Library/PrivilegedHelperTools/* ]]; then
                 local helper_bundle_id
                 helper_bundle_id=$(_privileged_helper_bundle_id_from_binary "$binary")

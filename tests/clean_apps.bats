@@ -848,6 +848,78 @@ EOF
     [[ "$output" != *"skipped 1 protected"* ]] || return 1
 }
 
+@test "clean_orphaned_system_services keeps daemons whose binary is root-only readable (#1188)" {
+    # Intego-style self-protecting software (antivirus, endpoint agents) makes
+    # its install tree root-only readable, so the unprivileged -e probe misses
+    # the daemon binary and every one of its LaunchDaemons used to be flagged
+    # as an orphan and removed, breaking the product. The binary must be
+    # re-probed with sudo before being treated as missing. A genuinely missing
+    # binary must still be detected, which also proves the scan actually ran.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=false MOLE_DRY_RUN=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { :; }
+
+tmp_dir="$(mktemp -d)"
+protected_plist="$tmp_dir/com.example.selfprotect.daemon.plist"
+orphan_plist="$tmp_dir/com.example.gone.daemon.plist"
+root_only_binary="$tmp_dir/rootonly/selfprotectd"
+
+# PlistBuddy announces "File Doesn't Exist, Will Create" on stdout, which
+# would land in $output and trip the negative plist-name assertions below.
+/usr/libexec/PlistBuddy -c "Add :Program string $root_only_binary" "$protected_plist" > /dev/null 2>&1 || true
+/usr/libexec/PlistBuddy -c "Add :Program string $tmp_dir/missing-binary" "$orphan_plist" > /dev/null 2>&1 || true
+
+safe_sudo_remove() {
+  echo "removed:$1"
+  return 0
+}
+
+sudo() {
+  if [[ "$1" == "-n" && "$2" == "true" ]]; then
+    return 0
+  fi
+  [[ "${1:-}" == "-n" ]] && shift
+  if [[ "$1" == "test" ]]; then
+    # Simulate the root-only readable install dir: the binary exists for
+    # root but the unprivileged [[ -e ]] probe cannot see it.
+    if [[ "${3:-}" == "$root_only_binary" ]]; then
+      return 0
+    fi
+    return 1
+  fi
+  if [[ "$1" == "find" ]]; then
+    case "$2" in
+      /Library/LaunchDaemons) printf '%s\0' "$protected_plist" "$orphan_plist" ;;
+      *) : ;;
+    esac
+    return 0
+  fi
+  if [[ "$1" == "du" ]]; then
+    echo "4 ${3:-}"
+    return 0
+  fi
+  if [[ "$1" == "launchctl" ]]; then
+    return 0
+  fi
+  command "$@"
+}
+
+clean_orphaned_system_services
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Found 1 orphaned"* ]] || return 1
+    [[ "$output" == *"removed:"* ]] || return 1
+    [[ "$output" == *"com.example.gone.daemon.plist"* ]] || return 1
+    [[ "$output" != *"com.example.selfprotect.daemon.plist"* ]] || return 1
+}
+
 @test "clean_orphaned_system_services counts safe_sudo protected skips as protected (#1141)" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=false MOLE_DRY_RUN=0 bash --noprofile --norc <<'EOF'
 set -euo pipefail
