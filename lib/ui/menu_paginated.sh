@@ -229,9 +229,28 @@ paginated_multi_select() {
         fi
     }
 
+    # Save the caller's EXIT/INT/TERM traps before overriding them. Restoring
+    # rather than clearing on exit keeps an outer handler alive, e.g.
+    # bin/uninstall.sh arms `trap cleanup EXIT` whose only job is writing the
+    # session-end operation log; a bare `trap - EXIT` here dropped it silently.
+    local _menu_saved_exit _menu_saved_int _menu_saved_term
+    _menu_saved_exit=$(trap -p EXIT)
+    _menu_saved_int=$(trap -p INT)
+    _menu_saved_term=$(trap -p TERM)
+    # Uses :- defaults: cleanup() is the EXIT trap and may fire once more at
+    # shell exit after this function has returned and the saved-trap locals
+    # are gone. Degrading to `trap -` then is harmless (the caller's trap was
+    # already restored on the normal-exit path below).
+    # shellcheck disable=SC2329
+    _menu_restore_traps() {
+        if [[ -n "${_menu_saved_exit:-}" ]]; then eval "${_menu_saved_exit}"; else trap - EXIT; fi
+        if [[ -n "${_menu_saved_int:-}" ]]; then eval "${_menu_saved_int}"; else trap - INT; fi
+        if [[ -n "${_menu_saved_term:-}" ]]; then eval "${_menu_saved_term}"; else trap - TERM; fi
+    }
+
     # Cleanup function
     cleanup() {
-        trap - EXIT INT TERM
+        _menu_restore_traps
         unset MOLE_READ_KEY_FORCE_CHAR
         export MOLE_MENU_SORT_MODE="${sort_mode:-name}"
         export MOLE_MENU_SORT_REVERSE="${sort_reverse:-false}"
@@ -959,7 +978,7 @@ paginated_multi_select() {
                     final_result="${selected_indices[*]}"
                 fi
 
-                trap - EXIT INT TERM
+                _menu_restore_traps
                 MOLE_SELECTION_RESULT="$final_result"
                 unset MOLE_READ_KEY_FORCE_CHAR
                 export MOLE_MENU_SORT_MODE="${sort_mode:-name}"
