@@ -1482,6 +1482,34 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "decode_bundle_id_list preserves login item helper ids" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+# Regression for App Cleaner 9 (#helper bootout): bundle ids are not paths,
+# so routing them through decode_file_list blanked the list and skipped the
+# launchctl bootout of the app's login item helpers.
+helper_ids=$(printf 'com.nektony.App-Cleaner-SIIICn-UIHelper
+com.nektony.App-Cleaner-SIIICn-Monitor' | base64)
+result=$(decode_bundle_id_list "$helper_ids" "App Cleaner 9" 2>&1)
+[[ "$result" == *"com.nektony.App-Cleaner-SIIICn-UIHelper"* ]] || exit 1
+[[ "$result" == *"com.nektony.App-Cleaner-SIIICn-Monitor"* ]] || exit 1
+[[ "$result" != *"Invalid path"* ]] || exit 1
+
+# The execute path must decode helper ids with the id decoder, not the
+# path decoder that rejects them.
+grep -q 'decode_bundle_id_list "$encoded_login_item_helpers"' "$PROJECT_ROOT/lib/uninstall/batch.sh" || exit 1
+if grep -q 'decode_file_list "$encoded_login_item_helpers"' "$PROJECT_ROOT/lib/uninstall/batch.sh"; then
+    exit 1
+fi
+exit 0
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "uninstall_resolve_display_name keeps versioned app names when metadata is generic" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -2418,58 +2446,92 @@ INNER
 	[[ "$output" == *'"source": "Homebrew"'* ]]
 }
 
-# Regression tests for #940: detect Background Items left behind after uninstall.
-_btm_helper_runner() {
+# Regression tests for #940: warn about background jobs that survive uninstall.
+# Detection is launchctl-only. sfltool dumpbtm is deliberately not used:
+# unprivileged dumpbtm pops the macOS "sfltool wants to make changes"
+# admin-password dialog on every uninstall batch.
+_bg_items_runner() {
 	HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
-		BTM_DUMP="$1" DETAIL="$2" SUCCESS_PATH="$3" \
+		DETAIL="$1" SUCCESS_PATH="$2" LAUNCHCTL_RC="${3:-113}" \
+		MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
 		bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
-_uninstall_match_btm_leftovers "$BTM_DUMP" "$DETAIL" -- "$SUCCESS_PATH"
+launchctl() { return "${LAUNCHCTL_RC}"; }
+_uninstall_match_loaded_background_items "$DETAIL" -- "$SUCCESS_PATH"
 EOF
 }
 
-@test "_uninstall_match_btm_leftovers reports bundle id still in BTM dump" {
+@test "_uninstall_match_loaded_background_items reports app whose job is still loaded" {
 	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
-	local dump=$'Record #1\n  name: Paste\n  bundleID: com.wiheads.paste\n  url: file:///Applications/Paste.app/'
 
-	result="$(_btm_helper_runner "$dump" "$detail" "/Applications/Paste.app")"
+	result="$(_bg_items_runner "$detail" "/Applications/Paste.app" 0)"
 
 	[ "$result" = "Paste" ]
 }
 
-@test "_uninstall_match_btm_leftovers stays silent when bundle id is absent" {
+@test "_uninstall_match_loaded_background_items stays silent when no job is loaded" {
 	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
-	local dump=$'Record #1\n  name: SomethingElse\n  bundleID: com.example.other'
 
-	result="$(_btm_helper_runner "$dump" "$detail" "/Applications/Paste.app")"
+	result="$(_bg_items_runner "$detail" "/Applications/Paste.app" 113)"
 
 	[ -z "$result" ]
 }
 
-@test "_uninstall_match_btm_leftovers skips apps that were not successfully removed" {
-	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
-	local dump=$'Record #1\n  bundleID: com.wiheads.paste'
+@test "_uninstall_match_loaded_background_items checks helper ids under the sibling guard" {
+	# Sibling guard demotes bundle_id to "unknown" while helper ids stay
+	# valid; a loaded helper job must still be reported.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+		bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
-	result="$(_btm_helper_runner "$dump" "$detail" "/Applications/OtherApp.app")"
+helpers=$(printf 'com.wiheads.paste.helper' | base64)
+detail="Paste|/Applications/Paste.app|unknown|0|||false|false|false||||false|$helpers|guard"
+
+launchctl() { [[ "$2" == *"com.wiheads.paste.helper"* ]] && return 0 || return 113; }
+result=$(_uninstall_match_loaded_background_items "$detail" -- "/Applications/Paste.app")
+[[ "$result" == "Paste" ]] || exit 1
+
+launchctl() { return 113; }
+result=$(_uninstall_match_loaded_background_items "$detail" -- "/Applications/Paste.app")
+[[ -z "$result" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "_uninstall_match_loaded_background_items stays quiet in test mode" {
+	# Test mode must not probe launchctl at all; summaries stay silent so
+	# end-to-end uninstall tests never see a background-item warning.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+		bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+launchctl() { return 0; }
+detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
+result=$(_uninstall_match_loaded_background_items "$detail" -- "/Applications/Paste.app")
+[[ -z "$result" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "_uninstall_match_loaded_background_items skips apps that were not successfully removed" {
+	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
+
+	result="$(_bg_items_runner "$detail" "/Applications/OtherApp.app" 0)"
 
 	[ -z "$result" ]
 }
 
-@test "_uninstall_match_btm_leftovers ignores unknown bundle id" {
+@test "_uninstall_match_loaded_background_items ignores unknown bundle id without helpers" {
 	local detail="Paste|/Applications/Paste.app|unknown|0|||false|false|false||||"
-	local dump=$'Record #1\n  bundleID: unknown'
 
-	result="$(_btm_helper_runner "$dump" "$detail" "/Applications/Paste.app")"
-
-	[ -z "$result" ]
-}
-
-@test "_uninstall_match_btm_leftovers returns empty for empty dump" {
-	local detail="Paste|/Applications/Paste.app|com.wiheads.paste|0|||false|false|false||||"
-
-	result="$(_btm_helper_runner "" "$detail" "/Applications/Paste.app")"
+	result="$(_bg_items_runner "$detail" "/Applications/Paste.app" 0)"
 
 	[ -z "$result" ]
 }

@@ -289,7 +289,9 @@ opt_fix_broken_configs() {
         spinner_started="true"
     fi
 
-    local broken_prefs=$(fix_broken_preferences)
+    local broken_prefs=""
+    local prefs_partial=0
+    broken_prefs=$(fix_broken_preferences) || prefs_partial=1
 
     if [[ "$spinner_started" == "true" ]]; then
         stop_inline_spinner
@@ -300,7 +302,9 @@ opt_fix_broken_configs() {
     fi
 
     export OPTIMIZE_CONFIGS_REPAIRED="${broken_prefs}"
-    if [[ $broken_prefs -gt 0 ]]; then
+    if [[ $prefs_partial -ne 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Preference scan hit its time budget, repaired ${broken_prefs:-0} so far"
+    elif [[ $broken_prefs -gt 0 ]]; then
         opt_msg "Repaired $broken_prefs corrupted preference files"
     else
         opt_msg "All preference files valid"
@@ -601,7 +605,7 @@ opt_memory_pressure_relief() {
         fi
 
         if ! optimize_sudo_available; then
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Memory pressure relief skipped · admin access required"
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Memory pressure relief · skipped (admin access required)"
             return 0
         fi
 
@@ -644,7 +648,7 @@ opt_network_stack_optimize() {
         fi
 
         if ! optimize_sudo_available; then
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Network stack refresh skipped · admin access required"
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Network stack refresh · skipped (admin access required)"
             return 0
         fi
 
@@ -693,7 +697,7 @@ opt_disk_permissions_repair() {
         fi
 
         if ! optimize_sudo_available; then
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Disk permissions repair skipped · admin access required"
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Disk permissions repair · skipped (admin access required)"
             return 0
         fi
 
@@ -754,7 +758,7 @@ opt_spotlight_index_optimize() {
 
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
                 if ! optimize_sudo_available; then
-                    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Spotlight index rebuild skipped · admin access required"
+                    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Spotlight index rebuild · skipped (admin access required)"
                     return 0
                 fi
                 echo -e "  ${BLUE}${ICON_INFO}${NC} Spotlight search is slow, rebuilding index, may take 1-2 hours"
@@ -1300,8 +1304,12 @@ _login_item_app_exists() {
     # 5. Fallback: check sfltool dumpbtm for the actual on-disk path.
     #    Nested helper apps (e.g. DBnginMenuHelper.app inside DBngin.app) are
     #    invisible to mdfind but still have a valid URL in the BTM database.
-    local btm_path
-    btm_path=$(sfltool dumpbtm 2> /dev/null | awk -v item="$name" '
+    #    Root only: unprivileged dumpbtm pops the macOS "sfltool wants to
+    #    make changes" admin-password dialog, so without an active sudo
+    #    session this fallback is skipped rather than prompting.
+    local btm_path=""
+    if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]] && sudo -n true 2> /dev/null; then
+        btm_path=$(sudo -n sfltool dumpbtm 2> /dev/null | awk -v item="$name" '
         BEGIN { IGNORECASE = 1 }
         index($0, item) {
             if (match($0, "/.*\\.app")) {
@@ -1310,6 +1318,7 @@ _login_item_app_exists() {
             }
         }
     ')
+    fi
     if [[ -n "$btm_path" ]] && [[ -e "$btm_path" ]]; then
         _login_item_debug "'$name' resolved by sfltool BTM path: $btm_path"
         return 0

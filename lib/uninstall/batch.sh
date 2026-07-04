@@ -90,16 +90,76 @@ decode_file_list() {
     echo "$decoded"
     return 0
 }
+
+# Decode a base64 blob of login-item helper bundle ids. Unlike
+# decode_file_list, the lines are bundle ids, not absolute paths, so the
+# leading-slash check there would reject every id, print a misleading
+# "Invalid path" warning, and blank the whole list, silently skipping the
+# launchctl bootout of the app's login item helpers. Per-line validation
+# stays in bootout_login_item_helpers via mole_is_reverse_dns_bundle_id.
+decode_bundle_id_list() {
+    local encoded="$1"
+    local app_name="$2"
+    local decoded
+
+    # macOS uses -D, GNU uses -d. Always return 0 for set -e safety.
+    if ! decoded=$(printf '%s' "$encoded" | base64 -D 2> /dev/null); then
+        if ! decoded=$(printf '%s' "$encoded" | base64 -d 2> /dev/null); then
+            log_error "Failed to decode helper id list for $app_name" >&2
+            echo ""
+            return 0
+        fi
+    fi
+
+    if [[ "$decoded" =~ $'\0' ]]; then
+        log_warning "Helper id list for $app_name contains null bytes, rejecting" >&2
+        echo ""
+        return 0
+    fi
+
+    echo "$decoded"
+    return 0
+}
 # Note: find_app_files() is in lib/core/app_protection.sh, calculate_total_size() is in lib/core/file_ops.sh.
 
-# Match successfully-uninstalled apps against an sfltool dumpbtm output and emit
-# the names of apps that still have a Background Items entry registered.
-# Args: <btm_dump> <app_detail>... -- <success_path>...
-# app_detail follows the pipe-encoded shape used inside batch_uninstall_applications.
-_uninstall_match_btm_leftovers() {
-    local btm_dump="$1"
-    shift
+# Only a background job that is still loaded in launchd, meaning the bootout
+# was missed or failed, deserves a summary warning. BTM registration records
+# are kept for uninstalled apps on purpose (they restore the user's
+# enable/disable choice on a reinstall) and are pruned at the next login.
+# Args: $1 - app bundle id, $2 - newline-separated helper bundle ids.
+# Returns 0 when any of the labels is still loaded in the user's launchd
+# domain. In test mode report "not loaded" so summaries stay quiet; unit
+# tests exercise the real branch with MOLE_TEST_MODE=0 and a launchctl mock.
+_uninstall_background_job_loaded() {
+    local bundle_id="$1"
+    local helper_ids="${2:-}"
 
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        return 1
+    fi
+
+    local uid label
+    uid=$(id -u)
+    while IFS= read -r label; do
+        [[ -n "$label" ]] || continue
+        mole_is_reverse_dns_bundle_id "$label" || continue
+        if launchctl print "gui/$uid/$label" > /dev/null 2>&1; then
+            return 0
+        fi
+    done <<< "$(printf '%s\n%s\n' "$bundle_id" "$helper_ids")"
+
+    return 1
+}
+
+# Emit the names of successfully-uninstalled apps that still have a background
+# job loaded in launchd, meaning the bootout was missed or failed and the user
+# must toggle it off manually. Deliberately does NOT consult sfltool dumpbtm:
+# unprivileged dumpbtm pops the macOS "sfltool wants to make changes"
+# admin-password dialog on every uninstall batch, and registered-but-unloaded
+# BTM records are by-design residue macOS clears at next login.
+# Args: <app_detail>... -- <success_path>...
+# app_detail follows the pipe-encoded shape used inside batch_uninstall_applications.
+_uninstall_match_loaded_background_items() {
     local -a details=()
     local -a success_paths=()
     local sep_seen=false
@@ -116,20 +176,23 @@ _uninstall_match_btm_leftovers() {
         fi
     done
 
-    [[ -z "$btm_dump" ]] && return 0
     [[ ${#details[@]} -eq 0 || ${#success_paths[@]} -eq 0 ]] && return 0
 
-    local detail app_name app_path bundle_id sp matched
+    local detail app_name app_path bundle_id enc_helpers sp matched
     for detail in "${details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id _ _ _ _ _ _ _ _ _ <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id _ _ _ _ _ _ _ _ _ _ enc_helpers _ <<< "$detail"
         matched=false
         for sp in "${success_paths[@]}"; do
             [[ "$sp" == "$app_path" ]] && matched=true && break
         done
         [[ "$matched" != true ]] && continue
-        [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && continue
 
-        if grep -qF "$bundle_id" <<< "$btm_dump"; then
+        # The sibling guard can demote bundle_id to "unknown" while helper ids
+        # stay valid; _uninstall_background_job_loaded validates each label,
+        # so no explicit unknown-skip is needed here.
+        local helper_ids
+        helper_ids=$(decode_bundle_id_list "${enc_helpers:-}" "$app_name")
+        if _uninstall_background_job_loaded "$bundle_id" "$helper_ids"; then
             printf '%s\n' "$app_name"
         fi
     done
@@ -933,7 +996,7 @@ _batch_execute_removals() {
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local diag_system=$(decode_file_list "$encoded_diag_system" "$app_name")
-        local login_item_helpers=$(decode_file_list "$encoded_login_item_helpers" "$app_name")
+        local login_item_helpers=$(decode_bundle_id_list "$encoded_login_item_helpers" "$app_name")
         local reason=""
         local suggestion=""
 
@@ -1179,13 +1242,12 @@ _batch_execute_removals() {
             # any echo so the success line does not collide with the spinner.
             [[ -t 1 ]] && stop_inline_spinner
 
-            # Show success
-            if [[ -t 1 ]]; then
-                if [[ ${#app_details[@]} -gt 1 ]]; then
-                    echo -e "${GREEN}${ICON_SUCCESS}${NC} [$current_index/${#app_details[@]}] ${app_name}"
-                else
-                    echo -e "${GREEN}${ICON_SUCCESS}${NC} ${app_name}"
-                fi
+            # Show per-app progress only for multi-app batches. For a single
+            # app the summary block right below already names it on the
+            # "Removed 1 app" line, so a standalone success line above the
+            # box would just duplicate it.
+            if [[ -t 1 && ${#app_details[@]} -gt 1 ]]; then
+                echo -e "${GREEN}${ICON_SUCCESS}${NC} [$current_index/${#app_details[@]}] ${app_name}"
             fi
 
             # Warn about files that could not be removed and exclude them from freed total.
@@ -1384,8 +1446,7 @@ _batch_render_summary() {
             bg_list+="${background_items_warning_apps[idx]}"
         done
 
-        summary_details+=("${ICON_REVIEW} Background items still registered: ${YELLOW}${bg_list}${NC}")
-        summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Open ${GRAY}System Settings > General > Login Items & Extensions${NC} and toggle the entry off to clear it")
+        summary_details+=("${ICON_REVIEW} Background item still running for ${YELLOW}${bg_list}${NC}, turn it off in ${GRAY}System Settings > Login Items & Extensions${NC}")
     fi
 
     if [[ ${#running_at_uninstall_apps[@]} -gt 0 ]]; then
@@ -1408,7 +1469,7 @@ _batch_render_summary() {
         title="Uninstall dry run complete"
     fi
 
-    echo ""
+    # No blank line here: print_summary_block already opens with one.
     print_summary_block "$title" "${summary_details[@]}"
     printf '\n'
 }
@@ -1519,24 +1580,18 @@ batch_uninstall_applications() {
         return 130
     fi
 
-    # Detect stale Background Items entries (System Settings > Login Items & Extensions).
-    # Modern SMAppService helpers are not removable via osascript and Apple has no
-    # public CLI to delete individual BTM records, so we only detect + warn. Single
-    # dumpbtm call per batch, gated by safety env vars and dry-run.
+    # Detect background jobs that survived the uninstall (System Settings >
+    # Login Items & Extensions). Modern SMAppService helpers are not removable
+    # via osascript and Apple has no public CLI to delete individual BTM
+    # records, so we only detect + warn. Detection is launchctl-only: it needs
+    # no privileges, while sfltool dumpbtm pops the macOS "sfltool wants to
+    # make changes" admin-password dialog on every batch.
     local -a background_items_warning_apps=()
-    local _btm_dump=""
-    if [[ ${#success_items[@]} -gt 0 ]] &&
-        ! is_uninstall_dry_run &&
-        [[ "${MOLE_TEST_NO_AUTH:-0}" != "1" && "${MOLE_TEST_MODE:-0}" != "1" ]] &&
-        command -v sfltool > /dev/null 2>&1; then
-        _btm_dump=$(run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" sfltool dumpbtm 2> /dev/null || true)
-    fi
-
-    if [[ -n "$_btm_dump" ]]; then
+    if [[ ${#success_items[@]} -gt 0 ]] && ! is_uninstall_dry_run; then
         local _bg_line
         while IFS= read -r _bg_line; do
             [[ -n "$_bg_line" ]] && background_items_warning_apps+=("$_bg_line")
-        done < <(_uninstall_match_btm_leftovers "$_btm_dump" "${app_details[@]}" -- "${success_items[@]}")
+        done < <(_uninstall_match_loaded_background_items "${app_details[@]}" -- "${success_items[@]}")
     fi
 
     _batch_render_summary
