@@ -294,8 +294,7 @@ EOF
     [[ "$output" == *"Free space: 75.16GB"* ]]
     [[ "$output" == *"Tracked cleanup:"* ]]
     [[ "$output" == *"1.02GB"* ]]
-    [[ "$output" == *"Free space change: +1.02GB"* ]]
-    [[ "$output" == *"Free space now: 76.19GB"* ]]
+    [[ "$output" == *"Free space: 76.19GB (+1.02GB)"* ]]
     [[ "$output" != *"Space freed:"* ]]
     [ "$(cat "$HOME/df.count")" = "2" ]
 }

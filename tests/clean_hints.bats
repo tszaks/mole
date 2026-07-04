@@ -380,6 +380,43 @@ EOTD
     [[ "$output" == *"no matching binary in PATH"* ]]
 }
 
+@test "show_orphan_dotdir_hint_notice skips empty dotdirs (nothing to reclaim)" {
+    mkdir -p "$HOME/.fakecli-empty-orphan"
+    touch -t 202401010000 "$HOME/.fakecli-empty-orphan"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { echo "0"; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Potential orphan dotfile"* ]] || return 1
+    [[ "$output" != *".fakecli-empty-orphan"* ]] || return 1
+}
+
+@test "show_orphan_dotdir_hint_notice keeps dotdir when size probe times out" {
+    mkdir -p "$HOME/.fakecli-slow-orphan"
+    touch -t 202401010000 "$HOME/.fakecli-slow-orphan"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+hint_get_path_size_kb_with_timeout() { return 1; }
+show_orphan_dotdir_hint_notice
+EOTD
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *".fakecli-slow-orphan"* ]] || return 1
+}
+
 @test "show_orphan_dotdir_hint_notice skips dotdir owned by installed GUI app (#872)" {
     mkdir -p "$HOME/.bridge"
     touch -t 202401010000 "$HOME/.bridge"

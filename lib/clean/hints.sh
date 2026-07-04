@@ -922,6 +922,11 @@ show_orphan_dotdir_hint_notice() {
         local size_note=""
         local size_kb
         if size_kb=$(hint_get_path_size_kb_with_timeout "$dotdir" 0.8); then
+            # Empty dotdirs reclaim nothing, so reviewing them is not worth a
+            # row. A failed probe (timeout) means the dir is big: keep it.
+            if [[ "$size_kb" -eq 0 ]]; then
+                continue
+            fi
             size_note="$(bytes_to_human $((size_kb * 1024))), "
         fi
 

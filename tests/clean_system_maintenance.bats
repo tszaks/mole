@@ -325,7 +325,7 @@ clean_local_snapshots
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Time Machine local snapshots:"* ]]
+    [[ "$output" == *"Time Machine local snapshots ·"* ]]
     [[ "$output" == *"tmutil listlocalsnapshots /"* ]]
 }
 

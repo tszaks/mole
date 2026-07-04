@@ -361,9 +361,7 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Docker unused data · skipped by default"* ]]
-    [[ "$output" == *"Review: docker system df"* ]]
-    [[ "$output" == *"Prune:  docker system prune"* ]]
+    [[ "$output" == *"Docker unused data · skipped (review: docker system df)"* ]]
     [[ "$output" == *"Docker BuildX cache"* ]]
     [[ "$output" != *"docker called"* ]]
 }
@@ -404,9 +402,7 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"OrbStack container data · skipped by default (4M)"* ]]
-    [[ "$output" == *"Review: docker system df"* ]]
-    [[ "$output" == *"Prune:  docker system prune --filter until=720h"* ]]
+    [[ "$output" == *"OrbStack container data · skipped (4M, review: docker system df)"* ]]
     [[ "$output" == *"Docker BuildX cache|$HOME/.docker/buildx/cache/*"* ]]
     [[ "$output" != *"data.img.raw"* ]]
     [[ "$output" != *"swap.img"* ]]
@@ -432,11 +428,10 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Docker unused data · skipped by default"* ]]
+    [[ "$output" == *"Docker unused data · skipped (review: docker system df)"* ]]
     [[ "$output" != *"whitelisted"* ]]
     [[ "$output" != *"mo clean --whitelist"* ]]
     [[ "$output" != *"docker called"* ]]
-    [[ "$output" == *"Prune:  docker system prune"* ]]
 }
 
 @test "clean_codex_runtimes reports active runtime for manual review" {
@@ -774,106 +769,42 @@ EOF
     [[ "$output" != *"Local State"* ]]
 }
 
-@test "clean_dev_agent_worktrees skips agent worktrees by default and reports size" {
+@test "report_agent_worktree_candidates reports large worktree containers as review only" {
     mkdir -p "$HOME/code/proj/.claude/worktrees/wt-one"
-    mkdir -p "$HOME/code/proj/.claude/worktrees/wt-two"
     echo "data" > "$HOME/code/proj/.claude/worktrees/wt-one/file"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
-        MOLE_AGENT_WORKTREE_PATHS="$HOME/code" \
-        bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/dev.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
 note_activity() { :; }
 run_with_timeout() { shift; "$@"; }
-safe_clean() { echo "SHOULD_NOT_DELETE:$1"; }
-clean_dev_agent_worktrees
+get_path_size_kb() { echo "2097152"; }
+report_agent_worktree_candidates
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"AI agent worktrees · skipped by default (2 in .claude/worktrees"* ]]
-    [[ "$output" == *"MOLE_AGENT_WORKTREES=1 mo clean"* ]]
-    [[ "$output" != *"SHOULD_NOT_DELETE"* ]]
+    [[ "$output" == *"AI agent worktrees"* ]] || return 1
+    [[ "$output" == *"review only"* ]] || return 1
+    [[ "$output" == *".claude/worktrees"* ]] || return 1
+    # Report only: the worktree must still exist afterwards.
+    [ -d "$HOME/code/proj/.claude/worktrees/wt-one" ]
 }
 
-@test "clean_dev_agent_worktrees removes clean worktrees but keeps dirty ones when opted in" {
-    local origin="$HOME/origin.git"
-    local proj="$HOME/code/proj"
-    git init --bare -q "$origin"
-    git -c init.defaultBranch=main init -q "$proj"
-    (
-        cd "$proj"
-        git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
-        git remote add origin "$origin"
-        git push -q origin HEAD:main
-        git worktree add -q .claude/worktrees/clean-one HEAD
-        git worktree add -q .claude/worktrees/dirty-one HEAD
-        # Agents lock their worktrees; a plain prune would skip the stale entry.
-        git worktree lock .claude/worktrees/clean-one
-    )
-    echo "uncommitted" > "$proj/.claude/worktrees/dirty-one/scratch.txt"
+@test "report_agent_worktree_candidates stays silent below the 1GB bar" {
+    mkdir -p "$HOME/code/proj/.claude/worktrees/wt-one"
+    echo "data" > "$HOME/code/proj/.claude/worktrees/wt-one/file"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
-        MOLE_AGENT_WORKTREES=1 MOLE_AGENT_WORKTREE_PATHS="$HOME/code" \
-        bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/dev.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
 note_activity() { :; }
 run_with_timeout() { shift; "$@"; }
-safe_clean() { echo "REMOVED:$1"; rm -rf "$1"; }
-clean_dev_agent_worktrees
+get_path_size_kb() { echo "512000"; }
+report_agent_worktree_candidates
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"REMOVED:$proj/.claude/worktrees/clean-one"* ]]
-    [[ "$output" == *"Kept agent worktree (unsaved work)"* ]]
-    [[ "$output" == *"dirty-one"* ]]
-    [[ "$output" != *"REMOVED:$proj/.claude/worktrees/dirty-one"* ]]
-    [ ! -d "$proj/.claude/worktrees/clean-one" ]
-    [ -d "$proj/.claude/worktrees/dirty-one" ]
-    # The stale (locked) registry entry must be reaped, the dirty one kept.
-    run git -C "$proj" worktree list
-    [[ "$output" != *"clean-one"* ]]
-    [[ "$output" == *"dirty-one"* ]]
-}
-
-@test "clean_dev_agent_worktrees keeps worktrees with stashed work when opted in" {
-    local origin="$HOME/origin-stash.git"
-    local proj="$HOME/code/proj-stash"
-    git init --bare -q "$origin"
-    git -c init.defaultBranch=main init -q "$proj"
-    (
-        cd "$proj"
-        git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
-        git remote add origin "$origin"
-        git push -q origin HEAD:main
-        git worktree add -q .claude/worktrees/stashed-one HEAD
-        cd .claude/worktrees/stashed-one
-        echo "stashed work" > scratch.txt
-        git add scratch.txt
-        git -c user.email=t@t -c user.name=t stash push -q -m "agent scratch"
-    )
-
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
-        MOLE_AGENT_WORKTREES=1 MOLE_AGENT_WORKTREE_PATHS="$HOME/code" \
-        bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/dev.sh"
-note_activity() { :; }
-run_with_timeout() { shift; "$@"; }
-safe_clean() { echo "REMOVED:$1"; rm -rf "$1"; }
-clean_dev_agent_worktrees
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Kept agent worktree (unsaved work)"* ]]
-    [[ "$output" == *"stashed-one"* ]]
-    [[ "$output" != *"REMOVED:$proj/.claude/worktrees/stashed-one"* ]]
-    [ -d "$proj/.claude/worktrees/stashed-one" ]
-    run git -C "$proj/.claude/worktrees/stashed-one" stash list
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"agent scratch"* ]]
+    [ -z "$output" ]
 }

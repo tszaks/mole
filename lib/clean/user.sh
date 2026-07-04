@@ -2109,6 +2109,32 @@ jetbrains_stale_version_dirs() {
         '
 }
 
+# AI coding agents (Claude Code and similar) create full checkouts under
+# <project>/.claude/worktrees/ that accumulate silently across repos. Report
+# only, same 1GB bar as other large candidates; removal stays a manual
+# `git worktree remove` decision because a worktree may hold agent work.
+report_agent_worktree_candidates() {
+    local threshold_kb=$((1024 * 1024)) # 1GB
+    local -a roots=(
+        "$HOME/code" "$HOME/Code" "$HOME/dev" "$HOME/Projects"
+        "$HOME/GitHub" "$HOME/Workspace" "$HOME/Repos"
+        "$HOME/Development" "$HOME/www" "$HOME/src"
+    )
+    local root container size_kb
+    for root in "${roots[@]}"; do
+        [[ -d "$root" ]] || continue
+        while IFS= read -r -d '' container; do
+            size_kb=$(get_path_size_kb "$container" 2> /dev/null || echo 0)
+            [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+            [[ "$size_kb" -ge "$threshold_kb" ]] || continue
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} AI agent worktrees · ${GREEN}$(bytes_to_human "$((size_kb * 1024))")${NC}${GRAY}, review only${NC}"
+            echo -e "  ${GRAY}${ICON_SUBLIST}${NC} ${GRAY}$(format_path_link "$container")${NC}"
+            note_activity
+        done < <(run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" command find "$root" -maxdepth 6 -type d -path "*/.claude/worktrees" -prune -print0 2> /dev/null)
+    done
+    return 0
+}
+
 # Large file candidates (report only, no deletion).
 check_large_file_candidates() {
     local threshold_kb=$((1024 * 1024)) # 1GB
@@ -2202,8 +2228,7 @@ check_large_file_candidates() {
         if [[ -n "$snapshot_list" ]]; then
             snapshot_count=$(echo "$snapshot_list" | { grep -Eo 'com\.apple\.TimeMachine\.[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' || true; } | wc -l | awk '{print $1}')
             if [[ "$snapshot_count" =~ ^[0-9]+$ && "$snapshot_count" -gt 0 ]]; then
-                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Time Machine local snapshots · ${GREEN}${snapshot_count}${NC}"
-                echo -e "  ${GRAY}${ICON_REVIEW}${NC} ${GRAY}Review: tmutil listlocalsnapshots /${NC}"
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Time Machine local snapshots · ${GREEN}${snapshot_count}${NC} ${GRAY}(review: tmutil listlocalsnapshots /)${NC}"
                 found_any=true
             fi
         fi
@@ -2256,6 +2281,8 @@ check_large_file_candidates() {
         [[ -n "$jb_stale" ]] || continue
         _report_large_review_dir "JetBrains old version data" "$jetbrains_support/$jb_stale"
     done < <(jetbrains_stale_version_dirs "$jetbrains_support")
+
+    report_agent_worktree_candidates
 
     unset -f _large_candidate_size_kb _report_large_review_dir _report_large_review_row
 

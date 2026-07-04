@@ -1320,13 +1320,13 @@ perform_cleanup() {
 
     local -a summary_details=()
 
-    # Emit the "Free space change" (when measurable) and "Free space now" lines.
-    # $1 is the free space in KB captured before cleanup started. Caller appends
-    # each printed line to summary_details.
+    # Emit one "Free space" line, with the measured delta in parentheses when
+    # available. $1 is the free space in KB captured before cleanup started.
+    # Caller appends each printed line to summary_details.
     emit_free_space_summary() {
         local initial_kb="$1"
         if [[ "$DRY_RUN" == "true" ]]; then
-            printf 'Free space now: %s\n' "$(get_free_space)"
+            printf 'Free space: %s\n' "$(get_free_space)"
             return 0
         fi
 
@@ -1334,10 +1334,11 @@ perform_cleanup() {
         if ! final_kb=$(get_free_space_kb 2> /dev/null); then
             final_kb=""
         fi
-        if [[ "$initial_kb" =~ ^[0-9]+$ && "$final_kb" =~ ^[0-9]+$ ]]; then
-            printf 'Free space change: %s\n' "$(format_free_space_delta_kb "$((final_kb - initial_kb))")"
+        local delta_note=""
+        if [[ "$initial_kb" =~ ^[0-9]+$ && "$final_kb" =~ ^[0-9]+$ && "$initial_kb" -ne "$final_kb" ]]; then
+            delta_note=" ($(format_free_space_delta_kb "$((final_kb - initial_kb))"))"
         fi
-        printf 'Free space now: %s\n' "$(format_free_space_kb "$final_kb")"
+        printf 'Free space: %s%s\n' "$(format_free_space_kb "$final_kb")" "$delta_note"
     }
 
     if [[ $total_size_cleaned -gt 0 ]]; then
