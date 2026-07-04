@@ -580,7 +580,10 @@ format_path_link() {
         printf '%s' "$display"
         return 0
     fi
-    printf '\033]8;;file://%s\033\\%s\033]8;;\033\\' "$(percent_encode_path "$path")" "$display"
+    # ESC-backslash is the OSC 8 string terminator; kept in a variable since
+    # a single-quoted printf format ending in \\ trips ShellCheck SC1003.
+    local st=$'\033\\'
+    printf '\033]8;;file://%s%s%s\033]8;;%s' "$(percent_encode_path "$path")" "$st" "$display" "$st"
 }
 
 # ============================================================================
