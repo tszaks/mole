@@ -259,6 +259,17 @@ safe_remove() {
         return 1
     fi
 
+    # Honor the user whitelist here, not just in safe_clean. safe_remove is
+    # called directly by several clean/optimize flows (Xcode DerivedData,
+    # mail downloads, deep-system caches, broken LaunchAgents) that would
+    # otherwise ignore a user's whitelist selection. is_path_whitelisted is
+    # a no-op when the whitelist is empty, and uninstall does not route
+    # through safe_remove, so this stays scoped to clean/optimize. See #710.
+    if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$path"; then
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "whitelist"
+        return 1
+    fi
+
     # Check if path exists
     if [[ ! -e "$path" ]]; then
         return 0

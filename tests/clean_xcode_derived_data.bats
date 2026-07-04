@@ -54,8 +54,51 @@ clean_xcode_derived_data
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"3 projects"* ]]
-    [[ "$output" == *"Xcode DerivedData"* ]]
+    [[ "$output" == *"3 projects"* ]] || return 1
+    [[ "$output" == *"Xcode DerivedData"* ]] || return 1
+}
+
+@test "clean_xcode_derived_data honors a real DerivedData whitelist entry (#710)" {
+    # Uses the real is_path_whitelisted (not a stub) with an actual whitelist
+    # pattern. clean_xcode_derived_data deletes via safe_remove directly, so
+    # the protection has to live in safe_remove; before that fix this test
+    # deletes the build dirs and fails.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+cleanup_result_color_kb() { echo "\033[0;32m"; }
+bytes_to_human() { echo "36 KB"; }
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+pgrep() { return 1; }
+export -f pgrep
+
+dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
+mkdir -p "$dd_dir/ProjectAlpha-abcdef123"
+echo "build output" > "$dd_dir/ProjectAlpha-abcdef123/build.o"
+
+# The shipped whitelist preset for DerivedData.
+WHITELIST_PATTERNS=("$dd_dir/*")
+
+clean_xcode_derived_data
+
+[[ -f "$dd_dir/ProjectAlpha-abcdef123/build.o" ]] || { echo "WRONG: whitelisted DerivedData was deleted"; exit 1; }
+
+# HOME is shared across tests in this file (setup_file, no per-test reset).
+# The whitelisted dir survives by design, so remove it here or it leaks into
+# the "empty DerivedData" test.
+rm -rf "$dd_dir"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
 }
 
 @test "clean_xcode_derived_data skips when Xcode is running" {
