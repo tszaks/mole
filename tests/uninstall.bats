@@ -452,6 +452,13 @@ EOF
 	printf '%s' '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>SharedName</string></dict></plist>' > "$HOME/Applications/SharedName-beta.app/Contents/Info.plist"
 	mkdir -p "$HOME/Library/Logs/DiagnosticReports"
 	touch "$HOME/Library/Logs/DiagnosticReports/SharedName-2026-07-03-101010.ips"
+	# LaunchAgents referencing an install by exact path: the one pointing at
+	# the selected beta must still be unloaded under the guard (the bundle id
+	# is demoted to "unknown", but the path scan is exact evidence), while the
+	# one pointing at the survivor must stay loaded.
+	mkdir -p "$HOME/Library/LaunchAgents"
+	printf '%s' "$HOME/Applications/SharedName-beta.app/Contents/MacOS/SharedName" > "$HOME/Library/LaunchAgents/com.thirdparty.betahelper.plist"
+	printf '%s' "$HOME/Applications/SharedName.app/Contents/MacOS/SharedName" > "$HOME/Library/LaunchAgents/com.thirdparty.stablehelper.plist"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -471,6 +478,7 @@ pkill() { return 0; }
 sudo() { return 0; }
 remove_login_item() { printf 'LOGIN_ITEM:%s\n' "$1" >> "$HOME/login.log"; }
 force_kill_app() { printf 'KILL:%s\n' "$1" >> "$HOME/kill.log"; return 0; }
+unload_launch_plist() { printf 'UNLOAD:%s\n' "$1" >> "$HOME/unload.log"; }
 
 # Case 1: display names collide ("SharedName" for both) but basenames differ.
 # Discovery must use the basename (SharedName-beta) so the survivor's
@@ -494,6 +502,8 @@ printf '\n' | batch_uninstall_applications > /dev/null 2>&1
 [[ -f "$HOME/Library/Preferences/SharedName.plist" ]] || { echo "WRONG: survivor prefs removed"; exit 1; }
 [[ ! -f "$HOME/login.log" ]] || { echo "WRONG: login item removed on colliding name"; cat "$HOME/login.log"; exit 1; }
 [[ -f "$HOME/Library/Logs/DiagnosticReports/SharedName-2026-07-03-101010.ips" ]] || { echo "WRONG: survivor crash reports deleted under sibling guard"; exit 1; }
+grep -q "UNLOAD:.*com.thirdparty.betahelper.plist" "$HOME/unload.log" 2> /dev/null || { echo "WRONG: path-referenced agent of the selected app not unloaded under guard"; exit 1; }
+! grep -q "com.thirdparty.stablehelper.plist" "$HOME/unload.log" 2> /dev/null || { echo "WRONG: survivor's agent unloaded"; cat "$HOME/unload.log"; exit 1; }
 
 # Case 2: basenames collide too (same SharedName.app in two folders).
 # Name discovery must be suppressed entirely: only the bundle goes.

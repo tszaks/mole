@@ -233,22 +233,29 @@ stop_launch_services() {
         return 0
     fi
 
-    [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && return 0
-
-    # Validate bundle_id format: must be reverse-DNS style (e.g., com.example.app)
-    # This prevents glob injection attacks if bundle_id contains special characters
-    if ! mole_is_reverse_dns_bundle_id "$bundle_id"; then
+    # The bundle-id-keyed unloads below need a valid reverse-DNS id, but the
+    # app-path scan further down does not, and it must still run when the
+    # sibling guard demoted the bundle id to "unknown": name-globbed agent
+    # plists are deleted by remove_file_list, and skipping the unload here
+    # would leave their jobs loaded in launchd until logout.
+    local bundle_id_usable=true
+    if [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]]; then
+        bundle_id_usable=false
+    elif ! mole_is_reverse_dns_bundle_id "$bundle_id"; then
+        # Validate bundle_id format: must be reverse-DNS style (e.g.,
+        # com.example.app). This prevents glob injection attacks if bundle_id
+        # contains special characters.
         debug_log "Invalid bundle_id format for LaunchAgent search: $bundle_id"
-        return 0
+        bundle_id_usable=false
     fi
 
-    if [[ -d ~/Library/LaunchAgents ]]; then
+    if [[ "$bundle_id_usable" == "true" ]] && [[ -d ~/Library/LaunchAgents ]]; then
         while IFS= read -r -d '' plist; do
             unload_launch_plist "$plist" "false"
         done < <(find ~/Library/LaunchAgents -maxdepth 1 \( -name "${bundle_id}.plist" -o -name "${bundle_id}.*.plist" \) -print0 2> /dev/null)
     fi
 
-    if [[ "$has_system_files" == "true" && "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
+    if [[ "$bundle_id_usable" == "true" && "$has_system_files" == "true" && "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
         if [[ -d /Library/LaunchAgents ]]; then
             while IFS= read -r -d '' plist; do
                 unload_launch_plist "$plist" "true"
@@ -263,22 +270,29 @@ stop_launch_services() {
 
     # Scan for LaunchAgents whose ProgramArguments reference the app path.
     # Catches agents with bundle IDs that don't match the app's bundle ID.
+    # Enumerate with find -print0 and probe each plist with grep -qF:
+    # "grep -rlZ" is not portable on macOS (BSD grep treats -Z as
+    # --decompress and prints newline-separated names), which left this scan
+    # silently dead inside a NUL-delimited read loop.
     if [[ -n "$app_path" ]]; then
         if [[ -d ~/Library/LaunchAgents ]]; then
             while IFS= read -r -d '' plist; do
+                grep -qF -- "$app_path" "$plist" 2> /dev/null || continue
                 unload_launch_plist "$plist" "false"
-            done < <(grep -rlZ "$app_path" ~/Library/LaunchAgents/ 2> /dev/null || true)
+            done < <(find ~/Library/LaunchAgents -maxdepth 1 -name '*.plist' -print0 2> /dev/null)
         fi
         if [[ "$has_system_files" == "true" && "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
             if [[ -d /Library/LaunchAgents ]]; then
                 while IFS= read -r -d '' plist; do
+                    grep -qF -- "$app_path" "$plist" 2> /dev/null || continue
                     unload_launch_plist "$plist" "true"
-                done < <(grep -rlZ "$app_path" /Library/LaunchAgents/ 2> /dev/null || true)
+                done < <(find /Library/LaunchAgents -maxdepth 1 -name '*.plist' -print0 2> /dev/null)
             fi
             if [[ -d /Library/LaunchDaemons ]]; then
                 while IFS= read -r -d '' plist; do
+                    grep -qF -- "$app_path" "$plist" 2> /dev/null || continue
                     unload_launch_plist "$plist" "true"
-                done < <(grep -rlZ "$app_path" /Library/LaunchDaemons/ 2> /dev/null || true)
+                done < <(find /Library/LaunchDaemons -maxdepth 1 -name '*.plist' -print0 2> /dev/null)
             fi
         fi
     fi
