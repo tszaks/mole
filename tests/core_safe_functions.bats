@@ -451,6 +451,195 @@ SCRIPT
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
 }
 
+@test "safe_sudo_find_delete batches file removals into one xargs rm" {
+    local target_dir="$TEST_DIR/sudo-batch-target"
+    local script="$TEST_DIR/sudo-batch-test.sh"
+    mkdir -p "$target_dir"
+    touch "$target_dir/a.log" "$target_dir/b.log" "$target_dir/keep.log"
+
+    cat > "$script" <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+TRACE="$TARGET_DIR/sudo.trace"
+> "$TRACE"
+
+WHITELIST_PATTERNS=("$TARGET_DIR/keep.log")
+
+sudo() {
+    printf 'SUDO:%s\n' "$*" >> "$TRACE"
+    if [[ "${1:-}" != "-n" ]]; then
+        echo "INTERACTIVE_SUDO:$*" >&2
+        return 99
+    fi
+    shift
+    case "${1:-}" in
+        test)
+            shift
+            command test "$@"
+            ;;
+        find)
+            printf '%s\0' "$TARGET_DIR/a.log" "$TARGET_DIR/b.log" "$TARGET_DIR/keep.log"
+            ;;
+        xargs)
+            shift
+            command xargs "$@"
+            ;;
+        rm)
+            echo "SINGLE_FILE_RM:$*"
+            return 0
+            ;;
+        *)
+            "$@"
+            ;;
+    esac
+}
+export -f sudo
+
+set +e
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
+rc=$?
+set -e
+printf 'RC=%s\n' "$rc"
+[[ -e "$TARGET_DIR/a.log" ]] && echo "A_SURVIVED" || echo "A_REMOVED"
+[[ -e "$TARGET_DIR/b.log" ]] && echo "B_SURVIVED" || echo "B_REMOVED"
+[[ -e "$TARGET_DIR/keep.log" ]] && echo "KEEP_SURVIVED" || echo "KEEP_REMOVED"
+printf 'XARGS_CALLS=%s\n' "$(grep -c 'SUDO:-n xargs' "$TRACE" || true)"
+cat "$TRACE"
+echo "--OPLOG--"
+cat "$HOME/Library/Logs/mole/operations.log" 2> /dev/null || true
+exit 0
+SCRIPT
+    chmod +x "$script"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=0"* ]] || return 1
+    [[ "$output" == *"A_REMOVED"* ]] || return 1
+    [[ "$output" == *"B_REMOVED"* ]] || return 1
+    [[ "$output" == *"KEEP_SURVIVED"* ]] || return 1
+    [[ "$output" == *"XARGS_CALLS=1"* ]] || return 1
+    [[ "$output" != *"SINGLE_FILE_RM"* ]] || return 1
+    [[ "$output" == *"REMOVED $target_dir/a.log (batch)"* ]] || return 1
+    [[ "$output" == *"REMOVED $target_dir/b.log (batch)"* ]] || return 1
+    [[ "$output" != *"INTERACTIVE_SUDO"* ]] || return 1
+}
+
+@test "safe_sudo_find_delete batch path survives set -e with oplog disabled" {
+    local target_dir="$TEST_DIR/sudo-batch-nooplog"
+    local script="$TEST_DIR/sudo-batch-nooplog-test.sh"
+    mkdir -p "$target_dir"
+    touch "$target_dir/a.log"
+
+    cat > "$script" <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+sudo() {
+    if [[ "${1:-}" != "-n" ]]; then
+        echo "INTERACTIVE_SUDO:$*" >&2
+        return 99
+    fi
+    shift
+    case "${1:-}" in
+        test)
+            shift
+            command test "$@"
+            ;;
+        find)
+            printf '%s\0' "$TARGET_DIR/a.log"
+            ;;
+        xargs)
+            shift
+            command xargs "$@"
+            ;;
+        *)
+            "$@"
+            ;;
+    esac
+}
+export -f sudo
+
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
+# Reaching this line proves the disabled-oplog branch did not trip set -e.
+echo "SURVIVED_SET_E"
+[[ -e "$TARGET_DIR/a.log" ]] && echo "A_SURVIVED" || echo "A_REMOVED"
+exit 0
+SCRIPT
+    chmod +x "$script"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        MO_NO_OPLOG=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SURVIVED_SET_E"* ]] || return 1
+    [[ "$output" == *"A_REMOVED"* ]] || return 1
+}
+
+@test "safe_sudo_find_delete retries batch survivors through safe_sudo_remove" {
+    local target_dir="$TEST_DIR/sudo-batch-fallback"
+    local script="$TEST_DIR/sudo-batch-fallback-test.sh"
+    mkdir -p "$target_dir"
+    touch "$target_dir/stuck.log"
+
+    cat > "$script" <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+TRACE="$TARGET_DIR/sudo.trace"
+> "$TRACE"
+
+sudo() {
+    printf 'SUDO:%s\n' "$*" >> "$TRACE"
+    if [[ "${1:-}" != "-n" ]]; then
+        echo "INTERACTIVE_SUDO:$*" >&2
+        return 99
+    fi
+    shift
+    case "${1:-}" in
+        test)
+            shift
+            command test "$@"
+            ;;
+        find)
+            printf '%s\0' "$TARGET_DIR/stuck.log"
+            ;;
+        xargs)
+            # Simulate a batch failure without deleting anything.
+            return 1
+            ;;
+        du)
+            shift
+            command du "$@"
+            ;;
+        rm)
+            return 0
+            ;;
+        *)
+            "$@"
+            ;;
+    esac
+}
+export -f sudo
+
+set +e
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
+rc=$?
+set -e
+printf 'RC=%s\n' "$rc"
+cat "$TRACE"
+exit 0
+SCRIPT
+    chmod +x "$script"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=0"* ]] || return 1
+    [[ "$output" == *"SUDO:-n xargs -0 rm -f --"* ]] || return 1
+    [[ "$output" == *"SUDO:-n rm -rf $target_dir/stuck.log"* ]] || return 1
+    [[ "$output" != *"INTERACTIVE_SUDO"* ]] || return 1
+}
+
 @test "safe_find_delete rejects symlinked directory" {
     local real_dir="$TEST_DIR/real"
     local link_dir="$TEST_DIR/link"

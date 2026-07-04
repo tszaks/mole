@@ -948,6 +948,15 @@ safe_sudo_find_delete() {
 
     # Iterate results to respect both system protection and user whitelist.
     # See safe_find_delete for rationale (#757).
+    #
+    # Regular files are removed in one privileged xargs batch instead of one
+    # safe_sudo_remove per match: the single-file path costs three sudo forks
+    # per file (test -e, du, rm), which turns a sweep over a stale .logarchive
+    # bundle (1000+ tracev3 files) into minutes. Every path still passes the
+    # same per-file gates before entering the batch; only the rm is batched.
+    # Directories and dry-run keep the single-file path so rm -rf handling
+    # and preview output stay unchanged.
+    local -a batch_files=()
     while IFS= read -r -d '' match; do
         if should_protect_path "$match"; then
             continue
@@ -955,8 +964,43 @@ safe_sudo_find_delete() {
         if declare -f is_path_whitelisted > /dev/null && is_path_whitelisted "$match"; then
             continue
         fi
+        # -type f never emits symlinks; a path that is one now was swapped
+        # after find saw it, and the single-file path refuses those.
+        if [[ "$type_filter" == "f" && "${MOLE_DRY_RUN:-0}" != "1" && ! -L "$match" ]]; then
+            if validate_path_for_deletion "$match"; then
+                batch_files+=("$match")
+            fi
+            continue
+        fi
         safe_sudo_remove "$match" || true
     done < <(sudo -n find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
+
+    if [[ ${#batch_files[@]} -gt 0 ]]; then
+        local batch_rc=0
+        printf '%s\0' "${batch_files[@]}" | sudo -n xargs -0 rm -f -- 2> /dev/null || batch_rc=$?
+
+        # Plain if, not `oplog_enabled && ...`: the short-circuit form returns
+        # 1 when the oplog is disabled and would trip set -e in callers.
+        local batch_ts=""
+        if oplog_enabled; then
+            batch_ts=$(get_timestamp)
+        fi
+        local -a removed_lines=()
+        local batch_file
+        for batch_file in "${batch_files[@]}"; do
+            if [[ $batch_rc -ne 0 ]] && sudo -n test -e "$batch_file" 2> /dev/null; then
+                # Survived the batch (SIP, immutable flag, permissions):
+                # retry through the single-file path so the failure is
+                # classified and logged exactly as before.
+                safe_sudo_remove "$batch_file" || true
+            elif [[ -n "$batch_ts" ]]; then
+                removed_lines+=("[$batch_ts] [${MOLE_CURRENT_COMMAND:-clean}] REMOVED $batch_file (batch)")
+            fi
+        done
+        if [[ ${#removed_lines[@]} -gt 0 ]]; then
+            append_log_lines "$OPERATIONS_LOG_FILE" "${removed_lines[@]}"
+        fi
+    fi
 
     return 0
 }
