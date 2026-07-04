@@ -12,6 +12,7 @@ jobs:
   build:
     name: Build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       matrix:
         include:
@@ -59,6 +60,7 @@ jobs:
     name: Publish Release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
       attestations: write
@@ -86,7 +88,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: |
             bin/analyze-darwin-*
@@ -106,6 +108,7 @@ jobs:
 
   update-formula:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: release
     steps:
       - name: Checkout code
