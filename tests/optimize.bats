@@ -530,6 +530,67 @@ EOF
 	[[ "$output" != *"DEFAULTS: write"* ]]
 }
 
+@test "opt_spotlight_index_optimize reports optimal when probes are fast" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+STUB="$HOME/spotlight-stubs"
+mkdir -p "$STUB"
+printf '#!/bin/bash\necho "/: Indexing enabled."\n' > "$STUB/mdutil"
+printf '#!/bin/bash\necho "mdfind:$*" >> "$HOME/mdfind-calls.log"\nexit 0\n' > "$STUB/mdfind"
+chmod +x "$STUB/mdutil" "$STUB/mdfind"
+PATH="$STUB:$PATH"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+is_ac_power() { return 0; }
+opt_spotlight_index_optimize
+echo "probes=$(wc -l < "$HOME/mdfind-calls.log" | tr -d ' ')"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Spotlight index already optimal"* ]] || return 1
+	[[ "$output" == *"probes=2"* ]] || return 1
+}
+
+@test "opt_spotlight_index_optimize skips the speed probe on battery" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+STUB="$HOME/spotlight-stubs-battery"
+mkdir -p "$STUB"
+printf '#!/bin/bash\necho "/: Indexing enabled."\n' > "$STUB/mdutil"
+printf '#!/bin/bash\necho "mdfind:$*" >> "$HOME/mdfind-battery.log"\nexit 0\n' > "$STUB/mdfind"
+chmod +x "$STUB/mdutil" "$STUB/mdfind"
+PATH="$STUB:$PATH"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+is_ac_power() { return 1; }
+opt_spotlight_index_optimize
+[[ -f "$HOME/mdfind-battery.log" ]] && echo "probed" || echo "no-probe"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Spotlight index already optimal"* ]] || return 1
+	[[ "$output" == *"no-probe"* ]] || return 1
+}
+
+@test "opt_spotlight_index_optimize dry-run reports rebuild when probes are slow" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 MOLE_OPTIMIZE_SPOTLIGHT_SLOW_SEC=-1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+STUB="$HOME/spotlight-stubs-slow"
+mkdir -p "$STUB"
+printf '#!/bin/bash\necho "/: Indexing enabled."\n' > "$STUB/mdutil"
+printf '#!/bin/bash\nexit 0\n' > "$STUB/mdfind"
+chmod +x "$STUB/mdutil" "$STUB/mdfind"
+PATH="$STUB:$PATH"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+is_ac_power() { return 0; }
+opt_spotlight_index_optimize
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Spotlight index rebuild started"* ]] || return 1
+}
+
 @test "opt_prune_spotlight_orphan_rules reports clean when rules key is absent" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

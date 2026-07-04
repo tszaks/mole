@@ -609,7 +609,22 @@ opt_memory_pressure_relief() {
             return 0
         fi
 
+        local spinner_started="false"
+        if [[ -t 1 ]]; then
+            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Releasing inactive memory..."
+            spinner_started="true"
+        fi
+
+        local purge_ok="false"
         if sudo purge > /dev/null 2>&1; then
+            purge_ok="true"
+        fi
+
+        if [[ "$spinner_started" == "true" ]]; then
+            stop_inline_spinner
+        fi
+
+        if [[ "$purge_ok" == "true" ]]; then
             opt_msg "Inactive memory released"
             opt_msg "System responsiveness improved"
         else
@@ -729,7 +744,7 @@ opt_disk_permissions_repair() {
 # Spotlight index check/rebuild (only if slow).
 opt_spotlight_index_optimize() {
     local spotlight_status
-    spotlight_status=$(mdutil -s / 2> /dev/null || echo "")
+    spotlight_status=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" mdutil -s / 2> /dev/null || echo "")
 
     if echo "$spotlight_status" | grep -qi "Indexing disabled"; then
         echo -e "  ${GRAY}${ICON_EMPTY}${NC} Spotlight indexing is disabled"
@@ -737,25 +752,46 @@ opt_spotlight_index_optimize() {
     fi
 
     if echo "$spotlight_status" | grep -qi "Indexing enabled" && ! echo "$spotlight_status" | grep -qi "Indexing and searching disabled"; then
+        # A rebuild is only offered on AC power, so skip the speed probe on
+        # battery instead of measuring a result that would be discarded.
+        if ! is_ac_power; then
+            opt_msg "Spotlight index already optimal"
+            return 0
+        fi
+
+        local slow_threshold="${MOLE_OPTIMIZE_SPOTLIGHT_SLOW_SEC:-3}"
+        if [[ ! "$slow_threshold" =~ ^-?[0-9]+$ ]]; then
+            slow_threshold=3
+        fi
+
+        local spinner_started="false"
+        if [[ -t 1 ]]; then
+            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Checking Spotlight speed..."
+            spinner_started="true"
+        fi
+
         local slow_count=0
-        local test_start test_end test_duration
-        for _ in 1 2; do
+        local test_start test_end test_duration probe
+        for probe in 1 2; do
             test_start=$(get_epoch_seconds)
-            mdfind "kMDItemFSName == 'Applications'" > /dev/null 2>&1 || true
+            # A timeout counts as slow: an mdfind that cannot answer within
+            # the probe ceiling is exactly the sluggishness being measured.
+            run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemFSName == 'Applications'" > /dev/null 2>&1 || true
             test_end=$(get_epoch_seconds)
             test_duration=$((test_end - test_start))
-            if [[ $test_duration -gt 3 ]]; then
+            if [[ $test_duration -gt $slow_threshold ]]; then
                 slow_count=$((slow_count + 1))
             fi
-            sleep 1
+            if [[ "$probe" == "1" ]]; then
+                sleep 1
+            fi
         done
 
-        if [[ $slow_count -ge 2 ]]; then
-            if ! is_ac_power; then
-                opt_msg "Spotlight index already optimal"
-                return 0
-            fi
+        if [[ "$spinner_started" == "true" ]]; then
+            stop_inline_spinner
+        fi
 
+        if [[ $slow_count -ge 2 ]]; then
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
                 if ! optimize_sudo_available; then
                     echo -e "  ${YELLOW}${ICON_WARNING}${NC} Spotlight index rebuild · skipped (admin access required)"
