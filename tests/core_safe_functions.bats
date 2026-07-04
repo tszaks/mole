@@ -525,6 +525,60 @@ SCRIPT
     [[ "$output" != *"INTERACTIVE_SUDO"* ]] || return 1
 }
 
+@test "safe_sudo_find_delete does not log REMOVED when sudo lapses mid-batch" {
+    local target_dir="$TEST_DIR/sudo-batch-lapsed"
+    local script="$TEST_DIR/sudo-batch-lapsed-test.sh"
+    mkdir -p "$target_dir"
+    touch "$target_dir/a.log" "$target_dir/b.log"
+
+    cat > "$script" <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+# Simulate a credential that dies right after the find: the batch xargs rm
+# fails, and every later sudo probe (true / test / rm) fails for the same
+# auth reason. Nothing was deleted, so no REMOVED lines may be logged.
+sudo() {
+    if [[ "${1:-}" != "-n" ]]; then
+        echo "INTERACTIVE_SUDO:$*" >&2
+        return 99
+    fi
+    shift
+    case "${1:-}" in
+        find)
+            printf '%s\0' "$TARGET_DIR/a.log" "$TARGET_DIR/b.log"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+export -f sudo
+
+set +e
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
+rc=$?
+set -e
+printf 'RC=%s\n' "$rc"
+[[ -e "$TARGET_DIR/a.log" ]] && echo "A_SURVIVED" || echo "A_REMOVED"
+echo "--OPLOG--"
+cat "$HOME/Library/Logs/mole/operations.log" 2> /dev/null || true
+exit 0
+SCRIPT
+    chmod +x "$script"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=0"* ]] || return 1
+    [[ "$output" == *"A_SURVIVED"* ]] || return 1
+    # Scope to this test's paths: the oplog HOME is shared across tests and
+    # earlier batch tests legitimately log their own "(batch)" lines.
+    [[ "$output" != *"REMOVED $target_dir/a.log (batch)"* ]] || return 1
+    [[ "$output" != *"REMOVED $target_dir/b.log (batch)"* ]] || return 1
+    [[ "$output" != *"INTERACTIVE_SUDO"* ]] || return 1
+}
+
 @test "safe_sudo_find_delete batch path survives set -e with oplog disabled" {
     local target_dir="$TEST_DIR/sudo-batch-nooplog"
     local script="$TEST_DIR/sudo-batch-nooplog-test.sh"

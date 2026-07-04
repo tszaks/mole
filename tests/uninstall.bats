@@ -1482,6 +1482,32 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "bootout_login_item_helpers never touches the com.apple namespace" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+is_uninstall_dry_run() { return 1; }
+run_with_timeout() { shift; "$@"; }
+# The call site redirects launchctl to /dev/null, so trace to a file.
+TRACE="$HOME/bootout.trace"
+> "$TRACE"
+launchctl() { echo "BOOTOUT:$2" >> "$TRACE"; }
+export -f launchctl
+
+# A third-party helper whose Info.plist claims an Apple label must be
+# skipped; only the vendor helper may be booted out.
+bootout_login_item_helpers "com.apple.Safari.helper
+com.vendor.App-Helper"
+cat "$TRACE"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"BOOTOUT:gui/$(id -u)/com.vendor.App-Helper"* ]] || return 1
+	[[ "$output" != *"com.apple.Safari.helper"* ]] || return 1
+}
+
 @test "decode_bundle_id_list preserves login item helper ids" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

@@ -257,6 +257,11 @@ bootout_login_item_helpers() {
     while IFS= read -r helper_id; do
         [[ -n "$helper_id" ]] || continue
         mole_is_reverse_dns_bundle_id "$helper_id" || continue
+        # A third-party helper's Info.plist could claim an Apple label; never
+        # boot out the protected namespace regardless of what the bundle says.
+        case "$helper_id" in
+            com.apple.*) continue ;;
+        esac
         run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" launchctl bootout "gui/$uid/$helper_id" > /dev/null 2>&1 || true
     done <<< "$helper_ids"
 }

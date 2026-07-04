@@ -985,10 +985,20 @@ safe_sudo_find_delete() {
         if oplog_enabled; then
             batch_ts=$(get_timestamp)
         fi
+        # When the batch failed, confirm sudo credentials are still live
+        # before trusting the per-file probe below: with a lapsed credential
+        # `sudo -n test -e` fails for every file, which is indistinguishable
+        # from "file gone" and would log REMOVED entries for files still on
+        # disk. With dead credentials, retry everything through the
+        # single-file path so each failure is classified and logged.
+        local batch_sudo_alive=1
+        if [[ $batch_rc -ne 0 ]] && ! sudo -n true 2> /dev/null; then
+            batch_sudo_alive=0
+        fi
         local -a removed_lines=()
         local batch_file
         for batch_file in "${batch_files[@]}"; do
-            if [[ $batch_rc -ne 0 ]] && sudo -n test -e "$batch_file" 2> /dev/null; then
+            if [[ $batch_rc -ne 0 ]] && { [[ $batch_sudo_alive -eq 0 ]] || sudo -n test -e "$batch_file" 2> /dev/null; }; then
                 # Survived the batch (SIP, immutable flag, permissions):
                 # retry through the single-file path so the failure is
                 # classified and logged exactly as before.
