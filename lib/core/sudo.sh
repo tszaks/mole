@@ -95,9 +95,16 @@ request_sudo_access() {
         # Clear sudo cache before attempting authentication
         sudo -k 2> /dev/null
 
-        # Display native macOS password dialog
+        # Display native macOS password dialog. prompt_msg can carry on-disk
+        # app display names (batch uninstall builds it from ${sudo_apps[*]}),
+        # so escape backslashes and double quotes before embedding it in the
+        # AppleScript string literal, or an app named with an embedded quote
+        # could break out and run `do shell script`. Same escaping as
+        # force_kill_app and remove_login_item.
+        local escaped_msg="${prompt_msg//\\/\\\\}"
+        escaped_msg="${escaped_msg//\"/\\\"}"
         local password
-        password=$(osascript -e "display dialog \"$prompt_msg\" default answer \"\" with title \"Mole\" with icon caution with hidden answer" -e 'text returned of result' 2> /dev/null)
+        password=$(osascript -e "display dialog \"$escaped_msg\" default answer \"\" with title \"Mole\" with icon caution with hidden answer" -e 'text returned of result' 2> /dev/null)
 
         if [[ -z "$password" ]]; then
             # User cancelled the dialog
