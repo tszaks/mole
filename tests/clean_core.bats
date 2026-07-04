@@ -400,9 +400,12 @@ EOF
     echo "dependency" > "$HOME/.m2/repository/org/example/lib.jar"
 
     run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean --dry-run
-    [ "$status" -eq 0 ]
-    [ -f "$HOME/.m2/repository/org/example/lib.jar" ]
-    [[ "$output" != *"Maven repository cache"* ]]
+    [ "$status" -eq 0 ] || return 1
+    # The jar must survive, and the dry-run must not offer the Maven repo as a
+    # cleanup target. The label is "Maven local repository" (maven.sh); the old
+    # assertion checked a string that never appears, so it passed vacuously.
+    [ -f "$HOME/.m2/repository/org/example/lib.jar" ] || return 1
+    [[ "$output" != *"Maven local repository"* ]] || return 1
 }
 
 @test "FINDER_METADATA_SENTINEL in whitelist protects .DS_Store files" {

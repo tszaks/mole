@@ -892,6 +892,22 @@ remove_mole() {
     exit 0
 }
 
+# Build the main-menu controls hint line. Pure so the show/hide logic can be
+# tested without a tty (the caller only renders it inside `[[ -t 0 ]]`).
+# Args: $1 touchid_configured (true/false), $2 show_update (true/false).
+_main_menu_controls_line() {
+    local touchid_configured="$1"
+    local show_update="$2"
+    local controls="${GRAY}↑↓  |  Enter  |  M More  |  V Version"
+    if [[ "$touchid_configured" != "true" ]]; then
+        controls="${controls}  |  T TouchID"
+    elif [[ "$show_update" == "true" ]]; then
+        controls="${controls}  |  U Update"
+    fi
+    controls="${controls}  |  Q Quit${NC}"
+    printf '%s' "$controls"
+}
+
 # Menu UI
 show_main_menu() {
     local selected="${1:-1}"
@@ -929,13 +945,10 @@ show_main_menu() {
 
     if [[ -t 0 ]]; then
         printf '\r\033[2K\n'
-        local controls="${GRAY}↑↓  |  Enter  |  M More  |  V Version"
-        if ! is_touchid_configured; then
-            controls="${controls}  |  T TouchID"
-        elif [[ "${MAIN_MENU_SHOW_UPDATE:-false}" == "true" ]]; then
-            controls="${controls}  |  U Update"
-        fi
-        controls="${controls}  |  Q Quit${NC}"
+        local touchid_state=false
+        is_touchid_configured && touchid_state=true
+        local controls
+        controls=$(_main_menu_controls_line "$touchid_state" "${MAIN_MENU_SHOW_UPDATE:-false}")
         printf '\r\033[2K%s\n' "$controls"
         printf '\r\033[2K\n'
     fi

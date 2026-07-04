@@ -95,6 +95,10 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
 
+# HOME is shared across tests in this file; drop any cache a prior test wrote
+# so this one exercises a real scan rather than reading a stale cache.
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+
 # Create a fake .app with a plist that has no CFBundleIdentifier
 mkdir -p "$HOME/Applications/FakeApp.app/Contents"
 cat > "$HOME/Applications/FakeApp.app/Contents/Info.plist" <<'PLIST'
@@ -126,9 +130,9 @@ scan_installed_apps "$HOME/installed.txt"
 cat "$HOME/installed.txt"
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"com.example.GoodApp"* ]]
-    [[ "$output" != *"missing value"* ]]
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"com.example.GoodApp"* ]] || return 1
+    [[ "$output" != *"missing value"* ]] || return 1
 }
 
 @test "scan_installed_apps keeps find traversal options before predicates" {

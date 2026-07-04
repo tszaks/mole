@@ -194,22 +194,23 @@ EOF
 	[[ "$output" == *"Unknown uninstall option: --whitelist"* ]]
 }
 
-@test "show_main_menu hides update shortcut when no update notice is available" {
-	run bash --noprofile --norc <<'EOF'
-set -euo pipefail
-HOME="$(mktemp -d)"
-export HOME MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1
-source "$PROJECT_ROOT/mole"
-show_brand_banner() { printf 'banner\n'; }
-show_menu_option() { printf '%s' "$2"; }
-MAIN_MENU_BANNER=""
-MAIN_MENU_UPDATE_MESSAGE=""
-MAIN_MENU_SHOW_UPDATE=false
-show_main_menu 1 true
-EOF
+@test "main menu controls line shows the update shortcut only when an update is available" {
+	# The controls line is rendered only under a tty, so test the pure builder
+	# directly. Both the negative and positive cases run so the assertion
+	# cannot pass vacuously.
+	run bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true false"
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" != *"U Update"* ]] || return 1
 
-	[ "$status" -eq 0 ]
-	[[ "$output" != *"U Update"* ]]
+	run bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true true"
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"U Update"* ]] || return 1
+
+	# TouchID setup takes precedence: no update shortcut even if one is ready.
+	run bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line false true"
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"T TouchID"* ]] || return 1
+	[[ "$output" != *"U Update"* ]] || return 1
 }
 
 @test "show_main_menu keeps history out of the primary menu" {
