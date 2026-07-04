@@ -24,8 +24,11 @@ jobs:
         id: drift
         continue-on-error: true
         run: |
+          # pipefail so the audit's exit 2 (drift found) propagates through
+          # tee. Without it the step's status is tee's 0, outcome stays
+          # 'success', and the "Open issue on drift" gate below never fires.
+          set -o pipefail
           ./scripts/audit_bundle_drift.sh | tee /tmp/audit.txt
-          echo "rc=$?" >> "$GITHUB_OUTPUT"
 
       - name: Open issue on drift
         if: ${{ steps.drift.outcome != 'success' }}

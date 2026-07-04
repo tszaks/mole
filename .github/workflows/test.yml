@@ -92,7 +92,7 @@ jobs:
           #   # SAFE: explicit annotation that a direct rm is gated by narrow checks
           #   ^path:line:[ws]#: pure comment lines that mention rm -rf in docs
           #   echo : help text or messages that print rm -rf as documentation
-          if grep -rn "rm -rf" --include="*.sh" lib/ | grep -v -E "safe_remove|validate_path|# SAFE|^[^:]+:[0-9]+:[[:space:]]*#|echo "; then
+          if grep -rn "rm -rf" --include="*.sh" lib/ bin/ install.sh uninstall.sh mole | grep -v -E "safe_remove|validate_path|# SAFE|^[^:]+:[0-9]+:[[:space:]]*#|echo "; then
             echo "✗ Unsafe rm -rf usage found (annotate gated calls with '# SAFE: <reason>' or route through safe_remove)"
             exit 1
           fi
