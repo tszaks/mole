@@ -191,6 +191,87 @@ EOF
 	[[ "$output" == *"Cleaned: 1 items"* ]]
 }
 
+@test "clean_edge_old_versions keeps newest version even when Current points older" {
+	rm -rf "$HOME/Applications/Microsoft Edge.app"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+
+pgrep() { return 1; }
+export -f pgrep
+
+EDGE_APP="$HOME/Applications/Microsoft Edge.app"
+VERSIONS_DIR="$EDGE_APP/Contents/Frameworks/Microsoft Edge Framework.framework/Versions"
+mkdir -p "$VERSIONS_DIR"/{128.0.0.0,129.0.0.0,130.0.0.0}
+export MOLE_EDGE_APP_PATHS="$EDGE_APP"
+touch -t 202601010000 "$VERSIONS_DIR/128.0.0.0"
+touch -t 202602010000 "$VERSIONS_DIR/129.0.0.0"
+touch -t 202603010000 "$VERSIONS_DIR/130.0.0.0"
+ln -s "129.0.0.0" "$VERSIONS_DIR/Current"
+
+is_path_whitelisted() { return 1; }
+get_path_size_kb() { echo "10240"; }
+bytes_to_human() { echo "10M"; }
+note_activity() { :; }
+export -f is_path_whitelisted get_path_size_kb bytes_to_human note_activity
+
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+clean_edge_old_versions
+echo "Cleaned: $files_cleaned items"
+EOF
+
+	# HOME is shared across tests in this file; leave a clean slate for the
+	# later "removes old versions" test that reuses this app path.
+	rm -rf "$HOME/Applications/Microsoft Edge.app"
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	# 130 is a freshly staged update newer than Current (129); only 128 goes.
+	[[ "$output" == *"Cleaned: 1 items"* ]] || { echo "$output"; return 1; }
+}
+
+@test "clean_brave_old_versions keeps newest version even when Current points older" {
+	rm -rf "$HOME/Applications/Brave Browser.app"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+
+pgrep() { return 1; }
+export -f pgrep
+
+BRAVE_APP="$HOME/Applications/Brave Browser.app"
+VERSIONS_DIR="$BRAVE_APP/Contents/Frameworks/Brave Browser Framework.framework/Versions"
+mkdir -p "$VERSIONS_DIR"/{128.0.0.0,129.0.0.0,130.0.0.0}
+export MOLE_BRAVE_APP_PATHS="$BRAVE_APP"
+touch -t 202601010000 "$VERSIONS_DIR/128.0.0.0"
+touch -t 202602010000 "$VERSIONS_DIR/129.0.0.0"
+touch -t 202603010000 "$VERSIONS_DIR/130.0.0.0"
+ln -s "129.0.0.0" "$VERSIONS_DIR/Current"
+
+is_path_whitelisted() { return 1; }
+get_path_size_kb() { echo "10240"; }
+bytes_to_human() { echo "10M"; }
+note_activity() { :; }
+export -f is_path_whitelisted get_path_size_kb bytes_to_human note_activity
+
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+clean_brave_old_versions
+echo "Cleaned: $files_cleaned items"
+EOF
+
+	rm -rf "$HOME/Applications/Brave Browser.app"
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Cleaned: 1 items"* ]] || { echo "$output"; return 1; }
+}
+
 @test "clean_edge_updater_old_versions keeps latest version" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
 set -euo pipefail

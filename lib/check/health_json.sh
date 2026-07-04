@@ -22,7 +22,12 @@ get_memory_info() {
     # Used memory from vm_stat
     local vm_output active wired compressed page_size
     vm_output=$(vm_stat 2> /dev/null || echo "")
-    page_size=4096
+    # vm_stat reports page counts in units of its own page size, which is
+    # 16384 on Apple Silicon, not 4096. Read the size it declares in its
+    # header so used_bytes is correct; fall back to sysctl, then 4096.
+    page_size=$(printf '%s\n' "$vm_output" | LC_ALL=C sed -n 's/.*page size of \([0-9][0-9]*\) bytes.*/\1/p' | head -1)
+    [[ "$page_size" =~ ^[0-9]+$ ]] || page_size=$(sysctl -n hw.pagesize 2> /dev/null)
+    [[ "$page_size" =~ ^[0-9]+$ ]] || page_size=4096
 
     active=$(echo "$vm_output" | LC_ALL=C awk '/Pages active:/ {print $NF}' | tr -d '.\n' 2> /dev/null)
     wired=$(echo "$vm_output" | LC_ALL=C awk '/Pages wired down:/ {print $NF}' | tr -d '.\n' 2> /dev/null)

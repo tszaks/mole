@@ -498,13 +498,37 @@ clean_edge_old_versions() {
             continue
         fi
 
+        # Keep a version newer than Current: it is a freshly staged auto-update
+        # that Current will point at on next launch. Matches Chrome's guard.
+        local newest_version=""
+        local newest_mtime=0
+        local current_mtime
+        current_mtime=$(stat -f%m "$versions_dir/$current_version" 2> /dev/null || echo "0")
+        [[ "$current_mtime" =~ ^[0-9]+$ ]] || current_mtime=0
+
         local -a old_versions=()
         local dir name
         for dir in "$versions_dir"/*; do
             [[ -d "$dir" ]] || continue
             name=$(basename "$dir")
             [[ "$name" == "Current" ]] && continue
+            local mtime
+            mtime=$(stat -f%m "$dir" 2> /dev/null || echo "0")
+            if [[ "$mtime" =~ ^[0-9]+$ ]] && [[ "$mtime" -gt "$newest_mtime" ]]; then
+                newest_mtime="$mtime"
+                newest_version="$name"
+            fi
+        done
+        if [[ "$newest_mtime" -le "$current_mtime" ]]; then
+            newest_version=""
+        fi
+
+        for dir in "$versions_dir"/*; do
+            [[ -d "$dir" ]] || continue
+            name=$(basename "$dir")
+            [[ "$name" == "Current" ]] && continue
             [[ "$name" == "$current_version" ]] && continue
+            [[ -n "$newest_version" && "$name" == "$newest_version" ]] && continue
             if is_path_whitelisted "$dir"; then
                 continue
             fi
@@ -654,13 +678,37 @@ clean_brave_old_versions() {
             continue
         fi
 
+        # Keep a version newer than Current: a freshly staged auto-update.
+        # Matches Chrome's guard.
+        local newest_version=""
+        local newest_mtime=0
+        local current_mtime
+        current_mtime=$(stat -f%m "$versions_dir/$current_version" 2> /dev/null || echo "0")
+        [[ "$current_mtime" =~ ^[0-9]+$ ]] || current_mtime=0
+
         local -a old_versions=()
         local dir name
         for dir in "$versions_dir"/*; do
             [[ -d "$dir" ]] || continue
             name=$(basename "$dir")
             [[ "$name" == "Current" ]] && continue
+            local mtime
+            mtime=$(stat -f%m "$dir" 2> /dev/null || echo "0")
+            if [[ "$mtime" =~ ^[0-9]+$ ]] && [[ "$mtime" -gt "$newest_mtime" ]]; then
+                newest_mtime="$mtime"
+                newest_version="$name"
+            fi
+        done
+        if [[ "$newest_mtime" -le "$current_mtime" ]]; then
+            newest_version=""
+        fi
+
+        for dir in "$versions_dir"/*; do
+            [[ -d "$dir" ]] || continue
+            name=$(basename "$dir")
+            [[ "$name" == "Current" ]] && continue
             [[ "$name" == "$current_version" ]] && continue
+            [[ -n "$newest_version" && "$name" == "$newest_version" ]] && continue
             if is_path_whitelisted "$dir"; then
                 continue
             fi
