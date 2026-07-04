@@ -35,8 +35,14 @@ We are **not** defending against:
   by signed releases + SHA256SUMS attestations in `release.yml`).
 
 The lines we will not cross, regardless of input:
-- Never delete a path inside `/System`, `/bin`, `/sbin`, `/usr`, `/etc`,
+- Never delete a path inside `/System`, `/bin`, `/sbin`, `/usr` (except
+  `/usr/local`, where Homebrew and user software live), `/etc`,
   `/Library/Extensions`, or `/var/db` (system databases).
+- Never delete a bare top-level root itself, even when children are
+  deletable: `/Applications`, `/Library`, `/Library/Application Support`,
+  `/Volumes`, `/opt`, `/Users`, a user home root `/Users/<name>`, or
+  `/var/root`. This blocks the empty-variable collapse where `"$dir/$name"`
+  with an empty `$name` resolves to the parent root.
 - Never delete a path that resolves (after symlink chasing) into one of
   the above.
 - Never uninstall a `com.apple.*` system app, except the explicit list

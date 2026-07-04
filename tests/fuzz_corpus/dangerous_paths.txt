@@ -100,6 +100,20 @@ just-a-name
 /Users/Shared
 /Users/Guest
 
+# ---- top-level writable roots (empty-variable collapse: "$dir/$name" with
+# ---- an empty $name lands on the bare root). Children stay deletable. ----
+/Applications
+/Library
+/Library/Application Support
+/Volumes
+/opt
+/usr/share
+/usr/libexec
+/var/root
+/private/var/root
+/Users/me
+/Users/tw93
+
 # ---- realistic mistakes that should still fail (no absolute prefix) ----
 Library/Caches/com.apple.spotlight
 .Trash

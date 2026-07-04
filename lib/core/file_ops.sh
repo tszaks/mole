@@ -82,16 +82,26 @@ _mole_is_critical_deletion_path() {
     local path="$1"
 
     case "$path" in
+        # Homebrew (Intel) and user-installed software live here; individual
+        # entries stay deletable. Carve this out before the /usr and /opt
+        # deny arms below, which are otherwise broad.
+        /usr/local | /usr/local/* | /opt/homebrew | /opt/homebrew/*)
+            return 1
+            ;;
         / | \
             /bin | /bin/* | \
             /sbin | /sbin/* | \
-            /usr | /usr/bin | /usr/bin/* | /usr/sbin | /usr/sbin/* | /usr/lib | /usr/lib/* | \
+            /usr | /usr/* | \
             /System | /System/* | \
-            /Library/Apple | /Library/Apple/* | \
+            /Library | /Library/Apple | /Library/Apple/* | \
+            /Library/Application\ Support | \
             /Library/Extensions | /Library/Extensions/* | \
             /Library/Keychains | /Library/Keychains/* | \
+            /Applications | \
             /Applications/Finder.app | /Applications/Finder.app/* | \
             /Applications/Safari.app | /Applications/Safari.app/* | \
+            /Volumes | \
+            /opt | \
             /Users | /Users/Shared | /Users/Guest | /Users/Guest/*)
             return 0
             ;;
@@ -101,11 +111,20 @@ _mole_is_critical_deletion_path() {
         /etc | /etc/* | /private/etc | /private/etc/*)
             return 0
             ;;
-        /var | /var/db | /var/db/* | /var/audit | /var/audit/* | \
-            /private/var | /private/var/db | /private/var/db/* | /private/var/audit | /private/var/audit/*)
+        /var | /var/db | /var/db/* | /var/audit | /var/audit/* | /var/root | \
+            /private/var | /private/var/db | /private/var/db/* | /private/var/audit | /private/var/audit/* | /private/var/root)
             return 0
             ;;
     esac
+
+    # Reject a user home root (/Users/<name>) while keeping its children
+    # deletable. A single case glob cannot express "exactly one component
+    # under /Users", so match one level here: this catches the empty-variable
+    # collapse "/Users/$user/$leaf" -> "/Users/<name>" that would otherwise
+    # hand rm -rf an entire home directory.
+    if [[ "$path" == /Users/* && "$path" != /Users/*/* ]]; then
+        return 0
+    fi
 
     return 1
 }
