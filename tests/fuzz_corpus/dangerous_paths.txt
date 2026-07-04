@@ -107,6 +107,8 @@ just-a-name
 /Library/Application Support
 /Volumes
 /opt
+/opt/homebrew
+/usr/local
 /usr/share
 /usr/libexec
 /var/root

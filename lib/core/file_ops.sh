@@ -83,9 +83,9 @@ _mole_is_critical_deletion_path() {
 
     case "$path" in
         # Homebrew (Intel) and user-installed software live here; individual
-        # entries stay deletable. Carve this out before the /usr and /opt
-        # deny arms below, which are otherwise broad.
-        /usr/local | /usr/local/* | /opt/homebrew | /opt/homebrew/*)
+        # entries stay deletable. The Homebrew roots themselves are still
+        # critical roots and must fall through to the deny arms below.
+        /usr/local/* | /opt/homebrew/*)
             return 1
             ;;
         / | \
@@ -101,7 +101,7 @@ _mole_is_critical_deletion_path() {
             /Applications/Finder.app | /Applications/Finder.app/* | \
             /Applications/Safari.app | /Applications/Safari.app/* | \
             /Volumes | \
-            /opt | \
+            /opt | /opt/homebrew | \
             /Users | /Users/Shared | /Users/Guest | /Users/Guest/*)
             return 0
             ;;
