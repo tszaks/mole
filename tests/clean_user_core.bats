@@ -869,17 +869,6 @@ EOF
     [[ "$output" == "" ]]
 }
 
-@test "check_ios_device_backups returns when no backup dir" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-check_ios_device_backups
-EOF
-
-    [ "$status" -eq 0 ]
-}
-
 @test "clean_browsers calls expected cache paths" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
 set -euo pipefail

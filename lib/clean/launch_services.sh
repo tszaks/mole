@@ -94,7 +94,12 @@ clean_stale_launch_services_registrations() {
     local candidates_file
     candidates_file=$(mktemp_file "launch_services_stale_apps") || return 0
 
+    # The lsregister dump below takes seconds on a large LaunchServices
+    # database; without a spinner the section looks hung (per-step loading
+    # feedback).
+    start_section_spinner "Scanning launch services..."
     if ! collect_stale_launch_services_app_paths "$lsregister" > "$candidates_file"; then
+        stop_section_spinner
         debug_log "LaunchServices stale app scan failed"
         return 0
     fi
@@ -115,6 +120,7 @@ clean_stale_launch_services_registrations() {
         fi
     done < "$candidates_file"
 
+    stop_section_spinner
     [[ ${#stale_apps[@]} -gt 0 ]] || return 0
 
     note_activity
@@ -135,6 +141,7 @@ clean_stale_launch_services_registrations() {
 
     local success_count=0
     local failed_count=0
+    start_section_spinner "Cleaning stale launch services..."
     for app_path in "${stale_apps[@]}"; do
         debug_log "Unregistering stale LaunchServices app: $app_path"
         if run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" "$lsregister" -u "$app_path" > /dev/null 2>&1; then
@@ -144,6 +151,7 @@ clean_stale_launch_services_registrations() {
             debug_log "Failed to unregister stale LaunchServices app: $app_path"
         fi
     done
+    stop_section_spinner
 
     if [[ $success_count -gt 0 ]]; then
         log_success "LaunchServices stale app registrations, $success_count removed"

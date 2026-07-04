@@ -529,7 +529,7 @@ show_system_data_hint_notice() {
             if [[ "$size_kb" -ge "$threshold_kb" ]]; then
                 clue_labels+=("${labels[$i]}")
                 clue_sizes+=("$size_kb")
-                clue_paths+=("${path/#$HOME/~}")
+                clue_paths+=("$path")
                 if [[ ${#clue_labels[@]} -ge $max_hits ]]; then
                     break
                 fi
@@ -538,8 +538,8 @@ show_system_data_hint_notice() {
     done
 
     if [[ ${#clue_labels[@]} -eq 0 ]]; then
-        note_activity
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No common System Data clues detected"
+        # Stay silent so an idle System Data clues section collapses.
+        debug_log "No common System Data clues detected"
         return 0
     fi
 
@@ -548,8 +548,8 @@ show_system_data_hint_notice() {
     for i in "${!clue_labels[@]}"; do
         local human_size
         human_size=$(bytes_to_human "$((clue_sizes[i] * 1024))")
-        echo -e "  ${GREEN}${ICON_LIST}${NC} ${clue_labels[$i]}: ${human_size}"
-        echo -e "  ${GRAY}${ICON_SUBLIST}${NC} Path: ${GRAY}${clue_paths[$i]}${NC}"
+        echo -e "  ${GREEN}${ICON_LIST}${NC} ${clue_labels[$i]} · ${human_size}"
+        echo -e "  ${GRAY}${ICON_SUBLIST}${NC} ${GRAY}$(format_path_link "${clue_paths[$i]}")${NC}"
     done
     echo -e "  ${GRAY}${ICON_REVIEW}${NC} Review: mo analyze, Device backups, docker system df"
 }
@@ -841,7 +841,6 @@ show_orphan_dotdir_hint_notice() {
     now=$(date +%s)
 
     local -a labels=()
-    local -a details=()
     local installed_gui_app_texts=""
     local installed_gui_app_texts_loaded=false
     local claude_plugin_tokens=""
@@ -920,15 +919,14 @@ show_orphan_dotdir_hint_notice() {
             continue
         fi
 
-        local size_human=""
+        local size_note=""
         local size_kb
         if size_kb=$(hint_get_path_size_kb_with_timeout "$dotdir" 0.8); then
-            size_human=" ($(bytes_to_human $((size_kb * 1024))))"
+            size_note="$(bytes_to_human $((size_kb * 1024))), "
         fi
 
         # shellcheck disable=SC2088
-        labels+=("~/${basename}${size_human}")
-        details+=("No matching binary in PATH, last modified ${age_d} days ago")
+        labels+=("~/${basename} (${size_note}${age_d}d)")
 
         if [[ ${#labels[@]} -ge $max_hits ]]; then
             break
@@ -939,10 +937,13 @@ show_orphan_dotdir_hint_notice() {
 
     note_activity
 
-    local i
-    for i in "${!labels[@]}"; do
-        echo -e "  ${GREEN}${ICON_LIST}${NC} Potential orphan dotfile: ${labels[$i]}"
-        echo -e "  ${GRAY}${ICON_SUBLIST}${NC} ${details[$i]}"
+    # One summary row plus a compact list beats one row-pair per dotfile:
+    # the reason and age are near-identical across entries.
+    local joined="" entry
+    for entry in "${labels[@]}"; do
+        joined+="${joined:+  }${entry}"
     done
+    echo -e "  ${GREEN}${ICON_LIST}${NC} Potential orphan dotfiles · ${#labels[@]} found ${GRAY}(no matching binary in PATH)${NC}"
+    echo -e "  ${GRAY}${ICON_SUBLIST}${NC} ${GRAY}${joined}${NC}"
     echo -e "  ${GRAY}${ICON_REVIEW}${NC} Review manually before removing any ~/.<dir> directory"
 }

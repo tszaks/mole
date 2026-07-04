@@ -549,6 +549,40 @@ cleanup_result_color_kb() {
     printf '%s' "$GREEN"
 }
 
+# Percent-encode a filesystem path for use in a file:// URL. Byte-wise loop
+# under LC_ALL=C so multibyte characters are encoded per byte (bash 3.2 has
+# no built-in encoder).
+percent_encode_path() {
+    local LC_ALL=C
+    local input="$1"
+    local out="" ch i val
+    for ((i = 0; i < ${#input}; i++)); do
+        ch="${input:i:1}"
+        case "$ch" in
+            [a-zA-Z0-9/._~-]) out+="$ch" ;;
+            *)
+                # bash 3.2 returns negative values for bytes >= 128; mask to a byte.
+                val=$(printf '%d' "'$ch")
+                out+=$(printf '%%%02X' $((val & 255)))
+                ;;
+        esac
+    done
+    printf '%s' "$out"
+}
+
+# Print a path as an OSC 8 file:// hyperlink so terminals keep it clickable
+# even when it contains spaces (auto-detection breaks on whitespace). Shows
+# the ~-abbreviated path; piped output and non-ANSI terminals get plain text.
+format_path_link() {
+    local path="$1"
+    local display="${path/#$HOME/~}"
+    if ! is_ansi_supported 2> /dev/null; then
+        printf '%s' "$display"
+        return 0
+    fi
+    printf '\033]8;;file://%s\033\\%s\033]8;;\033\\' "$(percent_encode_path "$path")" "$display"
+}
+
 # ============================================================================
 # Temporary File Management
 # ============================================================================
@@ -716,9 +750,11 @@ SECTION_ACTIVITY=0
 #
 #   - lib/core/base.sh   (this file): purple arrow header, "Nothing to tidy"
 #                                     fallback, no dry-run export.
-#   - bin/clean.sh:      purple arrow header, "Nothing to clean" fallback,
-#                        appends '=== title ===' to EXPORT_LIST_FILE under
-#                        DRY_RUN, stops the section spinner on close.
+#   - bin/clean.sh:      purple arrow header, erases the header of idle
+#                        sections on ANSI TTYs ("Nothing to clean" fallback
+#                        when piped or under MO_DEBUG), appends '=== title ==='
+#                        to EXPORT_LIST_FILE under DRY_RUN, stops the section
+#                        spinner on close.
 #   - bin/purge.sh:      blue ━━━ box header, no fallback message, writes
 #                        each note_activity line directly to EXPORT_LIST_FILE.
 #

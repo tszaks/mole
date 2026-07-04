@@ -324,12 +324,12 @@ clean_deep_system() {
 clean_time_machine_failed_backups() {
     local tm_cleaned=0
     if ! command -v tmutil > /dev/null 2>&1; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        debug_log "Time Machine: no incomplete backups found"
         return 0
     fi
     # Fast pre-check: skip entirely if Time Machine is not configured (no tmutil needed)
     if ! defaults read /Library/Preferences/com.apple.TimeMachine AutoBackup 2> /dev/null | grep -qE '^[01]$'; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        debug_log "Time Machine: no incomplete backups found"
         return 0
     fi
     start_section_spinner "Checking Time Machine configuration..."
@@ -340,14 +340,14 @@ clean_time_machine_failed_backups() {
         if [[ "$spinner_active" == "true" ]]; then
             stop_section_spinner
         fi
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        debug_log "Time Machine: no incomplete backups found"
         return 0
     fi
     if [[ ! -d "/Volumes" ]]; then
         if [[ "$spinner_active" == "true" ]]; then
             stop_section_spinner
         fi
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        debug_log "Time Machine: no incomplete backups found"
         return 0
     fi
     # tm_is_running is tri-state: 0 running, 1 idle, 2 status-unknown. Treat
@@ -362,9 +362,11 @@ clean_time_machine_failed_backups() {
             stop_section_spinner
         fi
         if [[ $rc_tm_running -eq 2 ]]; then
-            echo -e "  ${YELLOW}!${NC} Could not determine Time Machine status, skipping cleanup"
+            echo -e "  ${YELLOW}!${NC} Time Machine cleanup · skipped (status unknown)"
+            note_activity
         else
-            echo -e "  ${YELLOW}!${NC} Time Machine backup in progress, skipping cleanup"
+            echo -e "  ${YELLOW}!${NC} Time Machine cleanup · skipped (backup in progress)"
+            note_activity
         fi
         return 0
     fi
@@ -385,7 +387,7 @@ clean_time_machine_failed_backups() {
         if [[ "$spinner_active" == "true" ]]; then
             stop_section_spinner
         fi
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        debug_log "Time Machine: no incomplete backups found"
         return 0
     fi
     if [[ "$spinner_active" == "true" ]]; then
@@ -426,19 +428,20 @@ clean_time_machine_failed_backups() {
                 local size_human
                 size_human=$(bytes_to_human "$((size_kb * 1024))")
                 if [[ "$DRY_RUN" == "true" ]]; then
-                    echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete backup: $backup_name${NC}, $(colorize_human_size "$size_human") ${YELLOW}dry${NC}"
+                    echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete backup: $backup_name${NC} · $(colorize_human_size "$size_human") ${YELLOW}dry${NC}"
                     tm_cleaned=$((tm_cleaned + 1))
                     note_activity
                     continue
                 fi
                 if ! command -v tmutil > /dev/null 2>&1; then
-                    echo -e "  ${YELLOW}!${NC} tmutil not available, skipping: $backup_name"
+                    echo -e "  ${YELLOW}!${NC} Incomplete backup: $backup_name · skipped (tmutil unavailable)"
+                    note_activity
                     continue
                 fi
                 if tmutil delete "$inprogress_file" 2> /dev/null; then
                     local line_color
                     line_color=$(cleanup_result_color_kb "$size_kb")
-                    echo -e "  ${line_color}${ICON_SUCCESS}${NC} Incomplete backup: $backup_name${NC}, ${line_color}$size_human${NC}"
+                    echo -e "  ${line_color}${ICON_SUCCESS}${NC} Incomplete backup: $backup_name${NC} · ${line_color}$size_human${NC}"
                     tm_cleaned=$((tm_cleaned + 1))
                     files_cleaned=$((files_cleaned + 1))
                     total_size_cleaned=$((total_size_cleaned + size_kb))
@@ -446,6 +449,9 @@ clean_time_machine_failed_backups() {
                     note_activity
                 else
                     echo -e "  ${YELLOW}!${NC} Could not delete: $backup_name · try manually with sudo"
+                    # Mark activity so the idle-section erase in end_section
+                    # never wipes this failure warning off the terminal.
+                    note_activity
                 fi
             done < <(run_with_timeout 15 find "$backupdb_dir" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2> /dev/null || true) # 15s: Time Machine backupdb find, see lib/core/timeouts.sh
         fi
@@ -482,7 +488,7 @@ clean_time_machine_failed_backups() {
                     local size_human
                     size_human=$(bytes_to_human "$((size_kb * 1024))")
                     if [[ "$DRY_RUN" == "true" ]]; then
-                        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete APFS backup in $bundle_name: $backup_name${NC}, $(colorize_human_size "$size_human") ${YELLOW}dry${NC}"
+                        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete APFS backup in $bundle_name: $backup_name${NC} · $(colorize_human_size "$size_human") ${YELLOW}dry${NC}"
                         tm_cleaned=$((tm_cleaned + 1))
                         note_activity
                         continue
@@ -493,7 +499,7 @@ clean_time_machine_failed_backups() {
                     if tmutil delete "$inprogress_file" 2> /dev/null; then
                         local line_color
                         line_color=$(cleanup_result_color_kb "$size_kb")
-                        echo -e "  ${line_color}${ICON_SUCCESS}${NC} Incomplete APFS backup in $bundle_name: $backup_name${NC}, ${line_color}$size_human${NC}"
+                        echo -e "  ${line_color}${ICON_SUCCESS}${NC} Incomplete APFS backup in $bundle_name: $backup_name${NC} · ${line_color}$size_human${NC}"
                         tm_cleaned=$((tm_cleaned + 1))
                         files_cleaned=$((files_cleaned + 1))
                         total_size_cleaned=$((total_size_cleaned + size_kb))
@@ -501,6 +507,8 @@ clean_time_machine_failed_backups() {
                         note_activity
                     else
                         echo -e "  ${YELLOW}!${NC} Could not delete from bundle: $backup_name"
+                        # Keep the warning visible past the idle-section erase.
+                        note_activity
                     fi
                 done < <(run_with_timeout 15 find "$mounted_path" -maxdepth 3 -type d \( -name "*.inProgress" -o -name "*.inprogress" \) 2> /dev/null || true) # 15s: TM sparsebundle inner find, see lib/core/timeouts.sh
             fi
@@ -510,7 +518,7 @@ clean_time_machine_failed_backups() {
         stop_section_spinner
     fi
     if [[ $tm_cleaned -eq 0 ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No incomplete backups found"
+        debug_log "Time Machine: no incomplete backups found"
     fi
 }
 # Returns 0 if a backup is actively running.
@@ -545,13 +553,15 @@ clean_local_snapshots() {
 
     if [[ $rc_running -eq 2 ]]; then
         stop_section_spinner
-        echo -e "  ${YELLOW}!${NC} Could not determine Time Machine status; skipping snapshot check"
+        echo -e "  ${YELLOW}!${NC} Snapshot check · skipped (Time Machine status unknown)"
+        note_activity
         return 0
     fi
 
     if [[ $rc_running -eq 0 ]]; then
         stop_section_spinner
-        echo -e "  ${YELLOW}!${NC} Time Machine is active; skipping snapshot check"
+        echo -e "  ${YELLOW}!${NC} Snapshot check · skipped (backup in progress)"
+        note_activity
         return 0
     fi
 

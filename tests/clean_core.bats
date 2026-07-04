@@ -282,7 +282,6 @@ show_user_launch_agent_hint_notice() { :; }
 show_orphan_dotdir_hint_notice() { :; }
 clean_apple_silicon_caches() { :; }
 clean_cached_device_firmware() { :; }
-check_ios_device_backups() { :; }
 clean_time_machine_failed_backups() { :; }
 check_large_file_candidates() { :; }
 show_system_data_hint_notice() { :; }
@@ -550,7 +549,7 @@ clean_time_machine_failed_backups
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"Time Machine backup in progress, skipping cleanup"* ]]
+    [[ "$output" != *"Time Machine cleanup · skipped (backup in progress)"* ]]
 }
 
 @test "clean_time_machine_failed_backups skips when backup is actually running" {
@@ -596,5 +595,5 @@ clean_time_machine_failed_backups
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Time Machine backup in progress, skipping cleanup"* ]]
+    [[ "$output" == *"Time Machine cleanup · skipped (backup in progress)"* ]]
 }

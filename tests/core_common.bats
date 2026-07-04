@@ -283,6 +283,40 @@ EOF
     [ "${bytes_lines[3]}" = "3.00GB" ]
 }
 
+@test "percent_encode_path encodes spaces and multibyte characters per byte" {
+    output="$(
+        HOME="$HOME" bash --noprofile --norc << 'EOF'
+source "$PROJECT_ROOT/lib/core/common.sh"
+percent_encode_path "/Users/x/Library/Application Support/中文 dir"
+printf '\n'
+percent_encode_path "/plain/path-1.2_3~ok"
+printf '\n'
+EOF
+    )"
+
+    encode_lines=()
+    while IFS= read -r line; do
+        encode_lines+=("$line")
+    done <<< "$output"
+
+    [ "${encode_lines[0]}" = "/Users/x/Library/Application%20Support/%E4%B8%AD%E6%96%87%20dir" ]
+    [ "${encode_lines[1]}" = "/plain/path-1.2_3~ok" ]
+}
+
+@test "format_path_link falls back to plain tilde path without a TTY" {
+    output="$(
+        HOME="$HOME" bash --noprofile --norc << 'EOF'
+source "$PROJECT_ROOT/lib/core/common.sh"
+format_path_link "$HOME/Library/Application Support/MobileSync/Backup"
+printf '\n'
+EOF
+    )"
+
+    # Captured output is not a TTY, so no OSC 8 escapes may leak into pipes.
+    # shellcheck disable=SC2088  # literal tilde is the expected display form
+    [ "$output" = "~"'/Library/Application Support/MobileSync/Backup' ]
+}
+
 @test "colorize_human_size colors dry-run size units by suffix" {
     output="$(
         env -u NO_COLOR HOME="$HOME" bash --noprofile --norc << 'EOF'

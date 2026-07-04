@@ -297,7 +297,9 @@ clean_time_machine_failed_backups
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"No incomplete backups found"* ]]
+    # The no-destinations path is silent now (debug-only); an idle Time
+    # Machine section collapses instead of printing a reassurance row.
+    [ -z "$output" ]
 }
 
 @test "clean_local_snapshots reports snapshot count" {

@@ -377,7 +377,7 @@ EOTD
     [ "$status" -eq 0 ]
     [[ "$output" == *"Potential orphan dotfile"* ]]
     [[ "$output" == *".fakecli-test-orphan"* ]]
-    [[ "$output" == *"No matching binary in PATH"* ]]
+    [[ "$output" == *"no matching binary in PATH"* ]]
 }
 
 @test "show_orphan_dotdir_hint_notice skips dotdir owned by installed GUI app (#872)" {

@@ -50,11 +50,11 @@ clean_ds_store_tree() {
         size_human=$(bytes_to_human "$total_bytes")
         local size_kb=$(((total_bytes + 1023) / 1024))
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label${NC}, ${YELLOW}$file_count files, $size_human dry${NC}"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label${NC} · ${YELLOW}$file_count files, $size_human dry${NC}"
         else
             local line_color
             line_color=$(cleanup_result_color_kb "$size_kb")
-            echo -e "  ${line_color}${ICON_SUCCESS}${NC} $label${NC}, ${line_color}$file_count files, $size_human${NC}"
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} $label${NC} · ${line_color}$file_count files, $size_human${NC}"
         fi
         files_cleaned=$((files_cleaned + file_count))
         total_size_cleaned=$((total_size_cleaned + size_kb))
@@ -326,6 +326,7 @@ clean_orphaned_app_data() {
     if ! ls "$HOME/Library/Caches" > /dev/null 2>&1; then
         stop_section_spinner
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: No permission to access Library folders"
+        note_activity
         return 0
     fi
     start_section_spinner "Scanning installed apps..."
@@ -333,7 +334,7 @@ clean_orphaned_app_data() {
     scan_installed_apps "$installed_bundles"
     stop_section_spinner
     local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')
-    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Found $app_count active/installed apps"
+    debug_log "Found $app_count active/installed apps"
     local orphaned_count=0
     local total_orphaned_kb=0
     start_section_spinner "Scanning orphaned app resources..."
@@ -786,7 +787,7 @@ clean_orphaned_system_services() {
 
     # Report and clean
     if [[ $orphaned_count -gt 0 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Found $orphaned_count orphaned system services"
+        debug_log "Found $orphaned_count orphaned system services"
 
         local removed_count=0
         local skipped_protected_count=0
@@ -830,17 +831,14 @@ clean_orphaned_system_services() {
             fi
         done
 
-        local orphaned_kb_display
-        if [[ $removed_kb -gt 1024 ]]; then
-            orphaned_kb_display=$(echo "$removed_kb" | awk '{printf "%.1fMB", $1/1024}')
-        else
-            orphaned_kb_display="${removed_kb}KB"
-        fi
-        if [[ "${DRY_RUN:-false}" != "true" ]]; then
-            if [[ $removed_count -gt 0 ]]; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $removed_count orphaned services, about $orphaned_kb_display"
-                note_activity
-            fi
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Orphaned services · ${YELLOW}${orphaned_count} found dry${NC}"
+            note_activity
+        elif [[ $removed_count -gt 0 ]]; then
+            local orphaned_kb_display
+            orphaned_kb_display=$(bytes_to_human "$((removed_kb * 1024))")
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Orphaned services · cleaned ${removed_count}, ${orphaned_kb_display}"
+            note_activity
         fi
         # Surface protected/failed counts in BOTH dry-run and real-clean so the
         # two modes agree on what gets touched. Before #886, dry-run silently
@@ -848,7 +846,15 @@ clean_orphaned_system_services() {
         # skipped them, leaving the user confused about which files actually
         # disappeared.
         if [[ $skipped_protected_count -gt 0 || $failed_count -gt 0 ]]; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Orphaned services skipped $skipped_protected_count protected, failed $failed_count"
+            local issue_note=""
+            if [[ $skipped_protected_count -gt 0 ]]; then
+                issue_note="skipped ${skipped_protected_count} protected"
+            fi
+            if [[ $failed_count -gt 0 ]]; then
+                issue_note+="${issue_note:+, }${failed_count} failed"
+            fi
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Orphaned services · ${issue_note}"
+            note_activity
         fi
     fi
 
@@ -885,6 +891,11 @@ _remove_verified_container_stub() {
 clean_orphaned_container_stubs() {
     local containers_dir="$HOME/Library/Containers"
     [[ -d "$containers_dir" ]] || return 0
+
+    # Keep the section spinner alive: the mdfind probes below can take
+    # seconds, and without a spinner the section looks hung after the
+    # previous step's output (per-step loading feedback).
+    start_section_spinner "Scanning orphaned containers..."
 
     # Format: "bundle_id_glob:app_path_to_check"
     # The app_path_to_check is the canonical .app location; the stub is removed
@@ -989,6 +1000,7 @@ clean_orphaned_container_stubs() {
     # eval: restore shopt state captured by $(shopt -p)
     eval "$_ng_state"
 
+    stop_section_spinner
     if [[ $removed_count -gt 0 ]]; then
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Orphaned app container stubs, ${YELLOW}${removed_count} stubs dry${NC}"
@@ -1001,5 +1013,7 @@ clean_orphaned_container_stubs() {
     fi
     if [[ $failed_count -gt 0 ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Orphaned container stubs: $failed_count could not be removed"
+        # Keep the warning visible past the idle-section erase.
+        note_activity
     fi
 }

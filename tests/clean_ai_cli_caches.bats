@@ -328,7 +328,7 @@ clean_dev_ai_agents
 EOF
 
     assert_run_success
-    assert_output_contains "active version unknown · skipping cleanup"
+    assert_output_contains "· skipped (active version unknown)"
     assert_output_not_contains "SAFE_CLEAN:"
 }
 
@@ -349,7 +349,7 @@ clean_dev_ai_agents
 EOF
 
     assert_run_success
-    assert_output_contains "active version unknown · skipping cleanup"
+    assert_output_contains "· skipped (active version unknown)"
     assert_output_not_contains "SAFE_CLEAN:"
 }
 
@@ -370,7 +370,7 @@ clean_dev_ai_agents
 EOF
 
     assert_run_success
-    assert_output_contains "active version unknown · skipping cleanup"
+    assert_output_contains "· skipped (active version unknown)"
     assert_output_not_contains "SAFE_CLEAN:"
 }
 
@@ -389,7 +389,7 @@ clean_dev_ai_agents
 EOF
 
     assert_run_success
-    assert_output_contains "active version unknown · skipping cleanup"
+    assert_output_contains "· skipped (active version unknown)"
     assert_output_not_contains "SAFE_CLEAN:"
 }
 
@@ -412,6 +412,6 @@ clean_dev_ai_agents
 EOF
 
     assert_run_success
-    assert_output_contains "Claude Desktop bundled Claude Code cleanup skipped · Claude Desktop is running"
+    assert_output_contains "Claude Desktop bundled Claude Code · skipped (Claude Desktop running)"
     assert_output_not_contains "SAFE_CLEAN:"
 }

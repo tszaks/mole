@@ -37,7 +37,7 @@ clean_xcode_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Xcode is running"* ]]
+    [[ "$output" == *"Xcode DerivedData/Documentation · skipped (Xcode running)"* ]]
     [[ "$output" != *"derived data"* ]]
     [[ "$output" != *"documentation cache"* ]]
 }
@@ -168,7 +168,7 @@ clean_final_cut_pro_generated_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Final Cut Pro is running"* ]]
+    [[ "$output" == *"Final Cut Pro generated caches · skipped (Final Cut Pro running)"* ]]
     [[ "$output" != *"unexpected safe_clean"* ]]
 }
 

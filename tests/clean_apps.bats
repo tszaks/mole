@@ -714,8 +714,8 @@ clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"skipped 1 protected, failed 0"* ]]
-    [[ "$output" != *"Cleaned 1 orphaned services"* ]]
+    [[ "$output" == *"Orphaned services · skipped 1 protected"* ]]
+    [[ "$output" != *"Orphaned services · cleaned"* ]]
     [[ "$output" != *"unexpected-remove"* ]]
     [[ "$output" != *"unexpected-launchctl"* ]]
 }
@@ -767,7 +767,7 @@ clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"skipped 1 protected, failed 0"* ]]
+    [[ "$output" == *"Orphaned services · skipped 1 protected"* ]]
     [[ "$output" != *"unexpected-remove"* ]]
     [[ "$output" != *"unexpected-launchctl"* ]]
 }
@@ -846,8 +846,7 @@ clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Found 1 orphaned"* ]] || return 1
-    [[ "$output" == *"Cleaned 1 orphaned"* ]] || return 1
+    [[ "$output" == *"Orphaned services · cleaned 1"* ]] || return 1
     [[ "$output" == *"removed:"* ]] || return 1
     [[ "$output" != *"skipped 1 protected"* ]] || return 1
 }
@@ -918,7 +917,7 @@ clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Found 1 orphaned"* ]] || return 1
+    [[ "$output" == *"Orphaned services · cleaned 1"* ]] || return 1
     [[ "$output" == *"removed:"* ]] || return 1
     [[ "$output" == *"com.example.gone.daemon.plist"* ]] || return 1
     [[ "$output" != *"com.example.selfprotect.daemon.plist"* ]] || return 1
@@ -988,7 +987,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Found 1 orphaned"* ]] || return 1
-    [[ "$output" == *"skipped 1 protected, failed 0"* ]] || return 1
+    [[ "$output" == *"Orphaned services · skipped 1 protected"* ]] || return 1
     [[ "$output" != *"rm-called"* ]] || return 1
     [[ "$output" != *"Failed to remove orphaned service"* ]] || return 1
 }

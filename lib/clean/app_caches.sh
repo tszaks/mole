@@ -10,7 +10,8 @@ clean_xcode_derived_data() {
 
     # Skip while Xcode is running to avoid build failures.
     if pgrep -x "Xcode" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped (Xcode running)"
+        note_activity
         return 0
     fi
 
@@ -95,6 +96,7 @@ clean_xcode_tools() {
             if [[ "$unavail_count" -gt 0 ]]; then
                 if [[ "${DRY_RUN:-false}" == "true" ]]; then
                     echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Unavailable simulators · would delete ${unavail_count} devices"
+                    note_activity
                 else
                     # Capture exit code so a timeout (124) or simctl error
                     # is reported instead of falsely echoing SUCCESS.
@@ -115,7 +117,8 @@ clean_xcode_tools() {
             fi
         fi
     else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Simulator is running, skipping Simulator cache/temp/log cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Simulator caches · skipped (Simulator running)"
+        note_activity
     fi
     safe_clean ~/Library/Caches/com.apple.dt.Xcode/* "Xcode cache"
     safe_clean ~/Library/Developer/Xcode/iOS\ Device\ Logs/* "iOS device logs"
@@ -126,7 +129,8 @@ clean_xcode_tools() {
         safe_clean ~/Library/Developer/Xcode/DocumentationCache/* "Xcode documentation cache"
         safe_clean ~/Library/Developer/Xcode/DocumentationIndex/* "Xcode documentation index"
     else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping DerivedData/Documentation cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData/Documentation · skipped (Xcode running)"
+        note_activity
     fi
 }
 # Remove extension directories that VS Code / Cursor have marked obsolete.
@@ -324,7 +328,7 @@ find_final_cut_pro_generated_cache_targets() {
 
 clean_final_cut_pro_generated_caches() {
     if final_cut_pro_is_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Final Cut Pro is running, skipping generated cache cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Final Cut Pro generated caches · skipped (Final Cut Pro running)"
         note_activity
         return 0
     fi

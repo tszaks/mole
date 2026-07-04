@@ -124,7 +124,7 @@ clean_xcode_derived_data
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Xcode is running"* ]]
+    [[ "$output" == *"Xcode DerivedData · skipped (Xcode running)"* ]]
 }
 
 @test "clean_xcode_derived_data handles empty DerivedData" {

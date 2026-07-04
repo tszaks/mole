@@ -98,7 +98,7 @@ EOF
 	run bash -c 'HOME=$(mktemp -d) && mkdir -p "$HOME/Library/Android/sdk/ndk"/{21.0.1,22.0.0,20.0.0} && source "$0" && note_activity() { :; } && NC="" && GREEN="" && GRAY="" && YELLOW="" && ICON_SUCCESS="✓" && check_android_ndk' "$PROJECT_ROOT/lib/clean/dev.sh"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Android NDK versions: 3 found"* ]]
+	[[ "$output" == *"Android NDK versions · 3 found"* ]]
 }
 
 @test "check_android_ndk silent when only one NDK" {
@@ -171,7 +171,7 @@ clean_xcode_documentation_cache
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"skipping documentation cache cleanup"* ]]
+	[[ "$output" == *"Xcode documentation cache · skipped (Xcode running)"* ]]
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
 }
 
@@ -214,7 +214,7 @@ clean_xcode_system_coresimulator_caches
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"CoreSimulator is running"* ]]
+	[[ "$output" == *"Xcode Simulator system cache · skipped (CoreSimulator running)"* ]]
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
 }
 
@@ -303,7 +303,7 @@ EOF
 	run bash -c 'HOME=$(mktemp -d) && mkdir -p "$HOME/.rustup/toolchains"/{stable,nightly,1.75.0}-aarch64-apple-darwin && source "$0" && note_activity() { :; } && NC="" && GREEN="" && GRAY="" && YELLOW="" && ICON_SUCCESS="✓" && rustup() { :; } && export -f rustup && check_rust_toolchains' "$PROJECT_ROOT/lib/clean/dev.sh"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Rust toolchains: 3 found"* ]]
+	[[ "$output" == *"Rust toolchains · 3 found"* ]]
 }
 
 @test "check_rust_toolchains silent when only one toolchain" {
@@ -465,7 +465,7 @@ EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" != *"|Claude Code old version"* ]]
-	[[ "$output" == *"Claude Code old version active symlink is broken"* ]]
+	[[ "$output" == *"Claude Code old version · skipped (active symlink broken)"* ]]
 
 	rm -f "$bin_dir/claude"
 }

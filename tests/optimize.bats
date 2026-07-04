@@ -181,6 +181,58 @@ EOF
 	[[ "$output" == *"still-present"* ]]
 }
 
+@test "fix_broken_preferences lints plists in one batch instead of per file" {
+	local test_home="$HOME/fixprefs-batch"
+	run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/maintenance.sh"
+
+CALL_LOG="$HOME/plutil-calls.log"
+prefs="$HOME/Library/Preferences"
+mkdir -p "$prefs"
+touch \
+    "$prefs/com.example.one.plist" \
+    "$prefs/com.example.two.plist" \
+    "$prefs/com.example.three.plist"
+
+plutil() {
+    echo "call" >> "$CALL_LOG"
+    return 0
+}
+
+count=$(fix_broken_preferences)
+echo "count=$count"
+echo "calls=$(wc -l < "$CALL_LOG" | tr -d ' ')"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"count=0"* ]] || return 1
+	[[ "$output" == *"calls=1"* ]] || return 1
+}
+
+@test "opt_fix_broken_configs reports partial results when scan hits its time budget" {
+	local test_home="$HOME/fixprefs-budget"
+	run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TIMEOUT_HINT_SCAN_SEC=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/maintenance.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+prefs="$HOME/Library/Preferences"
+mkdir -p "$prefs"
+touch "$prefs/com.example.slow.plist"
+
+plutil() { return 0; }
+
+opt_fix_broken_configs
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Preference scan hit its time budget"* ]] || return 1
+	[[ "$output" != *"All preference files valid"* ]] || return 1
+}
+
 @test "opt_cache_refresh reuses measured cache sizes for deletion" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -745,7 +797,7 @@ EOF
 	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]]
 	[[ "$output" == *"Gatekeeper status: assessments enabled"* ]]
 	[[ "$output" == *"Only system-managed CoreSimulator images are mounted"* ]]
-	[[ "$output" != *"Mounted image detach candidates"* ]]
+	[[ "$output" != *"assessment overhead:"* ]]
 }
 
 @test "run_optimize_diagnostics suppresses one-off CPU spikes" {
@@ -761,10 +813,32 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"No obvious sustained high-CPU bottleneck detected"* ]]
+	[[ "$output" == *"No sustained high-CPU bottleneck detected"* ]]
 }
 
-@test "run_optimize_diagnostics lists user-mounted image detach candidates in dry-run" {
+@test "run_optimize_diagnostics offers user-mounted images under syspolicyd pressure in dry-run" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 \
+		MOLE_OPTIMIZE_PS_SAMPLE_1=$'55 /usr/libexec/syspolicyd' \
+		MOLE_OPTIMIZE_PS_SAMPLE_2=$'60 /usr/libexec/syspolicyd' \
+		MOLE_OPTIMIZE_SPCTL_STATUS="assessments enabled" \
+		MOLE_OPTIMIZE_HDIUTIL_INFO=$'================================================\nimage-path      : /Users/test/Downloads/TestInstaller.dmg\n/dev/disk14s1\t/Volumes/Test Installer\n' \
+		bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/diagnostics.sh"
+is_path_whitelisted() { return 1; }
+run_optimize_diagnostics
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]]
+	[[ "$output" == *"Mounted image adds assessment overhead:"* ]]
+	[[ "$output" == *"TestInstaller.dmg"* ]]
+	[[ "$output" == *"/Volumes/Test Installer"* ]]
+	[[ "$output" == *"Would offer detach for 1 mounted image"* ]]
+}
+
+@test "run_optimize_diagnostics keeps healthy runs quiet even with user-mounted images" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 \
 		MOLE_OPTIMIZE_PS_SAMPLE_1=$'1 /usr/sbin/distnoted' \
 		MOLE_OPTIMIZE_PS_SAMPLE_2=$'1 /usr/sbin/distnoted' \
@@ -778,13 +852,17 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Mounted image detach candidates:"* ]]
-	[[ "$output" == *"/Volumes/Test Installer"* ]]
-	[[ "$output" == *"Would offer detach for 1 mounted image"* ]]
+	[[ "$output" == *"No sustained high-CPU bottleneck detected"* ]]
+	[[ "$output" != *"assessment overhead:"* ]]
+	[[ "$output" != *"Would offer detach"* ]]
+	[[ "$output" != *"/Volumes/Test Installer"* ]]
 }
 
 @test "run_optimize_diagnostics skips protected mounted images" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 \
+		MOLE_OPTIMIZE_PS_SAMPLE_1=$'55 /usr/libexec/syspolicyd' \
+		MOLE_OPTIMIZE_PS_SAMPLE_2=$'60 /usr/libexec/syspolicyd' \
+		MOLE_OPTIMIZE_SPCTL_STATUS="assessments enabled" \
 		MOLE_OPTIMIZE_HDIUTIL_INFO=$'================================================\nimage-path      : /Users/test/Downloads/KeepMe.dmg\n/dev/disk15s1\t/Volumes/KeepMe\n' \
 		bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -797,7 +875,9 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" != *"Mounted image detach candidates:"* ]]
+	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]]
+	[[ "$output" != *"assessment overhead:"* ]]
+	[[ "$output" != *"Would offer detach"* ]]
 }
 
 @test "run_optimize_diagnostics honors optimize whitelist paths for mounted images (#977)" {
@@ -809,8 +889,9 @@ system_maintenance
 EOF
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 \
-		MOLE_OPTIMIZE_PS_SAMPLE_1=$'1 /usr/sbin/distnoted' \
-		MOLE_OPTIMIZE_PS_SAMPLE_2=$'1 /usr/sbin/distnoted' \
+		MOLE_OPTIMIZE_PS_SAMPLE_1=$'55 /usr/libexec/syspolicyd' \
+		MOLE_OPTIMIZE_PS_SAMPLE_2=$'60 /usr/libexec/syspolicyd' \
+		MOLE_OPTIMIZE_SPCTL_STATUS="assessments enabled" \
 		MOLE_OPTIMIZE_HDIUTIL_INFO=$'================================================\nimage-path      : /Volumes/EXT3/Mail/TB.dmg\n/dev/disk6s2               Apple_HFS                       /Volumes/mail\n' \
 		bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -821,8 +902,8 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"No obvious sustained high-CPU bottleneck detected"* ]]
-	[[ "$output" != *"Mounted image detach candidates:"* ]]
+	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]]
+	[[ "$output" != *"assessment overhead:"* ]]
 	[[ "$output" != *"Would offer detach"* ]]
 }
 
@@ -839,7 +920,28 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"No obvious sustained high-CPU bottleneck detected"* ]]
+	[[ "$output" == *"No sustained high-CPU bottleneck detected"* ]]
+}
+
+@test "opt_diag_detach_candidates prints summary line only for multiple images" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/diagnostics.sh"
+run_with_timeout() { return 0; }
+echo "--- single ---"
+opt_diag_detach_candidates $'/Users/test/A.dmg\t/Volumes/A'
+echo "--- double ---"
+opt_diag_detach_candidates $'/Users/test/A.dmg\t/Volumes/A\n/Users/test/B.dmg\t/Volumes/B'
+EOF
+
+	[ "$status" -eq 0 ]
+	single="${output#*--- single ---}"
+	single="${single%%--- double ---*}"
+	double="${output#*--- double ---}"
+	[[ "$single" == *"Detached /Volumes/A"* ]] || return 1
+	[[ "$single" != *"mounted images"* ]] || return 1
+	[[ "$double" == *"Detached 2 mounted images"* ]] || return 1
 }
 
 @test "opt_periodic_maintenance skips when periodic command missing" {

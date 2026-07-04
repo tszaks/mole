@@ -29,9 +29,11 @@ clean_homebrew() {
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
         # Check if Homebrew cache is whitelisted
         if is_path_whitelisted "$HOME/Library/Caches/Homebrew"; then
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew · skipped whitelist"
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew · skipped (whitelist)"
+            note_activity
         else
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Homebrew · would cleanup"
+            note_activity
             local dry_run_autoremove_file
             dry_run_autoremove_file=$(create_temp_file)
             local dry_run_autoremove_exit=0
@@ -46,7 +48,8 @@ clean_homebrew() {
     fi
     # Keep behavior consistent with dry-run preview.
     if is_path_whitelisted "$HOME/Library/Caches/Homebrew"; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew · skipped whitelist"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew · skipped (whitelist)"
+        note_activity
         return 0
     fi
     # Skip if cleaned recently to avoid repeated heavy operations.
@@ -62,7 +65,10 @@ clean_homebrew() {
         local days_diff=$((time_diff / 86400))
         if [[ $days_diff -lt $cache_valid_days ]]; then
             should_skip=true
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew · cleaned ${days_diff}d ago, skipped"
+            local cleaned_when="cleaned ${days_diff}d ago"
+            [[ $days_diff -eq 0 ]] && cleaned_when="cleaned today"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Homebrew · skipped (${cleaned_when})"
+            note_activity
         fi
     fi
     [[ "$should_skip" == "true" ]] && return 0
@@ -97,6 +103,7 @@ clean_homebrew() {
         # Cleanup was skipped due to small cache size
         local size_mb=$((brew_cache_size / 1024))
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew cleanup · cache ${size_mb}MB, skipped"
+        note_activity
     elif [[ "$brew_success" == "true" && -f "$brew_tmp_file" ]]; then
         local brew_output
         brew_output=$(cat "$brew_tmp_file" 2> /dev/null || echo "")
@@ -105,13 +112,16 @@ clean_homebrew() {
         freed_space=$(printf '%s\n' "$brew_output" | grep -o "[0-9.]*[KMGT]B freed" 2> /dev/null | tail -1 || true)
         if [[ $removed_count -gt 0 ]] || [[ -n "$freed_space" ]]; then
             if [[ -n "$freed_space" ]]; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew cleanup${NC}, ${GREEN}$freed_space${NC}"
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew cleanup${NC} · ${GREEN}$freed_space${NC}"
+                note_activity
             else
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew cleanup, ${removed_count} items"
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Homebrew cleanup · ${removed_count} items"
+                note_activity
             fi
         fi
     elif [[ $brew_exit -eq 124 ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Homebrew cleanup timed out · run ${GRAY}brew cleanup${NC} manually"
+        note_activity
     fi
     local autoremove_preview_file
     autoremove_preview_file=$(create_temp_file)
@@ -119,11 +129,15 @@ clean_homebrew() {
     run_brew_autoremove_preview "$autoremove_preview_timeout" "$autoremove_preview_file" || autoremove_preview_exit=$?
     if [[ $autoremove_preview_exit -eq 124 ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Autoremove preview timed out · run ${GRAY}brew autoremove --dry-run${NC} manually"
+        # Keep the manual-action guidance visible past the idle-section erase.
+        note_activity
     elif [[ $autoremove_preview_exit -ne 0 ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Autoremove preview failed · run ${GRAY}brew autoremove --dry-run${NC} manually"
+        note_activity
     elif brew_autoremove_preview_has_items "$autoremove_preview_file"; then
         show_brew_autoremove_preview "$autoremove_preview_file"
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Homebrew autoremove skipped · run ${GRAY}brew autoremove${NC} manually"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Homebrew autoremove · skipped (run ${GRAY}brew autoremove${NC} manually)"
+        note_activity
     fi
     # Update cache timestamp on successful completion or when cleanup was intelligently skipped
     # This prevents repeated cache size checks within the 7-day window

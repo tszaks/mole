@@ -15,8 +15,10 @@ clean_tool_cache() {
     if [[ -n "$cache_path" ]] && is_path_whitelisted "$cache_path"; then
         if [[ "$DRY_RUN" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $description · would skip (whitelist)"
+            note_activity
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $description · skipped (whitelist)"
+            note_activity
         fi
         return 0
     fi
@@ -34,9 +36,11 @@ clean_tool_cache() {
         fi
         if [[ "$command_succeeded" == "true" ]]; then
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $description"
+            note_activity
         fi
     else
         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $description · would clean"
+        note_activity
     fi
     return 0
 }
@@ -101,6 +105,7 @@ clean_conda_metadata_caches() {
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} conda index/tarball/log caches · would skip (whitelist)"
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} conda index/tarball/log caches · skipped (whitelist)"
+            note_activity
         fi
         return 0
     fi
@@ -210,6 +215,7 @@ clean_dev_npm() {
                 echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} bun cache · would skip (whitelist)"
             else
                 echo -e "  ${GREEN}${ICON_SUCCESS}${NC} bun cache · skipped (whitelist)"
+                note_activity
             fi
             bun_cache_cleaned=true
         elif [[ "$bun_dry_run" != "true" ]]; then
@@ -224,9 +230,11 @@ clean_dev_npm() {
             fi
             if [[ "$bun_cache_cleaned" == "true" ]]; then
                 echo -e "  ${GREEN}${ICON_SUCCESS}${NC} bun cache"
+                note_activity
             fi
         else
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} bun cache · would clean"
+            note_activity
             bun_cache_cleaned=true
         fi
 
@@ -299,6 +307,7 @@ clean_dev_go() {
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Go cache · would skip (whitelist)"
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go cache · skipped (whitelist)"
+            note_activity
         fi
         return 0
     fi
@@ -308,6 +317,7 @@ clean_dev_go() {
     elif [[ "$build_protected" == "true" ]]; then
         clean_tool_cache "Go module cache" "" bash -c 'go clean -modcache > /dev/null 2>&1 || true'
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go build cache · skipped (whitelist)"
+        note_activity
     else
         clean_tool_cache "Go build cache" "" bash -c 'go clean -cache > /dev/null 2>&1 || true'
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go module cache · skipped (whitelist)"
@@ -390,9 +400,9 @@ check_multiple_versions() {
         note_activity
         local hint=""
         if [[ -n "$list_cmd" ]]; then
-            hint=" · ${GRAY}${list_cmd}${NC}"
+            hint=" ${GRAY}(${list_cmd})${NC}"
         fi
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${tool_name}: ${count} found${hint}"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${tool_name} · ${count} found${hint}"
     fi
 }
 
@@ -448,6 +458,7 @@ clean_dev_nix() {
             clean_tool_cache "Nix garbage collection" "/nix/store" nix-collect-garbage --delete-older-than 30d
         elif is_path_whitelisted "/nix/store"; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Nix garbage collection · would skip (whitelist)"
+            note_activity
         else
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Nix garbage collection · would clean"
         fi
@@ -489,7 +500,7 @@ clean_xcode_documentation_cache() {
     [[ -d "$doc_cache_root" ]] || return 0
 
     if pgrep -x "Xcode" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode is running, skipping documentation cache cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (Xcode running)"
         note_activity
         return 0
     fi
@@ -538,7 +549,7 @@ clean_xcode_documentation_cache() {
 
     if ! has_sudo_session; then
         if ! ensure_sudo_session "Cleaning Xcode documentation cache requires admin access"; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache cleanup skipped (sudo denied)"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (sudo denied)"
             note_activity
             return 0
         fi
@@ -564,7 +575,7 @@ clean_xcode_documentation_cache() {
         fi
         note_activity
     elif [[ $skipped_count -gt 0 ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode documentation cache · nothing to clean"
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode documentation cache · already clean"
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${skipped_count} protected items"
         note_activity
     else
@@ -595,7 +606,7 @@ clean_xcode_xctest_devices() {
     [[ -d "$xctest_devices_dir" ]] || return 0
 
     if _xcode_xctest_devices_process_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode or XCTest is running, skipping XCTestDevices cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (Xcode or XCTest running)"
         note_activity
         return 0
     fi
@@ -608,7 +619,7 @@ clean_xcode_system_coresimulator_caches() {
     [[ -d "$cache_root" ]] || return 0
 
     if _coresimulator_cache_process_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} CoreSimulator is running, skipping system Simulator cache cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (CoreSimulator running)"
         note_activity
         return 0
     fi
@@ -1058,6 +1069,7 @@ clean_dev_mobile() {
                 else
                     echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
                 fi
+                note_activity
             else
                 # Skip if no unavailable simulators
                 if ((unavailable_before == 0)); then
@@ -1192,7 +1204,8 @@ clean_dev_jvm() {
     safe_clean ~/.gradle/caches/build-cache-*/* "Gradle build cache"
     safe_clean ~/.gradle/notifications/* "Gradle notifications cache"
     if gradle_daemon_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Gradle daemon is running · daemon/workers cleanup skipped"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Gradle daemon/workers · skipped (Gradle daemon running)"
+        note_activity
     else
         safe_clean ~/.gradle/daemon/* "Gradle daemon"
         safe_clean ~/.gradle/workers/* "Gradle workers"
@@ -1446,7 +1459,7 @@ clean_claude_desktop_bundled_versions() {
 
     if claude_desktop_running; then
         note_activity
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Claude Desktop bundled Claude Code cleanup skipped · Claude Desktop is running"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Claude Desktop bundled Claude Code · skipped (Claude Desktop running)"
         return 0
     fi
 
@@ -1454,7 +1467,7 @@ clean_claude_desktop_bundled_versions() {
     sdk_version=$(claude_desktop_sdk_version "$claude_support" || true)
     if [[ -z "$sdk_version" ]]; then
         note_activity
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Claude Desktop bundled Claude Code active version unknown · skipping cleanup"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Claude Desktop bundled Claude Code · skipped (active version unknown)"
         return 0
     fi
 
@@ -1465,7 +1478,7 @@ clean_claude_desktop_bundled_versions() {
 
         if [[ ! -e "$versions_root/$sdk_version" ]]; then
             note_activity
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} $label active version unknown · skipping cleanup"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
             return 0
         fi
     done
@@ -1506,7 +1519,8 @@ clean_dev_ai_agents() {
         local active_path=""
         if [[ -n "$active_symlink" && -L "$active_symlink" ]]; then
             if [[ ! -e "$active_symlink" ]]; then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label active symlink is broken · skipping cleanup"
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active symlink broken)"
+                note_activity
                 continue
             fi
             local target
@@ -1656,6 +1670,7 @@ clean_codex_runtimes() {
     if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$runtime_root"; then
         if [[ "${DRY_RUN:-false}" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Codex runtimes · would skip (whitelist)"
+            note_activity
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Codex runtimes · skipped (whitelist)"
         fi
@@ -1679,6 +1694,7 @@ clean_codex_runtimes() {
         if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$runtime_dir"; then
             if [[ "${DRY_RUN:-false}" == "true" ]]; then
                 echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Codex runtimes · would skip (whitelist)"
+                note_activity
             else
                 echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Codex runtimes · skipped (whitelist)"
             fi

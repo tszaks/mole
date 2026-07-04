@@ -40,8 +40,7 @@ clean_chrome_old_versions
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Google Chrome running"* ]]
-	[[ "$output" == *"old versions cleanup skipped"* ]]
+	[[ "$output" == *"Chrome old versions · skipped (Chrome running)"* ]]
 }
 
 @test "clean_chrome_old_versions skips when only Chrome helpers are running" {
@@ -62,8 +61,7 @@ clean_chrome_old_versions
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Google Chrome running"* ]]
-	[[ "$output" == *"old versions cleanup skipped"* ]]
+	[[ "$output" == *"Chrome old versions · skipped (Chrome running)"* ]]
 }
 
 @test "clean_chrome_old_versions removes old versions but keeps current" {
@@ -394,8 +392,7 @@ clean_edge_old_versions
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Microsoft Edge running"* ]]
-	[[ "$output" == *"old versions cleanup skipped"* ]]
+	[[ "$output" == *"Edge old versions · skipped (Edge running)"* ]]
 }
 
 @test "clean_edge_old_versions removes old versions but keeps current" {

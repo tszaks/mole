@@ -318,7 +318,16 @@ end_section() {
     stop_section_spinner
 
     if [[ "${TRACK_SECTION:-0}" == "1" && "${SECTION_ACTIVITY:-0}" == "0" ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Nothing to clean"
+        # On an interactive ANSI terminal, erase the just-printed header and
+        # its leading blank line so idle sections disappear instead of adding
+        # a noise row. Piped output keeps the explicit fallback so logs stay
+        # self-describing. MO_DEBUG interleaves stderr lines that the two-line
+        # erase would eat, so keep the fallback there too.
+        if [[ -t 1 && "${MO_DEBUG:-}" != "1" ]] && safe_clear_lines 2; then
+            :
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Nothing to clean"
+        fi
     fi
     TRACK_SECTION=0
 }
@@ -887,15 +896,17 @@ safe_clean() {
         local size_human
         size_human=$(bytes_to_human "$((total_size_kb * 1024))")
 
-        local label="$description"
+        # Multi-target cleanups report the item count as part of the detail
+        # column, keeping the label clean: "npm logs · 2 items, 2KB".
+        local count_note=""
         if [[ ${#targets[@]} -gt 1 ]]; then
-            label+=" ${#targets[@]} items"
+            count_note="${#targets[@]} items, "
         fi
 
         if [[ "$DRY_RUN" == "true" ]]; then
             local size_display
             size_display=$(colorize_human_size "$size_human")
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $label${NC}, ${size_display} ${YELLOW}dry${NC}"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $description${NC} · ${count_note}${size_display} ${YELLOW}dry${NC}"
 
             local paths_temp
             paths_temp=$(create_temp_file)
@@ -957,7 +968,7 @@ safe_clean() {
         else
             local line_color
             line_color=$(cleanup_result_color_kb "$total_size_kb")
-            echo -e "  ${line_color}${ICON_SUCCESS}${NC} $label${NC}, ${line_color}$size_human${NC}"
+            echo -e "  ${line_color}${ICON_SUCCESS}${NC} $description${NC} · ${count_note}${line_color}$size_human${NC}"
         fi
         files_cleaned=$((files_cleaned + total_count))
         total_size_cleaned=$((total_size_cleaned + total_size_kb))
@@ -1269,9 +1280,10 @@ perform_cleanup() {
         clean_apple_silicon_caches
 
         # ===== 12. Device backups & firmware =====
+        # iOS backups are reported once, in the Large files section; a second
+        # row here used a different size formatter and confused users.
         start_section "Device backups & firmware"
         clean_cached_device_firmware
-        check_ios_device_backups
         end_section
 
         # ===== 13. Time Machine =====
