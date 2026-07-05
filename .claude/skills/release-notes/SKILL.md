@@ -34,7 +34,7 @@ If any fail, stop. The notes can wait; a bad release tag cannot.
 ## Format
 
 Strictly follow the current compact release shape. Compare against a recent release if unsure:
-`gh release view V1.43.1 --repo tw93/Mole --json body --jq .body`.
+`gh release view V1.45.0 --repo tw93/Mole --json body --jq .body`. (Do not copy older pages such as V1.43.1 or V1.44.x; their body h1 drifted and was rejected.)
 
 Structure:
 
@@ -55,28 +55,24 @@ Structure:
 1. **<中文 headline>**：<一句中文说明>。
 2. ...
 
----
-
-### Mole Mac App
-
-Prefer a GUI? Check out [Mole Mac App](https://mole.fit). The CLI stays free and open source.
-
----
-
-### Thanks 💖
+### Thanks
 
 Issue reporters and PR contributors this cycle: @handle1 · @handle2.
 
-> https://github.com/tw93/Mole
+### Mole Mac App
+
+Prefer a GUI? Try [Mole Mac App](https://mole.fit). The CLI stays free and open source.
 ```
+
+No `---` separators between sections, and no trailing repository link; the published pages end on the Mole Mac App line.
 
 ### Format rules (all are documented bugs that have shipped before)
 
 - **Body h1 is just `Mole`**. Version, codename, and emoji live only in the `--title` argument (`V<version> <CodeName> <emoji>`); repeating them in the body header is redundant and has been explicitly rejected before.
 - **No em dash anywhere**. Use commas, periods, colons, semicolons, or parentheses.
 - **No sponsor list by default**. The current public release style thanks issue reporters and PR contributors for this cycle only.
-- **No emoji except the version emoji** in the release title/header and `💖` in the Thanks header.
-- **No inline PR refs, no inline `@handle` thanks**. PRs and people belong in the closing Thanks block only.
+- **No emoji except the version emoji in the release title**. Body section headers stay plain, including `### Thanks` (the old `Thanks 💖` header is gone from the published pages).
+- **No inline PR refs, no inline `@handle` thanks**. PRs and people belong in the dedicated Thanks block only.
 - **English block first, 中文 block second**. Same numbered order in both blocks. Same number of items.
 - **Order items by user-perceived impact, not commit chronology**. Headline change first; internal safety hardening, performance, and bug fixes follow.
 - **Pick icons that match the action, not the category**. A broom (🧹) on insight rows mis-signalled "all of these are safe to delete", which is wrong for iOS Backups, Xcode Archives, and Old Downloads. Eyes (👀) match "look here" without that false promise.
