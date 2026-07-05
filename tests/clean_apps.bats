@@ -335,6 +335,56 @@ EOF
     [[ "$output" == *"PASS: Successful deletion removed"* ]]
 }
 
+@test "clean_orphaned_app_data uses dry-run wording for orphaned summary (#1192)" {
+    local test_home="$HOME/dry-run-orphan-summary"
+    rm -rf "$test_home"
+    mkdir -p "$test_home"
+
+    run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+scan_installed_apps() {
+    : > "$1"
+}
+
+is_bundle_orphaned() {
+    return 0
+}
+
+is_claude_vm_bundle_orphaned() {
+    return 1
+}
+
+safe_clean() {
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        return 0
+    fi
+    rm -rf "$1"
+    return 0
+}
+
+get_path_size_kb() {
+    echo 2048
+}
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+
+mkdir -p "$HOME/Library/Caches/com.test.orphan-dry-run"
+echo "data" > "$HOME/Library/Caches/com.test.orphan-dry-run/data"
+
+clean_orphaned_app_data
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Would clean 1 items, about 2.0MB"* ]] || return 1
+    [[ "$output" != *"Cleaned 1 items"* ]] || return 1
+    [ -d "$test_home/Library/Caches/com.test.orphan-dry-run" ] || return 1
+}
+
 @test "clean_orphaned_app_data removes orphaned Claude VM bundle" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

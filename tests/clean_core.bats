@@ -505,6 +505,25 @@ EOF
     [ ! -f "$HOME/Library/Mail Downloads/old.pdf" ]
 }
 
+@test "_clean_mail_downloads uses dry-run wording and keeps attachments" {
+    mkdir -p "$HOME/Library/Mail Downloads"
+    touch "$HOME/Library/Mail Downloads/old.pdf"
+    touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true MOLE_MAIL_DOWNLOADS_MIN_KB=1 bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+pgrep() { return 1; }
+_clean_mail_downloads
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Would clean 1 mail attachments"* ]]
+    [[ "$output" != *"Cleaned 1 mail attachments"* ]]
+    [ -f "$HOME/Library/Mail Downloads/old.pdf" ]
+}
+
 @test "clean_time_machine_failed_backups detects running backup correctly" {
     if ! command -v tmutil > /dev/null 2>&1; then
         skip "tmutil not available"

@@ -138,6 +138,8 @@ _clean_mail_downloads() {
     local count=0
     local cleaned_kb=0
     local spinner_active=false
+    local dry_run_mode=false
+    [[ "${DRY_RUN:-false}" == "true" || "${MOLE_DRY_RUN:-0}" == "1" ]] && dry_run_mode=true
     for target_path in "${mail_dirs[@]}"; do
         if [[ -d "$target_path" ]]; then
             if [[ "$spinner_active" == "false" && -t 1 ]]; then
@@ -160,7 +162,13 @@ _clean_mail_downloads() {
                 if [[ -f "$file_path" ]]; then
                     local file_size_kb
                     file_size_kb=$(get_path_size_kb "$file_path")
-                    if safe_remove "$file_path" true; then
+                    local remove_rc=1
+                    if [[ "$dry_run_mode" == "true" ]]; then
+                        MOLE_DRY_RUN=1 safe_remove "$file_path" true "$file_size_kb" && remove_rc=0
+                    elif safe_remove "$file_path" true "$file_size_kb"; then
+                        remove_rc=0
+                    fi
+                    if [[ $remove_rc -eq 0 ]]; then
                         count=$((count + 1))
                         cleaned_kb=$((cleaned_kb + file_size_kb))
                     fi
@@ -174,7 +182,11 @@ _clean_mail_downloads() {
     if [[ $count -gt 0 ]]; then
         local cleaned_mb
         cleaned_mb=$(echo "$cleaned_kb" | awk '{printf "%.1f", $1/1024}' || echo "0.0")
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $count mail attachments older than ${mail_age_days}d, about ${cleaned_mb}MB"
+        if [[ "$dry_run_mode" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Would clean $count mail attachments older than ${mail_age_days}d, about ${cleaned_mb}MB"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Cleaned $count mail attachments older than ${mail_age_days}d, about ${cleaned_mb}MB"
+        fi
         note_activity
     fi
 }
