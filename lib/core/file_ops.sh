@@ -946,6 +946,18 @@ safe_sudo_find_delete() {
         find_args+=("-mtime" "+$age_days")
     fi
 
+    # Keep the best-effort scan/batch phase independent of the caller's
+    # errexit state. The predicates below intentionally return 1 for ordinary
+    # "not protected / not whitelisted / no oplog" cases; callers still get
+    # explicit nonzero returns from the validation gates above.
+    local restore_errexit=0
+    case $- in
+        *e*)
+            restore_errexit=1
+            set +e
+            ;;
+    esac
+
     # Iterate results to respect both system protection and user whitelist.
     # See safe_find_delete for rationale (#757).
     #
@@ -1010,6 +1022,10 @@ safe_sudo_find_delete() {
         if [[ ${#removed_lines[@]} -gt 0 ]]; then
             append_log_lines "$OPERATIONS_LOG_FILE" "${removed_lines[@]}"
         fi
+    fi
+
+    if [[ $restore_errexit -eq 1 ]]; then
+        set -e
     fi
 
     return 0
