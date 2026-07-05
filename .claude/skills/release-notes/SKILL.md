@@ -41,7 +41,7 @@ Structure:
 ```
 <div align="center">
   <img src="https://cdn.tw93.fun/pic/cole.png" alt="Mole Logo" width="120" height="120" style="border-radius:50%" />
-  <h1 style="margin: 12px 0 6px;">Mole V<version> <CodeName> <emoji></h1>
+  <h1 style="margin: 12px 0 6px;">Mole</h1>
   <p><em>Deep clean and optimize your Mac.</em></p>
 </div>
 
@@ -72,12 +72,14 @@ Issue reporters and PR contributors this cycle: @handle1 · @handle2.
 
 ### Format rules (all are documented bugs that have shipped before)
 
+- **Body h1 is just `Mole`**. Version, codename, and emoji live only in the `--title` argument (`V<version> <CodeName> <emoji>`); repeating them in the body header is redundant and has been explicitly rejected before.
 - **No em dash anywhere**. Use commas, periods, colons, semicolons, or parentheses.
 - **No sponsor list by default**. The current public release style thanks issue reporters and PR contributors for this cycle only.
 - **No emoji except the version emoji** in the release title/header and `💖` in the Thanks header.
 - **No inline PR refs, no inline `@handle` thanks**. PRs and people belong in the closing Thanks block only.
 - **English block first, 中文 block second**. Same numbered order in both blocks. Same number of items.
 - **Order items by user-perceived impact, not commit chronology**. Headline change first; internal safety hardening, performance, and bug fixes follow.
+- **Pick icons that match the action, not the category**. A broom (🧹) on insight rows mis-signalled "all of these are safe to delete", which is wrong for iOS Backups, Xcode Archives, and Old Downloads. Eyes (👀) match "look here" without that false promise.
 - **Verify every command mentioned in the notes actually exists in HEAD**. CLAUDE.md cites `mo check / mo doctor` as a case where a removed command nearly shipped as a "feature".
 - **Keep the Mole Mac App cross-link only if it matches the current release style**. Do not turn it into a sales block.
 

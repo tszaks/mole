@@ -105,6 +105,7 @@ Public docs and examples should prefer the installed `mo` command. Use `./mole` 
 - Long cleanup scans need both an overall wall-clock budget and inner-loop checkpoints. If a project/artifact scan times out, degrade to partial or skipped-slow-scan output instead of appearing hung.
 - System-service orphan scans must parse plist `Program` / `ProgramArguments` values as absolute paths only. Use non-interactive sudo for unreadable root-owned plists when needed, reject PlistBuddy error text as data, and keep CI tests on `/Library/LaunchDaemons` rather than relying on `/Library/PrivilegedHelperTools`.
 - Uninstall leftover expansion must stay exact and boring: bundle ID or app-name variants only, reject generic/common words, keep short-name floors, skip broad locations like `Preferences/ByHost`, and only remove helper remnants after the parent app is confirmed gone and protected-path checks pass.
+- Any new uninstall teardown path (launch services, login items, cask zap, helper bootout) must route through the shared-bundle-id sibling guard, covering `/Volumes` copies, inverse-name, and shared-identity variants, with a bats regression per variant. Five consecutive fixes converged on this invariant in 2026-06/07; do not add a teardown branch that bypasses the guard.
 - Preference repair and optimize cleanup must skip protected and whitelisted plists before attempting removal.
 - Keep shell code formatted with `./scripts/check.sh --format`.
 - Prefer targeted Bats tests during development; run the full suite before committing.
@@ -191,22 +192,7 @@ Wait for the workflow to finish (typically 2 minutes for V1.38.0). The workflow 
 
 ### Apply curated release notes
 
-```bash
-gh release edit V<version> --repo tw93/Mole \
-  --title "V<version> <CodeName> <emoji>" \
-  --notes-file <path>
-```
-
-Format follows the recent compact release pages: centered Mole header, English `Changelog`, Chinese `更新日志`, optional `Mole Mac App` cross-link, then a short `Thanks 💖` line for issue reporters and PR contributors in this cycle. Do not add sponsor lists by default. Order changelog items by user-perceived impact, not chronological commit order.
-
-Add the standard reaction set (`+1`, `laugh`, `hooray`, `heart`, `rocket`, `eyes`):
-
-```bash
-RELEASE_ID=$(gh api repos/tw93/Mole/releases/tags/V<version> --jq '.id')
-for r in +1 laugh hooray heart rocket eyes; do
-  gh api "repos/tw93/Mole/releases/$RELEASE_ID/reactions" -X POST -f content="$r" --silent
-done
-```
+The curated-notes flow (bilingual format, `gh release edit` instead of `create`, thanks block, and the six-reaction set) is owned by `.claude/skills/release-notes/SKILL.md`. Follow that skill; do not duplicate its format details here. Version, codename, and emoji go only in the release title; the body h1 is just `Mole`.
 
 ### Shell and release pitfalls (cumulative)
 
@@ -225,8 +211,4 @@ These are real bugs hit on this codebase. Each one cost time. Re-read before tou
 
 ### Release-notes craft
 
-- **Order items by user-perceived impact, not commit chronology**. The headline change goes first; internal safety hardening, performance, and bug fixes follow.
-- **Verify every mentioned command still exists in HEAD before listing it**. `mo check / mo doctor` was removed in the same release cycle that I almost shipped notes claiming it as a feature.
-- **Pick icons that match the action, not the category**. A broom (🧹) on insight rows mis-signalled "all of these are safe to delete", which is wrong for iOS Backups, Xcode Archives, and Old Downloads. Eyes (👀) match "look here" without that false promise.
-- **No em dash anywhere in user-facing text**. Use commas, periods, colons, or semicolons. (Global rule, but worth re-stating because it has been violated repeatedly in release drafts.)
-- **No parenthesised PR refs or thanks inline**. Move PR numbers and contributor handles to a single closing thanks block to keep the changelog scannable.
+Format rules (impact ordering, command existence checks, icon semantics, no em dash, no inline PR refs) live in `.claude/skills/release-notes/SKILL.md` under "Format rules". Keep that skill as the single source of truth for notes formatting.
