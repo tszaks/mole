@@ -1188,6 +1188,14 @@ find_app_files() {
         )
         for dir in "${raycast_dirs[@]}"; do
             [[ -d "$dir" ]] && while IFS= read -r -d '' p; do
+                shopt -s nocasematch
+                case "$(basename "$p")" in
+                    *raycast-x*)
+                        shopt -u nocasematch
+                        continue
+                        ;;
+                esac
+                shopt -u nocasematch
                 files_to_clean+=("$p")
             done < <(command find "$dir" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
         done
@@ -1198,6 +1206,14 @@ find_app_files() {
 
         # Cache (deeper search)
         [[ -d "$HOME/Library/Caches" ]] && while IFS= read -r -d '' p; do
+            shopt -s nocasematch
+            case "$(basename "$p")" in
+                *raycast-x*)
+                    shopt -u nocasematch
+                    continue
+                    ;;
+            esac
+            shopt -u nocasematch
             files_to_clean+=("$p")
         done < <(command find "$HOME/Library/Caches" -maxdepth 2 -type d -iname "*raycast*" -print0 2> /dev/null)
 
@@ -1452,6 +1468,14 @@ find_app_system_files() {
     # Raycast system-level files
     if [[ "$bundle_id" == "com.raycast.macos" ]]; then
         [[ -d "/Library/Application Support" ]] && while IFS= read -r -d '' p; do
+            shopt -s nocasematch
+            case "$(basename "$p")" in
+                *raycast-x*)
+                    shopt -u nocasematch
+                    continue
+                    ;;
+            esac
+            shopt -u nocasematch
             system_files+=("$p")
         done < <(command find "/Library/Application Support" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
     fi
