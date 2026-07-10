@@ -811,6 +811,16 @@ clean_orphaned_system_services() {
             fi
             if [[ "$DRY_RUN" == "true" ]]; then
                 debug_log "[DRY RUN] Would remove orphaned service: $orphan_file"
+                # Terminal output only shows a count for this section, so the
+                # preview file must carry the exact paths; without them users
+                # cannot copy an entry into the whitelist before the real run
+                # deletes a root-level service. See #1210.
+                if [[ -n "${EXPORT_LIST_FILE:-}" && -f "$EXPORT_LIST_FILE" ]]; then
+                    local orphan_size_kb
+                    orphan_size_kb=$(sudo -n du -skP "$orphan_file" 2> /dev/null | awk '{print $1}' || echo "0")
+                    [[ -n "$orphan_size_kb" ]] || orphan_size_kb=0
+                    echo "$orphan_file  # $(bytes_to_human "$((orphan_size_kb * 1024))")" >> "$EXPORT_LIST_FILE"
+                fi
             else
                 local file_size_kb
                 file_size_kb=$(sudo -n du -skP "$orphan_file" 2> /dev/null | awk '{print $1}' || echo "0")

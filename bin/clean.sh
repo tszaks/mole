@@ -28,7 +28,14 @@ PROTECT_FINDER_METADATA=false
 EXTERNAL_VOLUME_TARGET=""
 IS_M_SERIES=$([[ "$(uname -m)" == "arm64" ]] && echo "true" || echo "false")
 
-EXPORT_LIST_FILE="$HOME/.config/mole/clean-list.txt"
+# Whitelist and preview belong to the invoking user even when the whole
+# command runs as root: stock macOS sudo keeps HOME, but sudo -H and root
+# shells reset it to /var/root, which would silently load an empty whitelist
+# and hide the preview file from the user. See #1210.
+MOLE_USER_HOME="$(get_invoking_home)"
+[[ -n "$MOLE_USER_HOME" ]] || MOLE_USER_HOME="$HOME"
+
+EXPORT_LIST_FILE="$MOLE_USER_HOME/.config/mole/clean-list.txt"
 CURRENT_SECTION=""
 readonly PROTECTED_SW_DOMAINS=(
     # Web editors
@@ -57,7 +64,7 @@ readonly PROTECTED_SW_DOMAINS=(
 
 declare -a WHITELIST_PATTERNS=()
 WHITELIST_WARNINGS=()
-if [[ -f "$HOME/.config/mole/whitelist" ]]; then
+if [[ -f "$MOLE_USER_HOME/.config/mole/whitelist" ]]; then
     while IFS= read -r line; do
         # shellcheck disable=SC2295
         line="${line#"${line%%[![:space:]]*}"}"
@@ -65,9 +72,9 @@ if [[ -f "$HOME/.config/mole/whitelist" ]]; then
         line="${line%"${line##*[![:space:]]}"}"
         [[ -z "$line" || "$line" =~ ^# ]] && continue
 
-        [[ "$line" == ~* ]] && line="${line/#~/$HOME}"
-        line="${line//\$HOME/$HOME}"
-        line="${line//\$\{HOME\}/$HOME}"
+        [[ "$line" == ~* ]] && line="${line/#~/$MOLE_USER_HOME}"
+        line="${line//\$HOME/$MOLE_USER_HOME}"
+        line="${line//\$\{HOME\}/$MOLE_USER_HOME}"
         if [[ "$line" =~ \.\. ]]; then
             WHITELIST_WARNINGS+=("Path traversal not allowed: $line")
             continue
@@ -108,7 +115,7 @@ if [[ -f "$HOME/.config/mole/whitelist" ]]; then
         fi
         [[ "$duplicate" == "true" ]] && continue
         WHITELIST_PATTERNS+=("$line")
-    done < "$HOME/.config/mole/whitelist"
+    done < "$MOLE_USER_HOME/.config/mole/whitelist"
 else
     WHITELIST_PATTERNS=("${DEFAULT_WHITELIST_PATTERNS[@]}")
 fi
@@ -119,7 +126,7 @@ expand_whitelist_patterns() {
         local -a EXPANDED_PATTERNS
         EXPANDED_PATTERNS=()
         for pattern in "${WHITELIST_PATTERNS[@]}"; do
-            local expanded="${pattern/#\~/$HOME}"
+            local expanded="${pattern/#\~/$MOLE_USER_HOME}"
             EXPANDED_PATTERNS+=("$expanded")
         done
         WHITELIST_PATTERNS=("${EXPANDED_PATTERNS[@]}")

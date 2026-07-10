@@ -143,6 +143,28 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "bundle_has_installed_app finds parent app via capitalized .Helper suffix (issue #1210)" {
+    make_app "$FAKE_APPS/App Tamer.app" "com.stclairsoft.AppTamer"
+
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+$(prelude)
+bundle_has_installed_app "com.stclairsoft.AppTamer.Helper"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "bundle_has_installed_app matches CFBundleIdentifier case-insensitively" {
+    make_app "$FAKE_APPS/Example.app" "com.Example.MyApp"
+
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+$(prelude)
+bundle_has_installed_app "com.example.myapp"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "bundle_has_installed_app finds parent app via .daemon suffix" {
     make_app "$FAKE_APPS/Example.app" "com.example.myapp"
 

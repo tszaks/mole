@@ -1131,6 +1131,52 @@ EOF
     [[ "$output" != *"Skipping protected"* ]] || return 1
 }
 
+@test "clean_orphaned_system_services dry-run writes orphan paths to the export list (#1210)" {
+    # MOLE_TEST_NO_AUTH=0 overrides CI default so the function executes.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { :; }
+
+should_protect_path() { return 1; }
+
+tmp_dir="$(mktemp -d)"
+tmp_plist="$tmp_dir/com.example.exported.orphan.plist"
+/usr/libexec/PlistBuddy -c "Add :Program string $tmp_dir/missing-binary" "$tmp_plist" > /dev/null 2>&1 || true
+
+EXPORT_LIST_FILE="$tmp_dir/clean-list.txt"
+touch "$EXPORT_LIST_FILE"
+
+sudo() {
+  if [[ "$1" == "-n" && "$2" == "true" ]]; then
+    return 0
+  fi
+  [[ "${1:-}" == "-n" ]] && shift
+  if [[ "$1" == "find" ]]; then
+    case "$2" in
+      /Library/LaunchDaemons) printf '%s\0' "$tmp_plist" ;;
+      *) : ;;
+    esac
+    return 0
+  fi
+  command "$@"
+}
+
+clean_orphaned_system_services
+echo "--- export list ---"
+cat "$EXPORT_LIST_FILE"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"found dry"* ]] || return 1
+    [[ "$output" == *"com.example.exported.orphan.plist  # "* ]] || return 1
+}
+
 @test "clean_orphaned_container_stubs removes stub container when app is uninstalled" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
 set -euo pipefail
