@@ -1903,6 +1903,8 @@ show_uninstall_help() { :; }
 hide_cursor() { :; }
 show_cursor() { :; }
 clear_screen() { :; }
+start_uninstall_interactive_screen() { :; }
+stop_uninstall_interactive_screen() { :; }
 scan_applications() { printf '%s\n' "$app_cache_file"; }
 load_applications() {
     printf 'load\n' >> "$trace_file"
@@ -1921,6 +1923,60 @@ eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed
 main
 
 expected=$(printf 'load\ndrain\nselect\n')
+actual=$(cat "$trace_file")
+[[ "$actual" == "$expected" ]] || {
+    printf 'unexpected trace:\n%s\n' "$actual" >&2
+    exit 1
+}
+INNER
+
+	[ "$status" -eq 0 ]
+}
+
+@test "main keeps scan and selector on one alternate screen until cancel (#1194)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+
+trace_file="$HOME/uninstall-screen-trace.log"
+app_cache_file="$HOME/apps-cache.txt"
+touch "$app_cache_file"
+
+log_operation_session_start() { :; }
+show_uninstall_help() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+clear_screen() { printf 'clear\n' >> "$trace_file"; }
+start_uninstall_interactive_screen() {
+    export MOLE_ALT_SCREEN_ACTIVE=1
+    export MOLE_MANAGED_ALT_SCREEN=1
+    printf 'start\n' >> "$trace_file"
+}
+stop_uninstall_interactive_screen() {
+    printf 'stop\n' >> "$trace_file"
+    unset MOLE_ALT_SCREEN_ACTIVE MOLE_MANAGED_ALT_SCREEN
+}
+scan_applications() {
+    printf 'scan\n' >> "$trace_file"
+    printf '%s\n' "$app_cache_file"
+}
+uninstall_app_inventory_fingerprint() {
+    printf 'fingerprint\n' >> "$trace_file"
+    printf 'inventory\n'
+}
+load_applications() { printf 'load\n' >> "$trace_file"; }
+drain_pending_input() { printf 'drain\n' >> "$trace_file"; }
+select_apps_for_uninstall() {
+    [[ "${MOLE_ALT_SCREEN_ACTIVE:-}" == "1" ]]
+    [[ "${MOLE_MANAGED_ALT_SCREEN:-}" == "1" ]]
+    printf 'select\n' >> "$trace_file"
+    return 1
+}
+
+eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+
+main
+
+expected=$(printf 'start\nscan\nfingerprint\nload\ndrain\nselect\nstop\n')
 actual=$(cat "$trace_file")
 [[ "$actual" == "$expected" ]] || {
     printf 'unexpected trace:\n%s\n' "$actual" >&2
@@ -2172,6 +2228,8 @@ show_uninstall_help() { :; }
 hide_cursor() { :; }
 show_cursor() { :; }
 clear_screen() { :; }
+start_uninstall_interactive_screen() { :; }
+stop_uninstall_interactive_screen() { :; }
 drain_pending_input() { :; }
 uninstall_app_inventory_fingerprint() { printf '%s\n' "$fingerprint_state"; }
 batch_uninstall_applications() {
@@ -2249,6 +2307,8 @@ show_uninstall_help() { :; }
 hide_cursor() { :; }
 show_cursor() { :; }
 clear_screen() { :; }
+start_uninstall_interactive_screen() { :; }
+stop_uninstall_interactive_screen() { :; }
 scan_applications() { printf '%s\n' "$APPS_CACHE_FILE"; }
 load_applications() { return 0; }
 drain_pending_input() { :; }
@@ -2280,6 +2340,8 @@ show_uninstall_help() { :; }
 hide_cursor() { :; }
 show_cursor() { :; }
 clear_screen() { :; }
+start_uninstall_interactive_screen() { :; }
+stop_uninstall_interactive_screen() { :; }
 scan_applications() { printf '%s\n' "$APPS_CACHE_FILE"; }
 load_applications() { return 0; }
 drain_pending_input() { :; }

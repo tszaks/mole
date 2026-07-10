@@ -237,7 +237,7 @@ paginated_multi_select() {
     _menu_saved_exit=$(trap -p EXIT)
     _menu_saved_int=$(trap -p INT)
     _menu_saved_term=$(trap -p TERM)
-    # Uses :- defaults: cleanup() is the EXIT trap and may fire once more at
+    # Uses :- defaults: _pm_cleanup() is the EXIT trap and may fire once more at
     # shell exit after this function has returned and the saved-trap locals
     # are gone. Degrading to `trap -` then is harmless (the caller's trap was
     # already restored on the normal-exit path below).
@@ -249,7 +249,7 @@ paginated_multi_select() {
     }
 
     # Cleanup function
-    cleanup() {
+    _pm_cleanup() {
         _menu_restore_traps
         unset MOLE_READ_KEY_FORCE_CHAR
         export MOLE_MENU_SORT_MODE="${sort_mode:-name}"
@@ -259,13 +259,13 @@ paginated_multi_select() {
 
     # Interrupt handler
     # shellcheck disable=SC2329
-    handle_interrupt() {
-        cleanup
+    _pm_handle_interrupt() {
+        _pm_cleanup
         exit 130 # Standard exit code for Ctrl+C
     }
 
-    trap cleanup EXIT
-    trap handle_interrupt INT TERM
+    trap _pm_cleanup EXIT
+    trap _pm_handle_interrupt INT TERM
 
     # Setup terminal - preserve interrupt character
     stty -echo -icanon intr ^C 2> /dev/null || true
@@ -663,7 +663,7 @@ paginated_multi_select() {
                     top_index=0
                     need_full_redraw=true
                 else
-                    cleanup
+                    _pm_cleanup
                     return 1
                 fi
                 ;;

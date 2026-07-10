@@ -1131,13 +1131,28 @@ load_applications() {
     return 0
 }
 
+# Keep the scan and selector on one alternate screen so restoring the terminal
+# also restores the primary-screen cursor to the command's original row.
+start_uninstall_interactive_screen() {
+    if [[ -t 1 && -t 2 && "${MOLE_ALT_SCREEN_ACTIVE:-}" != "1" ]]; then
+        enter_alt_screen
+        export MOLE_ALT_SCREEN_ACTIVE=1
+        export MOLE_MANAGED_ALT_SCREEN=1
+        printf '\033[2J\033[H' >&2
+    fi
+}
+
+stop_uninstall_interactive_screen() {
+    if [[ "${MOLE_ALT_SCREEN_ACTIVE:-}" == "1" ]]; then
+        leave_alt_screen
+    fi
+    unset MOLE_ALT_SCREEN_ACTIVE MOLE_MANAGED_ALT_SCREEN
+}
+
 # Cleanup: restore cursor and kill keepalive.
 cleanup() {
     local exit_code="${1:-$?}"
-    if [[ "${MOLE_ALT_SCREEN_ACTIVE:-}" == "1" ]]; then
-        leave_alt_screen
-        unset MOLE_ALT_SCREEN_ACTIVE
-    fi
+    stop_uninstall_interactive_screen
     if [[ -n "${sudo_keepalive_pid:-}" ]]; then
         kill "$sudo_keepalive_pid" 2> /dev/null || true
         wait "$sudo_keepalive_pid" 2> /dev/null || true
@@ -1476,8 +1491,15 @@ main() {
     local first_scan=true
     local cached_apps_file=""
     local cached_inventory_fingerprint=""
+    unset MOLE_INLINE_LOADING MOLE_MANAGED_ALT_SCREEN MOLE_ALT_SCREEN_ACTIVE
     while true; do
-        unset MOLE_INLINE_LOADING MOLE_MANAGED_ALT_SCREEN
+        unset MOLE_INLINE_LOADING
+
+        # Keep scanning and selection on one alternate screen. Entering the
+        # selector only after the scan leaves the primary-screen cursor below
+        # the scan progress; restoring it on cancel then creates a large blank
+        # gap before the next shell prompt (#1194).
+        start_uninstall_interactive_screen
 
         if [[ $first_scan == false ]]; then
             echo -e "${GRAY}Checking application list...${NC}" >&2
@@ -1529,15 +1551,15 @@ main() {
         set -e
 
         if [[ $exit_code -ne 0 ]]; then
+            stop_uninstall_interactive_screen
             show_cursor
-            clear_screen
-            printf '\033[2J\033[H' >&2
             rm -f "$apps_file"
             [[ "$apps_file" == "$cached_apps_file" ]] && cached_apps_file=""
 
             return 0
         fi
 
+        stop_uninstall_interactive_screen
         show_cursor
         clear_screen
         printf '\033[2J\033[H' >&2
