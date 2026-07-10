@@ -630,8 +630,54 @@ probe_temp_root() {
     printf '%s\n' "$path"
 }
 
+# Remove abandoned files only from Mole's dedicated fallback temp directory.
+# Persistent cache files live one level above this directory and are never
+# included. A one-day grace period avoids racing with concurrent long-running
+# Mole processes while bounding leftovers from interrupted runs.
+prune_stale_mole_temp_files() {
+    local root="${1:-}"
+    local invoking_home=""
+    local max_age_minutes="${MOLE_TEMP_STALE_MINUTES:-1440}"
+
+    [[ "$max_age_minutes" =~ ^[0-9]+$ ]] || max_age_minutes=1440
+    [[ -n "$root" && -d "$root" && ! -L "$root" ]] || return 0
+
+    invoking_home=$(get_invoking_home)
+    [[ -n "$invoking_home" ]] || return 0
+    [[ "$root" == "${invoking_home%/}/.cache/mole/tmp" ]] || return 0
+
+    find "$root" -mindepth 1 -maxdepth 1 \( -type f -o -type l \) \
+        -mmin "+$max_age_minutes" -exec rm -f -- {} + 2> /dev/null || true # SAFE: dedicated Mole temp root only
+}
+
+initialize_mole_temp_registry_path() {
+    [[ -n "${MOLE_TEMP_REGISTRY_FILE:-}" ]] && return 0
+    [[ -n "${MOLE_RESOLVED_TMPDIR:-}" ]] || return 1
+
+    # Bash keeps $$ stable inside command substitutions, so the parent and all
+    # of its subshells independently derive the same registry path.
+    MOLE_TEMP_REGISTRY_FILE="${MOLE_RESOLVED_TMPDIR%/}/mole.registry.$$"
+    export MOLE_TEMP_REGISTRY_FILE
+}
+
+ensure_mole_temp_registry_file() {
+    initialize_mole_temp_registry_path || return 1
+
+    case "$MOLE_TEMP_REGISTRY_FILE" in
+        "${MOLE_RESOLVED_TMPDIR%/}"/mole.registry.*) ;;
+        *) return 1 ;;
+    esac
+
+    if [[ ! -e "$MOLE_TEMP_REGISTRY_FILE" ]]; then
+        (umask 077 && set -C && : > "$MOLE_TEMP_REGISTRY_FILE") 2> /dev/null || true
+    fi
+
+    [[ -f "$MOLE_TEMP_REGISTRY_FILE" && ! -L "$MOLE_TEMP_REGISTRY_FILE" && -O "$MOLE_TEMP_REGISTRY_FILE" ]]
+}
+
 ensure_mole_temp_root() {
     if [[ -n "${MOLE_RESOLVED_TMPDIR:-}" ]]; then
+        initialize_mole_temp_registry_path || true
         return 0
     fi
 
@@ -657,6 +703,8 @@ ensure_mole_temp_root() {
     [[ -n "$resolved" ]] || resolved="/tmp"
     MOLE_RESOLVED_TMPDIR="$resolved"
     export MOLE_RESOLVED_TMPDIR
+    initialize_mole_temp_registry_path || true
+    prune_stale_mole_temp_files "$MOLE_RESOLVED_TMPDIR"
 }
 
 prepare_mole_tmpdir() {
@@ -692,11 +740,17 @@ create_temp_dir() {
 # Register existing file for cleanup
 register_temp_file() {
     MOLE_TEMP_FILES+=("$1")
+    if ensure_mole_temp_registry_file; then
+        printf '%s\n' "$1" >> "$MOLE_TEMP_REGISTRY_FILE" 2> /dev/null || true
+    fi
 }
 
 # Register existing directory for cleanup
 register_temp_dir() {
     MOLE_TEMP_DIRS+=("$1")
+    if ensure_mole_temp_registry_file; then
+        printf '%s\n' "$1" >> "$MOLE_TEMP_REGISTRY_FILE" 2> /dev/null || true
+    fi
 }
 
 # Create temp file with prefix (for analyze.sh compatibility)
@@ -731,6 +785,25 @@ cleanup_temp_files() {
         for file in "${MOLE_TEMP_DIRS[@]}"; do
             [[ -d "$file" ]] && rm -rf "$file" 2> /dev/null || true # SAFE: cleanup_temp_files
         done
+    fi
+
+    # Command substitutions run mktemp_file/create_temp_* in a child shell, so
+    # their in-memory array updates cannot reach this parent. The registry is
+    # shared across those shells and closes that cleanup gap. See #1203.
+    if ensure_mole_temp_registry_file; then
+        local registered_path
+        while IFS= read -r registered_path; do
+            [[ -n "$registered_path" ]] || continue
+            [[ "$registered_path" == "${MOLE_RESOLVED_TMPDIR%/}/"* ]] || continue
+            [[ ! "$registered_path" =~ (^|/)\.\.(\/|$) ]] || continue
+
+            if [[ -d "$registered_path" && ! -L "$registered_path" ]]; then
+                rm -rf "$registered_path" 2> /dev/null || true # SAFE: mktemp dir registered under resolved Mole temp root
+            else
+                rm -f "$registered_path" 2> /dev/null || true
+            fi
+        done < "$MOLE_TEMP_REGISTRY_FILE"
+        rm -f "$MOLE_TEMP_REGISTRY_FILE" 2> /dev/null || true
     fi
 
     MOLE_TEMP_FILES=()

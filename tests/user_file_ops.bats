@@ -90,6 +90,77 @@ setup() {
     [ "$result" = "$first_tmp|$first_tmp" ]
 }
 
+@test "cleanup_temp_files removes command-substitution temp files (#1203)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/base.sh"
+
+MOLE_RESOLVED_TMPDIR="$HOME/.cache/mole/tmp"
+MOLE_TEMP_REGISTRY_FILE=""
+export MOLE_RESOLVED_TMPDIR MOLE_TEMP_REGISTRY_FILE
+mkdir -p "$MOLE_RESOLVED_TMPDIR"
+
+temp_file=$(mktemp_file "subshell")
+printf 'BEFORE:%s\n' "$([[ -f "$temp_file" ]] && echo exists || echo missing)"
+cleanup_temp_files
+printf 'AFTER:%s\n' "$([[ -f "$temp_file" ]] && echo leaked || echo cleaned)"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"BEFORE:exists"* ]]
+    [[ "$output" == *"AFTER:cleaned"* ]]
+}
+
+@test "cleanup_temp_files rejects registry paths outside the temp root (#1203)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/base.sh"
+
+MOLE_RESOLVED_TMPDIR="$HOME/.cache/mole/tmp"
+MOLE_TEMP_REGISTRY_FILE="$MOLE_RESOLVED_TMPDIR/mole.registry.$$"
+export MOLE_RESOLVED_TMPDIR MOLE_TEMP_REGISTRY_FILE
+mkdir -p "$MOLE_RESOLVED_TMPDIR"
+
+persistent_file="$HOME/.cache/mole/installed_apps_cache"
+touch "$persistent_file"
+printf '%s\n' "$persistent_file" > "$MOLE_TEMP_REGISTRY_FILE"
+
+cleanup_temp_files
+[[ -e "$persistent_file" ]]
+
+invalid_registry="$HOME/.cache/mole/not-a-temp-registry"
+printf '%s\n' "$persistent_file" > "$invalid_registry"
+MOLE_TEMP_REGISTRY_FILE="$invalid_registry"
+cleanup_temp_files
+[[ -e "$invalid_registry" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "prune_stale_mole_temp_files leaves persistent cache and fresh temps alone (#1203)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEMP_STALE_MINUTES=60 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/base.sh"
+
+temp_root="$HOME/.cache/mole/tmp"
+old_temp="$temp_root/old-scan"
+fresh_temp="$temp_root/current-scan"
+persistent_cache="$HOME/.cache/mole/installed_apps_cache"
+mkdir -p "$temp_root"
+touch "$old_temp" "$fresh_temp" "$persistent_cache"
+touch -t 202001010101 "$old_temp" "$persistent_cache"
+
+prune_stale_mole_temp_files "$temp_root"
+
+[[ ! -e "$old_temp" ]]
+[[ -e "$fresh_temp" ]]
+[[ -e "$persistent_cache" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "prepare_mole_tmpdir falls back to /tmp when TMPDIR and invoking home are unavailable" {
     result=$(env HOME="$HOME" TMPDIR="/var/empty" bash -c "
         source '$PROJECT_ROOT/lib/core/base.sh'
