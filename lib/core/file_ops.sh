@@ -917,20 +917,45 @@ safe_sudo_find_delete() {
         return 0
     fi
 
+    # Keep the entire sudo-probing body independent of the caller's errexit
+    # state. macOS 14's /bin/bash build fires the caller's errexit when a
+    # sudo shell-function mock returns nonzero inside an if condition (the
+    # same bash 3.2.57 on macOS 15+ does not), so the guard must sit above
+    # the first sudo probe, not just around the scan/batch loop. The
+    # predicates below intentionally return 1 for ordinary "not protected /
+    # not whitelisted / no oplog" cases; callers still get explicit nonzero
+    # returns from the validation gates, restored to their errexit state.
+    local restore_errexit=0
+    case $- in
+        *e*)
+            restore_errexit=1
+            set +e
+            ;;
+    esac
+
     # Validate base directory (use sudo for permission-restricted dirs)
     if ! sudo -n test -d "$base_dir" 2> /dev/null; then
         debug_log "Directory does not exist, skipping: $base_dir"
+        if [[ $restore_errexit -eq 1 ]]; then
+            set -e
+        fi
         return 0
     fi
 
     if sudo -n test -L "$base_dir" 2> /dev/null; then
         log_error "Refusing to search symlinked directory: $base_dir"
+        if [[ $restore_errexit -eq 1 ]]; then
+            set -e
+        fi
         return 1
     fi
 
     # Validate type filter
     if [[ "$type_filter" != "f" && "$type_filter" != "d" ]]; then
         log_error "Invalid type filter: $type_filter, must be 'f' or 'd'"
+        if [[ $restore_errexit -eq 1 ]]; then
+            set -e
+        fi
         return 1
     fi
 
@@ -945,18 +970,6 @@ safe_sudo_find_delete() {
     if [[ "$age_days" -gt 0 ]]; then
         find_args+=("-mtime" "+$age_days")
     fi
-
-    # Keep the best-effort scan/batch phase independent of the caller's
-    # errexit state. The predicates below intentionally return 1 for ordinary
-    # "not protected / not whitelisted / no oplog" cases; callers still get
-    # explicit nonzero returns from the validation gates above.
-    local restore_errexit=0
-    case $- in
-        *e*)
-            restore_errexit=1
-            set +e
-            ;;
-    esac
 
     # Iterate results to respect both system protection and user whitelist.
     # See safe_find_delete for rationale (#757).
