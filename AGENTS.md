@@ -111,7 +111,7 @@ Public docs and examples should prefer the installed `mo` command. Use `./mole` 
 - Prefer targeted Bats tests during development; run the full suite before committing.
 - Do not add AI attribution trailers to commits.
 - `start_section` / `end_section` / `note_activity` have three intentionally different implementations in `lib/core/base.sh`, `bin/clean.sh`, and `bin/purge.sh`. Source order decides which one wins, and the wording, color, and dry-run export semantics differ on purpose. Read the cross-reference comment in `lib/core/base.sh` before changing any of them.
-- **Test-orphan pattern: grep the whole repo including top-level entry scripts before declaring a function dead.** Mole has a recurring shape where a helper is defined in `lib/core/base.sh` (or similar core lib), has full bats coverage in `tests/`, and is referenced by zero production callers. Known instances: `is_sip_enabled`, `is_darwin_ge`, `get_invoking_user`, `get_brand_name`, `get_mole_temp_root`, `scan_external_volumes`, `clean_dev_editors`, `perform_updates`, `format_brew_update_label`, `brew_has_outdated`. A "zero callers" verdict requires three checks: (1) grep across `lib`, `bin`, `cmd`, `scripts`, `tests`, AND the top-level entry (`mole` shim, install/uninstall scripts), not just core lib dirs; (2) check for string-built call sites (`eval`, `declare -f`, `compgen`); (3) re-grep after removal to confirm nothing was hand-wired. When deleting a write-only helper, also trace every variable it wrote and every config it read; the entire data path may be orphaned. Sub-agent "dead code" reports are starting points, not verdicts.
+- **Test-orphan pattern: grep the whole repo including top-level entry scripts before declaring a function dead.** Mole has a recurring shape where a helper is defined in `lib/core/base.sh` (or similar core lib), has full bats coverage in `tests/`, and is referenced by zero production callers. Past instances, all since removed from the repo: `is_sip_enabled`, `is_darwin_ge`, `get_invoking_user`, `get_brand_name`, `get_mole_temp_root`, `scan_external_volumes`, `clean_dev_editors`, `perform_updates`, `format_brew_update_label`, `brew_has_outdated`. A "zero callers" verdict requires three checks: (1) grep across `lib`, `bin`, `cmd`, `scripts`, `tests`, AND the top-level entry (`mole` shim, install/uninstall scripts), not just core lib dirs; (2) check for string-built call sites (`eval`, `declare -f`, `compgen`); (3) re-grep after removal to confirm nothing was hand-wired. When deleting a write-only helper, also trace every variable it wrote and every config it read; the entire data path may be orphaned. Sub-agent "dead code" reports are starting points, not verdicts.
 
 ## Hotspot Ownership
 
@@ -165,11 +165,23 @@ golangci-lint run ./cmd/...
 - Re-read the live issue or PR title, body, comments, state, labels, and author language before any public reply or closeout.
 - Keep CLI issues and Mole Mac app issues separate. A fix in `mole-mac` does not imply a close in this CLI repo, and a CLI fix does not prove a Mac app issue is fixed unless the Mac app release path is verified.
 - When closing a fixed bug or shipped feature, use project wording from the issue context and include the expected release path only when confirmed.
-- If a fix is on `main` but not in a stable release, prefer telling CLI users to try `mo update --nightly` now, then mention the next stable release only when that path is confirmed.
+- **Remote diagnostics for unreproducible reports**: when an issue needs runtime evidence from the reporter's machine, ask them to run `curl -fsSL 'https://mole.fit/downloads/Mole-Diagnose.command' | bash` and email the resulting `Mole-Diagnose-*.zip` from their Desktop to the support address. The script is read-only (process samples, recent logs, crash reports) and lives in the `mole-mac` repo at `site/downloads/Mole-Diagnose.command`; it targets the Mole Mac app, so for CLI-only issues prefer asking for the relevant `mo` command output or `mo status` JSON instead. The zip contains local paths and logs: have reporters email it, never attach it to a public issue.
+- **Default issue closeout pipeline** once a fix is confirmed: commit lands on `main` (that alone makes it installable via nightly), verify the fix is actually on `main`, then reply in the reporter's language, opening with `@reporter`, in short paragraphs rather than one block, with the concrete update command: `mo update --nightly` now, the next stable release only when that path is confirmed. Closing is the maintainer's call: propose the close and wait for confirmation, and the closing comment should invite reopening if the problem persists.
 
 ## Release
 
 Tag-driven flow. The `release.yml` workflow watches `'V*'` tag pushes (capital `V`), builds amd64 and arm64 binaries on macOS, generates `SHA256SUMS`, attaches build provenance, creates the GitHub Release without notes, then bumps the personal Homebrew tap and opens a Homebrew core PR.
+
+### Distribution channels
+
+| Channel | What ships | Trigger | Automation |
+|---|---|---|---|
+| Nightly (`mo update --nightly`) | `main` HEAD via `install.sh` | Any commit pushed to `main` | Automatic; no tag or release involved |
+| GitHub stable release | amd64/arm64 binaries + `SHA256SUMS` | Push a capital-`V` tag | `release.yml` builds and creates the release; curated notes are a manual follow-up |
+| Homebrew personal tap (`tw93/homebrew-tap`) | Formula bump | Same `V*` tag workflow | Automatic; do not re-run manually unless the workflow log shows a failure |
+| Homebrew core | Version-bump PR to `Homebrew/homebrew-core` | Same `V*` tag workflow | Automatic PR; merge timing is upstream's |
+
+At the start of any release-flavored task, restate which channels this run will touch and which it will not, and confirm with the maintainer before acting. Channel scope is specified by the maintainer, never inferred.
 
 ### Pre-flight checklist
 
@@ -193,6 +205,8 @@ Wait for the workflow to finish (typically 2 minutes for V1.38.0). The workflow 
 ### Apply curated release notes
 
 The curated-notes flow (bilingual format, `gh release edit` instead of `create`, thanks block, and the six-reaction set) is owned by `.claude/skills/release-notes/SKILL.md`. Follow that skill; do not duplicate its format details here. Version, codename, and emoji go only in the release title; the body h1 is just `Mole`.
+
+Ritual anchors: before drafting, read the latest stable release body as the hard format template (`gh release view <latest-tag> --json body`); the title takes a codename plus emoji per repo convention (for example `V1.45.0 Quiet 🤫`). After publishing, add all six positive reactions (`+1`, `laugh`, `heart`, `hooray`, `rocket`, `eyes`) with `.claude/skills/release-notes/scripts/post-reactions.sh V<version>` (the script lives inside the skill, not in the top-level `scripts/`), then re-read the release reactions to confirm all six landed.
 
 ### Shell and release pitfalls (cumulative)
 
