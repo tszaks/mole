@@ -473,6 +473,155 @@ EOF
     [[ "$output" != *"REAL_AUTOREMOVE"* ]]
 }
 
+@test "clean_homebrew restores an active Cellar link removed by cleanup (#1206)" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/brew.sh"
+
+TEST_BREW_PREFIX="$HOME/homebrew"
+TEST_BREW_CELLAR="$TEST_BREW_PREFIX/Cellar"
+node_target="$TEST_BREW_CELLAR/node/26.4.0/bin/node"
+npx_target="$TEST_BREW_CELLAR/node/26.4.0/bin/npx"
+replacement_npx_target="$TEST_BREW_CELLAR/node/26.5.0/bin/npx"
+mkdir -p "$TEST_BREW_PREFIX/bin" "$TEST_BREW_CELLAR/node/26.4.0/bin" "$TEST_BREW_CELLAR/node/26.5.0/bin" "$HOME/Library/Caches/Homebrew"
+printf '#!/bin/sh\n' > "$node_target"
+printf '#!/bin/sh\n' > "$npx_target"
+printf '#!/bin/sh\n' > "$replacement_npx_target"
+ln -s ../Cellar/node/26.4.0/bin/node "$TEST_BREW_PREFIX/bin/node"
+ln -s ../Cellar/node/26.4.0/bin/npx "$TEST_BREW_PREFIX/bin/npx"
+rm -f "$HOME/.cache/mole/brew_last_cleanup"
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+ensure_user_file() { mkdir -p "$(dirname "$1")"; : > "$1"; }
+run_with_timeout() {
+    shift
+    if [[ "$1" == "du" ]]; then
+        echo "51201 $3"
+        return 0
+    fi
+    "$@"
+}
+brew() {
+    case "$*" in
+        --prefix) printf '%s\n' "$TEST_BREW_PREFIX" ;;
+        --cellar) printf '%s\n' "$TEST_BREW_CELLAR" ;;
+        "cleanup --prune=30")
+            rm -f "$TEST_BREW_PREFIX/bin/node" "$TEST_BREW_PREFIX/bin/npx"
+            ln -s ../Cellar/node/26.5.0/bin/npx "$TEST_BREW_PREFIX/bin/npx"
+            ;;
+        "autoremove --dry-run") : ;;
+        *) return 0 ;;
+    esac
+}
+
+clean_homebrew
+[[ -L "$TEST_BREW_PREFIX/bin/node" ]]
+[[ "$(readlink "$TEST_BREW_PREFIX/bin/node")" == "../Cellar/node/26.4.0/bin/node" ]]
+[[ "$(readlink "$TEST_BREW_PREFIX/bin/npx")" == "../Cellar/node/26.5.0/bin/npx" ]]
+[[ -x "$node_target" || -f "$node_target" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Homebrew links · restored 1 active executable(s)"* ]] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "clean_homebrew does not restore a link after its Cellar target is removed (#1206)" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/brew.sh"
+
+TEST_BREW_PREFIX="$HOME/homebrew-removed"
+TEST_BREW_CELLAR="$TEST_BREW_PREFIX/Cellar"
+node_target="$TEST_BREW_CELLAR/node/26.4.0/bin/node"
+mkdir -p "$TEST_BREW_PREFIX/bin" "$TEST_BREW_CELLAR/node/26.4.0/bin" "$HOME/Library/Caches/Homebrew"
+printf '#!/bin/sh\n' > "$node_target"
+ln -s ../Cellar/node/26.4.0/bin/node "$TEST_BREW_PREFIX/bin/node"
+rm -f "$HOME/.cache/mole/brew_last_cleanup"
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+ensure_user_file() { mkdir -p "$(dirname "$1")"; : > "$1"; }
+run_with_timeout() {
+    shift
+    if [[ "$1" == "du" ]]; then
+        echo "51201 $3"
+        return 0
+    fi
+    "$@"
+}
+brew() {
+    case "$*" in
+        --prefix) printf '%s\n' "$TEST_BREW_PREFIX" ;;
+        --cellar) printf '%s\n' "$TEST_BREW_CELLAR" ;;
+        "cleanup --prune=30")
+            rm -f "$TEST_BREW_PREFIX/bin/node" "$node_target"
+            ;;
+        "autoremove --dry-run") : ;;
+        *) return 0 ;;
+    esac
+}
+
+clean_homebrew
+[[ ! -e "$TEST_BREW_PREFIX/bin/node" && ! -L "$TEST_BREW_PREFIX/bin/node" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Homebrew links · restored"* ]]
+}
+
+@test "clean_homebrew does not restore executable links outside the Cellar (#1206)" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/brew.sh"
+
+TEST_BREW_PREFIX="$HOME/homebrew-external"
+TEST_BREW_CELLAR="$TEST_BREW_PREFIX/Cellar"
+external_target="$HOME/custom-tools/node"
+mkdir -p "$TEST_BREW_PREFIX/bin" "$TEST_BREW_CELLAR" "$(dirname "$external_target")" "$HOME/Library/Caches/Homebrew"
+printf '#!/bin/sh\n' > "$external_target"
+ln -s "$external_target" "$TEST_BREW_PREFIX/bin/node"
+rm -f "$HOME/.cache/mole/brew_last_cleanup"
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+ensure_user_file() { mkdir -p "$(dirname "$1")"; : > "$1"; }
+run_with_timeout() {
+    shift
+    if [[ "$1" == "du" ]]; then
+        echo "51201 $3"
+        return 0
+    fi
+    "$@"
+}
+brew() {
+    case "$*" in
+        --prefix) printf '%s\n' "$TEST_BREW_PREFIX" ;;
+        --cellar) printf '%s\n' "$TEST_BREW_CELLAR" ;;
+        "cleanup --prune=30") rm -f "$TEST_BREW_PREFIX/bin/node" ;;
+        "autoremove --dry-run") : ;;
+        *) return 0 ;;
+    esac
+}
+
+clean_homebrew
+[[ ! -e "$TEST_BREW_PREFIX/bin/node" && ! -L "$TEST_BREW_PREFIX/bin/node" ]]
+[[ -f "$external_target" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Homebrew links · restored"* ]]
+}
+
 @test "clean_homebrew dry-run shows brew autoremove preview without removing formulae" {
     run bash --noprofile --norc << 'EOF'
 set -euo pipefail
