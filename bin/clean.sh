@@ -304,15 +304,39 @@ trap 'cleanup TERM 143; exit 143' TERM
 
 # IMPORTANT: This file overrides start_section / end_section from
 # lib/core/base.sh by virtue of being sourced after it. The clean variant adds
-# CURRENT_SECTION tracking, dry-run EXPORT_LIST_FILE writes and a section
-# spinner stop. See the cross-reference block in lib/core/base.sh and the
-# differing purge variant in bin/purge.sh before changing any of these three.
+# CURRENT_SECTION tracking, dry-run EXPORT_LIST_FILE writes, a section
+# spinner stop, and idle-header recycling. See the cross-reference block in
+# lib/core/base.sh and the differing purge variant in bin/purge.sh before
+# changing any of these three.
+#
+# Idle-header recycling: an idle section used to erase its own header after
+# the fact, which made all content below jump up two lines per idle section.
+# Instead the header stays put and the NEXT start_section overwrites it in
+# place, so the screen never moves vertically. Any output that is not a
+# section header must clear a leftover idle header first via
+# flush_idle_section_slot.
+IDLE_SECTION_PENDING=0
+
+flush_idle_section_slot() {
+    if [[ "${IDLE_SECTION_PENDING:-0}" == "1" ]]; then
+        IDLE_SECTION_PENDING=0
+        safe_clear_lines 2 || true
+    fi
+}
+
 start_section() {
     TRACK_SECTION=1
     SECTION_ACTIVITY=0
     CURRENT_SECTION="$1"
-    echo ""
-    echo -e "${PURPLE_BOLD}${ICON_ARROW} $1${NC}"
+    if [[ "${IDLE_SECTION_PENDING:-0}" == "1" ]]; then
+        # Overwrite the previous idle section's header line in place (the
+        # pending flag is only ever set on an interactive ANSI terminal).
+        IDLE_SECTION_PENDING=0
+        printf '\033[1A\r\033[2K%b\n' "${PURPLE_BOLD}${ICON_ARROW} $1${NC}"
+    else
+        echo ""
+        echo -e "${PURPLE_BOLD}${ICON_ARROW} $1${NC}"
+    fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
         ensure_user_file "$EXPORT_LIST_FILE"
@@ -325,16 +349,18 @@ end_section() {
     stop_section_spinner
 
     if [[ "${TRACK_SECTION:-0}" == "1" && "${SECTION_ACTIVITY:-0}" == "0" ]]; then
-        # On an interactive ANSI terminal, erase the just-printed header and
-        # its leading blank line so idle sections disappear instead of adding
-        # a noise row. Piped output keeps the explicit fallback so logs stay
-        # self-describing. MO_DEBUG interleaves stderr lines that the two-line
-        # erase would eat, so keep the fallback there too.
-        if [[ -t 1 && "${MO_DEBUG:-}" != "1" ]] && safe_clear_lines 2; then
-            :
+        # On an interactive ANSI terminal, leave the header on screen and let
+        # the next start_section recycle its line, so idle sections disappear
+        # without the erase-and-jump. Piped output keeps the explicit fallback
+        # so logs stay self-describing. MO_DEBUG interleaves stderr lines that
+        # line recycling would corrupt, so keep the fallback there too.
+        if [[ -t 1 && "${MO_DEBUG:-}" != "1" ]] && is_ansi_supported 2> /dev/null; then
+            IDLE_SECTION_PENDING=1
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Nothing to clean"
         fi
+    else
+        IDLE_SECTION_PENDING=0
     fi
     TRACK_SECTION=0
 }
@@ -602,8 +628,8 @@ safe_clean() {
     local show_scan_feedback=false
     if [[ ${#targets[@]} -gt 20 && -t 1 ]]; then
         show_scan_feedback=true
-        stop_section_spinner
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning ${#targets[@]} items..."
+        # Updates a running section spinner in place instead of restarting it.
+        start_section_spinner "Scanning ${#targets[@]} items..."
     fi
 
     local _perf_scan_start
@@ -637,7 +663,9 @@ safe_clean() {
 
     debug_timer_end "$description: path scan" _perf_scan_start
 
-    if [[ "$show_scan_feedback" == "true" ]]; then
+    # Keep the spinner alive between phases; the next phase swaps its text in
+    # place. Under MO_DEBUG stop it so debug lines print on a clean line.
+    if [[ "$show_scan_feedback" == "true" && "${MO_DEBUG:-}" == "1" ]]; then
         stop_section_spinner
     fi
 
@@ -668,6 +696,11 @@ safe_clean() {
     fi
 
     if [[ ${#existing_paths[@]} -eq 0 ]]; then
+        # The scan spinner we started (or took over) must not outlive this
+        # call; callers print rows without stopping spinners themselves.
+        if [[ "$show_scan_feedback" == "true" ]]; then
+            stop_section_spinner
+        fi
         return 0
     fi
 
@@ -688,7 +721,7 @@ safe_clean() {
     if [[ ${#existing_paths[@]} -gt 10 ]]; then
         show_spinner=true
         local total_paths=${#existing_paths[@]}
-        if [[ -t 1 ]]; then MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items..."; fi
+        if [[ -t 1 ]]; then start_section_spinner "Scanning items..."; fi
     fi
 
     local cleaning_spinner_started=false
@@ -713,7 +746,7 @@ safe_clean() {
         # Heuristic: mostly files -> bulk stat is faster than per-file subshells.
         if [[ $dir_count -lt 5 && ${#existing_paths[@]} -gt 20 ]]; then
             if [[ -t 1 && "$show_spinner" == "false" ]]; then
-                MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning items..."
+                start_section_spinner "Scanning items..."
                 show_spinner=true
             fi
 
@@ -802,7 +835,7 @@ safe_clean() {
         # Read results back in original order.
         # Start spinner for cleaning phase
         if [[ "$DRY_RUN" != "true" && ${#existing_paths[@]} -gt 0 && -t 1 ]]; then
-            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Cleaning..."
+            start_section_spinner "Cleaning..."
             cleaning_spinner_started=true
         fi
         idx=0
@@ -846,7 +879,7 @@ safe_clean() {
 
         # Start spinner for cleaning phase (small batch)
         if [[ "$DRY_RUN" != "true" && ${#existing_paths[@]} -gt 0 && -t 1 ]]; then
-            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Cleaning..."
+            start_section_spinner "Cleaning..."
             cleaning_spinner_started=true
         fi
         local idx=0
@@ -883,7 +916,7 @@ safe_clean() {
         debug_timer_end "$description: deletion" _perf_del_start
     fi
 
-    if [[ "$show_spinner" == "true" || "$cleaning_spinner_started" == "true" ]]; then
+    if [[ "$show_spinner" == "true" || "$cleaning_spinner_started" == "true" || "$show_scan_feedback" == "true" ]]; then
         stop_inline_spinner
     fi
 
@@ -1212,6 +1245,7 @@ perform_cleanup() {
         fi
 
         if [[ ${#WHITELIST_WARNINGS[@]} -gt 0 ]]; then
+            flush_idle_section_slot
             echo ""
             for warning in "${WHITELIST_WARNINGS[@]}"; do
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Whitelist: $warning"
@@ -1315,6 +1349,7 @@ perform_cleanup() {
     fi
 
     # ===== Final summary =====
+    flush_idle_section_slot
     echo ""
 
     local summary_heading=""

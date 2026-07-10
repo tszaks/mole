@@ -615,3 +615,43 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Time Machine cleanup · skipped (backup in progress)"* ]]
 }
+
+@test "start_section recycles an idle section header in place on a TTY" {
+    if ! /usr/bin/script -q /dev/null /bin/true > /dev/null 2>&1; then
+        skip "script cannot allocate a TTY in this environment"
+    fi
+
+    raw="$HOME/section-recycle.raw"
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        MOLE_TEST_NO_AUTH=1 TERM=xterm-256color \
+        /usr/bin/script -q "$raw" /bin/bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            start_section "Idle Alpha"
+            end_section
+            start_section "Active Beta"
+            note_activity
+            echo "  row output"
+            end_section
+        ' > /dev/null 2>&1
+
+    raw_content="$(cat "$raw")"
+    # Idle header painted, then the next header overwrites its line in place.
+    [[ "$raw_content" == *"Idle Alpha"* ]] || return 1
+    [[ "$raw_content" == *$'\033[1A\r\033[2K'*"Active Beta"* ]] || return 1
+    # TTY path must not fall back to the piped-output placeholder row.
+    [[ "$raw_content" != *"Nothing to clean"* ]] || return 1
+}
+
+@test "end_section keeps the Nothing-to-clean fallback for piped output" {
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            start_section "Idle Alpha"
+            end_section
+        '
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Idle Alpha"* ]] || return 1
+    [[ "$output" == *"Nothing to clean"* ]] || return 1
+}

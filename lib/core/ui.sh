@@ -303,6 +303,7 @@ show_menu_option() {
 # Background spinner implementation
 INLINE_SPINNER_PID=""
 INLINE_SPINNER_STOP_FILE=""
+INLINE_SPINNER_MSG_FILE=""
 
 # Keep spinner message on one line and avoid wrapping/noisy output on narrow terminals.
 format_spinner_message() {
@@ -343,13 +344,20 @@ start_inline_spinner() {
         # Create unique stop flag file for this spinner instance
         ensure_mole_temp_root
         INLINE_SPINNER_STOP_FILE="$MOLE_RESOLVED_TMPDIR/mole_spinner_$$_$RANDOM.stop"
+        # Message file lets callers swap the text in place; a stop/start cycle
+        # blanks the line for a frame and reads as flicker.
+        INLINE_SPINNER_MSG_FILE="$MOLE_RESOLVED_TMPDIR/mole_spinner_$$_$RANDOM.msg"
+        printf '%s\n' "$display_message" > "$INLINE_SPINNER_MSG_FILE" 2> /dev/null || true
 
         (
             local stop_file="$INLINE_SPINNER_STOP_FILE"
+            local msg_file="$INLINE_SPINNER_MSG_FILE"
             local chars
             chars="$(mo_spinner_chars)"
             [[ -z "$chars" ]] && chars="|/-\\"
             local i=0
+            local current_message="$display_message"
+            local next_message=""
 
             # Clear line on first output to prevent text remnants from previous messages
             printf "\r\033[2K" >&2 || true
@@ -357,8 +365,19 @@ start_inline_spinner() {
             # Cooperative exit: check for stop file instead of relying on signals
             while [[ ! -f "$stop_file" ]]; do
                 local c="${chars:$((i % ${#chars})):1}"
+                # Re-read the message each frame; erase the line only when the
+                # text changed (a shorter message would leave remnants), and
+                # keep erase + redraw in one write so no blank frame shows.
+                local frame_lead="\r"
+                if [[ -r "$msg_file" ]]; then
+                    IFS= read -r next_message < "$msg_file" 2> /dev/null || next_message=""
+                    if [[ -n "$next_message" && "$next_message" != "$current_message" ]]; then
+                        current_message="$next_message"
+                        frame_lead="\r\033[2K"
+                    fi
+                fi
                 # Output to stderr to avoid interfering with stdout
-                printf "\r${MOLE_SPINNER_PREFIX:-}${BLUE}%s${NC} %s" "$c" "$display_message" >&2 || break
+                printf "${frame_lead}${MOLE_SPINNER_PREFIX:-}${BLUE}%s${NC} %s" "$c" "$current_message" >&2 || break
                 i=$((i + 1))
                 /bin/sleep 0.05
             done
@@ -397,12 +416,31 @@ stop_inline_spinner() {
 
         # Cleanup
         rm -f "$INLINE_SPINNER_STOP_FILE" 2> /dev/null || true
+        rm -f "$INLINE_SPINNER_MSG_FILE" "${INLINE_SPINNER_MSG_FILE}.new" 2> /dev/null || true
         INLINE_SPINNER_PID=""
         INLINE_SPINNER_STOP_FILE=""
+        INLINE_SPINNER_MSG_FILE=""
 
         # Clear the line - use \033[2K to clear entire line, not just to end
         [[ -t 1 ]] && printf "\r\033[2K" >&2 || true
     fi
+}
+
+# Swap the text of a running inline spinner without restarting it.
+# Returns 1 when no spinner is active so callers can fall back to starting one.
+update_inline_spinner_message() {
+    local message="$1"
+    [[ -n "$INLINE_SPINNER_PID" && -n "$INLINE_SPINNER_MSG_FILE" ]] || return 1
+    kill -0 "$INLINE_SPINNER_PID" 2> /dev/null || return 1
+
+    local display_message
+    display_message=$(format_spinner_message "$message")
+
+    # Write-then-rename so the spinner never reads a half-truncated file.
+    local tmp_file="${INLINE_SPINNER_MSG_FILE}.new"
+    printf '%s\n' "$display_message" > "$tmp_file" 2> /dev/null || return 1
+    mv -f "$tmp_file" "$INLINE_SPINNER_MSG_FILE" 2> /dev/null || return 1
+    return 0
 }
 
 # Get spinner characters

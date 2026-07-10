@@ -863,26 +863,31 @@ note_activity() {
     fi
 }
 
-# Start a section spinner with optional message
+# Start a section spinner with optional message. When a spinner is already
+# running, swap its text in place instead of restarting the subprocess: the
+# stop/start cycle blanks the line for a frame and reads as flicker.
 # Usage: start_section_spinner "message"
 start_section_spinner() {
     local message="${1:-Scanning...}"
-    stop_inline_spinner || true
     if [[ -t 1 ]]; then
+        if declare -F update_inline_spinner_message > /dev/null 2>&1 &&
+            update_inline_spinner_message "$message"; then
+            return 0
+        fi
+        stop_inline_spinner || true
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "$message"
+    else
+        stop_inline_spinner || true
     fi
 }
 
 # Stop spinner and clear the line
 # Usage: stop_section_spinner
 stop_section_spinner() {
-    # Always try to stop spinner (function handles empty PID gracefully)
+    # stop_inline_spinner clears the line itself when a spinner was running;
+    # a second unconditional clear here only blanked the row an extra frame
+    # right before result rows printed.
     stop_inline_spinner || true
-    # Always clear line to handle edge cases where spinner output remains
-    # (e.g., spinner was stopped elsewhere but line not cleared)
-    if [[ -t 1 ]]; then
-        printf "\r\033[2K" >&2 || true
-    fi
 }
 
 # Safe terminal line clearing with terminal type detection
@@ -896,11 +901,17 @@ safe_clear_lines() {
     # Note: This forward reference works because functions are parsed before execution
     is_ansi_supported 2> /dev/null || return 1
 
-    # Clear lines one by one (more reliable than multi-line sequences)
+    [[ "$lines" =~ ^[0-9]+$ && "$lines" -gt 0 ]] || return 0
+
+    # Emit the whole erase as one write so the terminal renders it in a
+    # single frame; per-line writes flash intermediate states.
+    local sequence=""
     local i
     for ((i = 0; i < lines; i++)); do
-        printf "\033[1A\r\033[2K" > "$tty_device" 2> /dev/null || return 1
+        sequence+="\033[1A\r\033[2K"
     done
+    # shellcheck disable=SC2059
+    printf "$sequence" > "$tty_device" 2> /dev/null || return 1
 
     return 0
 }
@@ -939,8 +950,8 @@ update_progress_if_needed() {
 
     # Check if enough time has elapsed
     if [[ $((current_time - last_time)) -ge $interval ]]; then
-        # Update the spinner with progress
-        stop_section_spinner
+        # Update the spinner text in place; restarting it here blinked the
+        # line on every progress tick.
         start_section_spinner "Scanning items... $completed/$total"
 
         # Update the last_update_time variable
