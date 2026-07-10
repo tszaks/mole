@@ -662,9 +662,20 @@ build_binary_from_source() {
     return 1
 }
 
+install_staged_binary() {
+    local staged_path="$1"
+    local target_path="$2"
+
+    chmod +x "$staged_path" || return 1
+    xattr -c "$staged_path" 2> /dev/null || true
+    mv -f "$staged_path" "$target_path"
+}
+
 download_binary() {
     local binary_name="$1"
     local target_path="$CONFIG_DIR/bin/${binary_name}-go"
+    local staged_path
+    staged_path=$(mktemp "$CONFIG_DIR/bin/.${binary_name}-go.XXXXXX") || return 1
     local arch
     arch=$(uname -m)
     local arch_suffix="amd64"
@@ -673,30 +684,40 @@ download_binary() {
     fi
 
     if [[ -f "$SOURCE_DIR/bin/${binary_name}-go" ]]; then
-        cp "$SOURCE_DIR/bin/${binary_name}-go" "$target_path"
-        chmod +x "$target_path"
+        if ! cp "$SOURCE_DIR/bin/${binary_name}-go" "$staged_path" ||
+            ! install_staged_binary "$staged_path" "$target_path"; then
+            rm -f "$staged_path"
+            return 1
+        fi
         log_success "Installed local ${binary_name} binary"
         return 0
     elif [[ -f "$SOURCE_DIR/bin/${binary_name}-darwin-${arch_suffix}" ]]; then
-        cp "$SOURCE_DIR/bin/${binary_name}-darwin-${arch_suffix}" "$target_path"
-        chmod +x "$target_path"
+        if ! cp "$SOURCE_DIR/bin/${binary_name}-darwin-${arch_suffix}" "$staged_path" ||
+            ! install_staged_binary "$staged_path" "$target_path"; then
+            rm -f "$staged_path"
+            return 1
+        fi
         log_success "Installed local ${binary_name} binary"
         return 0
     fi
 
     if [[ "${MOLE_EDGE_INSTALL:-}" == "true" ]]; then
-        if build_binary_from_source "$binary_name" "$target_path"; then
+        if build_binary_from_source "$binary_name" "$staged_path" &&
+            install_staged_binary "$staged_path" "$target_path"; then
             return 0
         fi
+        rm -f "$staged_path"
     fi
 
     local version
     version=$(get_source_version)
     if [[ -z "$version" ]]; then
         log_warning "Could not determine version for ${binary_name}, trying local build"
-        if build_binary_from_source "$binary_name" "$target_path"; then
+        if build_binary_from_source "$binary_name" "$staged_path" &&
+            install_staged_binary "$staged_path" "$target_path"; then
             return 0
         fi
+        rm -f "$staged_path"
         return 1
     fi
     local release_tag
@@ -712,22 +733,24 @@ download_binary() {
         echo "Downloading ${binary_name}..."
     fi
 
-    if curl -fsSL --connect-timeout 10 --max-time 60 -o "$target_path" "$url"; then
+    if curl -fsSL --connect-timeout 10 --max-time 60 -o "$staged_path" "$url"; then
         if [[ -t 1 ]]; then stop_line_spinner; fi
-        if verify_release_asset_checksum "$release_tag" "$asset_name" "$target_path"; then
-            chmod +x "$target_path"
-            xattr -c "$target_path" 2> /dev/null || true
+        if verify_release_asset_checksum "$release_tag" "$asset_name" "$staged_path" &&
+            install_staged_binary "$staged_path" "$target_path"; then
             log_success "Downloaded ${binary_name} binary"
             return 0
         fi
-        rm -f "$target_path"
+        rm -f "$staged_path"
         log_warning "Checksum verification failed for ${binary_name}, trying local build"
-        if build_binary_from_source "$binary_name" "$target_path"; then
+        if build_binary_from_source "$binary_name" "$staged_path" &&
+            install_staged_binary "$staged_path" "$target_path"; then
             return 0
         fi
+        rm -f "$staged_path"
         log_error "Failed to install verified ${binary_name} binary"
         return 1
     fi
+    rm -f "$staged_path"
     if [[ -t 1 ]]; then stop_line_spinner; fi
 
     local fallback_tag
@@ -739,24 +762,26 @@ download_binary() {
         else
             echo "Retrying ${binary_name} from ${fallback_tag}..."
         fi
-        if curl -fsSL --connect-timeout 10 --max-time 60 -o "$target_path" "$fallback_url"; then
+        if curl -fsSL --connect-timeout 10 --max-time 60 -o "$staged_path" "$fallback_url"; then
             if [[ -t 1 ]]; then stop_line_spinner; fi
-            if verify_release_asset_checksum "$fallback_tag" "$asset_name" "$target_path"; then
-                chmod +x "$target_path"
-                xattr -c "$target_path" 2> /dev/null || true
+            if verify_release_asset_checksum "$fallback_tag" "$asset_name" "$staged_path" &&
+                install_staged_binary "$staged_path" "$target_path"; then
                 log_success "Downloaded ${binary_name} from ${fallback_tag} (v${version} not yet published)"
                 return 0
             fi
-            rm -f "$target_path"
+            rm -f "$staged_path"
             log_warning "Checksum verification failed for ${binary_name} from ${fallback_tag}"
         fi
+        rm -f "$staged_path"
         if [[ -t 1 ]]; then stop_line_spinner; fi
     fi
 
     log_warning "Could not download ${binary_name} binary, v${version}, trying local build"
-    if build_binary_from_source "$binary_name" "$target_path"; then
+    if build_binary_from_source "$binary_name" "$staged_path" &&
+        install_staged_binary "$staged_path" "$target_path"; then
         return 0
     fi
+    rm -f "$staged_path"
     log_error "Failed to install ${binary_name} binary"
     return 1
 }
@@ -856,12 +881,15 @@ install_files() {
         maybe_sudo /usr/bin/sed -i '' "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"
     fi
 
+    local helper_install_marker="$CONFIG_DIR/.helper_install_incomplete"
+    : > "$helper_install_marker"
     if ! download_binary "analyze"; then
         exit 1
     fi
     if ! download_binary "status"; then
         exit 1
     fi
+    rm -f "$helper_install_marker"
 }
 
 # Verification and PATH hint

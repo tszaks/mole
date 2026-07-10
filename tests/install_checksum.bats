@@ -142,6 +142,61 @@ EOF
 	[[ "$output" == *"WARNING:Checksum verification failed for status, trying local build"* ]]
 }
 
+@test "download_binary preserves the installed helper when verification and rebuild fail (#1193)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+INSTALL_DIR="$HOME/install"
+CONFIG_DIR="$HOME/config"
+SOURCE_DIR="$HOME/source"
+VERBOSE=1
+GREEN='' BLUE='' YELLOW='' RED='' NC=''
+ICON_SUCCESS='ok'
+ICON_ERROR='err'
+
+load_installer_binary_helpers
+
+start_line_spinner() { :; }
+stop_line_spinner() { :; }
+log_success() { echo "SUCCESS:$*"; }
+log_warning() { echo "WARNING:$*"; }
+log_error() { echo "ERROR:$*"; }
+verify_release_asset_checksum() { return 1; }
+get_latest_release_tag() { echo "V1.2.3"; }
+build_binary_from_source() { return 1; }
+curl() {
+    local out=""
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == "-o" ]]; then
+            out="$2"
+            shift 2
+        else
+            shift
+        fi
+    done
+    printf 'unverified-new-binary' > "$out"
+}
+
+printf 'known-good-old-binary' > "$CONFIG_DIR/bin/analyze-go"
+chmod +x "$CONFIG_DIR/bin/analyze-go"
+
+if download_binary "analyze"; then
+    echo "UNEXPECTED_SUCCESS"
+    exit 1
+fi
+
+grep -qx 'known-good-old-binary' "$CONFIG_DIR/bin/analyze-go"
+if find "$CONFIG_DIR/bin" -maxdepth 1 -name '.analyze-go.*' -print -quit | grep -q .; then
+    echo "STAGING_FILE_LEAKED"
+    exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]]
+	[[ "$output" != *"STAGING_FILE_LEAKED"* ]]
+}
+
 @test "download_binary rejects SHA256SUMS without matching asset entry" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail

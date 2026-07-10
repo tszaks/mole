@@ -24,14 +24,16 @@ make_manual_mole_install() {
 	local install_dir="$1"
 	local config_dir="$2"
 	local version="$3"
-	mkdir -p "$install_dir" "$config_dir"
+	mkdir -p "$install_dir" "$config_dir/bin"
 	sed \
 		-e "s|^SCRIPT_DIR=.*|SCRIPT_DIR=\"$config_dir\"|" \
 		-e "s/^VERSION=\".*\"$/VERSION=\"$version\"/" \
 		"$PROJECT_ROOT/mole" > "$install_dir/mole"
 	cp "$PROJECT_ROOT/mo" "$install_dir/mo"
 	cp -R "$PROJECT_ROOT/lib" "$config_dir/lib"
-	chmod +x "$install_dir/mole" "$install_dir/mo"
+	printf '#!/bin/bash\nexit 0\n' > "$config_dir/bin/analyze-go"
+	printf '#!/bin/bash\nexit 0\n' > "$config_dir/bin/status-go"
+	chmod +x "$install_dir/mole" "$install_dir/mo" "$config_dir/bin/analyze-go" "$config_dir/bin/status-go"
 }
 
 make_homebrew_shadow() {
@@ -155,6 +157,41 @@ fi
 exit 1
 SCRIPT
 	chmod +x "$bin_dir/curl"
+}
+
+@test "mo update repairs missing helpers at the current stable version (#1193)" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local installer_version_log="$TEST_ROOT/installer.version"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local current_version
+
+	current_version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "$PROJECT_ROOT/mole" | head -1)"
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "$current_version"
+	make_update_curl_stub "$fake_bin" "$current_version"
+	rm -f "$manual_config/bin/analyze-go"
+	touch "$manual_config/.helper_install_incomplete"
+	: > "$curl_url_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		INSTALLER_VERSION_LOG="$installer_version_log" \
+		"$manual_bin/mo" update
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Mole installation needs repair"* ]]
+	[[ "$output" == *"missing analyze-go"* ]]
+	[ -f "$installer_args_log" ]
+	if grep -q -- "--update" "$installer_args_log"; then
+		return 1
+	fi
+	[ "$(cat "$installer_version_log")" = "V$current_version" ]
 }
 
 @test "mo update targets the invoked manual install, not another Homebrew mole in PATH" {
