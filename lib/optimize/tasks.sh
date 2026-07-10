@@ -68,7 +68,7 @@ run_launchctl_unload() {
 
 needs_permissions_repair() {
     local owner
-    owner=$(stat -f %Su "$HOME" 2> /dev/null || echo "")
+    owner=$($STAT_BSD -f %Su "$HOME" 2> /dev/null || echo "")
     if [[ -n "$owner" && "$owner" != "$USER" ]]; then
         return 0
     fi

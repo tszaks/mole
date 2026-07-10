@@ -1335,15 +1335,6 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-stat() {
-    if [[ "$2" == "%Su" ]]; then
-        echo "$USER"
-        return 0
-    fi
-    command stat "$@"
-}
-export -f stat
-
 test() {
     if [[ "$1" == "-e" || "$1" == "-w" ]]; then
         return 0
@@ -1365,14 +1356,8 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-stat() {
-    if [[ "$2" == "%Su" ]]; then
-        echo "root"
-        return 0
-    fi
-    command stat "$@"
-}
-export -f stat
+USER="not-the-home-owner"
+export USER
 
 sudo() {
     if [[ "$1" == "diskutil" && "$2" == "resetUserPermissions" ]]; then

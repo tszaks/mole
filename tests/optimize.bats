@@ -22,12 +22,11 @@ teardown_file() {
 	fi
 }
 
-@test "needs_permissions_repair returns true when home not writable" {
+@test "needs_permissions_repair returns true when home owner differs" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" USER="tester" bash --noprofile --norc <<'EOF'
 set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-stat() { echo "root"; }
-export -f stat
 if needs_permissions_repair; then
     echo "needs"
 fi
@@ -35,6 +34,30 @@ EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"needs"* ]]
+}
+
+@test "needs_permissions_repair ignores PATH-provided GNU stat (#1196)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" USER="$USER" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+stat() {
+    printf '  File: "%s"\n    ID: 10000110000001a Namelen: ? Type: apfs\n' "$HOME"
+    return 1
+}
+export -f stat
+
+if needs_permissions_repair; then
+    echo "needs"
+else
+    echo "optimal"
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"optimal"* ]]
+	[[ "$output" != *"needs"* ]]
 }
 
 @test "is_ac_power detects AC power" {
