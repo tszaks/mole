@@ -347,9 +347,12 @@ EOF
 </plist>
 PLIST
 
-    run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean --dry-run
+    # MOLE_TEST_MODE=1 short-circuits clean into a stub that never reaches
+    # the App leftovers section, so the report assertion needs the real
+    # sections to run. Dry-run keeps this side-effect free.
+    run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 "$PROJECT_ROOT/mole" clean --dry-run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Potential stale login item: com.example.stale.plist"* ]]
+    [[ "$output" == *"Stale login item · com.example.stale.plist"* ]] || return 1
     [ -f "$HOME/Library/LaunchAgents/com.example.stale.plist" ]
 }
 

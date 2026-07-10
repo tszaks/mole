@@ -785,7 +785,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"AI agent worktrees"* ]] || return 1
-    [[ "$output" == *"review only"* ]] || return 1
+    [[ "$output" == *"GB"* ]] || return 1
     [[ "$output" == *".claude/worktrees"* ]] || return 1
     # Report only: the worktree must still exist afterwards.
     [ -d "$HOME/code/proj/.claude/worktrees/wt-one" ]
