@@ -418,7 +418,7 @@ EOF
 }
 
 @test "should_protect_data covers Raycast wildcard variants" {
-    for id in com.raycast.macos com.raycast.shared com.raycast.macos.BrowserExtension; do
+    for id in com.raycast.macos com.raycast.shared com.raycast.macos.BrowserExtension com.raycast-x.macos; do
         result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data '$id' && echo 'protected' || echo 'not-protected'")
         [ "$result" = "protected" ]
     done
