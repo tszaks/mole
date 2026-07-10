@@ -234,7 +234,30 @@ setup() {
     run grep -nE '^[[:space:]]*setsid[[:space:]]*\(' "$PROJECT_ROOT/lib/core/timeout.sh"
     [ "$status" -ne 0 ]
     run grep -nE '^[[:space:]]*setpgid[[:space:]]*\(' "$PROJECT_ROOT/lib/core/timeout.sh"
-    [ "$status" -eq 0 ]
+	[ "$status" -eq 0 ]
+}
+
+@test "run_with_timeout: perl fallback keeps tty reads in foreground (#1201)" {
+	if [[ "$(uname -s)" != "Darwin" || ! -x /usr/bin/expect || ! -x /usr/bin/perl ]]; then
+		skip "macOS expect/perl required"
+	fi
+
+	run /usr/bin/expect "$PROJECT_ROOT/tests/timeout_tty_read.exp" "$PROJECT_ROOT"
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"READ:typed-value"* ]]
+}
+
+@test "run_with_timeout: perl fallback restores tty after timeout (#1201)" {
+	if [[ "$(uname -s)" != "Darwin" || ! -x /usr/bin/expect || ! -x /usr/bin/perl ]]; then
+		skip "macOS expect/perl required"
+	fi
+
+	run /usr/bin/expect "$PROJECT_ROOT/tests/timeout_tty_restore.exp" "$PROJECT_ROOT"
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"TIMEOUT:124"* ]]
+	[[ "$output" == *"READ-AFTER:typed-after"* ]]
 }
 
 @test "run_with_timeout: shell fallback preserves caller INT trap" {

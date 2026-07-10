@@ -155,11 +155,18 @@ run_with_timeout() {
         "$MO_TIMEOUT_PERL_BIN" -e '
             use strict;
             use warnings;
-            use POSIX qw(:sys_wait_h setpgid);
+            use POSIX qw(:sys_wait_h setpgid tcgetpgrp tcsetpgrp);
             use Time::HiRes qw(time sleep);
 
             my $duration = 0 + shift @ARGV;
             $duration = 1 if $duration <= 0;
+
+            my $tty_fd = -t STDIN ? fileno(STDIN) : undef;
+            my $original_pgrp;
+            if (defined $tty_fd) {
+                $original_pgrp = tcgetpgrp($tty_fd);
+                undef $original_pgrp if !defined $original_pgrp || $original_pgrp < 0;
+            }
 
             my $pid = fork();
             defined $pid or exit 125;
@@ -176,16 +183,38 @@ run_with_timeout() {
                 exit 127;
             }
 
+            # The child is a separate process group so timeout cleanup can kill
+            # its descendants. A tty only permits its foreground process group
+            # to read, however, so hand the terminal to the child while it runs.
+            # Without this, nested sudo prints Password: and then stops on
+            # SIGTTIN until the timeout expires (issue #1201).
+            setpgid($pid, $pid);
+            my $tty_handed_off = 0;
+            if (defined $tty_fd && defined $original_pgrp) {
+                local $SIG{TTOU} = "IGNORE";
+                $tty_handed_off = tcsetpgrp($tty_fd, $pid) == 0 ? 1 : 0;
+                kill "CONT", -$pid if $tty_handed_off;
+            }
+
+            my $restore_tty = sub {
+                return unless $tty_handed_off && defined $tty_fd && defined $original_pgrp;
+                local $SIG{TTOU} = "IGNORE";
+                tcsetpgrp($tty_fd, $original_pgrp);
+                $tty_handed_off = 0;
+            };
+
             my $deadline = time() + $duration;
 
             while (1) {
                 my $result = waitpid($pid, WNOHANG);
                 if ($result == $pid) {
-                    if (WIFEXITED($?)) {
-                        exit WEXITSTATUS($?);
+                    my $status = $?;
+                    $restore_tty->();
+                    if (WIFEXITED($status)) {
+                        exit WEXITSTATUS($status);
                     }
-                    if (WIFSIGNALED($?)) {
-                        exit 128 + WTERMSIG($?);
+                    if (WIFSIGNALED($status)) {
+                        exit 128 + WTERMSIG($status);
                     }
                     exit 1;
                 }
@@ -197,6 +226,7 @@ run_with_timeout() {
                     for (1 .. 6) {
                         $result = waitpid($pid, WNOHANG);
                         if ($result == $pid) {
+                            $restore_tty->();
                             exit 124;
                         }
                         sleep 0.25;
@@ -204,6 +234,7 @@ run_with_timeout() {
 
                     kill "KILL", -$pid;
                     waitpid($pid, 0);
+                    $restore_tty->();
                     exit 124;
                 }
 
