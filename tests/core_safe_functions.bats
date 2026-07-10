@@ -625,7 +625,19 @@ SCRIPT
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
         MO_NO_OPLOG=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
 
-    [ "$status" -eq 0 ]
+    # This test is environment-sensitive (errexit active during the call); on
+    # failure surface the exit status, captured output, and an xtrace replay
+    # so CI logs show where the inner script died instead of a bare rc check.
+    if [ "$status" -ne 0 ]; then
+        echo "inner script exit status: $status"
+        echo "--- captured output ---"
+        echo "$output"
+        echo "--- xtrace replay (tail) ---"
+        env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+            MO_NO_OPLOG=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+            bash --noprofile --norc -x "$script" 2>&1 | tail -60 || true
+        return 1
+    fi
     [[ "$output" == *"SURVIVED_SET_E"* ]] || return 1
     [[ "$output" == *"A_REMOVED"* ]] || return 1
 }
