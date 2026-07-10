@@ -306,6 +306,26 @@ is_safe_project_artifact() {
     return 0
 }
 
+# Revalidate a selected artifact against the configured scan roots immediately
+# before deletion. Purge supports explicit roots outside HOME (for example
+# /var/www), so HOME containment is neither sufficient nor correct here.
+is_safe_configured_purge_artifact() {
+    local path="$1"
+
+    [[ -n "$path" && "$path" != "/" && "$path" != "$HOME" ]] || return 1
+    [[ ${#PURGE_SEARCH_PATHS[@]} -gt 0 ]] || return 1
+
+    local search_path
+    for search_path in "${PURGE_SEARCH_PATHS[@]}"; do
+        [[ -n "$search_path" ]] || continue
+        if is_safe_project_artifact "$path" "$search_path"; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Detect if directory is a Rails project root
 is_rails_project_root() {
     local dir="$1"
@@ -1647,7 +1667,8 @@ clean_project_artifacts() {
             size_human=$(bytes_to_human "$((size_kb * 1024))")
         fi
         # Safety checks
-        if [[ -z "$item_path" || "$item_path" == "/" || "$item_path" == "$HOME" || "$item_path" != "$HOME/"* ]]; then
+        if ! is_safe_configured_purge_artifact "$item_path"; then
+            debug_log "Skipping purge target outside configured safe roots: ${item_path:-<empty>}"
             continue
         fi
         if [[ -t 1 ]]; then

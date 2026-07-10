@@ -116,6 +116,22 @@ setup() {
 	[[ "$result" == "ALLOWED" ]]
 }
 
+@test "is_safe_configured_purge_artifact rejects paths outside configured roots" {
+	mkdir -p "$HOME/www/project/node_modules" "$HOME/dev/other/node_modules"
+
+	result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        PURGE_SEARCH_PATHS=('$HOME/www')
+        if is_safe_configured_purge_artifact '$HOME/dev/other/node_modules'; then
+            echo 'UNSAFE'
+        else
+            echo 'BLOCKED'
+        fi
+    ")
+
+	[[ "$result" == "BLOCKED" ]]
+}
+
 @test "compact_purge_scan_path keeps the tail of long purge paths visible" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_SKIP_MAIN=1 bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -944,6 +960,34 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"COUNT=0"* ]]
 	[[ "$output" == *"SIZE=0"* ]]
+}
+
+@test "clean_project_artifacts accepts configured artifacts outside HOME (#1205)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" BATS_TEST_TMPDIR="$BATS_TEST_TMPDIR" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+external_root="$BATS_TEST_TMPDIR/var-www"
+artifact="$external_root/site/node_modules"
+mkdir -p "$artifact" "$HOME/.cache/mole"
+touch "$external_root/site/package.json"
+
+PURGE_SEARCH_PATHS=("$external_root")
+scan_purge_targets() { printf '%s\n' "$artifact" > "$2"; }
+get_dir_size_kb() { echo 1; }
+is_recently_modified() { return 1; }
+safe_remove() {
+    printf 'REMOVE:%s\n' "$1"
+    return 0
+}
+
+export MOLE_DRY_RUN=1
+clean_project_artifacts </dev/null
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"REMOVE:$BATS_TEST_TMPDIR/var-www/site/node_modules"* ]]
 }
 
 @test "clean_project_artifacts: scans and finds artifacts" {
