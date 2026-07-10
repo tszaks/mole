@@ -1186,10 +1186,12 @@ find_app_files() {
             "$HOME/Library/Application Scripts"
             "$HOME/Library/Containers"
         )
+        # Raycast v2 ships as a separate app (bundle id com.raycast-x.macos);
+        # exclude its directories from every v1 "*raycast*" sweep (#1202).
         for dir in "${raycast_dirs[@]}"; do
             [[ -d "$dir" ]] && while IFS= read -r -d '' p; do
                 files_to_clean+=("$p")
-            done < <(command find "$dir" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
+            done < <(command find "$dir" -maxdepth 1 -type d -iname "*raycast*" ! -iname "*raycast-x*" -print0 2> /dev/null)
         done
 
         # Explicit Raycast container directories (hardcoded leftovers)
@@ -1199,13 +1201,13 @@ find_app_files() {
         # Cache (deeper search)
         [[ -d "$HOME/Library/Caches" ]] && while IFS= read -r -d '' p; do
             files_to_clean+=("$p")
-        done < <(command find "$HOME/Library/Caches" -maxdepth 2 -type d -iname "*raycast*" -print0 2> /dev/null)
+        done < <(command find "$HOME/Library/Caches" -maxdepth 2 -type d -iname "*raycast*" ! -iname "*raycast-x*" -print0 2> /dev/null)
 
         # VSCode extension storage
         local vscode_global="$HOME/Library/Application Support/Code/User/globalStorage"
         [[ -d "$vscode_global" ]] && while IFS= read -r -d '' p; do
             files_to_clean+=("$p")
-        done < <(command find "$vscode_global" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
+        done < <(command find "$vscode_global" -maxdepth 1 -type d -iname "*raycast*" ! -iname "*raycast-x*" -print0 2> /dev/null)
     fi
 
     # CrashReporter plists: named AppName_UUID.plist (not subdirectories)
@@ -1449,11 +1451,11 @@ find_app_system_files() {
         done < <(command find /Library/PrivilegedHelperTools -maxdepth 1 -print0 2> /dev/null)
     fi
 
-    # Raycast system-level files
+    # Raycast system-level files (v2 dirs excluded, see find_app_files)
     if [[ "$bundle_id" == "com.raycast.macos" ]]; then
         [[ -d "/Library/Application Support" ]] && while IFS= read -r -d '' p; do
             system_files+=("$p")
-        done < <(command find "/Library/Application Support" -maxdepth 1 -type d -iname "*raycast*" -print0 2> /dev/null)
+        done < <(command find "/Library/Application Support" -maxdepth 1 -type d -iname "*raycast*" ! -iname "*raycast-x*" -print0 2> /dev/null)
     fi
 
     local receipt_files=""

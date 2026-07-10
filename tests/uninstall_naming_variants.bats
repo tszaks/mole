@@ -269,3 +269,24 @@ find_app_files 'invalid_bundle' ''"
 
     [[ "$result" == *".config/zed"* ]] || [[ "$result" == *".local/share/zed"* ]]
 }
+
+@test "find_app_files keeps Raycast v2 data when uninstalling Raycast v1 (#1202)" {
+    # Raycast v2 is a separate app (com.raycast-x.macos); the v1 "*raycast*"
+    # sweeps must not collect any of its directories.
+    mkdir -p "$HOME/Library/Application Support/com.raycast.macos"
+    mkdir -p "$HOME/Library/Application Support/com.raycast-x.macos"
+    mkdir -p "$HOME/Library/Containers/com.raycast.macos"
+    mkdir -p "$HOME/Library/Containers/com.raycast-x.macos"
+    mkdir -p "$HOME/Library/Caches/com.raycast.macos"
+    mkdir -p "$HOME/Library/Caches/Raycast-X"
+    mkdir -p "$HOME/Library/Application Support/Code/User/globalStorage/raycast-x.raycast"
+
+    result=$(find_app_files "com.raycast.macos" "Raycast")
+
+    [[ "$result" == *"Application Support/com.raycast.macos"* ]] || return 1
+    [[ "$result" == *"Containers/com.raycast.macos"* ]] || return 1
+    [[ "$result" == *"Caches/com.raycast.macos"* ]] || return 1
+    [[ "$result" != *"com.raycast-x.macos"* ]] || return 1
+    [[ "$result" != *"Caches/Raycast-X"* ]] || return 1
+    [[ "$result" != *"raycast-x.raycast"* ]] || return 1
+}
