@@ -587,9 +587,14 @@ SCRIPT
 
     cat > "$script" <<'SCRIPT'
 set -euo pipefail
+# Diagnostic breadcrumbs: this test fails only on some CI images, so record
+# which bash runs the script and every mock invocation on a side channel.
+printf 'DIAG_BASH:%s (%s)\n' "$BASH_VERSION" "$(command -v bash || true)"
 source "$PROJECT_ROOT/lib/core/common.sh"
+echo "DIAG_SOURCED"
 
 sudo() {
+    printf 'MOCK_CALL:%s\n' "$*" >> "$TARGET_DIR/mock.trace" || true
     if [[ "${1:-}" != "-n" ]]; then
         echo "INTERACTIVE_SUDO:$*" >&2
         return 99
@@ -614,6 +619,7 @@ sudo() {
 }
 export -f sudo
 
+echo "DIAG_MOCK_READY"
 safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
 # Reaching this line proves the disabled-oplog branch did not trip set -e.
 echo "SURVIVED_SET_E"
@@ -632,6 +638,8 @@ SCRIPT
         echo "inner script exit status: $status"
         echo "--- captured output ---"
         echo "$output"
+        echo "--- mock call trace ---"
+        cat "$target_dir/mock.trace" 2> /dev/null || echo "(no mock trace)"
         echo "--- xtrace replay (tail) ---"
         env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
             MO_NO_OPLOG=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
