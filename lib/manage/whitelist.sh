@@ -93,6 +93,7 @@ VS Code runtime cache|$HOME/Library/Application Support/Code/Cache/*|ide_cache
 VS Code extension and update cache|$HOME/Library/Application Support/Code/CachedData/*|ide_cache
 VS Code system cache (Cursor, VSCodium)|$HOME/Library/Caches/com.microsoft.VSCode/*|ide_cache
 Cursor editor cache|$HOME/Library/Caches/com.todesktop.230313mzl4w4u92/*|ide_cache
+LM Studio app cache|$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache
 Bazel build cache|$HOME/.cache/bazel/*|compiler_cache
 Go build cache|$HOME/Library/Caches/go-build/*|compiler_cache
 Go module cache|$HOME/go/pkg/mod/*|compiler_cache

@@ -103,6 +103,18 @@ setup() {
     [ "$status" -ne 0 ]
 }
 
+@test "whitelist inventory exposes LM Studio app cache" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+get_all_cache_items
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"LM Studio app cache|\$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache"* ]]
+    [[ "$output" != *".cache/lm-studio"* ]]
+}
+
 @test "mo clean --whitelist persists selections" {
     whitelist_file="$HOME/.config/mole/whitelist"
     mkdir -p "$(dirname "$whitelist_file")"
