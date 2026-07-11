@@ -646,6 +646,62 @@ EOF
     [[ "$raw_content" != *"Nothing to clean"* ]] || return 1
 }
 
+@test "log_success rows mark section activity so headers keep their blank separator" {
+    if ! /usr/bin/script -q /dev/null /bin/true > /dev/null 2>&1; then
+        skip "script cannot allocate a TTY in this environment"
+    fi
+
+    raw="$HOME/section-log-activity.raw"
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        MOLE_TEST_NO_AUTH=1 TERM=xterm-256color \
+        /usr/bin/script -q "$raw" /bin/bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            start_section "System"
+            log_success "System crash reports"
+            end_section
+            start_section "User essentials"
+            note_activity
+            end_section
+        ' > /dev/null 2>&1
+
+    raw_content="$(cat "$raw")"
+    # The log_success row counts as activity: the section is not idle, so the
+    # next header must not recycle (and eat) the row line.
+    [[ "$raw_content" == *"System crash reports"* ]] || return 1
+    [[ "$raw_content" != *$'\033[1A'* ]] || return 1
+    [[ "$raw_content" != *"Nothing to clean"* ]] || return 1
+}
+
+@test "sections whose rows come only from log_success are not marked idle in pipes" {
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            start_section "System"
+            log_success "System crash reports"
+            end_section
+        '
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"System crash reports"* ]] || return 1
+    [[ "$output" != *"Nothing to clean"* ]] || return 1
+}
+
+@test "log rows do not trigger purge's export-only note_activity override" {
+    export_file="$HOME/purge-log-activity.txt"
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" EXPORT_LIST_FILE="$export_file" \
+        MOLE_SKIP_MAIN=1 MOLE_TEST_NO_AUTH=1 bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/purge.sh"
+            start_section "Project artifacts"
+            log_success "Project cache"
+            end_section
+            [[ ! -s "$EXPORT_LIST_FILE" ]]
+        '
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Project cache"* ]] || return 1
+}
+
 @test "end_section keeps the Nothing-to-clean fallback for piped output" {
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \

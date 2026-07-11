@@ -204,7 +204,7 @@ Wait for the workflow to finish (typically 2 minutes for V1.38.0). The workflow 
 
 ### Apply curated release notes
 
-The curated-notes flow (bilingual format, `gh release edit` instead of `create`, thanks block, and the six-reaction set) is owned by `.claude/skills/release-notes/SKILL.md`. Follow that skill; do not duplicate its format details here. Version, codename, and emoji go only in the release title; the body h1 is just `Mole`.
+The curated-notes flow (bilingual format, `gh release edit` instead of `create`, thanks block, and the six-reaction set) is owned by `.claude/skills/release-notes/SKILL.md`. `.agents/skills/release-notes` is a symlink to that canonical directory for Codex discovery, and its Codex-only invocation policy lives in `agents/openai.yaml`; do not replace the symlink with a copied mirror. Follow that skill; do not duplicate its format details here. Version, codename, and emoji go only in the release title; the body h1 is just `Mole`.
 
 Ritual anchors: before drafting, read the latest stable release body as the hard format template (`gh release view <latest-tag> --json body`); the title takes a codename plus emoji per repo convention (for example `V1.45.0 Quiet 🤫`). After publishing, add all six positive reactions (`+1`, `laugh`, `heart`, `hooray`, `rocket`, `eyes`) with `.claude/skills/release-notes/scripts/post-reactions.sh V<version>` (the script lives inside the skill, not in the top-level `scripts/`), then re-read the release reactions to confirm all six landed.
 

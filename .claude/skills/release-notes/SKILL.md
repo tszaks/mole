@@ -75,7 +75,7 @@ No `---` separators between sections, and no trailing repository link; the publi
 - **No inline PR refs, no inline `@handle` thanks**. PRs and people belong in the dedicated Thanks block only.
 - **English block first, 中文 block second**. Same numbered order in both blocks. Same number of items.
 - **Order items by user-perceived impact, not commit chronology**. Headline change first; internal safety hardening, performance, and bug fixes follow.
-- **Pick icons that match the action, not the category**. A broom (🧹) on insight rows mis-signalled "all of these are safe to delete", which is wrong for iOS Backups, Xcode Archives, and Old Downloads. Eyes (👀) match "look here" without that false promise.
+- **Do not describe overview icons that no longer exist**. Analyze overview rows are text-only because emoji width and baselines vary across terminals. If icons return later, they must not imply that user data such as iOS Backups, Xcode Archives, or Old Downloads is safe to delete.
 - **Verify every command mentioned in the notes actually exists in HEAD**. AGENTS.md cites `mo check / mo doctor` as a case where a removed command nearly shipped as a "feature".
 - **Keep the Mole Mac App cross-link only if it matches the current release style**. Do not turn it into a sales block.
 

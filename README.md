@@ -177,15 +177,16 @@ Use `mo optimize --whitelist` to exclude specific optimizations. Path patterns w
 ```bash
 $ mo analyze
 
-Analyze Disk  ~/Documents  |  Total: 156.8GB
+Analyze Disk  (302.1GB free)
+Select a location to explore:
 
- ▶  1. ███████████████████  48.2%  |  📁 Library                     75.4GB  >6mo
-    2. ██████████░░░░░░░░░  22.1%  |  📁 Downloads                   34.6GB
-    3. ████░░░░░░░░░░░░░░░  14.3%  |  📁 Movies                      22.4GB
-    4. ███░░░░░░░░░░░░░░░░  10.8%  |  📁 Documents                   16.9GB
-    5. ██░░░░░░░░░░░░░░░░░   5.2%  |  📄 backup_2023.zip              8.2GB
+ ▶  1. ████████████████████████  47.9%  |  Home                       75.4GB
+    2. ███████████               22.0%  |  User Library               34.6GB
+    3. ███████                  14.2%  |  Applications               22.4GB
+    4. █████                    10.7%  |  System Library             16.9GB
+    5. ███                       5.2%  |  Old Downloads (90d+)       8.2GB  >3mo
 
-  ↑↓←→ Navigate  |  O Open  |  F Show  |  ⌫ Delete  |  L Large files  |  Q Quit
+↑↓→ | Enter | R Refresh | O Open | P Preview | F File | Esc/Q Quit
 ```
 
 ### Live System Status
