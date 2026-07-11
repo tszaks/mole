@@ -702,6 +702,34 @@ EOF
     [[ "$output" == *"Project cache"* ]] || return 1
 }
 
+@test "root preview staging is published through the invoking-user boundary" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+
+calls="$HOME/preview-user-boundary.calls"
+CLEAN_PREVIEW_STAGING_FILE="$HOME/root-owned-preview.stage"
+CLEAN_PREVIEW_FINAL_FILE="$HOME/user-config/clean-list.txt"
+EXPORT_LIST_FILE="$CLEAN_PREVIEW_STAGING_FILE"
+SUDO_USER="preview-user"
+printf 'preview content\n' > "$CLEAN_PREVIEW_STAGING_FILE"
+
+run_clean_preview_as_invoking_user() {
+    printf '%s\n' "$*" >> "$calls"
+    "$@"
+}
+
+publish_clean_preview_file
+[[ "$EXPORT_LIST_FILE" == "$CLEAN_PREVIEW_FINAL_FILE" ]]
+[[ "$(cat "$CLEAN_PREVIEW_FINAL_FILE")" == "preview content" ]]
+grep -q '^/bin/mkdir -p ' "$calls"
+grep -q '^/usr/bin/tee ' "$calls"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "end_section keeps the Nothing-to-clean fallback for piped output" {
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \

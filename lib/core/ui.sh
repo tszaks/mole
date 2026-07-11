@@ -304,6 +304,27 @@ show_menu_option() {
 INLINE_SPINNER_PID=""
 INLINE_SPINNER_STOP_FILE=""
 INLINE_SPINNER_MSG_FILE=""
+INLINE_SPINNER_CONTROL_DIR=""
+
+create_inline_spinner_control_dir() {
+    local control_root=""
+
+    if [[ "$(id -u 2> /dev/null || echo 1)" == "0" ]]; then
+        # A whole-command sudo run must not place root-written control files in
+        # the invoking user's temp tree. /private/var/root is root-owned on
+        # macOS and cannot be renamed or populated by the invoking user.
+        control_root="/private/var/root"
+        [[ -d "$control_root" && ! -L "$control_root" ]] || control_root="/var/root"
+    else
+        ensure_mole_temp_root
+        control_root="$MOLE_RESOLVED_TMPDIR"
+    fi
+
+    [[ -d "$control_root" && ! -L "$control_root" ]] || return 1
+    INLINE_SPINNER_CONTROL_DIR=$(umask 077 && mktemp -d "$control_root/.mole-spinner.XXXXXX") || return 1
+    [[ -d "$INLINE_SPINNER_CONTROL_DIR" && ! -L "$INLINE_SPINNER_CONTROL_DIR" && -O "$INLINE_SPINNER_CONTROL_DIR" ]] || return 1
+    MOLE_TEMP_DIRS+=("$INLINE_SPINNER_CONTROL_DIR")
+}
 
 # Keep spinner message on one line and avoid wrapping/noisy output on narrow terminals.
 format_spinner_message() {
@@ -341,13 +362,23 @@ start_inline_spinner() {
     display_message=$(format_spinner_message "$message")
 
     if [[ -t 1 ]]; then
-        # Create unique stop flag file for this spinner instance
-        ensure_mole_temp_root
-        INLINE_SPINNER_STOP_FILE="$MOLE_RESOLVED_TMPDIR/mole_spinner_$$_$RANDOM.stop"
+        if ! create_inline_spinner_control_dir; then
+            echo -n "  ${BLUE}|${NC} $display_message" >&2 || true
+            return 0
+        fi
+
+        INLINE_SPINNER_STOP_FILE="$INLINE_SPINNER_CONTROL_DIR/stop"
         # Message file lets callers swap the text in place; a stop/start cycle
         # blanks the line for a frame and reads as flicker.
-        INLINE_SPINNER_MSG_FILE="$MOLE_RESOLVED_TMPDIR/mole_spinner_$$_$RANDOM.msg"
-        printf '%s\n' "$display_message" > "$INLINE_SPINNER_MSG_FILE" 2> /dev/null || true
+        INLINE_SPINNER_MSG_FILE="$INLINE_SPINNER_CONTROL_DIR/message"
+        if ! (umask 077 && set -C && printf '%s\n' "$display_message" > "$INLINE_SPINNER_MSG_FILE") 2> /dev/null; then
+            rmdir "$INLINE_SPINNER_CONTROL_DIR" 2> /dev/null || true
+            INLINE_SPINNER_CONTROL_DIR=""
+            INLINE_SPINNER_STOP_FILE=""
+            INLINE_SPINNER_MSG_FILE=""
+            echo -n "  ${BLUE}|${NC} $display_message" >&2 || true
+            return 0
+        fi
 
         (
             local stop_file="$INLINE_SPINNER_STOP_FILE"
@@ -369,7 +400,7 @@ start_inline_spinner() {
                 # text changed (a shorter message would leave remnants), and
                 # keep erase + redraw in one write so no blank frame shows.
                 local frame_lead="\r"
-                if [[ -r "$msg_file" ]]; then
+                if [[ -f "$msg_file" && ! -L "$msg_file" && -r "$msg_file" ]]; then
                     IFS= read -r next_message < "$msg_file" 2> /dev/null || next_message=""
                     if [[ -n "$next_message" && "$next_message" != "$current_message" ]]; then
                         current_message="$next_message"
@@ -416,10 +447,14 @@ stop_inline_spinner() {
 
         # Cleanup
         rm -f "$INLINE_SPINNER_STOP_FILE" 2> /dev/null || true
-        rm -f "$INLINE_SPINNER_MSG_FILE" "${INLINE_SPINNER_MSG_FILE}.new" 2> /dev/null || true
+        rm -f "$INLINE_SPINNER_MSG_FILE" 2> /dev/null || true
+        if [[ -n "$INLINE_SPINNER_CONTROL_DIR" ]]; then
+            rmdir "$INLINE_SPINNER_CONTROL_DIR" 2> /dev/null || true
+        fi
         INLINE_SPINNER_PID=""
         INLINE_SPINNER_STOP_FILE=""
         INLINE_SPINNER_MSG_FILE=""
+        INLINE_SPINNER_CONTROL_DIR=""
 
         # Clear the line - use \033[2K to clear entire line, not just to end
         [[ -t 1 ]] && printf "\r\033[2K" >&2 || true
@@ -430,16 +465,21 @@ stop_inline_spinner() {
 # Returns 1 when no spinner is active so callers can fall back to starting one.
 update_inline_spinner_message() {
     local message="$1"
-    [[ -n "$INLINE_SPINNER_PID" && -n "$INLINE_SPINNER_MSG_FILE" ]] || return 1
+    [[ -n "$INLINE_SPINNER_PID" && -n "$INLINE_SPINNER_MSG_FILE" && -n "$INLINE_SPINNER_CONTROL_DIR" ]] || return 1
     kill -0 "$INLINE_SPINNER_PID" 2> /dev/null || return 1
+    [[ -f "$INLINE_SPINNER_MSG_FILE" && ! -L "$INLINE_SPINNER_MSG_FILE" && -O "$INLINE_SPINNER_MSG_FILE" ]] || return 1
 
     local display_message
     display_message=$(format_spinner_message "$message")
 
     # Write-then-rename so the spinner never reads a half-truncated file.
-    local tmp_file="${INLINE_SPINNER_MSG_FILE}.new"
+    local tmp_file
+    tmp_file=$(umask 077 && mktemp "$INLINE_SPINNER_CONTROL_DIR/message.XXXXXX") || return 1
     printf '%s\n' "$display_message" > "$tmp_file" 2> /dev/null || return 1
-    mv -f "$tmp_file" "$INLINE_SPINNER_MSG_FILE" 2> /dev/null || return 1
+    if ! mv -f "$tmp_file" "$INLINE_SPINNER_MSG_FILE" 2> /dev/null; then
+        rm -f "$tmp_file" 2> /dev/null || true
+        return 1
+    fi
     return 0
 }
 

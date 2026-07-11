@@ -555,6 +555,9 @@ EOF
             source "$PROJECT_ROOT/lib/core/common.sh"
             MOLE_SPINNER_PREFIX="  " start_inline_spinner "Phase one..."
             pid_before="$INLINE_SPINNER_PID"
+            control_dir="$INLINE_SPINNER_CONTROL_DIR"
+            control_mode=$(stat -f%Lp "$control_dir")
+            [[ "$INLINE_SPINNER_MSG_FILE" == "$control_dir/message" && "$control_mode" == "700" ]] && echo "CONTROL_PRIVATE"
             /bin/sleep 0.2
             update_inline_spinner_message "Phase two..." || echo "UPDATE_FAILED"
             /bin/sleep 0.2
@@ -568,6 +571,7 @@ EOF
     [[ "$raw_content" == *"Phase two..."* ]] || return 1
     [[ "$raw_content" != *"UPDATE_FAILED"* ]] || return 1
     [[ "$raw_content" == *"PID_STABLE"* ]] || return 1
+    [[ "$raw_content" == *"CONTROL_PRIVATE"* ]] || return 1
 }
 
 @test "update_progress_if_needed updates spinner text without restarting it" {

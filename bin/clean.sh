@@ -29,13 +29,15 @@ EXTERNAL_VOLUME_TARGET=""
 IS_M_SERIES=$([[ "$(uname -m)" == "arm64" ]] && echo "true" || echo "false")
 
 # Whitelist and preview belong to the invoking user even when the whole
-# command runs as root: stock macOS sudo keeps HOME, but sudo -H and root
-# shells reset it to /var/root, which would silently load an empty whitelist
-# and hide the preview file from the user. See #1210.
+# command runs as root. Root dry-runs stage preview content in a root-owned
+# file and publish it through an invoking-user process so user-controlled
+# symlinks are never opened for writing with root privileges. See #1210.
 MOLE_USER_HOME="$(get_invoking_home)"
 [[ -n "$MOLE_USER_HOME" ]] || MOLE_USER_HOME="$HOME"
 
-EXPORT_LIST_FILE="$MOLE_USER_HOME/.config/mole/clean-list.txt"
+CLEAN_PREVIEW_FINAL_FILE="$MOLE_USER_HOME/.config/mole/clean-list.txt"
+CLEAN_PREVIEW_STAGING_FILE=""
+EXPORT_LIST_FILE="$CLEAN_PREVIEW_FINAL_FILE"
 CURRENT_SECTION=""
 readonly PROTECTED_SW_DOMAINS=(
     # Web editors
@@ -133,6 +135,45 @@ expand_whitelist_patterns() {
     fi
 }
 expand_whitelist_patterns
+
+prepare_clean_preview_file() {
+    EXPORT_LIST_FILE="$CLEAN_PREVIEW_FINAL_FILE"
+    CLEAN_PREVIEW_STAGING_FILE=""
+
+    if is_root_user && [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+        local root_temp_dir="/private/var/root"
+        [[ -d "$root_temp_dir" && ! -L "$root_temp_dir" && -O "$root_temp_dir" ]] || root_temp_dir="/var/root"
+        [[ -d "$root_temp_dir" && ! -L "$root_temp_dir" && -O "$root_temp_dir" ]] || return 1
+
+        CLEAN_PREVIEW_STAGING_FILE=$(umask 077 && mktemp "$root_temp_dir/.mole-clean-preview.XXXXXX") || return 1
+        [[ -f "$CLEAN_PREVIEW_STAGING_FILE" && ! -L "$CLEAN_PREVIEW_STAGING_FILE" && -O "$CLEAN_PREVIEW_STAGING_FILE" ]] || return 1
+        MOLE_TEMP_FILES+=("$CLEAN_PREVIEW_STAGING_FILE")
+        EXPORT_LIST_FILE="$CLEAN_PREVIEW_STAGING_FILE"
+    else
+        ensure_user_file "$EXPORT_LIST_FILE"
+    fi
+}
+
+run_clean_preview_as_invoking_user() {
+    /usr/bin/sudo -u "$SUDO_USER" -- "$@"
+}
+
+publish_clean_preview_file() {
+    [[ -n "$CLEAN_PREVIEW_STAGING_FILE" ]] || return 0
+    [[ -f "$CLEAN_PREVIEW_STAGING_FILE" && ! -L "$CLEAN_PREVIEW_STAGING_FILE" && -O "$CLEAN_PREVIEW_STAGING_FILE" ]] || return 1
+    [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]] || return 1
+
+    local final_dir
+    final_dir=$(dirname "$CLEAN_PREVIEW_FINAL_FILE")
+    run_clean_preview_as_invoking_user /bin/mkdir -p "$final_dir" 2> /dev/null || return 1
+    if ! /bin/cat "$CLEAN_PREVIEW_STAGING_FILE" |
+        run_clean_preview_as_invoking_user /usr/bin/tee "$CLEAN_PREVIEW_FINAL_FILE" > /dev/null; then
+        return 1
+    fi
+
+    EXPORT_LIST_FILE="$CLEAN_PREVIEW_FINAL_FILE"
+    return 0
+}
 
 if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
     for entry in "${WHITELIST_PATTERNS[@]}"; do
@@ -1053,7 +1094,10 @@ start_cleanup() {
         echo -e "${YELLOW}Dry Run Mode${NC}, Preview only, no deletions"
         echo ""
 
-        ensure_user_file "$EXPORT_LIST_FILE"
+        prepare_clean_preview_file || {
+            echo -e "${YELLOW}${ICON_WARNING}${NC} Unable to create a safe cleanup preview file" >&2
+            return 1
+        }
         cat > "$EXPORT_LIST_FILE" << EOF
 # Mole Cleanup Preview - $(date '+%Y-%m-%d %H:%M:%S')
 #
@@ -1403,8 +1447,6 @@ perform_cleanup() {
                 echo "# Categories: $total_items"
             } >> "$EXPORT_LIST_FILE"
 
-            summary_details+=("Detailed file list: ${GRAY}$EXPORT_LIST_FILE${NC}")
-            summary_details+=("Use ${GRAY}mo clean --whitelist${NC} to add protection rules")
         else
             local summary_line="Tracked cleanup: ${GREEN}${freed_size_human}${NC}"
 
@@ -1448,6 +1490,17 @@ perform_cleanup() {
         while IFS= read -r free_space_line; do
             summary_details+=("$free_space_line")
         done < <(emit_free_space_summary "$initial_free_space_kb")
+    fi
+
+    if [[ "$DRY_RUN" == "true" && $total_size_cleaned -gt 0 ]]; then
+        if publish_clean_preview_file; then
+            summary_details+=("Detailed file list: ${GRAY}$CLEAN_PREVIEW_FINAL_FILE${NC}")
+            summary_details+=("Use ${GRAY}mo clean --whitelist${NC} to add protection rules")
+        else
+            summary_details+=("Cleanup preview file could not be written safely")
+        fi
+    elif [[ "$DRY_RUN" == "true" ]]; then
+        publish_clean_preview_file || true
     fi
 
     if [[ $had_errexit -eq 1 ]]; then

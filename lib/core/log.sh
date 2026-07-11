@@ -96,11 +96,11 @@ get_timestamp() {
 # this, a section whose rows come only from log_* helpers is misdetected as
 # idle and end_section/start_section reclaim lines that hold real output.
 _log_mark_section_activity() {
-    # The purge override writes note_activity calls to its export file instead
-    # of tracking UI rows. Only clean/base sections set TRACK_SECTION, so this
-    # guard keeps generic logging out of purge's command-specific side effect.
-    if [[ "${TRACK_SECTION:-0}" == "1" ]] && declare -F note_activity > /dev/null 2>&1; then
-        note_activity
+    # Purge deliberately gives note_activity a different export side effect.
+    # Update the stable section state directly so logging never dispatches to
+    # a source-order-selected command implementation.
+    if [[ "${TRACK_SECTION:-0}" == "1" ]]; then
+        SECTION_ACTIVITY=1
     fi
 }
 

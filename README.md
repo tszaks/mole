@@ -182,9 +182,9 @@ Select a location to explore:
 
  ▶  1. ████████████████████████  47.9%  |  Home                       75.4GB
     2. ███████████               22.0%  |  User Library               34.6GB
-    3. ███████                  14.2%  |  Applications               22.4GB
-    4. █████                    10.7%  |  System Library             16.9GB
-    5. ███                       5.2%  |  Old Downloads (90d+)       8.2GB  >3mo
+    3. ███████                   14.2%  |  Applications               22.4GB
+    4. █████                     10.7%  |  System Library             16.9GB
+    5. ███                        5.2%  |  Old Downloads (90d+)       8.2GB  >3mo
 
 ↑↓→ | Enter | R Refresh | O Open | P Preview | F File | Esc/Q Quit
 ```

@@ -42,28 +42,6 @@ run_hook() {
     [ "$(cat "$FORMAT_LOG")" = "goimports:-w -local github.com/tw93/mole $TEST_REPO/cmd/demo/main.go" ]
 }
 
-@test "Codex apply_patch payload formats added updated and moved destinations" {
-    patch=$(printf '%s\n' \
-        '*** Begin Patch' \
-        '*** Update File: cmd/demo/main.go' \
-        '*** Add File: scripts/demo.sh' \
-        '*** Delete File: scripts/removed.sh' \
-        '*** Move to: cmd/demo/main.go' \
-        '*** End Patch')
-    payload=$(jq -nc \
-        --arg cwd "$TEST_REPO" \
-        --arg command "$patch" \
-        '{cwd: $cwd, tool_input: {command: $command}}')
-
-    run_hook "$payload"
-
-    [ "$status" -eq 0 ]
-    [ "$(grep -c '^goimports:' "$FORMAT_LOG")" -eq 2 ]
-    [ "$(grep -c '^shfmt:' "$FORMAT_LOG")" -eq 1 ]
-    run grep -q 'removed.sh' "$FORMAT_LOG"
-    [ "$status" -ne 0 ]
-}
-
 @test "hook refuses files and symlink targets outside the repository" {
     outside="$BATS_TEST_TMPDIR/outside.go"
     printf 'package outside\n' > "$outside"

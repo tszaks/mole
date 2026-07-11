@@ -106,7 +106,8 @@ jobs:
           draft: false
           prerelease: false
 
-  update-formula:
+  update-personal-tap:
+    name: Update Personal Tap
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: release
@@ -161,6 +162,24 @@ jobs:
           git add Formula/mole.rb
           git commit -m "mole ${VERSION}" -m "Automated release via GitHub Actions"
           git push origin HEAD:main
+
+  update-homebrew-core:
+    name: Update Homebrew Core
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Extract version from tag
+        id: tag_version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#V}
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing version: $VERSION (tag: $TAG)"
 
       - name: Update Homebrew formula (Official Core)
         id: official_core
@@ -299,8 +318,7 @@ jobs:
             exit 1
           fi
 
-          echo "✓ Homebrew formulae updated successfully"
+          echo "✓ Homebrew Core formula update verified"
           echo "  Version: ${{ steps.tag_version.outputs.version }}"
           echo "  Tag: ${{ steps.tag_version.outputs.tag }}"
-          echo "  Personal tap: tw93/homebrew-tap"
           echo "  Official core: ${{ steps.official_core.outputs.pr_url }}"

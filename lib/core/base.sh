@@ -676,6 +676,31 @@ ensure_mole_temp_registry_file() {
 }
 
 ensure_mole_temp_root() {
+    if is_root_user; then
+        # Whole-command sudo must not reuse TMPDIR or the invoking user's cache
+        # for root-written registries and command output. Keep all root temp
+        # state below root's private home so a lower-trust user cannot rename a
+        # checked file between validation and append/read operations.
+        local root_home="/private/var/root"
+        [[ -d "$root_home" && ! -L "$root_home" && -O "$root_home" ]] || root_home="/var/root"
+        [[ -d "$root_home" && ! -L "$root_home" && -O "$root_home" ]] || return 1
+
+        local root_temp="$root_home/.cache/mole/tmp"
+        mkdir -p "$root_temp" 2> /dev/null || return 1
+        chmod 700 "$root_home/.cache" "$root_home/.cache/mole" "$root_temp" 2> /dev/null || true
+        root_temp=$(cd -P "$root_temp" 2> /dev/null && pwd) || return 1
+        [[ "$root_temp" == "$root_home/.cache/mole/tmp" && -d "$root_temp" && ! -L "$root_temp" && -O "$root_temp" ]] || return 1
+
+        MOLE_RESOLVED_TMPDIR="$root_temp"
+        export MOLE_RESOLVED_TMPDIR
+        case "${MOLE_TEMP_REGISTRY_FILE:-}" in
+            "$root_temp"/mole.registry.*) ;;
+            *) unset MOLE_TEMP_REGISTRY_FILE ;;
+        esac
+        initialize_mole_temp_registry_path || true
+        return 0
+    fi
+
     if [[ -n "${MOLE_RESOLVED_TMPDIR:-}" ]]; then
         initialize_mole_temp_registry_path || true
         return 0

@@ -622,6 +622,46 @@ EOF
     [[ "$output" != *"Homebrew links · restored"* ]]
 }
 
+@test "restore_homebrew_active_links rejects paths outside Homebrew bin roots" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/brew.sh"
+
+TEST_BREW_PREFIX="$HOME/homebrew-forged"
+TEST_BREW_CELLAR="$TEST_BREW_PREFIX/Cellar"
+target="$TEST_BREW_CELLAR/node/26.4.0/bin/node"
+forged_link="$HOME/outside-homebrew/node"
+mkdir -p "$TEST_BREW_PREFIX/bin" "$(dirname "$target")" "$(dirname "$forged_link")"
+printf '#!/bin/sh\n' > "$target"
+
+run_with_timeout() {
+    shift
+    "$@"
+}
+brew() {
+    case "$*" in
+        --prefix) printf '%s\n' "$TEST_BREW_PREFIX" ;;
+        --cellar) printf '%s\n' "$TEST_BREW_CELLAR" ;;
+        *) return 0 ;;
+    esac
+}
+note_activity() { :; }
+
+BREW_ACTIVE_PREFIX="$TEST_BREW_PREFIX"
+BREW_ACTIVE_CELLAR="$TEST_BREW_CELLAR"
+BREW_ACTIVE_LINK_PATHS=("$forged_link")
+BREW_ACTIVE_LINK_TARGETS=("$target")
+BREW_ACTIVE_RESOLVED_TARGETS=("$target")
+
+restore_homebrew_active_links
+[[ ! -e "$forged_link" && ! -L "$forged_link" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Homebrew links · restored"* ]]
+}
+
 @test "clean_homebrew dry-run shows brew autoremove preview without removing formulae" {
     run bash --noprofile --norc << 'EOF'
 set -euo pipefail

@@ -1,7 +1,6 @@
 #!/bin/bash
-# Format files changed by Claude Code or Codex with the project's configured
-# formatters. Stdin is the tool hook payload (JSON). Failures must not block
-# the edit.
+# Format files changed by Claude Code with the project's configured formatters.
+# Stdin is the tool hook payload (JSON). Failures must not block the edit.
 
 set -u
 
@@ -53,27 +52,7 @@ format_repo_file() {
     esac
 }
 
-# Claude Edit/Write/MultiEdit sends one file_path. Codex apply_patch sends the
-# whole patch in tool_input.command, so collect every added, updated, or moved
-# destination from the patch header.
 FILE=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.file_path // empty' 2> /dev/null || true)
-if [[ -n "$FILE" ]]; then
-    format_repo_file "$FILE"
-    exit 0
-fi
-
-PATCH=$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.command // empty' 2> /dev/null || true)
-[[ -n "$PATCH" ]] || exit 0
-while IFS= read -r line; do
-    case "$line" in
-        '*** Update File: '*) FILE="${line#'*** Update File: '}" ;;
-        '*** Add File: '*) FILE="${line#'*** Add File: '}" ;;
-        '*** Move to: '*) FILE="${line#'*** Move to: '}" ;;
-        *) continue ;;
-    esac
-    format_repo_file "$FILE"
-done <<EOF
-$PATCH
-EOF
+[[ -n "$FILE" ]] && format_repo_file "$FILE"
 
 exit 0

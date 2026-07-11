@@ -3,12 +3,12 @@
 package main
 
 import (
+	"context"
 	"encoding/gob"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -789,17 +789,15 @@ func TestScanPathConcurrentWarmsChildCachesWithoutRecursiveSpotlight(t *testing.
 		}
 	}
 
-	logPath := filepath.Join(home, "mdfind.log")
-	stubDir := filepath.Join(home, "bin")
-	if err := os.MkdirAll(stubDir, 0o755); err != nil {
-		t.Fatalf("create stub dir: %v", err)
+	originalRunner := spotlightQueryRunner
+	spotlightRoots := []string{}
+	spotlightQueryRunner = func(_ context.Context, queryRoot, _ string) ([]byte, error) {
+		spotlightRoots = append(spotlightRoots, queryRoot)
+		return nil, nil
 	}
-	stubPath := filepath.Join(stubDir, "mdfind")
-	stubScript := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %s\nexit 0\n", strconv.Quote(logPath))
-	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
-		t.Fatalf("write mdfind stub: %v", err)
-	}
-	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Cleanup(func() {
+		spotlightQueryRunner = originalRunner
+	})
 
 	var filesScanned, dirsScanned, bytesScanned int64
 	current := &atomic.Value{}
@@ -809,13 +807,8 @@ func TestScanPathConcurrentWarmsChildCachesWithoutRecursiveSpotlight(t *testing.
 		t.Fatalf("scanPathConcurrent(root): %v", err)
 	}
 
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read mdfind log: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected only root spotlight invocation, got %d lines: %q", len(lines), string(data))
+	if len(spotlightRoots) != 1 || spotlightRoots[0] != root {
+		t.Fatalf("expected only root spotlight invocation, got %q", spotlightRoots)
 	}
 }
 
