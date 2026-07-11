@@ -45,19 +45,10 @@ If the answer is no or unclear, decline the feature, narrow it, or park it until
 
 ## Repository Map
 
-- `mole` - main shell entrypoint.
-- `bin/` - command entry scripts such as clean, analyze, status, uninstall, purge, installer, completion, and touchid.
 - `lib/core/` - shared shell safety, UI, file operations, operation logs, app protection logic, and centralized timeout constants (`timeouts.sh`).
 - `lib/core/app_protection_data.sh` - readonly bundle ID and pattern arrays consumed by `app_protection.sh`. Data only, no logic.
-- `lib/clean/` - cleanup flows.
-- `lib/manage/` - whitelist and purge path management.
-- `lib/optimize/` - optimization tasks.
-- `lib/check/` - health, diagnostics, and dev environment checks.
-- `lib/uninstall/` - app uninstall flows and package-manager removal helpers.
-- `lib/ui/` - reusable menus and app selectors.
 - `cmd/analyze/` - Go disk-analysis TUI. `main.go` is bootstrap only; `model.go` holds types and accessor methods; `update.go` holds the Bubble Tea Update chain.
-- `cmd/status/` - Go status dashboard.
-- `tests/` - Bats and shell test coverage. `tests/fuzz_corpus/` holds property-test corpora consumed by `path_validation_fuzz.bats`.
+- `tests/fuzz_corpus/` holds property-test corpora consumed by `path_validation_fuzz.bats`.
 - `scripts/` - check, test, build, and release helpers. `audit_bundle_drift.sh` backs the monthly bundle audit; per-PR perf is covered by `tests/core_performance.bats`.
 - `docs/SECURITY_DESIGN.md` - design doc for the path validation / app protection / # SAFE annotation contract.
 - `SECURITY_AUDIT.md` - security review notes.
@@ -128,17 +119,6 @@ These files are intentionally large. Do not start by splitting them. Keep edits 
 - `cmd/analyze/update.go` owns the Bubble Tea `Update` chain and message handlers (Init, scanCmd, updateKey, goBack, switchToOverviewMode, enterSelectedDir). This is the largest file in `cmd/analyze/` and the natural landing spot for new key bindings, message types, or navigation behavior. Run `go test ./cmd/analyze`. `cmd/analyze/main.go` is bootstrap only (flag parsing, `main()`, helpers); `cmd/analyze/model.go` holds types and the model struct.
 - `cmd/analyze/analyze_test.go` and `cmd/status/view_test.go` are test hotspots. Add new cases near related behavior; split later only when touching many adjacent cases. Run `go test ./cmd/...`.
 
-## Command Surface
-
-- `mo clean` - deep cleanup and leftovers for apps that are already gone.
-- `mo uninstall` - remove installed apps and related leftovers.
-- `mo optimize` - maintenance and diagnostics, with `--whitelist` support.
-- `mo analyze` / `mo analyse` - Go disk explorer; safer for ad hoc cleanup because it uses Trash routing.
-- `mo status` - live health dashboard and JSON output for automation.
-- `mo purge` - project build artifact cleanup, with configurable scan paths through `mo purge --paths`.
-- `mo installer` - installer-file discovery and cleanup.
-- `mo completion`, `mo touchid`, `mo update`, and `mo remove` manage shell integration, sudo auth convenience, updates, and uninstalling Mole itself.
-
 ## Verification
 
 - Shell changes: run `./scripts/check.sh --format`, then the relevant Bats test or `MOLE_TEST_NO_AUTH=1 ./scripts/test.sh`.
@@ -170,45 +150,9 @@ golangci-lint run ./cmd/...
 
 ## Release
 
-Tag-driven flow. The `release.yml` workflow watches `'V*'` tag pushes (capital `V`), builds amd64 and arm64 binaries on macOS, generates `SHA256SUMS`, attaches build provenance, creates the GitHub Release without notes, then bumps the personal Homebrew tap and opens a Homebrew core PR.
+Tag-driven flow via `release.yml` on capital-`V` tag pushes. The full release runbook (distribution channels, pre-flight checklist, tag/publish commands, curated notes handoff, release-only pitfalls) lives in `.claude/skills/release-flow/SKILL.md`; read it before starting any release-flavored task. Notes formatting stays owned by `.claude/skills/release-notes/SKILL.md`. One rule that always applies: restate which distribution channels a release-flavored run will touch and confirm with the maintainer before acting; channel scope is specified by the maintainer, never inferred.
 
-### Distribution channels
-
-| Channel | What ships | Trigger | Automation |
-|---|---|---|---|
-| Nightly (`mo update --nightly`) | `main` HEAD via `install.sh` | Any commit pushed to `main` | Automatic; no tag or release involved |
-| GitHub stable release | amd64/arm64 binaries + `SHA256SUMS` | Push a capital-`V` tag | `release.yml` builds and creates the release; curated notes are a manual follow-up |
-| Homebrew personal tap (`tw93/homebrew-tap`) | Formula bump | Same `V*` tag workflow | Automatic; do not re-run manually unless the workflow log shows a failure |
-| Homebrew core | Version-bump PR to `Homebrew/homebrew-core` | Same `V*` tag workflow | Automatic PR; merge timing is upstream's |
-
-At the start of any release-flavored task, restate which channels this run will touch and which it will not, and confirm with the maintainer before acting. Channel scope is specified by the maintainer, never inferred.
-
-### Pre-flight checklist
-
-1. `grep '^VERSION=' mole` matches the new version.
-2. `SECURITY_AUDIT.md` opening line reflects the new version and date.
-3. `git status -s` is empty or only contains intentionally staged release work.
-4. `git log origin/main..HEAD --oneline` shows only commits you intend to ship.
-5. `./scripts/check.sh --format` and `MOLE_TEST_NO_AUTH=1 MOLE_TEST_JOBS=2 BATS_FORMATTER=tap ./scripts/test.sh` both exit 0.
-6. `go test ./cmd/...` and `make build` both pass.
-
-### Tag and publish
-
-```bash
-git push origin main
-git tag V<version>          # capital V; release workflow ignores lowercase v
-git push origin V<version>
-```
-
-Wait for the workflow to finish (typically 2 minutes for V1.38.0). The workflow creates the release with assets but `generate_release_notes: false`, so notes must be added in a follow-up step.
-
-### Apply curated release notes
-
-The curated-notes flow (bilingual format, `gh release edit` instead of `create`, thanks block, and the six-reaction set) is owned by `.claude/skills/release-notes/SKILL.md`. `.agents/skills/release-notes` is a symlink to that canonical directory for Codex discovery, and its Codex-only invocation policy lives in `agents/openai.yaml`; do not replace the symlink with a copied mirror. Follow that skill; do not duplicate its format details here. Version, codename, and emoji go only in the release title; the body h1 is just `Mole`.
-
-Ritual anchors: before drafting, read the latest stable release body as the hard format template (`gh release view <latest-tag> --json body`); the title takes a codename plus emoji per repo convention (for example `V1.45.0 Quiet 🤫`). After publishing, add all six positive reactions (`+1`, `laugh`, `heart`, `hooray`, `rocket`, `eyes`) with `.claude/skills/release-notes/scripts/post-reactions.sh V<version>` (the script lives inside the skill, not in the top-level `scripts/`), then re-read the release reactions to confirm all six landed.
-
-### Shell and release pitfalls (cumulative)
+## Shell and Test Pitfalls (cumulative)
 
 These are real bugs hit on this codebase. Each one cost time. Re-read before touching the same area.
 
@@ -220,10 +164,4 @@ These are real bugs hit on this codebase. Each one cost time. Re-read before tou
 - **A test can pass vacuously when the function early-returns**: `clean_apps.bats` `setup_file` exports `MOLE_TEST_MODE=1`, and `clean_orphaned_system_services` returns immediately under that flag, leaving `$output` empty. A test whose *last* assertion is a `[[ "$output" != *"..."* ]]` (true on empty) then passes green while its real `==` assertion in the middle is silently swallowed (same shape as #886). Always end each assertion with `|| return 1`, and override `MOLE_TEST_MODE=0` (plus a `sudo -n true` mock) when the test needs the function body to actually run.
 - **BSD grep has no GNU `-Z`/`--null` output mode**: on stock macOS `grep -Z` means `--decompress` (ugrep aliases treat it as fuzzy matching), so `grep -rlZ ... | while read -d ''` consumes nothing and the loop is silently dead. Enumerate with `find ... -print0` and probe each file with `grep -qF` instead. The path-referenced LaunchAgent unload in `stop_launch_services` shipped dead this way from #816 until 2026-07.
 - **PlistBuddy announces file creation on stdout**: `/usr/libexec/PlistBuddy -c "Add ..."` against a missing file prints `File Doesn't Exist, Will Create: <path>` to stdout, which lands in bats `$output` and trips negative `[[ "$output" != *"<name>"* ]]` assertions. Redirect stdout too (`> /dev/null 2>&1`) when creating plist fixtures.
-- **`gh release create` conflicts with the workflow-created release**: the workflow already creates the release on tag push, so post-tag note publishing must use `gh release edit`, never `create`.
-- **Tag prefix is case-sensitive**: `release.yml` filters on `'V*'`. A lowercase `v1.38.0` tag will not trigger the workflow.
 - **macOS 14's /bin/bash fires errexit through if-guarded mock functions**: the macos-14 runner's bash 3.2.57 build kills a `set -e` script when an exported shell-function `sudo` mock returns nonzero inside an `if fn; then` condition with a `2> /dev/null` redirect; the same bash version on macOS 15+ and dev machines does not, so the failure reproduces on no local machine. Symptom: a bats inner script exits 1 with empty output at the first failing mock probe. Fix pattern: disable errexit before the first sudo probe inside the helper (see `safe_sudo_find_delete`) and restore it before each validation-gate return. When a test fails only on one runner image, make the test print exit status, captured output, and a mock call trace on failure instead of a bare rc assertion; that evidence trail is how this one was pinned. Hit fixing test 31 of `core_safe_functions.bats`, 2026-07.
-
-### Release-notes craft
-
-Format rules (impact ordering, command existence checks, icon semantics, no em dash, no inline PR refs) live in `.claude/skills/release-notes/SKILL.md` under "Format rules". Keep that skill as the single source of truth for notes formatting.
