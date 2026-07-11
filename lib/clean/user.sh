@@ -1666,6 +1666,69 @@ clean_utm_caches() {
     safe_clean ~/Library/Containers/com.utmapp.UTM/Data/tmp/* "UTM temporary files"
 }
 
+clean_tart_caches() {
+    local cache_root="$HOME/.tart/cache"
+    [[ -d "$cache_root" ]] || return 0
+    command -v tart > /dev/null 2>&1 || return 0
+
+    local cache_size_kb=0
+    cache_size_kb=$(get_path_size_kb "$cache_root" 2> /dev/null || echo 0)
+    [[ "$cache_size_kb" =~ ^[0-9]+$ ]] || cache_size_kb=0
+    [[ "$cache_size_kb" -gt 0 ]] || return 0
+
+    if is_path_whitelisted "$cache_root"; then
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Tart caches · would skip (whitelist)"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Tart caches · skipped (whitelist)"
+        fi
+        note_activity
+        return 0
+    fi
+
+    if pgrep -x "tart" > /dev/null 2>&1; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Tart caches · skipped (Tart running)"
+        note_activity
+        return 0
+    fi
+
+    local cache_size_human
+    cache_size_human=$(bytes_to_human "$((cache_size_kb * 1024))")
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Tart caches · would prune items older than ${MOLE_ORPHAN_AGE_DAYS} days (${cache_size_human})"
+        echo -e "    ${GRAY}tart prune --entries caches --older-than ${MOLE_ORPHAN_AGE_DAYS}${NC}"
+        note_activity
+        return 0
+    fi
+
+    if [[ -t 1 ]]; then
+        start_section_spinner "Pruning Tart caches..."
+    fi
+    local prune_succeeded=false
+    if run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" tart prune --entries caches --older-than "$MOLE_ORPHAN_AGE_DAYS" > /dev/null 2>&1; then
+        prune_succeeded=true
+    fi
+    if [[ -t 1 ]]; then
+        stop_section_spinner
+    fi
+
+    if [[ "$prune_succeeded" != "true" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Tart caches · prune failed"
+        debug_log "tart prune failed for cache-only ${MOLE_ORPHAN_AGE_DAYS}-day policy"
+        note_activity
+        return 0
+    fi
+
+    local remaining_kb=0
+    remaining_kb=$(get_path_size_kb "$cache_root" 2> /dev/null || echo 0)
+    [[ "$remaining_kb" =~ ^[0-9]+$ ]] || remaining_kb=0
+    local reclaimed_kb=$((cache_size_kb - remaining_kb))
+    [[ "$reclaimed_kb" -ge 0 ]] || reclaimed_kb=0
+
+    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Tart caches · pruned, $(bytes_to_human "$((reclaimed_kb * 1024))") reclaimed"
+    note_activity
+}
+
 clean_virtualization_tools() {
     stop_section_spinner
     safe_clean ~/Library/Caches/com.vmware.fusion "VMware Fusion cache"
@@ -1674,6 +1737,7 @@ clean_virtualization_tools() {
     safe_clean ~/VirtualBox\ VMs/.cache "VirtualBox cache"
     safe_clean ~/Library/Caches/lima/download/by-url-sha256/* "Lima download cache"
     safe_clean ~/.vagrant.d/tmp/* "Vagrant temporary files"
+    clean_tart_caches
 }
 
 # Estimate item size for Application Support cleanup.
@@ -2012,7 +2076,7 @@ clean_application_support_logs() {
     fi
 }
 # Remove cached device firmware (.ipsw) from iTunes, Finder, and Apple Configurator 2.
-# These are installers for firmware already applied (or superseded) — macOS will
+# These are installers for firmware already applied (or superseded); macOS will
 # re-download them on demand. Typical size: 5-8GB per file. Never touches backups.
 clean_cached_device_firmware() {
     local -a shallow_dirs=(
