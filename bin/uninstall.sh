@@ -1704,6 +1704,15 @@ main() {
 
         batch_uninstall_applications
 
+        # A nested command may have returned the controlling terminal to the
+        # parent shell. Reading while Mole is no longer the foreground process
+        # group would suspend the completed uninstall with SIGTTIN. The removal
+        # is already finished, so exit cleanly instead of touching terminal input.
+        if ! mole_tty_is_foreground; then
+            show_cursor
+            return 0
+        fi
+
         local _countdown=5
         local _key=""
         local _pressed=false
