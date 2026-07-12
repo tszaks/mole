@@ -619,6 +619,28 @@ EOF
 	[[ "$result" == "FOUND" ]]
 }
 
+@test "scan_purge_targets: includes Terragrunt cache in project root with find mode" {
+	mkdir -p "$HOME/terragrunt-project/.terragrunt-cache"
+	touch "$HOME/terragrunt-project/terragrunt.hcl"
+
+	local scan_output
+	scan_output="$(mktemp)"
+
+	result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        MO_USE_FIND=1 scan_purge_targets '$HOME/terragrunt-project' '$scan_output'
+        if grep -q '$HOME/terragrunt-project/.terragrunt-cache' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'MISSING'
+        fi
+    ")
+
+	rm -f "$scan_output"
+
+	[[ "$result" == "FOUND" ]]
+}
+
 @test "scan_purge_targets: supports trailing slash search path in find mode" {
 	mkdir -p "$HOME/single-project/node_modules"
 	touch "$HOME/single-project/package.json"
@@ -771,6 +793,7 @@ EOF
     ")
 	[[ "$result" == *"node_modules"* ]]
 	[[ "$result" == *"target"* ]]
+	[[ "$result" == *".terragrunt-cache"* ]]
 }
 
 @test "get_dir_size_kb: calculates directory size" {

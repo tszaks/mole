@@ -22,6 +22,7 @@ readonly MOLE_PURGE_TARGETS=(
     ".nox"          # Python (nox virtualenvs)
     ".ruff_cache"   # Python (ruff)
     ".gradle"       # Gradle local
+    ".terragrunt-cache" # Terragrunt downloaded modules/providers
     "__pycache__"   # Python
     ".next"         # Next.js
     ".nuxt"         # Nuxt.js
@@ -72,6 +73,8 @@ readonly MOLE_PURGE_PROJECT_INDICATORS=(
     "requirements.txt"
     "pom.xml"
     "build.gradle"
+    "*.tf"
+    "terragrunt.hcl"
     "Gemfile"
     "composer.json"
     "pubspec.yaml"
