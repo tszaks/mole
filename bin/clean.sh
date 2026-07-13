@@ -977,10 +977,13 @@ safe_clean() {
         size_human=$(bytes_to_human "$((total_size_kb * 1024))")
 
         # Multi-target cleanups report the item count as part of the detail
-        # column, keeping the label clean: "npm logs · 2 items, 2KB".
+        # column, keeping the label clean: "npm logs · 2 items, 2KB". Use the
+        # actually-cleaned count (total_count), not the raw target count, so it
+        # stays consistent with the reported size after protected, whitelisted,
+        # missing, and deduplicated targets have been dropped.
         local count_note=""
-        if [[ ${#targets[@]} -gt 1 ]]; then
-            count_note="${#targets[@]} items, "
+        if [[ $total_count -gt 1 ]]; then
+            count_note="$total_count items, "
         fi
 
         if [[ "$DRY_RUN" == "true" ]]; then
