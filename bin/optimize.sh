@@ -156,7 +156,15 @@ show_system_health() {
     disk_percent=${disk_percent:-0}
     uptime=${uptime:-0}
 
-    printf "${ICON_ADMIN} System  %.0f/%.0f GB RAM | %.0f/%.0f GB Disk | Uptime %.0fd\n" \
+    # printf parses float arguments with the locale's decimal separator, so
+    # comma-decimal locales reject dot values like "5.70" (#1220). Round in
+    # C-locale awk and print plain strings to avoid float parsing entirely.
+    local rounded
+    rounded=$(LC_ALL=C awk -v mu="$mem_used" -v mt="$mem_total" -v du="$disk_used" -v dt="$disk_total" -v ut="$uptime" \
+        'BEGIN { printf "%.0f %.0f %.0f %.0f %.0f", mu, mt, du, dt, ut }' 2> /dev/null || echo "0 0 0 0 0")
+    read -r mem_used mem_total disk_used disk_total uptime <<< "$rounded"
+
+    printf "${ICON_ADMIN} System  %s/%s GB RAM | %s/%s GB Disk | Uptime %sd\n" \
         "$mem_used" "$mem_total" "$disk_used" "$disk_total" "$uptime"
 }
 
