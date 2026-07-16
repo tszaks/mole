@@ -345,7 +345,14 @@ start_uninstall_metadata_refresh() {
         uninstall_release_metadata_lock "$MOLE_UNINSTALL_META_CACHE_LOCK"
         rm -f "$updates_file" "$refresh_merged_file"
         rm -f "$refresh_file" 2> /dev/null || true
-    ) > /dev/null 2>&1 &
+        # Redirect stdin from /dev/null so the perl timeout fallback does not see
+        # a tty on stdin and hand the controlling terminal to its timed child.
+        # This background refresh (and its nested workers, which inherit this
+        # stdin) never needs the terminal; leaving stdin as the tty lets a worker
+        # steal the foreground process group and stop the foreground prompt with
+        # SIGTTIN (issue #1222). The interactive sudo handoff (#1201) is on
+        # non-background call sites and is unaffected.
+    ) > /dev/null 2>&1 < /dev/null &
     disown "$!" 2> /dev/null || true
 
 }
@@ -708,7 +715,10 @@ _scan_resolve_uncached() {
     if ((total_apps > 0)); then
         for app_data_tuple in "${app_data_tuples[@]}"; do
             ((app_count++))
-            process_app_metadata "$app_data_tuple" "$scan_raw_file" &
+            # Redirect stdin from /dev/null so the perl timeout fallback used by
+            # process_app_metadata does not hand the controlling terminal to its
+            # timed mdls/du child from this background worker (issue #1222).
+            process_app_metadata "$app_data_tuple" "$scan_raw_file" < /dev/null &
             pids+=($!)
             update_scan_status "Scanning applications..." "$app_count" "$total_apps"
 

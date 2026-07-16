@@ -260,6 +260,67 @@ setup() {
 	[[ "$output" == *"READ-AFTER:typed-after"* ]]
 }
 
+# Issue #1222: the perl fallback hands the controlling terminal to its timed
+# child whenever stdin is a tty (the #1201 behaviour). When it is invoked from a
+# background metadata/scan worker in bin/uninstall.sh that still has the tty on
+# stdin, that handoff steals the foreground process group from the foreground
+# script, which then stops with SIGTTIN at the confirmation prompt. Redirecting
+# the worker's stdin from /dev/null makes -t STDIN false and skips the handoff.
+# These two tests pin both halves of the contract: the handoff still happens for
+# interactive (tty) callers, and never happens once stdin is /dev/null.
+_tty_bg_field() {
+	# Extract NAME=<digits> from the fixture output (single line each).
+	printf '%s\n' "$2" | sed -n "s/.*${1}=\\([0-9][0-9]*\\).*/\\1/p" | head -1
+}
+
+@test "run_with_timeout: perl fallback hands tty to child when stdin is a tty (#1201/#1222)" {
+	if [[ "$(uname -s)" != "Darwin" || ! -x /usr/bin/expect || ! -x /usr/bin/perl ]]; then
+		skip "macOS expect/perl required"
+	fi
+
+	run /usr/bin/expect "$PROJECT_ROOT/tests/timeout_tty_background.exp" "$PROJECT_ROOT" tty
+
+	[ "$status" -eq 0 ] || return 1
+	local child fg caller
+	child=$(_tty_bg_field CHILD_PGRP "$output")
+	fg=$(_tty_bg_field FG "$output")
+	caller=$(_tty_bg_field CALLER_PGRP "$output")
+	[[ -n "$child" && -n "$fg" && -n "$caller" ]] || return 1
+	# The timed child captured the terminal's foreground process group.
+	[ "$fg" = "$child" ] || return 1
+	[ "$fg" != "$caller" ] || return 1
+}
+
+@test "run_with_timeout: perl fallback keeps tty with caller when stdin is /dev/null (#1222)" {
+	if [[ "$(uname -s)" != "Darwin" || ! -x /usr/bin/expect || ! -x /usr/bin/perl ]]; then
+		skip "macOS expect/perl required"
+	fi
+
+	run /usr/bin/expect "$PROJECT_ROOT/tests/timeout_tty_background.exp" "$PROJECT_ROOT" devnull
+
+	[ "$status" -eq 0 ] || return 1
+	local child fg caller
+	child=$(_tty_bg_field CHILD_PGRP "$output")
+	fg=$(_tty_bg_field FG "$output")
+	caller=$(_tty_bg_field CALLER_PGRP "$output")
+	[[ -n "$child" && -n "$fg" && -n "$caller" ]] || return 1
+	# No handoff: the terminal's foreground group stayed with the caller.
+	[ "$fg" = "$caller" ] || return 1
+	[ "$fg" != "$child" ] || return 1
+}
+
+# Guard the actual call sites: the background metadata refresh and scan workers
+# in bin/uninstall.sh must redirect stdin from /dev/null. Without it the perl
+# timeout fallback can steal the terminal from a background worker (#1222).
+@test "uninstall.sh: background metadata/scan workers redirect stdin (#1222)" {
+	# Disowned metadata-refresh subshell close.
+	run grep -nE '^[[:space:]]*\)[[:space:]]*>[[:space:]]*/dev/null[[:space:]]+2>&1[[:space:]]+<[[:space:]]*/dev/null[[:space:]]*&[[:space:]]*$' "$PROJECT_ROOT/bin/uninstall.sh"
+	[ "$status" -eq 0 ] || return 1
+	# Parallel scan workers.
+	run grep -nE 'process_app_metadata[[:space:]].*<[[:space:]]*/dev/null[[:space:]]*&[[:space:]]*$' "$PROJECT_ROOT/bin/uninstall.sh"
+	[ "$status" -eq 0 ] || return 1
+}
+
 @test "run_with_timeout: shell fallback preserves caller INT trap" {
     result=$(bash -c "
         set -euo pipefail
