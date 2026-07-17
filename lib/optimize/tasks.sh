@@ -1160,7 +1160,7 @@ opt_coreduet_cleanup() {
     done
 
     if [[ ${#knowledge_files[@]} -gt 0 ]]; then
-        total_size=$(command du -skcP "${knowledge_files[@]}" 2> /dev/null | awk 'END {print $1 + 0}' || echo "0")
+        total_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skcP "${knowledge_files[@]}" 2> /dev/null | awk 'END {print $1 + 0}' || echo "0")
         total_size=$(opt_numeric_kb "$total_size")
     fi
 

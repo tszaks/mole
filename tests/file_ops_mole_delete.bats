@@ -440,3 +440,39 @@ EOF
     warn_count=$(printf '%s\n' "$output" | grep -c "deletions audit log unavailable" || true)
     [ "$warn_count" = "1" ]
 }
+
+@test "get_path_size_kb bounds a hung du instead of wedging the sizing worker" {
+    # Regression: the primary sizing du (file_ops.sh get_path_size_kb) ran
+    # WITHOUT run_with_timeout while every sibling call site was bounded, so
+    # one stalled SMB/FUSE mount wedged a parallel scan worker forever. The
+    # stub du sleeps far past the 1s override; a bounded helper returns "0"
+    # quickly, an unbounded one trips the bats timeout.
+    local stub_dir="$SANDBOX/stub-bin"
+    mkdir -p "$stub_dir"
+    cat > "$stub_dir/du" <<'STUB'
+#!/bin/bash
+sleep 30
+echo "999999 /"
+STUB
+    chmod +x "$stub_dir/du"
+
+    local victim_dir="$SANDBOX/big-dir"
+    mkdir -p "$victim_dir"
+
+    local started elapsed
+    started=$SECONDS
+    run bash --noprofile --norc <<EOF
+set -euo pipefail
+export PATH="$stub_dir:\$PATH"
+export MOLE_TIMEOUT_DISK_VERIFY_SEC=1
+export MOLE_TEST_NO_AUTH=1
+source "$PROJECT_ROOT/lib/core/common.sh"
+get_path_size_kb "$victim_dir"
+EOF
+    elapsed=$((SECONDS - started))
+
+    [ "$status" -eq 0 ]
+    [ "$output" = "0" ] || return 1
+    # Generous ceiling: 1s timeout + escalation grace, never 30s.
+    [ "$elapsed" -lt 10 ] || return 1
+}

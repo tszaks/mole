@@ -353,3 +353,21 @@ _tty_bg_field() {
         [[ -z \"\$leaked\" ]]
     "
 }
+
+# A directory-sizing `du` on a stalled network mount or a huge tree wedges the
+# whole scan: it has no internal bound and the caller usually pipes it into a
+# command substitution that just waits. Every `du -s*` in lib/ and bin/ must
+# therefore run under run_with_timeout. This test pins that so a new sizing site
+# cannot be added unbounded.
+@test "every du sizing call in lib/ and bin/ runs under run_with_timeout" {
+    PROJECT_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    unbounded=$(grep -rn -- 'du -s' "$PROJECT_ROOT/lib" "$PROJECT_ROOT/bin" \
+        | grep -v 'run_with_timeout' \
+        | grep -v '^\s*#' \
+        | grep -v ':[0-9]*:\s*#' || true)
+    if [[ -n "$unbounded" ]]; then
+        echo "Unbounded du call sites:" >&2
+        echo "$unbounded" >&2
+        return 1
+    fi
+}

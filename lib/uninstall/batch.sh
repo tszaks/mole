@@ -1190,7 +1190,7 @@ _batch_execute_removals() {
 
                 if [[ ${#leftover_paths[@]} -gt 0 ]]; then
                     local _du_total
-                    _du_total=$(command du -skcP "${leftover_paths[@]}" 2> /dev/null | awk 'END {print $1}')
+                    _du_total=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skcP "${leftover_paths[@]}" 2> /dev/null | awk 'END {print $1}')
                     if [[ "$_du_total" =~ ^[0-9]+$ ]]; then
                         leftover_kb=$_du_total
                     fi

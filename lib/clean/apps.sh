@@ -817,13 +817,13 @@ clean_orphaned_system_services() {
                 # deletes a root-level service. See #1210.
                 if [[ -n "${EXPORT_LIST_FILE:-}" && -f "$EXPORT_LIST_FILE" ]]; then
                     local orphan_size_kb
-                    orphan_size_kb=$(sudo -n du -skP "$orphan_file" 2> /dev/null | awk '{print $1}' || echo "0")
+                    orphan_size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$orphan_file" 2> /dev/null | awk '{print $1}' || echo "0")
                     [[ -n "$orphan_size_kb" ]] || orphan_size_kb=0
                     echo "$orphan_file  # $(bytes_to_human "$((orphan_size_kb * 1024))")" >> "$EXPORT_LIST_FILE"
                 fi
             else
                 local file_size_kb
-                file_size_kb=$(sudo -n du -skP "$orphan_file" 2> /dev/null | awk '{print $1}' || echo "0")
+                file_size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$orphan_file" 2> /dev/null | awk '{print $1}' || echo "0")
 
                 # Unload if it's a LaunchDaemon/LaunchAgent
                 if [[ "$orphan_file" == *.plist ]]; then

@@ -486,7 +486,7 @@ safe_sudo_remove() {
 
             if sudo -n test -e "$path" 2> /dev/null; then
                 local size_kb
-                size_kb=$(sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+                size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
                 if [[ "$size_kb" -gt 0 ]]; then
                     file_size=$(bytes_to_human "$((size_kb * 1024))")
                 fi
@@ -516,7 +516,7 @@ safe_sudo_remove() {
     local size_human=""
     if oplog_enabled; then
         if sudo -n test -e "$path" 2> /dev/null; then
-            size_kb=$(sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+            size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
             if [[ "$size_kb" =~ ^[0-9]+$ ]] && [[ "$size_kb" -gt 0 ]]; then
                 size_human=$(bytes_to_human "$((size_kb * 1024))" 2> /dev/null || echo "${size_kb}KB")
             fi
@@ -627,7 +627,7 @@ mole_delete() {
             if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
                 du_rc=1
             else
-                raw_size=$(sudo -n du -skP "$path" 2> /dev/null | awk '{print $1; exit}')
+                raw_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1; exit}')
                 du_rc=${PIPESTATUS[0]}
             fi
         else
@@ -1137,8 +1137,12 @@ get_path_size_kb() {
         fi
     fi
 
+    # Bounded like every other du call site (hints/project/caches): an
+    # unbounded walk here wedges one parallel sizing worker forever on a
+    # stalled SMB/FUSE mount. On timeout the size reads 0, which only
+    # affects display/accounting, never deletion decisions.
     local size
-    size=$(command du -skP "$path" 2> /dev/null | awk 'NR==1 {print $1; exit}' || true)
+    size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skP "$path" 2> /dev/null | awk 'NR==1 {print $1; exit}' || true)
 
     if [[ "$size" =~ ^[0-9]+$ ]]; then
         echo "$size"

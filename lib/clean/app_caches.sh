@@ -26,7 +26,7 @@ clean_xcode_derived_data() {
 
     # Calculate total size.
     local size_kb=0
-    size_kb=$(du -skP "$dd_dir" 2> /dev/null | awk '{print $1}') || size_kb=0
+    size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skP "$dd_dir" 2> /dev/null | awk '{print $1}') || size_kb=0
     local size_human
     size_human=$(bytes_to_human "$((size_kb * 1024))")
 
