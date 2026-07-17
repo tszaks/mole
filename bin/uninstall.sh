@@ -273,6 +273,9 @@ start_uninstall_metadata_refresh() {
             ((worker_idx++))
             local worker_output="${updates_file}.${worker_idx}"
 
+            # stdin from /dev/null: these workers never read the terminal, and a
+            # background job that keeps the tty on stdin lets its timeout helpers
+            # take the terminal away from the foreground prompt (#1222).
             (
                 local last_used_epoch=0
                 local metadata_date
@@ -290,7 +293,7 @@ start_uninstall_metadata_refresh() {
                 [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
                 printf "%s|%s|%s|%s|%s|%s|%s\n" "$app_path" "${app_mtime:-0}" "$size_kb" "${last_used_epoch:-0}" "$now_epoch" "$bundle_id" "$display_name" > "$worker_output"
-            ) &
+            ) < /dev/null &
             worker_pids+=($!)
 
             if ((${#worker_pids[@]} >= max_parallel)); then

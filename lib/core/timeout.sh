@@ -161,11 +161,22 @@ run_with_timeout() {
             my $duration = 0 + shift @ARGV;
             $duration = 1 if $duration <= 0;
 
+            # Only the process group that currently owns the terminal may hand it
+            # to a child. Mole runs these helpers concurrently inside one process
+            # group (parallel scan workers), so a helper that started while a
+            # sibling held the terminal would capture the sibling child as the
+            # "original" owner and later restore the terminal to that already
+            # dead process group. Mole then no longer owns the terminal and the
+            # next prompt read stops on SIGTTIN (issue #1222/#1218).
+            my $my_pgrp = getpgrp();
             my $tty_fd = -t STDIN ? fileno(STDIN) : undef;
             my $original_pgrp;
             if (defined $tty_fd) {
                 $original_pgrp = tcgetpgrp($tty_fd);
-                undef $original_pgrp if !defined $original_pgrp || $original_pgrp < 0;
+                undef $original_pgrp
+                    if !defined $original_pgrp
+                    || $original_pgrp < 0
+                    || $original_pgrp != $my_pgrp;
             }
 
             my $pid = fork();
@@ -198,9 +209,14 @@ run_with_timeout() {
 
             my $restore_tty = sub {
                 return unless $tty_handed_off && defined $tty_fd && defined $original_pgrp;
+                $tty_handed_off = 0;
+                # Give the terminal back only while our own child still owns it.
+                # If something else took over meanwhile, restoring would revoke
+                # the current owner instead.
+                my $owner = tcgetpgrp($tty_fd);
+                return unless defined $owner && $owner == $pid;
                 local $SIG{TTOU} = "IGNORE";
                 tcsetpgrp($tty_fd, $original_pgrp);
-                $tty_handed_off = 0;
             };
 
             my $deadline = time() + $duration;
