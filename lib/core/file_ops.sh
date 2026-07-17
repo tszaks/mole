@@ -188,6 +188,54 @@ validate_path_for_deletion() {
         fi
     fi
 
+    # Ancestor-symlink guard. The checks above (deny list, protection policy)
+    # match on the LITERAL path string, and the -L test above only inspects the
+    # leaf. If any ANCESTOR component is a symlink, the string matches nothing
+    # dangerous while the actual rm follows the link into the real target:
+    # a redirected "~/Library/Caches" would let a cache sweep walk into
+    # ~/Documents or a system tree. Canonicalize the parent (physical cd
+    # resolves every ancestor link) and re-run the deny predicates on the
+    # resolved leaf. Deny-only: a resolved path never grants permission the
+    # literal path lacked, so legitimate targets keep their existing verdict.
+    # Runs BEFORE the allowlists below, which would otherwise early-return past
+    # this gate for /private/* paths.
+    #
+    # This sits on the hot path (every deletion candidate), so the common case
+    # must stay fork-free: walk the ancestors with the [[ -L ]] builtin and only
+    # pay for the canonicalizing subshell when one of them really is a symlink.
+    # A dirname + `cd -P` on every call cost ~2ms, about +23% on validation.
+    local parent_dir resolved_parent probe
+    local ancestor_is_link=false
+    parent_dir="${policy_path%/*}"
+    [[ -z "$parent_dir" ]] && parent_dir="/"
+    if [[ -d "$parent_dir" ]]; then
+        probe="$parent_dir"
+        while [[ "$probe" == /?* ]]; do
+            if [[ -L "$probe" ]]; then
+                ancestor_is_link=true
+                break
+            fi
+            probe="${probe%/*}"
+        done
+    fi
+    if [[ "$ancestor_is_link" == "true" ]]; then
+        resolved_parent=$(cd -P "$parent_dir" 2> /dev/null && pwd -P) || resolved_parent=""
+        if [[ -n "$resolved_parent" && "$resolved_parent" != "$parent_dir" ]]; then
+            local resolved_path
+            resolved_path=$(_mole_normalize_deletion_policy_path "${resolved_parent}/${policy_path##*/}")
+            if _mole_is_critical_deletion_path "$resolved_path"; then
+                log_error "Path validation failed: resolves into a critical system path: $path -> $resolved_path"
+                return 1
+            fi
+            if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$resolved_path"; then
+                if [[ "${MO_DEBUG:-0}" == "1" ]]; then
+                    log_warning "Path validation: resolves into a protected path: $path -> $resolved_path"
+                fi
+                return 1
+            fi
+        fi
+    fi
+
     # Allow deletion of coresymbolicationd cache (safe system cache that can be rebuilt)
     case "$policy_path" in
         /System/Library/Caches/com.apple.coresymbolicationd/data | /System/Library/Caches/com.apple.coresymbolicationd/data/*)

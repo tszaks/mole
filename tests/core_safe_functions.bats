@@ -103,6 +103,39 @@ teardown() {
     [ "$status" -eq 1 ]
 }
 
+@test "validate_path_for_deletion rejects a target whose ancestor symlink redirects into a critical path" {
+    # The deny list and the -L check both look at the literal string / leaf, so
+    # a symlinked ANCESTOR used to slip through: the policy path looked like an
+    # ordinary cache dir while rm followed the link into the real tree.
+    local fake_caches="$TEST_DIR/redirected-Caches"
+    ln -s /System "$fake_caches"
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_caches/Library/Caches/victim'"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"resolves into a critical system path"* ]] || return 1
+}
+
+@test "validate_path_for_deletion rejects a target whose ancestor symlink redirects into protected user data" {
+    local protected_home="$TEST_DIR/home"
+    mkdir -p "$protected_home/Library/Keychains"
+    local fake_cache_root="$TEST_DIR/cache-root"
+    ln -s "$protected_home/Library" "$fake_cache_root"
+
+    # should_protect_path is home-relative, so drive it against a fake HOME.
+    run bash -c "export HOME='$protected_home'; source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_cache_root/Keychains/login.keychain-db'"
+    [ "$status" -eq 1 ]
+}
+
+@test "validate_path_for_deletion still accepts an ordinary path under a real directory" {
+    # The ancestor guard is deny-only: it must not reject legitimate targets
+    # whose ancestors merely resolve (e.g. /tmp -> /private/tmp on macOS).
+    mkdir -p "$TEST_DIR/real/Caches"
+    : > "$TEST_DIR/real/Caches/cache.db"
+
+    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/real/Caches/cache.db'"
+    [ "$status" -eq 0 ]
+}
+
 @test "validate_path_for_deletion accepts valid path" {
     run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/valid'"
     [ "$status" -eq 0 ]
