@@ -47,6 +47,46 @@ func TestCalculateHealthScoreDetectsIssues(t *testing.T) {
 	}
 }
 
+func TestCalculateHealthScoreMonotonicInCPU(t *testing.T) {
+	// Rising CPU usage must never improve (raise) the health score, including
+	// across the high-usage threshold at 85%.
+	prev := 101
+	for usage := 40.0; usage <= 100.0; usage += 0.5 {
+		score, _ := calculateHealthScore(
+			CPUStatus{Usage: usage},
+			MemoryStatus{UsedPercent: 20, Pressure: "normal"},
+			[]DiskStatus{{UsedPercent: 30}},
+			DiskIOStatus{ReadRate: 5, WriteRate: 5},
+			ThermalStatus{CPUTemp: 40},
+			nil, 0,
+		)
+		if score > prev {
+			t.Fatalf("health score rose from %d to %d as CPU usage increased to %.1f%%", prev, score, usage)
+		}
+		prev = score
+	}
+}
+
+func TestCalculateHealthScoreMonotonicInMemory(t *testing.T) {
+	// Rising memory usage must never improve (raise) the health score, including
+	// across the high-usage threshold at 88%.
+	prev := 101
+	for usage := 60.0; usage <= 100.0; usage += 0.5 {
+		score, _ := calculateHealthScore(
+			CPUStatus{Usage: 10},
+			MemoryStatus{UsedPercent: usage, Pressure: "normal"},
+			[]DiskStatus{{UsedPercent: 30}},
+			DiskIOStatus{ReadRate: 5, WriteRate: 5},
+			ThermalStatus{CPUTemp: 40},
+			nil, 0,
+		)
+		if score > prev {
+			t.Fatalf("health score rose from %d to %d as memory usage increased to %.1f%%", prev, score, usage)
+		}
+		prev = score
+	}
+}
+
 func TestFormatUptime(t *testing.T) {
 	if got := formatUptime(65); got != "1m" {
 		t.Fatalf("expected 1m, got %s", got)
