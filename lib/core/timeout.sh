@@ -89,6 +89,28 @@ _mole_cleanup_timeout_killer() {
     wait "$killer_pid" 2> /dev/null || true
 }
 
+# Return success when Mole's process group still owns the controlling terminal.
+# Checking this before a prompt avoids SIGTTIN if a nested interactive command
+# returned the tty to Mole's parent shell instead of restoring it to Mole.
+mole_tty_is_foreground() {
+    # Non-terminal input cannot trigger SIGTTIN; preserve scripted/test flows.
+    [[ -t 0 ]] || return 0
+
+    local perl_bin="${MO_TIMEOUT_PERL_BIN:-}"
+    if [[ -z "$perl_bin" || ! -x "$perl_bin" ]]; then
+        perl_bin=$(command -v perl 2> /dev/null || true)
+    fi
+    [[ -n "$perl_bin" && -x "$perl_bin" ]] || return 0
+
+    # shellcheck disable=SC2016 # Embedded Perl variables are intentionally single-quoted.
+    "$perl_bin" -MPOSIX=tcgetpgrp -e '
+        my $foreground_pgrp = tcgetpgrp(fileno(STDIN));
+        my $current_pgrp = getpgrp();
+        exit((defined($foreground_pgrp) && $foreground_pgrp >= 0 &&
+            $foreground_pgrp == $current_pgrp) ? 0 : 1);
+    ' 2> /dev/null
+}
+
 # Run command with timeout
 # Uses gtimeout/timeout if available, falls back to shell-based implementation
 #
