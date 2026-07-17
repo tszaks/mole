@@ -74,6 +74,45 @@ run_clean_dry_run() {
         "$PROJECT_ROOT/mole" clean --dry-run
 }
 
+@test "safe_clean item count reflects cleaned items, not raw target count" {
+    local base="$HOME/safe_clean_count"
+    mkdir -p "$base"
+    printf 'xxxx' > "$base/a"
+    printf 'xxxx' > "$base/b"
+    printf 'xxxx' > "$base/keep"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 bash --noprofile --norc <<EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+# One of the three targets is whitelisted, so only two are actually cleaned.
+is_path_whitelisted() { [[ "\$1" == "$base/keep" ]]; }
+safe_remove() { /bin/rm -rf "\$1"; return 0; }
+safe_clean "$base/a" "$base/b" "$base/keep" "Test cache"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    # Two items were removed, so the detail column must say "2 items", not "3".
+    # Every assertion ends with || return 1: bare [[ ]] failures mid-test can be
+    # swallowed and let the test pass vacuously (same shape as #886).
+    [[ "$output" == *"2 items"* ]] || return 1
+    [[ "$output" != *"3 items"* ]] || return 1
+    [[ ! -e "$base/a" ]] || return 1
+    [[ ! -e "$base/b" ]] || return 1
+    [[ -e "$base/keep" ]] || return 1
+
+    rm -rf "$base"
+}
+
 @test "mo clean --dry-run skips system cleanup in non-interactive mode" {
     set_mock_sudo_uncached
     run_clean_dry_run
