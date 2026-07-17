@@ -376,16 +376,27 @@ _clean_chromium_old_versions() {
     for app_path in "${app_paths[@]}"; do
         [[ -d "$app_path" ]] || continue
 
+        # Every silent skip below logs its reason: "old versions not removed"
+        # reports are undiagnosable without knowing which gate bailed (#1216).
         local versions_dir="$app_path/Contents/Frameworks/$framework/Versions"
-        [[ -d "$versions_dir" ]] || continue
+        if [[ ! -d "$versions_dir" ]]; then
+            debug_log "${label} old versions: no Versions dir at $versions_dir"
+            continue
+        fi
 
         local current_link="$versions_dir/Current"
-        [[ -L "$current_link" ]] || continue
+        if [[ ! -L "$current_link" ]]; then
+            debug_log "${label} old versions: no Current symlink in $versions_dir"
+            continue
+        fi
 
         local current_version
         current_version=$(readlink "$current_link" 2> /dev/null || true)
         current_version="${current_version##*/}"
-        [[ -n "$current_version" ]] || continue
+        if [[ -z "$current_version" ]]; then
+            debug_log "${label} old versions: Current symlink unreadable"
+            continue
+        fi
 
         # Verify the Current symlink target exists. If broken, skip to avoid
         # accidentally deleting the active browser version.
@@ -418,6 +429,8 @@ _clean_chromium_old_versions() {
         done
         if [[ "$newest_mtime" -le "$current_mtime" ]]; then
             newest_version=""
+        elif [[ -n "$newest_version" ]]; then
+            debug_log "${label} old versions: keeping $newest_version (staged auto-update newer than Current=$current_version)"
         fi
 
         for dir in "$versions_dir"/*; do
@@ -433,6 +446,7 @@ _clean_chromium_old_versions() {
         done
 
         if [[ ${#old_versions[@]} -eq 0 ]]; then
+            debug_log "${label} old versions: nothing to remove in $versions_dir (Current=$current_version)"
             continue
         fi
 
