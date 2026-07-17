@@ -1089,6 +1089,32 @@ EOF
 	[[ "$output" == *"ordered"* ]]
 }
 
+@test "show_system_health formats floats under comma-decimal locales (#1220)" {
+	# Find an installed locale whose decimal separator is a comma.
+	local comma_locale="" candidate
+	for candidate in fr_FR.UTF-8 de_DE.UTF-8 pt_BR.UTF-8 es_ES.UTF-8 it_IT.UTF-8 nl_NL.UTF-8; do
+		if [[ "$(LC_ALL="$candidate" bash -c 'printf "%.1f" 1' 2> /dev/null)" == "1,0" ]]; then
+			comma_locale="$candidate"
+			break
+		fi
+	done
+	[[ -n "$comma_locale" ]] || skip "no comma-decimal locale installed"
+
+	run env LC_ALL="$comma_locale" LANG="$comma_locale" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+eval "$(sed -n '/^json_get_value()/,/^}$/p' "$PROJECT_ROOT/bin/optimize.sh")"
+eval "$(sed -n '/^show_system_health()/,/^}$/p' "$PROJECT_ROOT/bin/optimize.sh")"
+ICON_ADMIN="*"
+health_json='{"memory_used_gb": 5.70, "memory_total_gb": 8.00, "disk_used_gb": 287.86, "disk_total_gb": 351.19, "uptime_days": 6.1}'
+show_system_health "$health_json"
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"6/8 GB RAM"* ]]
+	[[ "$output" == *"288/351 GB Disk"* ]]
+	[[ "$output" == *"Uptime 6d"* ]]
+}
+
 @test "optimize whitelist items include task ids" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
