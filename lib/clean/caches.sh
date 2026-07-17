@@ -89,17 +89,21 @@ clean_service_worker_cache() {
             stop_inline_spinner
             spinner_was_running=true
         fi
-        local cleaned_mb=$((cleaned_size / 1024))
+        # cleaned_size is in KB. Hand-rolled KB/1024 truncation reported any
+        # sub-megabyte cleanup as "0MB"; use the shared formatter like every
+        # other cleaner so amounts under 1MB render as KB.
+        local cleaned_human
+        cleaned_human=$(bytes_to_human "$((cleaned_size * 1024))")
         local line_color
         line_color=$(cleanup_result_color_kb "$cleaned_size")
         if [[ "$DRY_RUN" != "true" ]]; then
             if [[ $protected_count -gt 0 ]]; then
-                echo -e "  ${line_color}${ICON_SUCCESS}${NC} $browser_name Service Worker${NC} · ${line_color}${cleaned_mb}MB${NC}, ${protected_count} protected"
+                echo -e "  ${line_color}${ICON_SUCCESS}${NC} $browser_name Service Worker${NC} · ${line_color}${cleaned_human}${NC}, ${protected_count} protected"
             else
-                echo -e "  ${line_color}${ICON_SUCCESS}${NC} $browser_name Service Worker${NC} · ${line_color}${cleaned_mb}MB${NC}"
+                echo -e "  ${line_color}${ICON_SUCCESS}${NC} $browser_name Service Worker${NC} · ${line_color}${cleaned_human}${NC}"
             fi
         else
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $browser_name Service Worker, would clean $(colorize_human_size "${cleaned_mb}MB"), ${protected_count} protected"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $browser_name Service Worker, would clean $(colorize_human_size "$cleaned_human"), ${protected_count} protected"
         fi
         note_activity
         if [[ "$spinner_was_running" == "true" ]]; then

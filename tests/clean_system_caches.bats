@@ -201,7 +201,46 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"TestBrowser Service Worker"* ]]
-    [[ "$output" == *$'\033[0;32m1MB\033[0m'* ]]
+    [[ "$output" == *$'\033[0;32m1.0MB\033[0m'* ]]
+
+    rm -rf "$test_cache"
+}
+
+@test "clean_service_worker_cache reports sub-megabyte cleanups as KB, not 0MB" {
+    local test_cache="$HOME/test_sw_cache_submb"
+    mkdir -p "$test_cache/abc123_https_example.com_0"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/caches.sh"
+DRY_RUN=false
+declare -a PROTECTED_SW_DOMAINS=("capcut.com")
+safe_remove() { return 0; }
+note_activity() { :; }
+run_with_timeout() {
+    local timeout="\$1"
+    shift
+    if [[ "\$1" == "sh" ]]; then
+        printf '%s\n' "$test_cache/abc123_https_example.com_0"
+        return 0
+    fi
+    if [[ "\$1" == "du" ]]; then
+        # 900 KB: under 1MB, so the old KB/1024 truncation printed "0MB".
+        printf '900\t%s\n' "$test_cache/abc123_https_example.com_0"
+        return 0
+    fi
+    "\$@"
+}
+clean_service_worker_cache 'TestBrowser' '$test_cache'
+EOF
+
+    # Every assertion ends with || return 1: bare [[ ]] failures mid-test can
+    # be swallowed and let the trailing rm -rf pass the test vacuously (#886).
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"TestBrowser Service Worker"* ]] || return 1
+    [[ "$output" == *"KB"* ]] || return 1
+    [[ "$output" != *"0MB"* ]] || return 1
 
     rm -rf "$test_cache"
 }
