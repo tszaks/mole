@@ -1273,6 +1273,35 @@ EOF
     [[ "$output" == *"could not be removed"* ]]
 }
 
+@test "container stub removal must bypass safe_remove because Containers are protected" {
+    # Guard for the "tidy the outlier back into the house pattern" trap: routing
+    # _remove_verified_container_stub through safe_remove looks like a cleanup
+    # win, but should_protect_path blankets ~/Library/Containers, so the shared
+    # helper refuses the stub and the cleaner silently stops working. This test
+    # pins the REASON the carve-out exists, so the next refactor sees it fail.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+source "$PROJECT_ROOT/lib/core/common.sh"
+# common.sh turns errexit on; the probes below are EXPECTED to return 1.
+set +e
+
+stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
+plist="$stub/.com.apple.containermanagerd.metadata.plist"
+mkdir -p "$stub"
+touch "$plist"
+
+validate_path_for_deletion "$stub" > /dev/null 2>&1
+echo "validate_dir_rc=$?"
+validate_path_for_deletion "$plist" > /dev/null 2>&1
+echo "validate_plist_rc=$?"
+EOF
+
+    [ "$status" -eq 0 ]
+    # Both must be REFUSED by the shared validator; that is exactly why the
+    # stub remover keeps its own narrow guards plus a raw rm/rmdir.
+    [[ "$output" == *"validate_dir_rc=1"* ]] || return 1
+    [[ "$output" == *"validate_plist_rc=1"* ]] || return 1
+}
+
 @test "clean_orphaned_container_stubs preserves container when app is installed" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc <<'EOF'
 set -euo pipefail

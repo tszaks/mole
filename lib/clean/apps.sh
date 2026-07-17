@@ -898,6 +898,16 @@ _remove_verified_container_stub() {
         return 1
     fi
 
+    # SAFE: deliberate carve-out from safe_remove, do NOT "unify" this back
+    # into the shared helper. should_protect_path blankets ~/Library/Containers
+    # (container interiors are user data), so safe_remove refuses BOTH paths and
+    # routing through it silently disables this cleaner entirely (verified: both
+    # validate_path_for_deletion calls return 1). The removal stays narrow by
+    # construction instead: the caller matches a hardcoded app allowlist, and the
+    # guards above pin the target to a non-symlink directory whose ONLY entry is
+    # the exact containermanagerd metadata plist, i.e. a stub with no Data/ dir
+    # and no user content. rmdir (not rm -r) means a container that gains any
+    # file between the check and the removal survives untouched.
     command rm -f -- "$metadata_plist" || return 1
     command rmdir -- "$container_dir"
 }
