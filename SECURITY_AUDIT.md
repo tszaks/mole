@@ -180,6 +180,7 @@ Symlink behavior is intentionally conservative.
 
 - path validation checks symlink targets before deletion
 - symlinks pointing at protected system targets are rejected
+- an *ancestor* being a symlink is caught too, not just the leaf: the parent is canonicalized and the deny checks re-run on the resolved path, so a redirected `~/Library/Caches` cannot route a cache sweep into a protected tree. The re-check is deny-only, so a resolved path never grants permission the literal path lacked
 - `mole_delete` validates symlinks rather than skipping them, so a symlink whose target resolves into a protected root is refused instead of silently moved
 - `safe_sudo_remove()` refuses to sudo-delete symlinks
 - `safe_find_delete()` and `safe_sudo_find_delete()` refuse to scan symlinked base directories
