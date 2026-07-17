@@ -235,10 +235,12 @@ run_with_timeout() {
 clean_service_worker_cache 'TestBrowser' '$test_cache'
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"TestBrowser Service Worker"* ]]
-    [[ "$output" == *"KB"* ]]
-    [[ "$output" != *"0MB"* ]]
+    # Every assertion ends with || return 1: bare [[ ]] failures mid-test can
+    # be swallowed and let the trailing rm -rf pass the test vacuously (#886).
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"TestBrowser Service Worker"* ]] || return 1
+    [[ "$output" == *"KB"* ]] || return 1
+    [[ "$output" != *"0MB"* ]] || return 1
 
     rm -rf "$test_cache"
 }
