@@ -392,10 +392,11 @@ func TestViewShowsEscBackAndCtrlCQuitHints(t *testing.T) {
 	}
 }
 
-func TestOverviewPendingSizeAlignsWithSizeColumn(t *testing.T) {
-	// A pending overview row must use the same right-aligned "--" placeholder
-	// as the percent column, not a lowercase word that breaks the numeric
-	// column rhythm ("pending.." regressed the alignment before).
+func TestOverviewPendingSizeUsesScanningSpinner(t *testing.T) {
+	// A pending overview row reuses the list view's animated scanning idiom
+	// instead of a static text placeholder: "pending.." broke the numeric
+	// column rhythm, and a static "--" read as stuck. The spinner string is
+	// exactly 10 display columns, flush with the right-aligned sizes.
 	m := model{
 		isOverview: true,
 		path:       "/",
@@ -410,9 +411,8 @@ func TestOverviewPendingSizeAlignsWithSizeColumn(t *testing.T) {
 	if strings.Contains(view, "pending") {
 		t.Fatalf("pending rows must not render a text placeholder, got:\n%s", view)
 	}
-	// %10s right-alignment: the placeholder ends at the same column as sizes.
-	if !strings.Contains(view, fmt.Sprintf("%10s", "--")) {
-		t.Fatalf("expected right-aligned -- size placeholder, got:\n%s", view)
+	if !strings.Contains(view, fmt.Sprintf("%s scanning", spinnerFrames[0])) {
+		t.Fatalf("expected animated scanning placeholder for pending row, got:\n%s", view)
 	}
 }
 

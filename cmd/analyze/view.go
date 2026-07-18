@@ -203,16 +203,18 @@ func (m model) View() string {
 					}
 					percentStr := formatPercent(percent, totalSize > 0 && sizeVal >= 0)
 					bar := coloredProgressBar(barValue, maxSize, percent)
-					// Match the percent column's "--" placeholder: a lowercase
-					// word breaks the numeric column rhythm, and the header
-					// spinner already signals that scanning is in progress.
-					sizeText := "--"
+					// Pending rows reuse the list view's scanning idiom: the
+					// animated spinner keeps the row visibly alive, and the
+					// string is exactly 10 display columns, flush with the
+					// right-aligned sizes (a static placeholder read as stuck).
+					sizeText := fmt.Sprintf("%s scanning", spinnerFrames[m.spinner])
+					sizeColor := colorCyan
 					if sizeVal >= 0 {
 						sizeText = humanizeBytes(sizeVal)
-					}
-					sizeColor := colorGray
-					if sizeVal >= 0 && totalSize > 0 {
-						sizeColor = sizeColorForPercent(percent)
+						sizeColor = colorGray
+						if totalSize > 0 {
+							sizeColor = sizeColorForPercent(percent)
+						}
 					}
 					entryPrefix := "   "
 					name := trimNameWithWidth(entry.Name, nameWidth)
