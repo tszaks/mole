@@ -37,6 +37,8 @@ git push origin V<version>
 
 Wait for the workflow to finish (typically 2 minutes for V1.38.0). The workflow creates the release with assets but `generate_release_notes: false`, so notes must be added in a follow-up step.
 
+After the workflow finishes, verify the release assets before announcing anything: `gh release view V<version> --json assets --jq '.assets[].name'` must list both architecture binaries AND `SHA256SUMS`. Since install verification is fail-closed (V1.47.0), a release without a readable `SHA256SUMS` asset makes every install and `mo update` abort by design; a missing checksums file is a release blocker, not a cosmetic gap.
+
 ## Apply curated release notes
 
 The curated-notes flow (bilingual format, `gh release edit` instead of `create`, thanks block, and the six-reaction set) is owned by `.claude/skills/release-notes/SKILL.md`. `.agents/skills/release-notes` is a symlink to that canonical directory for Codex discovery, and its Codex-only invocation policy lives in `agents/openai.yaml`; do not replace the symlink with a copied mirror. Follow that skill; do not duplicate its format details here. Version, codename, and emoji go only in the release title; the body h1 is just `Mole`.
