@@ -1839,7 +1839,8 @@ clean_antigravity_caches() {
         safe_clean "$ag_profile/extensions_crx_cache"/* "Antigravity extension cache"
         clean_service_worker_cache "Antigravity" "$ag_profile/Default/Service Worker/CacheStorage"
     fi
-    safe_clean "$HOME/.gemini/tmp"/* "Gemini CLI temp files"
+    # Never clean ~/.gemini/tmp: despite the name it stores gemini-cli
+    # conversation checkpoints and prompt history (AI chat state, not temp).
 }
 
 clean_chrome_devtools_mcp_caches() {

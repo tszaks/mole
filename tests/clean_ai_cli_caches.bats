@@ -171,7 +171,7 @@ EOF
     assert_output_not_contains "SWC:"
 }
 
-@test "clean_antigravity_caches cleans gemini CLI temp files without browser profile" {
+@test "clean_antigravity_caches never touches gemini tmp chat checkpoints" {
     mkdir -p "$HOME/.gemini/tmp"
     touch "$HOME/.gemini/tmp/work.bin"
 
@@ -186,9 +186,9 @@ clean_antigravity_caches
 EOF
 
     assert_run_success
-    assert_output_not_contains "SAFE_CLEAN:Antigravity"
+    assert_output_not_contains "SAFE_CLEAN:"
     assert_output_not_contains "SWC:"
-    assert_output_contains "SAFE_CLEAN:Gemini CLI temp files|$HOME/.gemini/tmp/"
+    [[ -f "$HOME/.gemini/tmp/work.bin" ]]
 }
 
 @test "clean_antigravity_caches skips browser profile and gemini tmp while running" {
