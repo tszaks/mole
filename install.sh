@@ -818,13 +818,27 @@ install_files() {
                     log_error "Admin access required, blocked in test mode"
                     return 1
                 fi
-                ensure_sudo_ready
+                # Explicit failure checks throughout this function: callers run
+                # `install_files || {...}`, and bash disables errexit inside a
+                # function invoked that way, so a failed sudo would otherwise be
+                # swallowed and the install would report success while leaving
+                # the old entry script in place (the 1.45.0 -> 1.47.0 fake
+                # "Updated to latest version" incident).
+                if ! ensure_sudo_ready; then
+                    log_error "Admin access to $INSTALL_DIR is required but not available"
+                    log_error "Cache credentials first, then retry: sudo -v && mo update"
+                    return 1
+                fi
             fi
 
             # Atomic update: copy to temporary name first, then move
-            maybe_sudo cp "$SOURCE_DIR/mole" "$INSTALL_DIR/mole.new"
-            maybe_sudo chmod +x "$INSTALL_DIR/mole.new"
-            maybe_sudo mv -f "$INSTALL_DIR/mole.new" "$INSTALL_DIR/mole"
+            if ! maybe_sudo cp "$SOURCE_DIR/mole" "$INSTALL_DIR/mole.new" ||
+                ! maybe_sudo chmod +x "$INSTALL_DIR/mole.new" ||
+                ! maybe_sudo mv -f "$INSTALL_DIR/mole.new" "$INSTALL_DIR/mole"; then
+                log_error "Failed to install mole to $INSTALL_DIR (admin access missing or denied)"
+                log_error "Cache credentials first, then retry: sudo -v && mo update"
+                return 1
+            fi
 
             log_success "Installed mole to $INSTALL_DIR"
         fi
@@ -837,9 +851,12 @@ install_files() {
         if [[ "$source_dir_abs" == "$install_dir_abs" ]]; then
             log_success "mo alias already present"
         else
-            maybe_sudo cp "$SOURCE_DIR/mo" "$INSTALL_DIR/mo.new"
-            maybe_sudo chmod +x "$INSTALL_DIR/mo.new"
-            maybe_sudo mv -f "$INSTALL_DIR/mo.new" "$INSTALL_DIR/mo"
+            if ! maybe_sudo cp "$SOURCE_DIR/mo" "$INSTALL_DIR/mo.new" ||
+                ! maybe_sudo chmod +x "$INSTALL_DIR/mo.new" ||
+                ! maybe_sudo mv -f "$INSTALL_DIR/mo.new" "$INSTALL_DIR/mo"; then
+                log_error "Failed to install mo alias to $INSTALL_DIR (admin access missing or denied)"
+                return 1
+            fi
             log_success "Installed mo alias"
         fi
     fi
@@ -890,7 +907,10 @@ install_files() {
     if [[ "$source_dir_abs" != "$install_dir_abs" ]]; then
         # Use absolute /usr/bin/sed (always BSD on macOS) so PATH-shadowed
         # GNU sed from Homebrew gnu-sed does not break the -i '' syntax.
-        maybe_sudo /usr/bin/sed -i '' "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"
+        if ! maybe_sudo /usr/bin/sed -i '' "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"; then
+            log_error "Failed to point $INSTALL_DIR/mole at $CONFIG_DIR"
+            return 1
+        fi
     fi
 
     local helper_install_marker="$CONFIG_DIR/.helper_install_incomplete"
@@ -908,6 +928,19 @@ install_files() {
 verify_installation() {
 
     if [[ -x "$INSTALL_DIR/mole" ]] && [[ -f "$CONFIG_DIR/lib/core/common.sh" ]]; then
+        # A runnable old entry script also passes --help, so cross-check the
+        # installed version against the source that was just installed. A
+        # mismatch means the entry script was not actually replaced (for
+        # example a swallowed sudo failure) and the install is a mixed-version
+        # state that must not be reported as success.
+        local expected_version installed_version
+        expected_version="$(get_source_version 2> /dev/null || true)"
+        installed_version="$(get_installed_version 2> /dev/null || true)"
+        if [[ -n "$expected_version" && -n "$installed_version" && "$expected_version" != "$installed_version" ]]; then
+            log_error "Installed mole reports $installed_version but $expected_version was expected"
+            log_error "The entry script at $INSTALL_DIR/mole was not replaced; retry with: sudo -v && mo update"
+            exit 1
+        fi
 
         if "$INSTALL_DIR/mole" --help > /dev/null 2>&1; then
             return 0

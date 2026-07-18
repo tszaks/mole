@@ -442,6 +442,90 @@ EOF
 }
 
 
+@test "install_files fails closed when sudo is unavailable, even under || caller (#update-incident)" {
+	# Old moles invoke `install_files || {...}`, which disables errexit inside
+	# the function. Uncached `sudo -n` then failed on every copy while the
+	# install still reported success with the OLD entry script in place
+	# ("Updated to latest version, 1.45.0" while fetching V1.47.0).
+	# MOLE_TEST_NO_AUTH must not leak in: it would take the blocked-in-test-mode
+	# branch instead of the real ensure_sudo_ready gate. sudo is a function mock.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=0 MOLE_TEST_MODE=0 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+eval "$(sed -n '/^needs_sudo() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^ensure_sudo_ready() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^maybe_sudo() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^install_files() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+
+INSTALL_DIR="$HOME/rooty-bin"
+CONFIG_DIR="$HOME/config"
+SOURCE_DIR="$HOME/source"
+VERBOSE=1
+GREEN='' BLUE='' YELLOW='' RED='' NC=''
+ICON_SUCCESS='ok' ICON_ERROR='err' ICON_ADMIN='adm'
+MOLE_ASSUME_SUDO_AUTH=1
+
+mkdir -p "$CONFIG_DIR" "$SOURCE_DIR"
+printf '#!/bin/bash\nVERSION="9.9.9"\n' > "$SOURCE_DIR/mole"
+printf '#!/bin/bash\n' > "$SOURCE_DIR/mo"
+# Non-writable install dir: needs_sudo must answer true for a plain user.
+mkdir -m 555 "$INSTALL_DIR"
+
+log_error() { echo "ERROR:$*"; }
+log_success() { echo "SUCCESS:$*"; }
+log_admin() { echo "ADMIN:$*"; }
+download_binary() { echo "DOWNLOAD_CALLED:$1"; return 0; }
+sudo() {
+	echo "sudo: a password is required" >&2
+	return 1
+}
+
+# Reproduce the exact caller shape from the update flow.
+install_files || echo "HANDLED_FAILURE"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"HANDLED_FAILURE"* ]] || return 1
+	[[ "$output" == *"sudo -v && mo update"* ]] || return 1
+	[[ "$output" != *"SUCCESS:Installed mole"* ]] || return 1
+	[[ "$output" != *"DOWNLOAD_CALLED"* ]] || return 1
+}
+
+@test "verify_installation rejects a stale entry script after an update (#update-incident)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -uo pipefail
+
+eval "$(sed -n '/^get_source_version() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^get_installed_version() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^verify_installation() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+
+INSTALL_DIR="$HOME/bin"
+CONFIG_DIR="$HOME/config"
+SOURCE_DIR="$HOME/source"
+GREEN='' RED='' YELLOW='' NC=''
+ICON_ERROR='err'
+
+mkdir -p "$INSTALL_DIR" "$CONFIG_DIR/lib/core" "$SOURCE_DIR"
+touch "$CONFIG_DIR/lib/core/common.sh"
+# The old entry script survived a failed copy: runnable, wrong version.
+printf '#!/bin/bash\nVERSION="1.45.0"\nexit 0\n' > "$INSTALL_DIR/mole"
+chmod +x "$INSTALL_DIR/mole"
+printf '#!/bin/bash\nVERSION="1.47.0"\n' > "$SOURCE_DIR/mole"
+
+log_error() { echo "ERROR:$*"; }
+log_warning() { echo "WARNING:$*"; }
+
+verify_installation
+echo "UNEXPECTED_PASS"
+EOF
+
+	# verify_installation exits 1 on the mixed-version state.
+	[ "$status" -eq 1 ] || return 1
+	[[ "$output" != *"UNEXPECTED_PASS"* ]] || return 1
+	[[ "$output" == *"was not replaced"* ]] || return 1
+	[[ "$output" == *"1.45.0"* && "$output" == *"1.47.0"* ]] || return 1
+}
+
 @test "write_install_channel_metadata succeeds for stable channel with empty commit hash" {
 	# Regression: the previous `[[ -n "$h" ]] && printf` form returned 1
 	# whenever the commit hash was empty (always the case on stable), making
