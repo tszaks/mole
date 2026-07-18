@@ -551,13 +551,32 @@ clean_edge_updater_old_versions() {
         version_dirs+=("$dir")
     done
 
-    if [[ ${#version_dirs[@]} -lt 2 ]]; then
+    if [[ ${#version_dirs[@]} -eq 0 ]]; then
         return 0
     fi
 
-    local latest_version
-    latest_version=$(printf '%s\n' "${version_dirs[@]##*/}" | sort -V | tail -n 1)
-    [[ -n "$latest_version" ]] || return 0
+    # A staged payload is only worth keeping while it is at least as new as
+    # the installed Edge. After Edge updates itself the updater leaves the
+    # previously staged copy behind, and a bare keep-the-newest rule keeps
+    # that stale copy forever when it is the only directory (#1216). With a
+    # known installed version, anything strictly older is removable; without
+    # one, fall back to the original conservative keep-latest rule.
+    local installed_version="" edge_app
+    for edge_app in "/Applications/Microsoft Edge.app" "$HOME/Applications/Microsoft Edge.app"; do
+        if [[ -f "$edge_app/Contents/Info.plist" ]]; then
+            installed_version=$(plutil -extract CFBundleShortVersionString raw "$edge_app/Contents/Info.plist" 2> /dev/null || echo "")
+            [[ -n "$installed_version" ]] && break
+        fi
+    done
+
+    local latest_version=""
+    if [[ -z "$installed_version" ]]; then
+        if [[ ${#version_dirs[@]} -lt 2 ]]; then
+            return 0
+        fi
+        latest_version=$(printf '%s\n' "${version_dirs[@]##*/}" | sort -V | tail -n 1)
+        [[ -n "$latest_version" ]] || return 0
+    fi
 
     local cleaned_count=0
     local total_size=0
@@ -566,7 +585,16 @@ clean_edge_updater_old_versions() {
     for dir in "${version_dirs[@]}"; do
         local name
         name=$(basename "$dir")
-        [[ "$name" == "$latest_version" ]] && continue
+        if [[ -n "$installed_version" ]]; then
+            # Keep any payload not strictly older than the installed Edge:
+            # an equal or newer copy is a pending update, not a leftover.
+            if [[ "$name" == "$installed_version" ]] ||
+                [[ "$(printf '%s\n%s\n' "$name" "$installed_version" | sort -V | head -n 1)" != "$name" ]]; then
+                continue
+            fi
+        else
+            [[ "$name" == "$latest_version" ]] && continue
+        fi
         if is_path_whitelisted "$dir"; then
             continue
         fi

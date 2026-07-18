@@ -277,7 +277,10 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
 
 pgrep() { return 1; }
-export -f pgrep
+# No readable installed-Edge version: pins the conservative keep-latest
+# fallback even on machines where a real Edge is installed.
+plutil() { return 1; }
+export -f pgrep plutil
 
 UPDATER_DIR="$HOME/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
 mkdir -p "$UPDATER_DIR"/{117.0.2045.60,118.0.2088.46,119.0.2108.9}
@@ -301,6 +304,115 @@ EOF
 	[[ "$output" == *"Edge updater old versions"* ]]
 	[[ "$output" == *"dry"* ]]
 	[[ "$output" == *"Cleaned: 2 items"* ]]
+}
+
+# Issue #1216: after Edge updates itself, the updater staging dir can hold a
+# single payload that is OLDER than the installed Edge. The keep-latest rule
+# kept that stale copy forever because it was the only directory.
+@test "clean_edge_updater_old_versions removes a lone payload older than installed Edge (#1216)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+
+pgrep() { return 1; }
+plutil() { echo "150.0.4078.65"; }
+export -f pgrep plutil
+mkdir -p "$HOME/Applications/Microsoft Edge.app/Contents"
+touch "$HOME/Applications/Microsoft Edge.app/Contents/Info.plist"
+
+UPDATER_DIR="$HOME/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
+rm -rf "$UPDATER_DIR"
+mkdir -p "$UPDATER_DIR/149.0.4022.52"
+
+is_path_whitelisted() { return 1; }
+get_path_size_kb() { echo "10240"; }
+bytes_to_human() { echo "10M"; }
+note_activity() { :; }
+export -f is_path_whitelisted get_path_size_kb bytes_to_human note_activity
+
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+clean_edge_updater_old_versions
+echo "Cleaned: $files_cleaned items"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Edge updater old versions"* ]] || return 1
+	[[ "$output" == *"Cleaned: 1 items"* ]] || return 1
+}
+
+@test "clean_edge_updater_old_versions keeps payloads not older than installed Edge" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+
+pgrep() { return 1; }
+plutil() { echo "150.0.4078.65"; }
+export -f pgrep plutil
+mkdir -p "$HOME/Applications/Microsoft Edge.app/Contents"
+touch "$HOME/Applications/Microsoft Edge.app/Contents/Info.plist"
+
+UPDATER_DIR="$HOME/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
+rm -rf "$UPDATER_DIR"
+# One stale, one equal to installed, one staged-newer pending update.
+mkdir -p "$UPDATER_DIR"/{149.0.4022.52,150.0.4078.65,151.0.5000.1}
+
+is_path_whitelisted() { return 1; }
+get_path_size_kb() { echo "10240"; }
+bytes_to_human() { echo "10M"; }
+note_activity() { :; }
+export -f is_path_whitelisted get_path_size_kb bytes_to_human note_activity
+
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+clean_edge_updater_old_versions
+echo "Cleaned: $files_cleaned items"
+[[ -d "$UPDATER_DIR/150.0.4078.65" ]] && echo "KEPT-EQUAL"
+[[ -d "$UPDATER_DIR/151.0.5000.1" ]] && echo "KEPT-NEWER"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Cleaned: 1 items"* ]] || return 1
+	[[ "$output" == *"KEPT-EQUAL"* ]] || return 1
+	[[ "$output" == *"KEPT-NEWER"* ]] || return 1
+}
+
+@test "clean_edge_updater_old_versions keeps a lone payload when installed version is unknown" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+
+pgrep() { return 1; }
+plutil() { return 1; }
+export -f pgrep plutil
+
+UPDATER_DIR="$HOME/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
+rm -rf "$UPDATER_DIR"
+mkdir -p "$UPDATER_DIR/149.0.4022.52"
+
+is_path_whitelisted() { return 1; }
+get_path_size_kb() { echo "10240"; }
+bytes_to_human() { echo "10M"; }
+note_activity() { :; }
+export -f is_path_whitelisted get_path_size_kb bytes_to_human note_activity
+
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+clean_edge_updater_old_versions
+echo "Cleaned: $files_cleaned items"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Cleaned: 0 items"* ]] || return 1
 }
 
 @test "clean_chrome_old_versions DRY_RUN mode does not delete files" {
