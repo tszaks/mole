@@ -45,6 +45,9 @@ If the answer is no or unclear, decline the feature, narrow it, or park it until
 
 ## Repository Map
 
+- `AGENTS.md` is the cross-agent source of truth. `CLAUDE.md` must remain a symlink to it so Claude and Codex receive the same project contract.
+- `.claude/skills/` is the canonical home for project skills. `.agents/skills/` contains relative symlinks for Codex discovery; do not maintain copied skill bodies.
+- `.claude/agents/` contains focused Claude review profiles. They must read the current contract from this file instead of copying a frozen version of the safety or portability rules.
 - `mole` - the CLI entrypoint. It is a **router only**: it parses args, renders the menu, and dispatches. Business logic does not belong here. Self-update lives in `lib/manage/update.sh` and self-removal in `lib/manage/remove.sh`; both are `source`d (not `exec`d) because the interactive menu and the update banner call them in-process. `VERSION=` stays in `mole` because `install.sh` reads it out of this file with `sed`.
 - `lib/core/` - shared shell safety, UI, file operations, operation logs, app protection logic, and centralized timeout constants (`timeouts.sh`).
 - `lib/core/app_protection_data.sh` - readonly bundle ID and pattern arrays consumed by `app_protection.sh`. Data only, no logic.
@@ -119,6 +122,12 @@ These files are intentionally large. Do not start by splitting them. Keep edits 
 - `bin/clean.sh` owns clean command orchestration, section output, and safe cleanup execution. Run `MOLE_TEST_NO_AUTH=1 bats tests/clean_core.bats tests/clean_apps.bats tests/cli.bats`. Section output follows one fixed rhythm: title → loading state → content → one trailing blank line, for every section. When touching any step of it, re-run the command and read the whole rendered output (column alignment, block spacing, icon consistency) instead of patching the one step that was reported.
 - `cmd/analyze/update.go` owns the Bubble Tea `Update` chain and message handlers (Init, scanCmd, updateKey, goBack, switchToOverviewMode, enterSelectedDir). This is the largest file in `cmd/analyze/` and the natural landing spot for new key bindings, message types, or navigation behavior. Run `go test ./cmd/analyze`. `cmd/analyze/main.go` is bootstrap only (flag parsing, `main()`, helpers); `cmd/analyze/model.go` holds types and the model struct.
 - `cmd/analyze/analyze_test.go` and `cmd/status/view_test.go` are test hotspots. Add new cases near related behavior; split later only when touching many adjacent cases. Run `go test ./cmd/...`.
+- `lib/core/file_ops.sh` owns the deletion funnel, Trash/permanent routing, operation-log outcomes, size accounting, and last-mile path validation. `lib/core/base.sh` owns shared shell primitives and source-order-sensitive section helpers. Keep policy in the existing protection helpers rather than adding a second delete path. Run `MOLE_TEST_NO_AUTH=1 bats tests/file_ops_mole_delete.bats tests/file_ops_size.bats tests/file_ops_safe_remove_symlink.bats tests/user_file_ops.bats tests/core_safe_functions.bats`.
+- `cmd/analyze/scanner.go` owns disk traversal, Spotlight integration, cancellation, and all scan concurrency budgets. Treat its semaphores as independent resource limits and measure before changing them. Run `go test ./cmd/analyze`.
+- `lib/clean/apps.sh` owns application-data cleanup, orphan service discovery, and the narrow verified-container-stub exception. `lib/clean/hints.sh` is read-only guidance and must stay bounded, timeout-aware, and non-destructive. Run `MOLE_TEST_NO_AUTH=1 bats tests/clean_apps.bats tests/clean_hints.bats`.
+- `lib/ui/menu_paginated.sh` owns the shared Bash 3.2-compatible selection UI and terminal restoration. Preserve trap chaining, TTY restoration, and empty-selection behavior. Run `MOLE_TEST_NO_AUTH=1 bats tests/menu_trap_restore.bats tests/uninstall.bats`.
+- `cmd/status/view.go` owns status rendering only; collection and JSON/NDJSON contracts live elsewhere in `cmd/status/`. Keep narrow-terminal layout and automation output independent. Run `go test ./cmd/status` and `MOLE_TEST_NO_AUTH=1 bats tests/cli.bats` when command routing changes.
+- `bin/installer.sh` owns installer discovery, immutable delete-plan validation, the paginated selection flow, and incomplete-cleanup exit semantics. Run `MOLE_TEST_NO_AUTH=1 bats tests/installer.bats tests/installer_fd.bats tests/installer_zip.bats`.
 
 ## Verification
 

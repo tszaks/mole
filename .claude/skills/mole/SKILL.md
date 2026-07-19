@@ -19,9 +19,9 @@ and never let a destructive command run without the user having seen the list.
 2. **The user runs the destructive command, not you**, unless they explicitly
    asked you to do it in the current turn. "Clean my Mac" is such an ask;
    "why is my disk full" is not.
-3. **Never parse the TUI.** `mo status` and the interactive `mo analyze` are
-   full-screen Go programs whose output is drawn, not printed. Piping them
-   produces escape-code soup. Use the JSON surfaces below.
+3. **Never parse a TUI frame.** Interactive `mo analyze` and terminal-attached
+   `mo status` are full-screen Go programs whose output is drawn, not printed.
+   Use `mo analyze --json`, `mo status --json`, or `mo status --watch` instead.
 4. **Never invent flags.** The command surface is small and listed here; if
    something is not on this page, run `mo <command> --help` and read it, do not
    assume a `--yes` or `--force` exists.
@@ -40,11 +40,12 @@ and never let a destructive command run without the user having seen the list.
 | "Clean up my old projects" | `mo purge --dry-run` then `mo purge` |
 | "Get rid of downloaded installers" | `mo installer --dry-run` then `mo installer` |
 | "What did Mole delete?" | `mo history --json --limit 20` |
-| Live CPU / memory / network | `mo status` (hand it to the user; it is a TUI) |
+| One CPU / memory / disk / network snapshot | `mo status --json` |
+| A short time series for diagnosis | `mo status --watch --interval 1s` (NDJSON; stop after enough samples) |
 
 ## Machine-readable surfaces
 
-These three are the entire agent-facing API. Everything else is for humans.
+These four surfaces are the agent-facing API. Everything else is for humans.
 
 **Disk usage.** `mo analyze --json` prints one JSON object: `path`, `overview`,
 and `entries[]` of `{name, path, size, is_dir, insight}`. `size` is bytes.
@@ -63,6 +64,13 @@ Read that file, not the terminal output, when you need to reason about or show
 the user exactly what a real run would remove. This list is clean-only: `mo
 purge --dry-run` and `mo installer --dry-run` print their candidates to the
 terminal and write no file.
+
+**System status.** `mo status --json` prints one metrics snapshot. It also
+switches to JSON automatically when stdout is not a TTY, but pass `--json`
+explicitly in scripts so intent stays obvious. `mo status --watch --interval
+1s` emits one complete JSON object per line from a warm collector. Bound the
+watch duration or sample count and terminate it after collecting the evidence
+the user asked for; do not leave an unbounded monitor running in the background.
 
 ## Command notes worth knowing
 

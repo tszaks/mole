@@ -15,7 +15,7 @@ Before drafting, confirm:
 1. **Version**. Capital `V`, e.g. `V1.38.0`. Lowercase `v` does not trigger the workflow and may indicate a botched tag.
 2. **CodeName + emoji**. Ask the user. The title format is `V<version> <CodeName> <emoji>`.
 3. **Release commit range**. `git log <previous-tag>..V<version> --oneline` gives the raw material.
-4. **User-visible behavior changes**. Scan the full commit message bodies (not just subjects) for any narrowed detection, removed feature, or "controlled regression" wording. Examples that have shipped before: the V1.40 VPN narrowing (37a446c9) silently stopped detecting split-tunnel third-party VPNs, the Bluetooth reset removal (357ee057) dropped a flow some users depended on. These belong in notes even when not bug-fix-shaped, because users will hit them in production and won't know what changed.
+4. **User-visible behavior changes**. Scan the full commit message bodies (not just subjects) for narrowed detection, removed features, or controlled regressions. These belong in notes even when they are not bug-fix-shaped, because users will encounter the changed boundary in production.
 5. **Issue reporters and PR contributors in this cycle**. Use the merged PRs and fixed issues in the release range. Keep it short, for example `Issue reporters and PR contributors this cycle: @a · @b.` Exclude `tw93` and bots.
 6. **Verify release exists**. `gh release view V<version> --repo tw93/Mole --json id,name` should return non-empty. If it doesn't, the workflow hasn't finished, wait, don't `gh release create`.
 
@@ -33,8 +33,7 @@ If any fail, stop. The notes can wait; a bad release tag cannot.
 
 ## Format
 
-Strictly follow the current compact release shape. Compare against a recent release if unsure:
-`gh release view V1.45.0 --repo tw93/Mole --json body --jq .body`. (Do not copy older pages such as V1.43.1 or V1.44.x; their body h1 drifted and was rejected.)
+Strictly follow the current compact release shape. Read the latest stable release as the live format reference before drafting: `gh release view --repo tw93/Mole --json tagName,body`.
 
 Structure:
 
@@ -103,12 +102,9 @@ Then add the six reactions with this skill's helper (path is relative to this SK
 This skill is user-invocable only. It must not run unprompted:
 
 - If the user mentions release notes in passing, draft only; do not call `gh release edit`.
-- If `gh release view` shows the release does not exist yet, wait. The workflow takes about 2 minutes for an Mn.m.0.
+- If `gh release view` shows the release does not exist yet, wait for the workflow; do not create a competing release manually.
 - If the user has not given an explicit "publish" / "提交" signal, stop after the draft.
 
-## Helper scripts
+## Helper script
 
-Both live in this skill's `scripts/` directory (next to this SKILL.md), not in the repo-root `scripts/`:
-
-- `scripts/sponsors.sh` - legacy helper for fetching recent sponsors. Do not use it in Mole release notes unless the user explicitly asks for sponsor names.
-- `scripts/post-reactions.sh <tag>` - adds the six reactions (`+1`, `laugh`, `hooray`, `heart`, `rocket`, `eyes`) to the release.
+`scripts/post-reactions.sh <tag>` lives next to this SKILL.md and adds the six reactions (`+1`, `laugh`, `hooray`, `heart`, `rocket`, `eyes`) to the release.

@@ -63,12 +63,18 @@ run_hook() {
     [ ! -e "$FORMAT_LOG" ]
 }
 
-@test "Codex release-notes skill is a symlink to the canonical Claude skill" {
-    skill_link="$PROJECT_ROOT/.agents/skills/release-notes"
+@test "Codex project skills are symlinks to the canonical Claude skills" {
+    local skill
+    local skill_link
 
-    [ -L "$skill_link" ]
-    [ "$(readlink "$skill_link")" = "../../.claude/skills/release-notes" ]
-    [ -f "$skill_link/SKILL.md" ]
+    for skill in mole release-flow release-notes; do
+        skill_link="$PROJECT_ROOT/.agents/skills/$skill"
+        [ -L "$skill_link" ]
+        [ "$(readlink "$skill_link")" = "../../.claude/skills/$skill" ]
+        [ -f "$skill_link/SKILL.md" ]
+    done
+
+    skill_link="$PROJECT_ROOT/.agents/skills/release-notes"
     [ -x "$skill_link/scripts/post-reactions.sh" ]
     grep -q '^policy:$' "$skill_link/agents/openai.yaml"
     grep -q '^  allow_implicit_invocation: false$' "$skill_link/agents/openai.yaml"
