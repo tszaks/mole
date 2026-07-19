@@ -39,6 +39,8 @@ Wait for the workflow to finish (typically 2 minutes for V1.38.0). The workflow 
 
 After the workflow finishes, verify the release assets before announcing anything: `gh release view V<version> --json assets --jq '.assets[].name'` must list both architecture binaries AND `SHA256SUMS`. Since install verification is fail-closed (V1.47.0), a release without a readable `SHA256SUMS` asset makes every install and `mo update` abort by design; a missing checksums file is a release blocker, not a cosmetic gap.
 
+Then run a **self-update smoke** before publishing notes or announcing: from an installed copy of the previous stable release, actually run `mo update` and confirm `mo --version` prints the candidate version. Existing users upgrade through the new tag's `install.sh`, so this is the only check that exercises what they will run; the pre-flight suite cannot cover it because the release does not exist yet. If the smoke fails, pull the release (see the pulling-and-re-releasing pitfall) before anyone is told to update.
+
 ## Apply curated release notes
 
 The curated-notes flow (bilingual format, `gh release edit` instead of `create`, thanks block, and the six-reaction set) is owned by `.claude/skills/release-notes/SKILL.md`. `.agents/skills/release-notes` is a symlink to that canonical directory for Codex discovery, and its Codex-only invocation policy lives in `agents/openai.yaml`; do not replace the symlink with a copied mirror. Follow that skill; do not duplicate its format details here. Version, codename, and emoji go only in the release title; the body h1 is just `Mole`.
