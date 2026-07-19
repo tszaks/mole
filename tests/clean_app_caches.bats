@@ -365,6 +365,8 @@ EOF
 
 @test "clean_code_editors includes Zed caches" {
     mkdir -p "$HOME/Library/Application Support/Zed/node/cache/_cacache"
+    mkdir -p "$HOME/Library/Application Support/Zed/node/node-v24.11.0-darwin-arm64/cache/_cacache"
+    mkdir -p "$HOME/Library/Application Support/Zed/node/node-v24.11.0-darwin-arm64/bin"
     mkdir -p "$HOME/Library/Application Support/Zed/db"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
@@ -378,7 +380,9 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Zed cache"* ]] || return 1
     [[ "$output" == *"CLEAN:$HOME/Library/Application Support/Zed/node/cache/_cacache|Zed npm cache"* ]] || return 1
+    [[ "$output" == *"CLEAN:$HOME/Library/Application Support/Zed/node/node-v24.11.0-darwin-arm64/cache/_cacache|Zed npm cache"* ]] || return 1
     [[ "$output" != *"$HOME/Library/Application Support/Zed/db"* ]] || return 1
+    [[ "$output" != *"node-v24.11.0-darwin-arm64/bin"* ]] || return 1
     [[ "$output" == *"Zed logs"* ]] || return 1
 }
 
