@@ -56,8 +56,14 @@ case "${1:-}" in
 		fi
 		exit 0
 		;;
-	update | upgrade)
+	update)
 		exit 0
+		;;
+	upgrade)
+		if [[ -n "${BREW_UPGRADE_OUTPUT:-}" ]]; then
+			printf '%s\n' "$BREW_UPGRADE_OUTPUT"
+		fi
+		exit "${BREW_UPGRADE_STATUS:-0}"
 		;;
 esac
 exit 0
@@ -396,4 +402,50 @@ EOF
 	[ "$status" -eq 0 ]
 	grep -q '^update$' "$brew_log"
 	grep -q '^upgrade mole$' "$brew_log"
+}
+
+@test "mo update preserves actionable Homebrew diagnostics on failure (#1247)" {
+	local fake_brew_bin="$TEST_ROOT/homebrew/bin"
+	local fake_brew_mole="$TEST_ROOT/homebrew/Cellar/mole/9.9.9/bin/mole"
+	local brew_log="$TEST_ROOT/brew.log"
+	local brew_upgrade_output
+	brew_upgrade_output=$'Error: Your Xcode (26.0.1) at /Applications/Xcode.app is too outdated.\nPlease update to Xcode 27.0 (or delete it).\nXcode can be updated from:\n  https://developer.apple.com/download/all/'
+
+	make_homebrew_shadow "$fake_brew_bin" "$fake_brew_mole"
+	: > "$brew_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_brew_bin:/usr/bin:/bin" \
+		BREW_LOG="$brew_log" \
+		BREW_UPGRADE_OUTPUT="$brew_upgrade_output" \
+		BREW_UPGRADE_STATUS=1 \
+		"$fake_brew_bin/mo" update
+
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Homebrew upgrade failed"* ]]
+	[[ "$output" == *"Please update to Xcode 27.0 (or delete it)."* ]]
+	[[ "$output" == *"https://developer.apple.com/download/all/"* ]]
+}
+
+@test "mo update trusts a nonzero Homebrew exit without Error text (#1247)" {
+	local fake_brew_bin="$TEST_ROOT/homebrew/bin"
+	local fake_brew_mole="$TEST_ROOT/homebrew/Cellar/mole/9.9.9/bin/mole"
+	local brew_log="$TEST_ROOT/brew.log"
+
+	make_homebrew_shadow "$fake_brew_bin" "$fake_brew_mole"
+	: > "$brew_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_brew_bin:/usr/bin:/bin" \
+		BREW_LOG="$brew_log" \
+		BREW_UPGRADE_OUTPUT="The upgrade command was interrupted" \
+		BREW_UPGRADE_STATUS=124 \
+		"$fake_brew_bin/mo" update
+
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Homebrew upgrade failed"* ]]
+	[[ "$output" == *"The upgrade command was interrupted"* ]]
+	[[ "$output" != *"Updated to latest version"* ]]
 }

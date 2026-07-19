@@ -103,8 +103,9 @@ update_via_homebrew() {
     fi
 
     local brew_upgrade_timeout="${MOLE_HOMEBREW_UPGRADE_TIMEOUT:-120}"
+    local upgrade_status=0
     HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 \
-        run_with_timeout "$brew_upgrade_timeout" brew upgrade mole > "$temp_upgrade" 2>&1 || true
+        run_with_timeout "$brew_upgrade_timeout" brew upgrade mole > "$temp_upgrade" 2>&1 || upgrade_status=$?
 
     local upgrade_output
     upgrade_output=$(cat "$temp_upgrade")
@@ -128,9 +129,13 @@ update_via_homebrew() {
         echo ""
         echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version, ${installed_version:-$current_version}"
         echo ""
-    elif echo "$upgrade_output" | grep -q "Error:"; then
+    elif [[ "$upgrade_status" -ne 0 ]]; then
         log_error "Homebrew upgrade failed"
-        echo "$upgrade_output" | grep "Error:" >&2
+        if [[ -n "$upgrade_output" ]]; then
+            printf '%s\n' "$upgrade_output" >&2
+        else
+            printf 'brew upgrade mole exited with status %s\n' "$upgrade_status" >&2
+        fi
         return 1
     else
         echo "$upgrade_output" | grep -Ev "^(==>|Updating Homebrew|Warning:)" || true
