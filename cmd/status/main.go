@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -91,46 +90,6 @@ func padViewToHeight(view string, height int) string {
 	}
 
 	return view + strings.Repeat("\n", height-contentHeight)
-}
-
-// getConfigPath returns the path to the status preferences file.
-func getConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "mole", "status_prefs")
-}
-
-// loadCatHidden loads the cat hidden preference from config file.
-func loadCatHidden() bool {
-	path := getConfigPath()
-	if path == "" {
-		return false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(data)) == "cat_hidden=true"
-}
-
-// saveCatHidden saves the cat hidden preference to config file.
-func saveCatHidden(hidden bool) {
-	path := getConfigPath()
-	if path == "" {
-		return
-	}
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return
-	}
-	value := "cat_hidden=false"
-	if hidden {
-		value = "cat_hidden=true"
-	}
-	_ = os.WriteFile(path, []byte(value+"\n"), 0644)
 }
 
 func newModel() model {
