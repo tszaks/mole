@@ -100,3 +100,38 @@ func loadCatHidden() bool {
 func saveCatHidden(hidden bool) {
 	savePref("cat_hidden", strconv.FormatBool(hidden))
 }
+
+// cpuCoresCycle is the sequence the 'c' key steps through. 0 means "all cores".
+// The default (first entry) is 2, matching the historical hard-coded behaviour.
+var cpuCoresCycle = []int{2, 4, 8, 0}
+
+// loadCPUCores reports how many CPU cores the status card should list. 0 means
+// "all". It falls back to the default (2) when unset or invalid, so a corrupt
+// pref never breaks the display.
+func loadCPUCores() int {
+	raw, ok := loadPrefs()["cpu_cores"]
+	if !ok {
+		return cpuCoresCycle[0]
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return cpuCoresCycle[0]
+	}
+	return n
+}
+
+// saveCPUCores persists the CPU core count preference (0 = all).
+func saveCPUCores(n int) {
+	savePref("cpu_cores", strconv.Itoa(n))
+}
+
+// nextCPUCores returns the value after current in cpuCoresCycle, wrapping around.
+// An unrecognised current value restarts the cycle at its first entry.
+func nextCPUCores(current int) int {
+	for i, v := range cpuCoresCycle {
+		if v == current {
+			return cpuCoresCycle[(i+1)%len(cpuCoresCycle)]
+		}
+	}
+	return cpuCoresCycle[0]
+}

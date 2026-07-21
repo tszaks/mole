@@ -75,6 +75,7 @@ type model struct {
 	collecting    bool
 	animFrame     int
 	catHidden     bool // true = hidden, false = visible
+	cpuCores      int  // how many CPU cores to list; 0 = all
 }
 
 // padViewToHeight ensures the rendered frame always overwrites the full
@@ -96,6 +97,7 @@ func newModel() model {
 	return model{
 		collector: NewCollector(processWatchOptionsFromFlags()),
 		catHidden: loadCatHidden(),
+		cpuCores:  loadCPUCores(),
 	}
 }
 
@@ -131,6 +133,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle cat visibility and persist preference
 			m.catHidden = !m.catHidden
 			saveCatHidden(m.catHidden)
+			return m, nil
+		case "c":
+			// Cycle how many CPU cores the card lists (2 → 4 → 8 → all) and persist.
+			m.cpuCores = nextCPUCores(m.cpuCores)
+			saveCPUCores(m.cpuCores)
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
@@ -191,7 +198,7 @@ func (m model) View() string {
 		if cardWidth > 2 {
 			cardWidth -= 2
 		}
-		cards := buildCards(m.metrics, cardWidth)
+		cards := buildCards(m.metrics, cardWidth, m.cpuCores)
 
 		var rendered []string
 		for i, c := range cards {
@@ -203,7 +210,7 @@ func (m model) View() string {
 		cardContent = lipgloss.JoinVertical(lipgloss.Left, rendered...)
 	} else {
 		cardWidth := max(24, termWidth/2-4)
-		cards := buildCards(m.metrics, cardWidth)
+		cards := buildCards(m.metrics, cardWidth, m.cpuCores)
 		cardContent = renderTwoColumns(cards, termWidth)
 	}
 

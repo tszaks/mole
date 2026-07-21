@@ -1281,7 +1281,7 @@ func TestRenderCPUCardKeepsOnlyTwoHotCores(t *testing.T) {
 		Load5:      2.27,
 		Load15:     2.16,
 		LogicalCPU: 4,
-	}, ThermalStatus{})
+	}, ThermalStatus{}, 2)
 
 	plain := stripANSI(strings.Join(card.lines, "\n"))
 	if len(card.lines) != 4 {
@@ -1292,6 +1292,47 @@ func TestRenderCPUCardKeepsOnlyTwoHotCores(t *testing.T) {
 	}
 	if !strings.Contains(plain, "Core2") || !strings.Contains(plain, "Core3") {
 		t.Fatalf("renderCPUCard() should keep the two hottest cores, got %q", plain)
+	}
+}
+
+func TestRenderCPUCardHonoursCoreCount(t *testing.T) {
+	cpu := CPUStatus{
+		Usage:      6.1,
+		PerCore:    []float64{8.0, 27.9, 18.9, 16.8},
+		LogicalCPU: 4,
+	}
+
+	// cpuCores = 0 means "all": every core gets a row.
+	all := stripANSI(strings.Join(renderCPUCard(cpu, ThermalStatus{}, 0).lines, "\n"))
+	if got := strings.Count(all, "Core"); got != 4 {
+		t.Fatalf("cpuCores=0 should render all 4 cores, got %d rows: %q", got, all)
+	}
+
+	// A custom count lists exactly that many of the hottest cores.
+	three := stripANSI(strings.Join(renderCPUCard(cpu, ThermalStatus{}, 3).lines, "\n"))
+	if got := strings.Count(three, "Core"); got != 3 {
+		t.Fatalf("cpuCores=3 should render 3 cores, got %d rows: %q", got, three)
+	}
+
+	// A count larger than the core total is clamped, not padded.
+	many := stripANSI(strings.Join(renderCPUCard(cpu, ThermalStatus{}, 99).lines, "\n"))
+	if got := strings.Count(many, "Core"); got != 4 {
+		t.Fatalf("cpuCores=99 should clamp to 4 cores, got %d rows: %q", got, many)
+	}
+}
+
+func TestNextCPUCoresCyclesAndWraps(t *testing.T) {
+	want := []int{4, 8, 0, 2} // starting from 2, one full loop back to 2
+	got := 2
+	for i, exp := range want {
+		got = nextCPUCores(got)
+		if got != exp {
+			t.Fatalf("step %d: nextCPUCores gave %d, want %d", i, got, exp)
+		}
+	}
+	// An unknown value restarts the cycle at the default.
+	if n := nextCPUCores(7); n != 2 {
+		t.Fatalf("nextCPUCores(7) = %d, want default 2", n)
 	}
 }
 
