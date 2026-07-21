@@ -368,7 +368,7 @@ flush_idle_section_slot() {
 start_section() {
     TRACK_SECTION=1
     SECTION_ACTIVITY=0
-    SECTION_START_SIZE_KB=${total_size_cleaned:-0}
+    SECTION_START_SIZE_KB="${total_size_cleaned:-0}"
     CURRENT_SECTION="$1"
     if [[ "${IDLE_SECTION_PENDING:-0}" == "1" ]]; then
         # Overwrite the previous idle section's header line in place (the
@@ -404,7 +404,7 @@ end_section() {
     else
         IDLE_SECTION_PENDING=0
         local section_size_kb=$((total_size_cleaned - SECTION_START_SIZE_KB))
-        [[ $section_size_kb -ge 0 ]] || section_size_kb=0
+        [[ "$section_size_kb" -ge 0 ]] || section_size_kb=0
         echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · $(colorize_human_size "$(bytes_to_human_kb "$section_size_kb")")"
     fi
     TRACK_SECTION=0

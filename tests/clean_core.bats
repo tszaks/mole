@@ -763,9 +763,9 @@ EOF
             note_activity
             end_section
         '
-    [ "$status" -eq 0 ] || return 1
+    [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"First"*"Category total"*"3.1MB"*"Second"*"Category total"*"2.0MB"* ]] || return 1
-    [ "$(printf '%s\n' "$output" | grep -c "Category total")" -eq 2 ] || return 1
+    [[ "$(printf '%s\n' "$output" | grep -c "Category total")" -eq 2 ]] || return 1
 }
 
 @test "active clean sections report a zero category total when size is untracked" {
@@ -777,7 +777,7 @@ EOF
             log_success "System logs"
             end_section
         '
-    [ "$status" -eq 0 ] || return 1
+    [[ "$status" -eq 0 ]] || return 1
     [[ "$output" == *"System logs"*"Category total"*"0B"* ]] || return 1
 }
 
