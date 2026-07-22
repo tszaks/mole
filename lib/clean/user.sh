@@ -932,6 +932,12 @@ process_container_cache() {
         for item in "$cache_dir"/*; do
             [[ -e "$item" ]] || continue
             [[ -L "$item" ]] && continue
+            # E5RT stores per-app compiled model bundles below an app-named
+            # cache directory. Removing the parent while the app is running can
+            # leave TextRecognition unable to rebuild until the app restarts.
+            if [[ -d "$item/com.apple.e5rt.e5bundlecache" ]]; then
+                continue
+            fi
             # Re-check each item, not just the parent bundle: a user may have
             # whitelisted a specific cache path, and should_protect_path may
             # cover a nested entry. Mirrors clean_group_container_caches.

@@ -274,6 +274,41 @@ EOF
     [[ "$output" != *"App caches"* ]] || [[ "$output" == *"already clean"* ]]
 }
 
+@test "clean_app_caches preserves nested E5RT caches in sandboxed apps" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+DRY_RUN=false
+should_protect_data() { return 1; }
+is_critical_system_component() { return 1; }
+should_protect_path() { return 1; }
+is_path_whitelisted() { return 1; }
+safe_remove() {
+    /bin/rm -rf "$1"
+}
+
+container="$HOME/Library/Containers/com.example.ocr"
+cache_dir="$container/Data/Library/Caches"
+e5rt_parent="$cache_dir/com.example.ocr"
+mkdir -p "$e5rt_parent/com.apple.e5rt.e5bundlecache" "$cache_dir/disposable"
+touch "$e5rt_parent/com.apple.e5rt.e5bundlecache/model.e5" "$cache_dir/disposable/data.tmp"
+
+total_size=0
+total_size_partial=false
+cleaned_count=0
+found_any=false
+precise_size_limit=64
+precise_size_used=0
+process_container_cache "$container"
+
+[[ -f "$e5rt_parent/com.apple.e5rt.e5bundlecache/model.e5" ]]
+[[ ! -e "$cache_dir/disposable" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "clean_app_caches skips expensive size scans for large sandboxed caches" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
