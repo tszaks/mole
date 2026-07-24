@@ -1336,6 +1336,46 @@ func TestNextCPUCoresCyclesAndWraps(t *testing.T) {
 	}
 }
 
+func TestSmallerCPUCoresStepsDownAndFloors(t *testing.T) {
+	for _, tc := range []struct{ from, want int }{
+		{0, 8}, {8, 4}, {4, 2}, {2, 2}, {7, 2},
+	} {
+		if got := smallerCPUCores(tc.from); got != tc.want {
+			t.Errorf("smallerCPUCores(%d) = %d, want %d", tc.from, got, tc.want)
+		}
+	}
+}
+
+// A tall CPU card must never push the frame past the window: the view steps the
+// core count back down until it fits, so the lower cards stay on screen.
+func TestViewShrinksCPUCardToFitHeight(t *testing.T) {
+	cpu := CPUStatus{Usage: 6.1, LogicalCPU: 20}
+	for i := range 20 {
+		cpu.PerCore = append(cpu.PerCore, float64(i))
+	}
+	m := model{
+		ready:    true,
+		width:    120,
+		metrics:  MetricsSnapshot{CPU: cpu},
+		cpuCores: 0, // "all"
+	}
+
+	tall := m
+	tall.height = 200
+	if got := lipgloss.Height(tall.View()); got != 200 {
+		t.Fatalf("tall window should render all cores and pad to 200, got %d", got)
+	}
+
+	short := m
+	short.height = 20
+	if got := lipgloss.Height(short.View()); got > 20 {
+		t.Fatalf("frame overflows a 20-line window: %d lines", got)
+	}
+	if strings.Count(stripANSI(short.View()), "Core") > 8 {
+		t.Error("short window should have stepped the core count down")
+	}
+}
+
 func TestRenderTwoColumnsInsertsRowGap(t *testing.T) {
 	cards := []cardData{
 		{icon: iconCPU, title: "CPU", lines: []string{"Total  ok"}},

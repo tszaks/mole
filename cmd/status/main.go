@@ -192,38 +192,51 @@ func (m model) View() string {
 	header, mole := renderHeader(m.metrics, m.errMessage, m.animFrame, termWidth, m.catHidden)
 	alertBar := renderProcessAlertBar(m.metrics.ProcessAlerts, termWidth)
 
-	var cardContent string
-	if termWidth <= 80 {
-		cardWidth := termWidth
-		if cardWidth > 2 {
-			cardWidth -= 2
-		}
-		cards := buildCards(m.metrics, cardWidth, m.cpuCores)
-
-		var rendered []string
-		for i, c := range cards {
-			if i > 0 {
-				rendered = append(rendered, "")
+	renderFrame := func(cpuCores int) string {
+		var cardContent string
+		if termWidth <= 80 {
+			cardWidth := termWidth
+			if cardWidth > 2 {
+				cardWidth -= 2
 			}
-			rendered = append(rendered, renderCard(c, cardWidth, 0))
+			cards := buildCards(m.metrics, cardWidth, cpuCores)
+
+			var rendered []string
+			for i, c := range cards {
+				if i > 0 {
+					rendered = append(rendered, "")
+				}
+				rendered = append(rendered, renderCard(c, cardWidth, 0))
+			}
+			cardContent = lipgloss.JoinVertical(lipgloss.Left, rendered...)
+		} else {
+			cardWidth := max(24, termWidth/2-4)
+			cards := buildCards(m.metrics, cardWidth, cpuCores)
+			cardContent = renderTwoColumns(cards, termWidth)
 		}
-		cardContent = lipgloss.JoinVertical(lipgloss.Left, rendered...)
-	} else {
-		cardWidth := max(24, termWidth/2-4)
-		cards := buildCards(m.metrics, cardWidth, m.cpuCores)
-		cardContent = renderTwoColumns(cards, termWidth)
+
+		// Combine header, mole, and cards with consistent spacing
+		parts := []string{header}
+		if alertBar != "" {
+			parts = append(parts, alertBar)
+		}
+		if mole != "" {
+			parts = append(parts, mole)
+		}
+		parts = append(parts, cardContent)
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
-	// Combine header, mole, and cards with consistent spacing
-	parts := []string{header}
-	if alertBar != "" {
-		parts = append(parts, alertBar)
+	// Every extra core is another card row, and the frame has no scrollback: on
+	// a 20-core Mac "all" adds ~18 lines and pushes the lower cards off a short
+	// window. Step the preference back down until the frame fits; the stored
+	// preference is untouched, so a taller window gets it back.
+	cpuCores := m.cpuCores
+	output := renderFrame(cpuCores)
+	for m.height > 0 && lipgloss.Height(output) > m.height && cpuCores != cpuCoresCycle[0] {
+		cpuCores = smallerCPUCores(cpuCores)
+		output = renderFrame(cpuCores)
 	}
-	if mole != "" {
-		parts = append(parts, mole)
-	}
-	parts = append(parts, cardContent)
-	output := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return padViewToHeight(output, m.height)
 }
 

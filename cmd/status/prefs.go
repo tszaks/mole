@@ -40,7 +40,7 @@ func loadPrefs() map[string]string {
 		return prefs
 	}
 
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -131,6 +131,21 @@ func nextCPUCores(current int) int {
 	for i, v := range cpuCoresCycle {
 		if v == current {
 			return cpuCoresCycle[(i+1)%len(cpuCoresCycle)]
+		}
+	}
+	return cpuCoresCycle[0]
+}
+
+// smallerCPUCores returns the entry before current in cpuCoresCycle, without
+// wrapping: the first entry is the floor. Used by the view to shrink the CPU
+// card when the rendered frame does not fit the window.
+func smallerCPUCores(current int) int {
+	for i, v := range cpuCoresCycle {
+		if v == current {
+			if i == 0 {
+				return cpuCoresCycle[0]
+			}
+			return cpuCoresCycle[i-1]
 		}
 	}
 	return cpuCoresCycle[0]
