@@ -174,12 +174,15 @@ total_items=0
 clean_app_caches
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Apple Media Services cache"* ]]
-    [[ "$output" == *"Duet Expert cache"* ]]
-    [[ "$output" == *"Parsecd cache"* ]]
-    [[ "$output" == *"Apple Python cache"* ]]
-    [[ "$output" == *"Apple Intelligence runtime cache"* ]]
+    [ "$status" -eq 0 ] || return 1
+    # The E5RT bundle cache is deliberately no longer a cleanup target: see
+    # holds_compiled_model_cache(). Assert it first so the check cannot pass
+    # vacuously on empty output.
+    [[ "$output" != *"Apple Intelligence runtime cache"* ]] || return 1
+    [[ "$output" == *"Apple Media Services cache"* ]] || return 1
+    [[ "$output" == *"Duet Expert cache"* ]] || return 1
+    [[ "$output" == *"Parsecd cache"* ]] || return 1
+    [[ "$output" == *"Apple Python cache"* ]] || return 1
 }
 
 @test "clean_app_caches shows spinner during initial app cache scan" {
@@ -302,11 +305,16 @@ precise_size_limit=64
 precise_size_used=0
 process_container_cache "$container"
 
-[[ -f "$e5rt_parent/com.apple.e5rt.e5bundlecache/model.e5" ]]
-[[ ! -e "$cache_dir/disposable" ]]
+# Report state instead of asserting here: this script is fed to bash on stdin,
+# and a child that drains the heredoc truncates whatever follows, so trailing
+# in-script assertions can silently never run. Assert on $output below.
+printf 'E5RT_KEPT=%s\n' "$([[ -f "$e5rt_parent/com.apple.e5rt.e5bundlecache/model.e5" ]] && echo yes || echo no)"
+printf 'SIBLING_REMOVED=%s\n' "$([[ -e "$cache_dir/disposable" ]] && echo no || echo yes)"
 EOF
 
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"E5RT_KEPT=yes"* ]] || return 1
+    [[ "$output" == *"SIBLING_REMOVED=yes"* ]] || return 1
 }
 
 @test "clean_app_caches skips expensive size scans for large sandboxed caches" {

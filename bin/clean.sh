@@ -693,6 +693,14 @@ safe_clean() {
             log_operation "clean" "SKIPPED" "$path" "whitelist"
         fi
         [[ "$skip" == "true" ]] && continue
+
+        if holds_compiled_model_cache "$path"; then
+            skip=true
+            skipped_count=$((skipped_count + 1))
+            log_operation "clean" "SKIPPED" "$path" "compiled model cache"
+        fi
+        [[ "$skip" == "true" ]] && continue
+
         if [[ -e "$path" ]]; then
             if [[ "$DRY_RUN" == "true" ]]; then
                 register_dry_run_cleanup_target "$path" || continue
