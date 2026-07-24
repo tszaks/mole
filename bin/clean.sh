@@ -403,9 +403,15 @@ end_section() {
         fi
     else
         IDLE_SECTION_PENDING=0
+        # Report-only sections (Large files, System Data clues, Project
+        # artifacts, hint-only App leftovers) mark activity without reclaiming
+        # anything, so a footer there would read "Category total · 0B" directly
+        # under a row quoting a 100GB directory. Only sections that actually
+        # moved the tracked total get one.
         local section_size_kb=$((total_size_cleaned - SECTION_START_SIZE_KB))
-        [[ "$section_size_kb" -ge 0 ]] || section_size_kb=0
-        echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · $(colorize_human_size "$(bytes_to_human_kb "$section_size_kb")")"
+        if [[ "$section_size_kb" -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · $(colorize_human_size "$(bytes_to_human_kb "$section_size_kb")")"
+        fi
     fi
     TRACK_SECTION=0
 }
