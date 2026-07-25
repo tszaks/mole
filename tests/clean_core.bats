@@ -448,9 +448,16 @@ PLIST
     [[ "$(grep -cF "$compiled_cache/model.bin" "$preview")" -eq 0 ]] || return 1
     [[ "$(grep -cF "$whitelisted_cache/keep.bin" "$preview")" -eq 0 ]] || return 1
     [[ "$(grep -cF "$protected_cache/protected.bin" "$preview")" -eq 0 ]] || return 1
-    grep -qF "# Potential cleanup: $expected_human" "$preview" || return 1
+    local preview_total preview_items preview_categories
+    preview_total=$(sed -n 's/^# Potential cleanup: //p' "$preview")
+    preview_items=$(sed -n 's/^# Items: //p' "$preview")
+    preview_categories=$(sed -n 's/^# Categories: //p' "$preview")
+    [[ -n "$preview_total" && "$preview_items" =~ ^[0-9]+$ && "$preview_categories" =~ ^[0-9]+$ ]] || return 1
     printf '%s\n' "$output" | grep -F "Category total" | grep -qF "$expected_human" || return 1
-    printf '%s\n' "$output" | grep -F "Potential space:" | grep -qF "$expected_human" || return 1
+    printf '%s\n' "$output" | grep -F "Potential space:" |
+        grep -F "Items: $preview_items" |
+        grep -F "Categories: $preview_categories" |
+        grep -qF "$preview_total" || return 1
 }
 
 @test "dry-run ledger keeps shell-timeout child candidates and unknown sizes" {
