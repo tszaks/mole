@@ -20,6 +20,19 @@ clean_trash() {
 
     if [[ "$DRY_RUN" == "true" ]]; then
         if [[ $trash_count -gt 0 ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                local trash_item
+                while IFS= read -r -d '' trash_item; do
+                    [[ -e "$trash_item" ]] || continue
+                    if should_protect_path "$trash_item" 2> /dev/null || is_path_whitelisted "$trash_item" 2> /dev/null; then
+                        continue
+                    fi
+                    local trash_item_kb
+                    trash_item_kb=$(get_path_size_kb "$trash_item" 2> /dev/null || echo "0")
+                    [[ "$trash_item_kb" =~ ^[0-9]+$ ]] || trash_item_kb=0
+                    record_dry_run_cleanup_target "$trash_item" "$trash_item_kb" 1 true || true
+                done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+            fi
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $trash_count items"
         else
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
@@ -164,6 +177,9 @@ _clean_mail_downloads() {
                     file_size_kb=$(get_path_size_kb "$file_path")
                     local remove_rc=1
                     if [[ "$dry_run_mode" == "true" ]]; then
+                        if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                            record_dry_run_cleanup_target "$file_path" "$file_size_kb" 1 true || continue
+                        fi
                         MOLE_DRY_RUN=1 safe_remove "$file_path" true "$file_size_kb" && remove_rc=0
                     elif safe_remove "$file_path" true "$file_size_kb"; then
                         remove_rc=0
@@ -267,7 +283,14 @@ _clean_darwin_user_runtime_dir() {
         item_size_kb=$(get_path_size_kb "$item" 2> /dev/null || echo "0")
         [[ "$item_size_kb" =~ ^[0-9]+$ ]] || item_size_kb=0
 
-        if [[ "${DRY_RUN:-false}" == "true" ]] || safe_remove "$item" true "$item_size_kb" > /dev/null 2>&1; then
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$item" "$item_size_kb" 1 true || continue
+            fi
+            found_any=true
+            count=$((count + 1))
+            total_size_kb=$((total_size_kb + item_size_kb))
+        elif safe_remove "$item" true "$item_size_kb" > /dev/null 2>&1; then
             found_any=true
             count=$((count + 1))
             total_size_kb=$((total_size_kb + item_size_kb))
@@ -293,7 +316,13 @@ _clean_darwin_user_runtime_dir() {
             if is_endpoint_security_cache_path "$item"; then
                 continue
             fi
-            if [[ "${DRY_RUN:-false}" == "true" ]] || safe_remove "$item" true "0" > /dev/null 2>&1; then
+            if [[ "${DRY_RUN:-false}" == "true" ]]; then
+                if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                    record_dry_run_cleanup_target "$item" 0 1 true || continue
+                fi
+                found_any=true
+                count=$((count + 1))
+            elif safe_remove "$item" true "0" > /dev/null 2>&1; then
                 found_any=true
                 count=$((count + 1))
             fi
@@ -454,6 +483,9 @@ _clean_chromium_old_versions() {
             local size_kb
             size_kb=$(get_path_size_kb "$dir" || echo 0)
             size_kb="${size_kb:-0}"
+            if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$dir" "$size_kb" 1 true || continue
+            fi
             total_size=$((total_size + size_kb))
             cleaned_count=$((cleaned_count + 1))
             cleaned_any=true
@@ -601,6 +633,9 @@ clean_edge_updater_old_versions() {
         local size_kb
         size_kb=$(get_path_size_kb "$dir" || echo 0)
         size_kb="${size_kb:-0}"
+        if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+            record_dry_run_cleanup_target "$dir" "$size_kb" 1 true || continue
+        fi
         total_size=$((total_size + size_kb))
         cleaned_count=$((cleaned_count + 1))
         cleaned_any=true
@@ -865,6 +900,9 @@ clean_handoff_pasteboard_cache() {
         item_kb=$(get_path_size_kb "$item" 2> /dev/null || echo 0)
         [[ "$item_kb" =~ ^[0-9]+$ ]] || item_kb=0
         if [[ "$DRY_RUN" == "true" ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$item" "$item_kb" 1 true || continue
+            fi
             cleaned_count=$((cleaned_count + 1))
             total_kb=$((total_kb + item_kb))
             continue
@@ -912,6 +950,52 @@ process_container_cache() {
     [[ "$item_count" =~ ^[0-9]+$ ]] || item_count=0
     [[ "$item_count" -eq 0 ]] && return 0
 
+    if [[ "$DRY_RUN" == "true" ]]; then
+        local _nullglob_state
+        local _dotglob_state
+        _nullglob_state=$(shopt -p nullglob || true)
+        _dotglob_state=$(shopt -p dotglob || true)
+        shopt -s nullglob dotglob
+
+        local item
+        for item in "$cache_dir"/*; do
+            [[ -e "$item" ]] || continue
+            [[ -L "$item" ]] && continue
+            if holds_compiled_model_cache "$item"; then
+                continue
+            fi
+            if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
+                continue
+            fi
+            if declare -f register_dry_run_cleanup_target > /dev/null 2>&1; then
+                register_dry_run_cleanup_target "$item" || continue
+            fi
+
+            local item_size_kb=0
+            local size_known=false
+            if [[ "$precise_size_used" -lt "$precise_size_limit" ]]; then
+                item_size_kb=$(get_path_size_kb "$item" 2> /dev/null || echo "0")
+                [[ "$item_size_kb" =~ ^[0-9]+$ ]] || item_size_kb=0
+                precise_size_used=$((precise_size_used + 1))
+                size_known=true
+            else
+                total_size_partial=true
+            fi
+
+            if declare -f append_dry_run_cleanup_target > /dev/null 2>&1; then
+                append_dry_run_cleanup_target "$item" "$item_size_kb" 1 "$size_known"
+            fi
+            total_size=$((total_size + item_size_kb))
+            cleaned_count=$((cleaned_count + 1))
+            found_any=true
+        done
+
+        # eval: restore shopt state captured by $(shopt -p)
+        eval "$_nullglob_state"
+        eval "$_dotglob_state"
+        return 0
+    fi
+
     if [[ "$item_count" -le 100 && "$precise_size_used" -lt "$precise_size_limit" ]]; then
         local size
         size=$(get_path_size_kb "$cache_dir" 2> /dev/null || echo "0")
@@ -924,31 +1008,29 @@ process_container_cache() {
 
     found_any=true
     cleaned_count=$((cleaned_count + 1))
-    if [[ "$DRY_RUN" != "true" ]]; then
-        local _nullglob_state
-        local _dotglob_state
-        _nullglob_state=$(shopt -p nullglob || true)
-        _dotglob_state=$(shopt -p dotglob || true)
-        shopt -s nullglob dotglob
-        local item
-        for item in "$cache_dir"/*; do
-            [[ -e "$item" ]] || continue
-            [[ -L "$item" ]] && continue
-            if holds_compiled_model_cache "$item"; then
-                continue
-            fi
-            # Re-check each item, not just the parent bundle: a user may have
-            # whitelisted a specific cache path, and should_protect_path may
-            # cover a nested entry. Mirrors clean_group_container_caches.
-            if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
-                continue
-            fi
-            safe_remove "$item" true || true
-        done
-        # eval: restore shopt state captured by $(shopt -p)
-        eval "$_nullglob_state"
-        eval "$_dotglob_state"
-    fi
+    local _nullglob_state
+    local _dotglob_state
+    _nullglob_state=$(shopt -p nullglob || true)
+    _dotglob_state=$(shopt -p dotglob || true)
+    shopt -s nullglob dotglob
+    local item
+    for item in "$cache_dir"/*; do
+        [[ -e "$item" ]] || continue
+        [[ -L "$item" ]] && continue
+        if holds_compiled_model_cache "$item"; then
+            continue
+        fi
+        # Re-check each item, not just the parent bundle: a user may have
+        # whitelisted a specific cache path, and should_protect_path may
+        # cover a nested entry. Mirrors clean_group_container_caches.
+        if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
+            continue
+        fi
+        safe_remove "$item" true || true
+    done
+    # eval: restore shopt state captured by $(shopt -p)
+    eval "$_nullglob_state"
+    eval "$_dotglob_state"
 }
 
 # Group Containers safe cleanup (logs for protected apps, caches/tmp for non-protected apps).
@@ -1051,6 +1133,9 @@ clean_group_container_caches() {
                     if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
                         continue
                     fi
+                    if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                        record_dry_run_cleanup_target "$item" 0 1 false || continue
+                    fi
                     candidate_changed=true
                     if [[ "$DRY_RUN" != "true" ]]; then
                         safe_remove "$item" true 2> /dev/null || true
@@ -1067,6 +1152,9 @@ clean_group_container_caches() {
                     item_size=$(get_path_size_kb "$item" 2> /dev/null) || item_size=0
                     [[ "$item_size" =~ ^[0-9]+$ ]] || item_size=0
                     if [[ "$DRY_RUN" == "true" ]]; then
+                        if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                            record_dry_run_cleanup_target "$item" "$item_size" 1 true || continue
+                        fi
                         candidate_changed=true
                         candidate_size_kb=$((candidate_size_kb + item_size))
                         continue
@@ -1232,6 +1320,9 @@ clean_external_volume_target() {
         [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
         if [[ "$DRY_RUN" == "true" ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$target_path" "$size_kb" 1 true || continue
+            fi
             found_any=true
             cleaned_count=$((cleaned_count + 1))
             total_size=$((total_size + size_kb))
@@ -1259,6 +1350,9 @@ clean_external_volume_target() {
         [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
         if [[ "$DRY_RUN" == "true" ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$metadata_file" "$size_kb" 1 true || continue
+            fi
             found_any=true
             cleaned_count=$((cleaned_count + 1))
             total_size=$((total_size + size_kb))
@@ -1811,7 +1905,11 @@ clean_application_support_logs() {
                     fi
                     stop_section_spinner
                     start_section_spinner "Scanning Application Support... $app_count/$total_apps [$app_label, bulk clean]"
-                    if [[ "$DRY_RUN" != "true" ]]; then
+                    if [[ "$DRY_RUN" == "true" ]]; then
+                        if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                            record_dry_run_cleanup_target "$candidate" 0 1 false || continue
+                        fi
+                    else
                         # Remove entire candidate directory in one go
                         safe_remove "$candidate" true > /dev/null 2>&1 || true
                     fi
@@ -1830,13 +1928,14 @@ clean_application_support_logs() {
                     if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
                         continue
                     fi
-                    item_found=true
-                    candidate_item_count=$((candidate_item_count + 1))
+                    local item_size_known=false
+                    local item_size_kb=0
+                    local item_size_bytes=""
                     if [[ ! -L "$item" && (-f "$item" || -d "$item") ]]; then
-                        local item_size_bytes=""
                         if item_size_bytes=$(app_support_item_size_bytes "$item" "$size_timeout_seconds"); then
                             if [[ "$item_size_bytes" =~ ^[0-9]+$ ]]; then
-                                candidate_size_bytes=$((candidate_size_bytes + item_size_bytes))
+                                item_size_kb=$(((item_size_bytes + 1023) / 1024))
+                                item_size_known=true
                             else
                                 candidate_size_partial=true
                             fi
@@ -1844,6 +1943,14 @@ clean_application_support_logs() {
                             candidate_size_partial=true
                         fi
                     fi
+                    if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                        record_dry_run_cleanup_target "$item" "$item_size_kb" 1 "$item_size_known" || continue
+                    fi
+                    if [[ "$item_size_known" == "true" ]]; then
+                        candidate_size_bytes=$((candidate_size_bytes + item_size_bytes))
+                    fi
+                    item_found=true
+                    candidate_item_count=$((candidate_item_count + 1))
                     if ((candidate_item_count % 250 == 0)); then
                         local current_time
                         current_time=$(get_epoch_seconds)
@@ -1889,7 +1996,11 @@ clean_application_support_logs() {
                     fi
                     stop_section_spinner
                     start_section_spinner "Scanning Application Support... group [$container_label, bulk clean]"
-                    if [[ "$DRY_RUN" != "true" ]]; then
+                    if [[ "$DRY_RUN" == "true" ]]; then
+                        if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                            record_dry_run_cleanup_target "$candidate" 0 1 false || continue
+                        fi
+                    else
                         safe_remove "$candidate" true > /dev/null 2>&1 || true
                     fi
                     found_any=true
@@ -1904,13 +2015,14 @@ clean_application_support_logs() {
                 local candidate_item_count=0
                 while IFS= read -r -d '' item; do
                     [[ -e "$item" ]] || continue
-                    item_found=true
-                    candidate_item_count=$((candidate_item_count + 1))
+                    local item_size_known=false
+                    local item_size_kb=0
+                    local item_size_bytes=""
                     if [[ ! -L "$item" && (-f "$item" || -d "$item") ]]; then
-                        local item_size_bytes=""
                         if item_size_bytes=$(app_support_item_size_bytes "$item" "$size_timeout_seconds"); then
                             if [[ "$item_size_bytes" =~ ^[0-9]+$ ]]; then
-                                candidate_size_bytes=$((candidate_size_bytes + item_size_bytes))
+                                item_size_kb=$(((item_size_bytes + 1023) / 1024))
+                                item_size_known=true
                             else
                                 candidate_size_partial=true
                             fi
@@ -1918,6 +2030,14 @@ clean_application_support_logs() {
                             candidate_size_partial=true
                         fi
                     fi
+                    if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                        record_dry_run_cleanup_target "$item" "$item_size_kb" 1 "$item_size_known" || continue
+                    fi
+                    if [[ "$item_size_known" == "true" ]]; then
+                        candidate_size_bytes=$((candidate_size_bytes + item_size_bytes))
+                    fi
+                    item_found=true
+                    candidate_item_count=$((candidate_item_count + 1))
                     if ((candidate_item_count % 250 == 0)); then
                         local current_time
                         current_time=$(get_epoch_seconds)
@@ -2008,6 +2128,9 @@ clean_cached_device_firmware() {
         size_kb=$(get_path_size_kb "$ipsw" || echo 0)
         size_kb="${size_kb:-0}"
         if [[ "$DRY_RUN" == "true" ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$ipsw" "$size_kb" 1 true || return 0
+            fi
             total_size_kb=$((total_size_kb + size_kb))
             cleaned_count=$((cleaned_count + 1))
             cleaned_any=true

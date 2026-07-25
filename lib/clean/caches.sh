@@ -77,6 +77,9 @@ clean_service_worker_cache() {
             protected_count=$((protected_count + 1))
         fi
         if [[ "$is_protected" == "false" ]]; then
+            if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$cache_dir" "$size" 1 true || continue
+            fi
             if [[ "$DRY_RUN" != "true" ]]; then
                 safe_remove "$cache_dir" true || true
             fi
@@ -406,7 +409,9 @@ clean_python_bytecode_cache_group() {
         [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            if declare -f register_dry_run_cleanup_target > /dev/null 2>&1; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$cache_dir" "$size_kb" 1 true || continue
+            elif declare -f register_dry_run_cleanup_target > /dev/null 2>&1; then
                 register_dry_run_cleanup_target "$cache_dir" || continue
             fi
             dry_run_paths+=("$cache_dir")
@@ -429,7 +434,7 @@ clean_python_bytecode_cache_group() {
     size_human=$(bytes_to_human "$((total_size_kb * 1024))")
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        if [[ -n "${EXPORT_LIST_FILE:-}" ]]; then
+        if ! declare -f record_dry_run_cleanup_target > /dev/null 2>&1 && [[ -n "${EXPORT_LIST_FILE:-}" ]]; then
             ensure_user_file "$EXPORT_LIST_FILE"
             local i=0
             for ((i = 0; i < ${#dry_run_paths[@]}; i++)); do

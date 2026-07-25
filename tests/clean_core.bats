@@ -407,6 +407,75 @@ PLIST
     [ "$output" -eq 1 ]
 }
 
+@test "mo clean --dry-run keeps container totals and preview paths consistent (#1282)" {
+    local explicit_cache="$HOME/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches"
+    local generic_cache="$HOME/Library/Containers/com.example.generic/Data/Library/Caches"
+    local compiled_cache="$generic_cache/com.apple.e5rt.e5bundlecache"
+    local whitelisted_cache="$HOME/Library/Containers/com.example.whitelisted/Data/Library/Caches"
+    local protected_cache="$HOME/Library/Containers/com.apple.Safari/Data/Library/Caches"
+    mkdir -p "$explicit_cache" "$generic_cache" "$compiled_cache" "$whitelisted_cache" "$protected_cache"
+    dd if=/dev/zero of="$explicit_cache/explicit.bin" bs=1024 count=1024 2> /dev/null
+    dd if=/dev/zero of="$generic_cache/generic.bin" bs=1024 count=1024 2> /dev/null
+    dd if=/dev/zero of="$compiled_cache/model.bin" bs=1024 count=1024 2> /dev/null
+    dd if=/dev/zero of="$whitelisted_cache/keep.bin" bs=1024 count=1024 2> /dev/null
+    dd if=/dev/zero of="$protected_cache/protected.bin" bs=1024 count=1024 2> /dev/null
+    printf '%s\n' "$whitelisted_cache/keep.bin" > "$HOME/.config/mole/whitelist"
+    local explicit_kb generic_kb expected_human
+    explicit_kb=$(du -skP "$explicit_cache/explicit.bin" | awk '{print $1}')
+    generic_kb=$(du -skP "$generic_cache/generic.bin" | awk '{print $1}')
+    # shellcheck disable=SC2016
+    expected_human=$(env PROJECT_ROOT="$PROJECT_ROOT" EXPECTED_KB="$((explicit_kb + generic_kb))" \
+        bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; bytes_to_human_kb "$EXPECTED_KB"')
+
+    set_mock_sudo_uncached
+    run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 PATH="$TEST_MOCK_BIN:$PATH" \
+        "$PROJECT_ROOT/mole" clean --dry-run
+
+    [ "$status" -eq 0 ] || return 1
+    local preview="$HOME/.config/mole/clean-list.txt"
+    [[ -f "$preview" ]] || return 1
+    [[ "$(grep -cF "$explicit_cache/explicit.bin" "$preview")" -eq 1 ]] || return 1
+    [[ "$(grep -cF "$generic_cache/generic.bin" "$preview")" -eq 1 ]] || return 1
+    [[ "$(grep -cF "$compiled_cache/model.bin" "$preview")" -eq 0 ]] || return 1
+    [[ "$(grep -cF "$whitelisted_cache/keep.bin" "$preview")" -eq 0 ]] || return 1
+    [[ "$(grep -cF "$protected_cache/protected.bin" "$preview")" -eq 0 ]] || return 1
+    grep -qF "# Potential cleanup: $expected_human" "$preview" || return 1
+    printf '%s\n' "$output" | grep -F "Category total" | grep -qF "$expected_human" || return 1
+    printf '%s\n' "$output" | grep -F "Potential space:" | grep -qF "$expected_human" || return 1
+}
+
+@test "dry-run ledger keeps shell-timeout child candidates and unknown sizes" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+
+DRY_RUN=true
+CLEAN_PREVIEW_FINAL_FILE="$HOME/ledger-preview.txt"
+prepare_clean_preview_file
+CURRENT_SECTION="Cloud & Office"
+candidate="$HOME/Library/Application Support/Cloud/cache.bin"
+mkdir -p "$(dirname "$candidate")"
+touch "$candidate"
+
+record_timeout_candidate() {
+    record_dry_run_cleanup_target "$candidate" 0 1 false
+}
+run_with_shell_timeout 5 record_timeout_candidate < /dev/null
+
+render_clean_preview_from_ledger
+dry_run_ledger_stats
+printf 'PARTIAL=%s\n' "$DRY_RUN_TOTAL_PARTIAL"
+cat "$EXPORT_LIST_FILE"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"0 1 1 1"* ]] || return 1
+    [[ "$output" == *"PARTIAL=true"* ]] || return 1
+    [[ "$output" == *"Cloud & Office"* ]] || return 1
+    [[ "$output" == *"cache.bin  # size unknown"* ]] || return 1
+}
+
 @test "mo clean honors whitelist entries" {
     mkdir -p "$HOME/Library/Caches/WhitelistedApp"
     echo "keep me" > "$HOME/Library/Caches/WhitelistedApp/data.tmp"

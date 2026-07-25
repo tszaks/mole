@@ -33,6 +33,10 @@ clean_ds_store_tree() {
     while IFS= read -r -d '' ds_file; do
         local size
         size=$(get_file_size "$ds_file")
+        if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+            local preview_size_kb=$(((size + 1023) / 1024))
+            record_dry_run_cleanup_target "$ds_file" "$preview_size_kb" 1 true || continue
+        fi
         total_bytes=$((total_bytes + size))
         file_count=$((file_count + 1))
         if [[ "$DRY_RUN" != "true" ]]; then
@@ -811,14 +815,13 @@ clean_orphaned_system_services() {
             fi
             if [[ "$DRY_RUN" == "true" ]]; then
                 debug_log "[DRY RUN] Would remove orphaned service: $orphan_file"
-                # Terminal output only shows a count for this section, so the
-                # preview file must carry the exact paths; without them users
-                # cannot copy an entry into the whitelist before the real run
-                # deletes a root-level service. See #1210.
-                if [[ -n "${EXPORT_LIST_FILE:-}" && -f "$EXPORT_LIST_FILE" ]]; then
-                    local orphan_size_kb
-                    orphan_size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$orphan_file" 2> /dev/null | awk '{print $1}' || echo "0")
-                    [[ -n "$orphan_size_kb" ]] || orphan_size_kb=0
+                local orphan_size_kb
+                orphan_size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$orphan_file" 2> /dev/null | awk '{print $1}' || echo "0")
+                [[ -n "$orphan_size_kb" ]] || orphan_size_kb=0
+                if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                    record_dry_run_cleanup_target "$orphan_file" "$orphan_size_kb" 1 true || continue
+                elif [[ -n "${EXPORT_LIST_FILE:-}" && -f "$EXPORT_LIST_FILE" ]]; then
+                    # Standalone module tests do not prepare the clean ledger.
                     echo "$orphan_file  # $(bytes_to_human "$((orphan_size_kb * 1024))")" >> "$EXPORT_LIST_FILE"
                 fi
             else
@@ -1015,6 +1018,12 @@ clean_orphaned_container_stubs() {
                     log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$container_dir" "stub-container"
                 fi
             else
+                if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                    local stub_size_kb
+                    stub_size_kb=$(get_path_size_kb "$container_dir" 2> /dev/null || echo "0")
+                    [[ "$stub_size_kb" =~ ^[0-9]+$ ]] || stub_size_kb=0
+                    record_dry_run_cleanup_target "$container_dir" "$stub_size_kb" 1 true || continue
+                fi
                 removed_count=$((removed_count + 1))
                 log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$container_dir" "dry-run stub-container"
             fi

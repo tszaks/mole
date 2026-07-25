@@ -293,6 +293,28 @@ validate_path_for_deletion() {
 # Safe Removal Operations
 # ============================================================================
 
+_record_file_ops_dry_run_target() {
+    local path="$1"
+    local precomputed_size_kb="${2:-}"
+
+    declare -f record_dry_run_cleanup_target > /dev/null 2>&1 || return 0
+
+    local size_kb=0
+    local size_known=true
+    if [[ -n "$precomputed_size_kb" && "$precomputed_size_kb" =~ ^[0-9]+$ ]]; then
+        size_kb="$precomputed_size_kb"
+    else
+        local measured_size=""
+        if measured_size=$(get_path_size_kb "$path" 2> /dev/null) && [[ "$measured_size" =~ ^[0-9]+$ ]]; then
+            size_kb="$measured_size"
+        else
+            size_known=false
+        fi
+    fi
+
+    record_dry_run_cleanup_target "$path" "$size_kb" 1 "$size_known" || true
+}
+
 # Safe wrapper around rm -rf with validation
 safe_remove() {
     local path="$1"
@@ -325,6 +347,7 @@ safe_remove() {
 
     # Dry-run mode: log but don't delete
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        _record_file_ops_dry_run_target "$path" "$precomputed_size_kb"
         if [[ "${MO_DEBUG:-}" == "1" ]]; then
             local file_type="file"
             [[ -d "$path" ]] && file_type="directory"
@@ -420,6 +443,7 @@ safe_remove_symlink() {
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        _record_file_ops_dry_run_target "$path"
         debug_log "[DRY RUN] Would remove symlink: $path"
         return 0
     fi
@@ -465,6 +489,10 @@ safe_sudo_remove() {
     if [[ -L "$path" ]]; then
         log_error "Refusing to sudo remove symlink: $path"
         return 1
+    fi
+
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        _record_file_ops_dry_run_target "$path"
     fi
 
     if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
@@ -639,6 +667,11 @@ mole_delete() {
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        if [[ "$size_kb" =~ ^[0-9]+$ ]]; then
+            _record_file_ops_dry_run_target "$path" "$size_kb"
+        else
+            _record_file_ops_dry_run_target "$path"
+        fi
         debug_log "[DRY RUN] Would delete ($mode): $path"
         _mole_delete_log "$mode" "$size_kb" "dry-run" "$path"
         return 0
@@ -947,6 +980,12 @@ safe_find_delete() {
         if declare -f is_path_whitelisted > /dev/null && is_path_whitelisted "$match"; then
             continue
         fi
+        if [[ "${MOLE_DRY_RUN:-0}" == "1" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+            local match_size_kb
+            match_size_kb=$(get_path_size_kb "$match" 2> /dev/null || echo "0")
+            [[ "$match_size_kb" =~ ^[0-9]+$ ]] || match_size_kb=0
+            record_dry_run_cleanup_target "$match" "$match_size_kb" 1 true || continue
+        fi
         safe_remove "$match" true || true
     done < <(command find "$base_dir" "${find_args[@]}" -print0 2> /dev/null < /dev/null || true)
 
@@ -1036,6 +1075,18 @@ safe_sudo_find_delete() {
         fi
         if declare -f is_path_whitelisted > /dev/null && is_path_whitelisted "$match"; then
             continue
+        fi
+        if [[ "${MOLE_DRY_RUN:-0}" == "1" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+            local match_size_kb=0
+            local match_size_known=false
+            local raw_match_size=""
+            if raw_match_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$match" 2> /dev/null | awk '{print $1; exit}'); then
+                if [[ "$raw_match_size" =~ ^[0-9]+$ ]]; then
+                    match_size_kb="$raw_match_size"
+                    match_size_known=true
+                fi
+            fi
+            record_dry_run_cleanup_target "$match" "$match_size_kb" 1 "$match_size_known" || continue
         fi
         # -type f never emits symlinks; a path that is one now was swapped
         # after find saw it, and the single-file path refuses those.

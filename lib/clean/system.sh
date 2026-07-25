@@ -336,6 +336,7 @@ clean_deep_system() {
                     log_operation "clean" "REMOVED" "$mem_reports_dir" "$file_count files, $size_human"
                 fi
             else
+                safe_sudo_find_delete "$mem_reports_dir" "*" "30" "f" || true
                 log_info "[DRY-RUN] Would remove $file_count old memory exception reports ($total_size_kb KB)"
             fi
         fi
@@ -454,6 +455,9 @@ clean_time_machine_failed_backups() {
                 local size_human
                 size_human=$(bytes_to_human "$((size_kb * 1024))")
                 if [[ "$DRY_RUN" == "true" ]]; then
+                    if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                        record_dry_run_cleanup_target "$inprogress_file" "$size_kb" 1 true || continue
+                    fi
                     echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete backup: $backup_name${NC} · $(colorize_human_size "$size_human") ${YELLOW}dry${NC}"
                     tm_cleaned=$((tm_cleaned + 1))
                     note_activity
@@ -514,6 +518,9 @@ clean_time_machine_failed_backups() {
                     local size_human
                     size_human=$(bytes_to_human "$((size_kb * 1024))")
                     if [[ "$DRY_RUN" == "true" ]]; then
+                        if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                            record_dry_run_cleanup_target "$inprogress_file" "$size_kb" 1 true || continue
+                        fi
                         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Incomplete APFS backup in $bundle_name: $backup_name${NC} · $(colorize_human_size "$size_human") ${YELLOW}dry${NC}"
                         tm_cleaned=$((tm_cleaned + 1))
                         note_activity

@@ -627,19 +627,28 @@ clean_xcode_system_coresimulator_caches() {
 
     [[ ${#cache_entries[@]} -gt 0 ]] || return 0
 
-    local total_size_kb=0
     local entry
-    for entry in "${cache_entries[@]}"; do
-        local entry_size_kb
-        entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null || echo 0)
-        [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
-        total_size_kb=$((total_size_kb + entry_size_kb))
-    done
 
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        local total_size_kb=0
+        local cleanable_count=0
+        for entry in "${cache_entries[@]}"; do
+            if should_protect_path "$entry" || is_path_whitelisted "$entry"; then
+                continue
+            fi
+            local entry_size_kb
+            entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null || echo 0)
+            [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$entry" "$entry_size_kb" 1 true || continue
+            fi
+            total_size_kb=$((total_size_kb + entry_size_kb))
+            cleanable_count=$((cleanable_count + 1))
+        done
+        [[ "$cleanable_count" -gt 0 ]] || return 0
         local total_size_human
         total_size_human=$(bytes_to_human "$((total_size_kb * 1024))")
-        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode Simulator system cache · would remove ${#cache_entries[@]} entries (${total_size_human})"
+        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode Simulator system cache · would remove ${cleanable_count} entries (${total_size_human})"
         note_activity
         return 0
     fi
@@ -734,8 +743,25 @@ clean_xcode_device_support() {
             stale_size_human=$(bytes_to_human "$((stale_size_kb * 1024))")
 
             if [[ "$DRY_RUN" == "true" ]]; then
-                echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} ${display_name} · would remove ${#stale_dirs[@]} old versions (${stale_size_human}), keeping ${keep_count} most recent"
-                note_activity
+                local dry_run_count=0
+                stale_size_kb=0
+                for stale_entry in "${stale_dirs[@]}"; do
+                    if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry"; then
+                        continue
+                    fi
+                    entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null || echo 0)
+                    [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
+                    if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                        record_dry_run_cleanup_target "$stale_entry" "$entry_size_kb" 1 true || continue
+                    fi
+                    stale_size_kb=$((stale_size_kb + entry_size_kb))
+                    dry_run_count=$((dry_run_count + 1))
+                done
+                if [[ "$dry_run_count" -gt 0 ]]; then
+                    stale_size_human=$(bytes_to_human "$((stale_size_kb * 1024))")
+                    echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} ${display_name} · would remove ${dry_run_count} old versions (${stale_size_human}), keeping ${keep_count} most recent"
+                    note_activity
+                fi
             else
                 # Remove old versions
                 local removed_count=0
@@ -845,14 +871,11 @@ clean_xcode_simulator_runtime_volumes() {
     fi
 
     local in_use_count=0
-    local unused_count=0
     for candidate in "${sorted_candidates[@]}"; do
         local status="UNUSED"
         if [[ ${#mount_points[@]} -gt 0 ]] && _sim_runtime_is_path_in_use "$candidate" "${mount_points[@]}"; then
             status="IN_USE"
             in_use_count=$((in_use_count + 1))
-        else
-            unused_count=$((unused_count + 1))
         fi
         entry_statuses+=("$status")
     done
@@ -861,6 +884,7 @@ clean_xcode_simulator_runtime_volumes() {
         local -a size_values=()
         local in_use_kb=0
         local unused_kb=0
+        local cleanable_unused_count=0
         local i=0
         for candidate in "${sorted_candidates[@]}"; do
             local size_kb
@@ -870,7 +894,16 @@ clean_xcode_simulator_runtime_volumes() {
             if [[ "$status" == "IN_USE" ]]; then
                 in_use_kb=$((in_use_kb + size_kb))
             else
-                unused_kb=$((unused_kb + size_kb))
+                if ! should_protect_path "$candidate" && ! is_path_whitelisted "$candidate"; then
+                    if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                        record_dry_run_cleanup_target "$candidate" "$size_kb" 1 true || {
+                            i=$((i + 1))
+                            continue
+                        }
+                    fi
+                    unused_kb=$((unused_kb + size_kb))
+                    cleanable_unused_count=$((cleanable_unused_count + 1))
+                fi
             fi
             i=$((i + 1))
         done
@@ -879,7 +912,7 @@ clean_xcode_simulator_runtime_volumes() {
             runtime_scan_spinner=false
         fi
 
-        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode runtime volumes · ${unused_count} unused, ${in_use_count} in use"
+        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode runtime volumes · ${cleanable_unused_count} unused, ${in_use_count} in use"
         local dryrun_total_kb=$((unused_kb + in_use_kb))
         local dryrun_total_human
         dryrun_total_human=$(bytes_to_human "$((dryrun_total_kb * 1024))")
@@ -1174,6 +1207,16 @@ clean_dev_mobile() {
 
                 if [[ "$DRY_RUN" == "true" ]]; then
                     if ((unavailable_before > 0)); then
+                        for unavailable_udid in "${unavailable_udids[@]}"; do
+                            local unavailable_path="$HOME/Library/Developer/CoreSimulator/Devices/$unavailable_udid"
+                            [[ -d "$unavailable_path" ]] || continue
+                            local unavailable_path_size_kb
+                            unavailable_path_size_kb=$(get_path_size_kb "$unavailable_path" 2> /dev/null || echo "0")
+                            [[ "$unavailable_path_size_kb" =~ ^[0-9]+$ ]] || unavailable_path_size_kb=0
+                            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                                record_dry_run_cleanup_target "$unavailable_path" "$unavailable_path_size_kb" 1 true || true
+                            fi
+                        done
                         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode unavailable simulators · would clean ${unavailable_before}, ${unavailable_size_human}"
                     else
                         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"

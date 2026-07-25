@@ -37,6 +37,7 @@ MOLE_USER_HOME="$(get_invoking_home)"
 
 CLEAN_PREVIEW_FINAL_FILE="$MOLE_USER_HOME/.config/mole/clean-list.txt"
 CLEAN_PREVIEW_STAGING_FILE=""
+CLEAN_PREVIEW_LEDGER_FILE=""
 EXPORT_LIST_FILE="$CLEAN_PREVIEW_FINAL_FILE"
 CURRENT_SECTION=""
 readonly PROTECTED_SW_DOMAINS=(
@@ -139,6 +140,7 @@ expand_whitelist_patterns
 prepare_clean_preview_file() {
     EXPORT_LIST_FILE="$CLEAN_PREVIEW_FINAL_FILE"
     CLEAN_PREVIEW_STAGING_FILE=""
+    CLEAN_PREVIEW_LEDGER_FILE=""
 
     if is_root_user && [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
         ensure_mole_temp_root || return 1
@@ -151,6 +153,10 @@ prepare_clean_preview_file() {
     else
         ensure_user_file "$EXPORT_LIST_FILE"
     fi
+
+    CLEAN_PREVIEW_LEDGER_FILE=$(create_temp_file) || return 1
+    [[ -f "$CLEAN_PREVIEW_LEDGER_FILE" && ! -L "$CLEAN_PREVIEW_LEDGER_FILE" ]] || return 1
+    : > "$CLEAN_PREVIEW_LEDGER_FILE"
 }
 
 run_clean_preview_as_invoking_user() {
@@ -199,6 +205,8 @@ PROJECT_ARTIFACT_HINT_ESTIMATED_KB=0
 PROJECT_ARTIFACT_HINT_ESTIMATE_SAMPLES=0
 PROJECT_ARTIFACT_HINT_ESTIMATE_PARTIAL=false
 declare -a DRY_RUN_SEEN_IDENTITIES=()
+DRY_RUN_TOTAL_PARTIAL=false
+SECTION_START_UNKNOWN_COUNT=0
 
 # shellcheck disable=SC2329
 note_activity() {
@@ -209,6 +217,12 @@ note_activity() {
 
 # shellcheck disable=SC2329
 register_dry_run_cleanup_target() {
+    # Full clean runs deduplicate the file-backed ledger in one linear pass.
+    # Avoid an O(n²) Bash array scan while candidates are still being found.
+    if [[ -n "${CLEAN_PREVIEW_LEDGER_FILE:-}" && -f "$CLEAN_PREVIEW_LEDGER_FILE" ]]; then
+        return 0
+    fi
+
     local path="$1"
     local identity
     identity=$(mole_path_identity "$path")
@@ -219,6 +233,220 @@ register_dry_run_cleanup_target() {
 
     DRY_RUN_SEEN_IDENTITIES+=("$identity")
     return 0
+}
+
+# Append one candidate to the dry-run ledger. Final rendering deduplicates the
+# shared file, so timeout subprocess paths survive without an O(n²) hot loop.
+# Fields are NUL-delimited to preserve whitespace in paths.
+# Args: path, size_kb, item_count, size_known
+append_dry_run_cleanup_target() {
+    local path="$1"
+    local size_kb="${2:-0}"
+    local item_count="${3:-1}"
+    local size_known="${4:-true}"
+    local identity
+    identity=$(mole_path_identity "$path")
+
+    [[ "$size_kb" =~ ^[0-9]+$ ]] || {
+        size_kb=0
+        size_known=false
+    }
+    [[ "$item_count" =~ ^[0-9]+$ && "$item_count" -gt 0 ]] || item_count=1
+    [[ "$size_known" == "true" || "$size_known" == "false" ]] || size_known=false
+
+    if [[ -n "${CLEAN_PREVIEW_LEDGER_FILE:-}" && -f "$CLEAN_PREVIEW_LEDGER_FILE" && ! -L "$CLEAN_PREVIEW_LEDGER_FILE" ]]; then
+        printf '%s\0%s\0%s\0%s\0%s\0%s\0' \
+            "$identity" "$size_kb" "$item_count" "$size_known" "${CURRENT_SECTION:-Uncategorized}" "$path" \
+            >> "$CLEAN_PREVIEW_LEDGER_FILE"
+        return 0
+    fi
+
+    # Keep focused function tests and sourced-module callers useful even when
+    # start_cleanup has not prepared the full ledger.
+    if [[ -n "${EXPORT_LIST_FILE:-}" ]]; then
+        ensure_user_file "$EXPORT_LIST_FILE"
+        if [[ "$size_known" == "true" ]]; then
+            echo "$path  # $(bytes_to_human "$((size_kb * 1024))")" >> "$EXPORT_LIST_FILE"
+        else
+            echo "$path  # size unknown" >> "$EXPORT_LIST_FILE"
+        fi
+    fi
+}
+
+# Validate and append a candidate in one call. Focused callers without a
+# prepared ledger retain the legacy in-memory duplicate check.
+record_dry_run_cleanup_target() {
+    local path="$1"
+    if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$path" 2> /dev/null; then
+        return 1
+    fi
+    if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$path" 2> /dev/null; then
+        return 1
+    fi
+    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
+        return 1
+    fi
+
+    if [[ -z "${CLEAN_PREVIEW_LEDGER_FILE:-}" || ! -f "$CLEAN_PREVIEW_LEDGER_FILE" ]]; then
+        register_dry_run_cleanup_target "$path" || return 1
+    fi
+    append_dry_run_cleanup_target "$@"
+}
+
+# Emit the first complete ledger record for each path identity. Perl keeps the
+# normal path linear for large clean previews; the Bash fallback preserves the
+# same NUL-safe format on systems without Perl.
+emit_deduplicated_dry_run_ledger() {
+    if [[ -z "${CLEAN_PREVIEW_LEDGER_FILE:-}" || ! -f "$CLEAN_PREVIEW_LEDGER_FILE" ]]; then
+        return 0
+    fi
+
+    local perl_bin=""
+    perl_bin=$(command -v perl 2> /dev/null || true)
+    if [[ -n "$perl_bin" && -x "$perl_bin" ]]; then
+        # shellcheck disable=SC2016  # Embedded Perl uses Perl variables inside single quotes.
+        "$perl_bin" -e '
+            use strict;
+            use warnings;
+            binmode STDIN;
+            binmode STDOUT;
+            local $/ = "\0";
+            my %seen;
+            while (defined(my $identity = <STDIN>)) {
+                chomp $identity;
+                my @record = ($identity);
+                for (1 .. 5) {
+                    my $field = <STDIN>;
+                    exit 0 unless defined $field;
+                    chomp $field;
+                    push @record, $field;
+                }
+                next if $seen{$identity}++;
+                print join("\0", @record), "\0";
+            }
+        ' < "$CLEAN_PREVIEW_LEDGER_FILE"
+        return 0
+    fi
+
+    local identity size_kb count size_known section path
+    local -a seen_identities=()
+    while IFS= read -r -d '' identity &&
+        IFS= read -r -d '' size_kb &&
+        IFS= read -r -d '' count &&
+        IFS= read -r -d '' size_known &&
+        IFS= read -r -d '' section &&
+        IFS= read -r -d '' path; do
+        if [[ ${#seen_identities[@]} -gt 0 ]] && mole_identity_in_list "$identity" "${seen_identities[@]}"; then
+            continue
+        fi
+        seen_identities+=("$identity")
+        printf '%s\0%s\0%s\0%s\0%s\0%s\0' \
+            "$identity" "$size_kb" "$count" "$size_known" "$section" "$path"
+    done < "$CLEAN_PREVIEW_LEDGER_FILE"
+}
+
+# Prints: known_size_kb item_count category_count unknown_size_count.
+dry_run_ledger_stats() {
+    local known_size_kb=0
+    local item_count=0
+    local category_count=0
+    local unknown_size_count=0
+    local identity size_kb count size_known section path
+    local -a seen_sections=()
+
+    if [[ -z "${CLEAN_PREVIEW_LEDGER_FILE:-}" || ! -f "$CLEAN_PREVIEW_LEDGER_FILE" ]]; then
+        printf '0 0 0 0\n'
+        return 0
+    fi
+
+    while IFS= read -r -d '' identity &&
+        IFS= read -r -d '' size_kb &&
+        IFS= read -r -d '' count &&
+        IFS= read -r -d '' size_known &&
+        IFS= read -r -d '' section &&
+        IFS= read -r -d '' path; do
+        [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+        [[ "$count" =~ ^[0-9]+$ ]] || count=1
+        known_size_kb=$((known_size_kb + size_kb))
+        item_count=$((item_count + count))
+        [[ "$size_known" == "true" ]] || unknown_size_count=$((unknown_size_count + 1))
+
+        if [[ ${#seen_sections[@]} -eq 0 ]] || ! mole_identity_in_list "$section" "${seen_sections[@]}"; then
+            seen_sections+=("$section")
+            category_count=$((category_count + 1))
+        fi
+    done < <(emit_deduplicated_dry_run_ledger)
+
+    printf '%s %s %s %s\n' "$known_size_kb" "$item_count" "$category_count" "$unknown_size_count"
+}
+
+write_clean_preview_header() {
+    cat > "$EXPORT_LIST_FILE" << EOF
+# Mole Cleanup Preview - $(date '+%Y-%m-%d %H:%M:%S')
+#
+# How to protect files:
+# 1. Copy any path below to ~/.config/mole/whitelist
+# 2. Run: mo clean --whitelist
+#
+# Example:
+#   /Users/*/Library/Caches/com.example.app
+#
+
+EOF
+}
+
+render_clean_preview_from_ledger() {
+    write_clean_preview_header
+
+    local identity size_kb count size_known section path
+    local current_rendered_section=""
+    local known_size_kb=0
+    local rendered_items=0
+    local rendered_categories=0
+    local unknown_size_count=0
+    local -a seen_sections=()
+
+    if [[ -n "${CLEAN_PREVIEW_LEDGER_FILE:-}" && -f "$CLEAN_PREVIEW_LEDGER_FILE" ]]; then
+        while IFS= read -r -d '' identity &&
+            IFS= read -r -d '' size_kb &&
+            IFS= read -r -d '' count &&
+            IFS= read -r -d '' size_known &&
+            IFS= read -r -d '' section &&
+            IFS= read -r -d '' path; do
+            if [[ "$section" != "$current_rendered_section" ]]; then
+                echo "" >> "$EXPORT_LIST_FILE"
+                echo "=== $section ===" >> "$EXPORT_LIST_FILE"
+                current_rendered_section="$section"
+                if [[ ${#seen_sections[@]} -eq 0 ]] || ! mole_identity_in_list "$section" "${seen_sections[@]}"; then
+                    seen_sections+=("$section")
+                    rendered_categories=$((rendered_categories + 1))
+                fi
+            fi
+
+            [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+            [[ "$count" =~ ^[0-9]+$ && "$count" -gt 0 ]] || count=1
+            local item_note=""
+            [[ "$count" -gt 1 ]] && item_note=", $count items"
+            if [[ "$size_known" == "true" ]]; then
+                echo "$path  # $(bytes_to_human "$((size_kb * 1024))")$item_note" >> "$EXPORT_LIST_FILE"
+            else
+                echo "$path  # size unknown$item_note" >> "$EXPORT_LIST_FILE"
+                unknown_size_count=$((unknown_size_count + 1))
+            fi
+
+            known_size_kb=$((known_size_kb + size_kb))
+            rendered_items=$((rendered_items + count))
+        done < <(emit_deduplicated_dry_run_ledger)
+    fi
+
+    total_size_cleaned=$known_size_kb
+    files_cleaned=$rendered_items
+    total_items=$rendered_categories
+    if [[ "$unknown_size_count" -gt 0 ]]; then
+        DRY_RUN_TOTAL_PARTIAL=true
+    else
+        DRY_RUN_TOTAL_PARTIAL=false
+    fi
 }
 
 read_clean_sudo_choice() {
@@ -368,7 +596,14 @@ flush_idle_section_slot() {
 start_section() {
     TRACK_SECTION=1
     SECTION_ACTIVITY=0
-    SECTION_START_SIZE_KB="${total_size_cleaned:-0}"
+    if [[ "$DRY_RUN" == "true" && -n "${CLEAN_PREVIEW_LEDGER_FILE:-}" ]]; then
+        local _start_items _start_categories
+        read -r SECTION_START_SIZE_KB _start_items _start_categories SECTION_START_UNKNOWN_COUNT \
+            < <(dry_run_ledger_stats)
+    else
+        SECTION_START_SIZE_KB="${total_size_cleaned:-0}"
+        SECTION_START_UNKNOWN_COUNT=0
+    fi
     CURRENT_SECTION="$1"
     if [[ "${IDLE_SECTION_PENDING:-0}" == "1" ]]; then
         # Overwrite the previous idle section's header line in place (the
@@ -380,7 +615,7 @@ start_section() {
         echo -e "${PURPLE_BOLD}${ICON_ARROW} $1${NC}"
     fi
 
-    if [[ "$DRY_RUN" == "true" ]]; then
+    if [[ "$DRY_RUN" == "true" && -z "${CLEAN_PREVIEW_LEDGER_FILE:-}" ]]; then
         ensure_user_file "$EXPORT_LIST_FILE"
         echo "" >> "$EXPORT_LIST_FILE"
         echo "=== $1 ===" >> "$EXPORT_LIST_FILE"
@@ -408,8 +643,25 @@ end_section() {
         # anything, so a footer there would read "Category total · 0B" directly
         # under a row quoting a 100GB directory. Only sections that actually
         # moved the tracked total get one.
-        local section_size_kb=$((total_size_cleaned - SECTION_START_SIZE_KB))
-        if [[ "$section_size_kb" -gt 0 ]]; then
+        local section_size_kb=0
+        local section_unknown_count=0
+        if [[ "$DRY_RUN" == "true" && -n "${CLEAN_PREVIEW_LEDGER_FILE:-}" ]]; then
+            local current_size_kb _current_items _current_categories current_unknown_count
+            read -r current_size_kb _current_items _current_categories current_unknown_count \
+                < <(dry_run_ledger_stats)
+            section_size_kb=$((current_size_kb - SECTION_START_SIZE_KB))
+            section_unknown_count=$((current_unknown_count - SECTION_START_UNKNOWN_COUNT))
+        else
+            section_size_kb=$((total_size_cleaned - SECTION_START_SIZE_KB))
+        fi
+
+        if [[ "$section_unknown_count" -gt 0 ]]; then
+            if [[ "$section_size_kb" -gt 0 ]]; then
+                echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · at least $(colorize_human_size "$(bytes_to_human_kb "$section_size_kb")")"
+            else
+                echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · size unknown"
+            fi
+        elif [[ "$section_size_kb" -gt 0 ]]; then
             echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · $(colorize_human_size "$(bytes_to_human_kb "$section_size_kb")")"
         fi
     fi
@@ -1010,9 +1262,6 @@ safe_clean() {
             size_display=$(colorize_human_size "$size_human")
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $description${NC} · ${count_note}${size_display} ${YELLOW}dry${NC}"
 
-            local paths_temp
-            paths_temp=$(create_temp_file)
-
             idx=0
             if [[ ${#existing_paths[@]} -gt 0 ]]; then
                 for path in "${existing_paths[@]}"; do
@@ -1024,47 +1273,9 @@ safe_clean() {
                         size=$(get_cleanup_path_size_kb "$path" 2> /dev/null || echo "0")
                     fi
 
-                    [[ "$size" == "0" || -z "$size" ]] && {
-                        idx=$((idx + 1))
-                        continue
-                    }
-
-                    echo "$(dirname "$path")|$size|$path" >> "$paths_temp"
+                    [[ "$size" =~ ^[0-9]+$ ]] || size=0
+                    append_dry_run_cleanup_target "$path" "$size" 1 true
                     idx=$((idx + 1))
-                done
-            fi
-
-            # Group dry-run paths by parent for a compact export list.
-            if [[ -f "$paths_temp" && -s "$paths_temp" ]]; then
-                sort -t'|' -k1,1 "$paths_temp" | awk -F'|' '
-                {
-                    parent = $1
-                    size = $2
-                    path = $3
-
-                    parent_size[parent] += size
-                    if (parent_count[parent] == 0) {
-                        parent_first[parent] = path
-                    }
-                    parent_count[parent]++
-                }
-                END {
-                    for (parent in parent_size) {
-                        if (parent_count[parent] > 1) {
-                            printf "%s|%d|%d\n", parent, parent_size[parent], parent_count[parent]
-                        } else {
-                            printf "%s|%d|1\n", parent_first[parent], parent_size[parent]
-                        }
-                    }
-                }
-                ' | while IFS='|' read -r display_path total_size child_count; do
-                    local size_human
-                    size_human=$(bytes_to_human "$((total_size * 1024))")
-                    if [[ $child_count -gt 1 ]]; then
-                        echo "$display_path  # $size_human, $child_count items" >> "$EXPORT_LIST_FILE"
-                    else
-                        echo "$display_path  # $size_human" >> "$EXPORT_LIST_FILE"
-                    fi
                 done
             fi
         else
@@ -1086,6 +1297,7 @@ start_cleanup() {
     export MOLE_CURRENT_COMMAND="clean"
     log_operation_session_start "clean"
     DRY_RUN_SEEN_IDENTITIES=()
+    DRY_RUN_TOTAL_PARTIAL=false
 
     if [[ -t 1 ]]; then
         printf '\033[2J\033[H'
@@ -1119,18 +1331,7 @@ start_cleanup() {
             echo -e "${YELLOW}${ICON_WARNING}${NC} Unable to create a safe cleanup preview file" >&2
             return 1
         }
-        cat > "$EXPORT_LIST_FILE" << EOF
-# Mole Cleanup Preview - $(date '+%Y-%m-%d %H:%M:%S')
-#
-# How to protect files:
-# 1. Copy any path below to ~/.config/mole/whitelist
-# 2. Run: mo clean --whitelist
-#
-# Example:
-#   /Users/*/Library/Caches/com.example.app
-#
-
-EOF
+        write_clean_preview_header
 
         # Preview system section when sudo is already cached (no password prompt).
         if adopt_sudo_session; then
@@ -1417,6 +1618,10 @@ perform_cleanup() {
     flush_idle_section_slot
     echo ""
 
+    if [[ "$DRY_RUN" == "true" ]]; then
+        render_clean_preview_from_ledger
+    fi
+
     local summary_heading=""
     local summary_status="success"
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -1448,12 +1653,19 @@ perform_cleanup() {
         printf 'Free space: %s%s\n' "$(format_free_space_kb "$final_kb")" "$delta_note"
     }
 
-    if [[ $total_size_cleaned -gt 0 ]]; then
+    if [[ $total_size_cleaned -gt 0 ||
+        ("$DRY_RUN" == "true" && ("$DRY_RUN_TOTAL_PARTIAL" == "true" || $files_cleaned -gt 0)) ]]; then
         local freed_size_human
         freed_size_human=$(bytes_to_human_kb "$total_size_cleaned")
 
         if [[ "$DRY_RUN" == "true" ]]; then
-            local stats="Potential space: $(colorize_human_size "$freed_size_human")"
+            local potential_label
+            if [[ "$DRY_RUN_TOTAL_PARTIAL" == "true" ]]; then
+                potential_label="At least $freed_size_human"
+            else
+                potential_label="$freed_size_human"
+            fi
+            local stats="Potential space: $(colorize_human_size "$potential_label")"
             [[ $files_cleaned -gt 0 ]] && stats+=" | Items: $files_cleaned"
             [[ $total_items -gt 0 ]] && stats+=" | Categories: $total_items"
             summary_details+=("$stats")
@@ -1463,7 +1675,7 @@ perform_cleanup() {
                 echo "# ============================================"
                 echo "# Summary"
                 echo "# ============================================"
-                echo "# Potential cleanup: ${freed_size_human}"
+                echo "# Potential cleanup: ${potential_label}"
                 echo "# Items: $files_cleaned"
                 echo "# Categories: $total_items"
             } >> "$EXPORT_LIST_FILE"
@@ -1513,7 +1725,8 @@ perform_cleanup() {
         done < <(emit_free_space_summary "$initial_free_space_kb")
     fi
 
-    if [[ "$DRY_RUN" == "true" && $total_size_cleaned -gt 0 ]]; then
+    if [[ "$DRY_RUN" == "true" &&
+        ($total_size_cleaned -gt 0 || "$DRY_RUN_TOTAL_PARTIAL" == "true" || $files_cleaned -gt 0) ]]; then
         if publish_clean_preview_file; then
             summary_details+=("Detailed file list: ${GRAY}$CLEAN_PREVIEW_FINAL_FILE${NC}")
             summary_details+=("Use ${GRAY}mo clean --whitelist${NC} to add protection rules")
