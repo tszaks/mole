@@ -184,9 +184,15 @@ discover_project_cache_roots() {
             _indicator_pids=("${_indicator_pids[@]:1}")
         fi
     done
-    for _pid in "${_indicator_pids[@]}"; do
-        wait "$_pid" 2> /dev/null || true
-    done
+    # bash 3.2 under nounset treats "${arr[@]}" on an empty array as unbound, and
+    # the loop above leaves the array empty whenever $HOME has no scannable
+    # project dir (every test home, and any real home whose top level is all
+    # Library/Applications/dot dirs).
+    if [[ ${#_indicator_pids[@]} -gt 0 ]]; then
+        for _pid in "${_indicator_pids[@]}"; do
+            wait "$_pid" 2> /dev/null || true
+        done
+    fi
 
     local _found_dir
     while IFS= read -r _found_dir; do
