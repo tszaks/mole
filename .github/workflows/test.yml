@@ -44,6 +44,58 @@ jobs:
           LC_ALL: en_US.UTF-8
         run: ./scripts/test.sh
 
+      # TEMPORARY diagnostic, remove once the answer is in. The two
+      # clean_core.bats tests that drive the full pipeline cost ~30s each on a
+      # runner and ~3.6s on a dev machine, and nothing local reproduces it.
+      # This attributes the cost to a section without changing any timeout
+      # budget, so it cannot turn the job red or alter what the suite asserts.
+      - name: Diagnose clean dry-run cost on this runner
+        if: always()
+        continue-on-error: true
+        env:
+          MOLE_TEST_NO_AUTH: "1"
+          MO_DEBUG: "1"
+          MO_NO_OPLOG: "1"
+        run: |
+          diag_home="$(mktemp -d)"
+          mkdir -p "$diag_home/Library/Caches" "$diag_home/.config/mole"
+          log="${RUNNER_TEMP}/clean-diag.txt"
+
+          # Reproduce the test's environment exactly, seams included, so what
+          # this measures is the cost that survived them rather than the raw
+          # pipeline. Mirrors tests/clean_core.bats setup_file plus its brew
+          # and xcrun stubs.
+          stub_bin="$diag_home/stub-bin"
+          mkdir -p "$stub_bin"
+          printf '#!/bin/bash\nexit 0\n' > "$stub_bin/brew"
+          printf '#!/bin/bash\nexit 1\n' > "$stub_bin/xcrun"
+          chmod +x "$stub_bin/brew" "$stub_bin/xcrun"
+
+          start=$(date +%s)
+          env HOME="$diag_home" \
+            MOLE_TEST_MODE=0 \
+            MOLE_LSREGISTER_PATH= \
+            MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT="$diag_home/absent-volumes" \
+            MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT="$diag_home/absent-cryptex" \
+            PATH="$stub_bin:$PATH" \
+            ./mole clean --dry-run 2>&1 |
+            perl -ne 'BEGIN { $| = 1 } print time, "|", $_' > "$log" || true
+          echo "total wall clock: $(($(date +%s) - start))s"
+
+          echo "--- gaps of 2s or more (cost lands on the line that follows) ---"
+          sed $'s/\x1b\\[[0-9;]*m//g' "$log" |
+            awk -F'|' '
+              prev != "" && $1 - prev >= 2 {
+                printf "  %3ds before: %s\n", $1 - prev, substr($2, 1, 100)
+              }
+              { prev = $1 }
+            '
+
+          echo "--- slowest PERF probes ---"
+          sed $'s/\x1b\\[[0-9;]*m//g' "$log" |
+            sed -n 's/.*PERF \[\(.*\)\] \([0-9.]*\)s.*/\2 \1/p' |
+            sort -rn | head -20
+
   compatibility:
     name: macOS
     strategy:
