@@ -397,8 +397,15 @@ clean_jianying_pro_generated_caches() {
     #   local_models, AigcMaterailCache, agencycache); plaintext draft configs
     #   reference effect 8000+ times, so anything not on this list is preserved.
     #
+    # image/ and importcache3/ are deliberately excluded: both hold copies of
+    # material the user imported, draft_info.json is encrypted so no plaintext
+    # reference check can prove they are unreferenced, and mo clean deletes
+    # permanently. If the user has since moved or deleted the source file, the
+    # cached copy is the only remaining one. Revisit only with evidence that
+    # the editor re-imports from the original on demand.
+    #
     # Verified on a real machine (macOS 15.7 Intel, JianyingPro 11.1.0):
-    # removing this set reclaimed ~76GB, 2025-era projects reopened cleanly, and
+    # removing this set reclaimed ~70GB, 2025-era projects reopened cleanly, and
     # the app recreated the scratch directories on next launch.
     local -a regenerable_subdirs=(
         recognize
@@ -406,12 +413,10 @@ clean_jianying_pro_generated_caches() {
         audioWave
         AlgorithmCache
         ILASDKDB
-        image
         RemuxCache
         prerender
         segmentPrerenderCache
         MotionBlurCache
-        importcache3
         ttsTemp
         tmp
     )

@@ -173,7 +173,7 @@ EOF
 }
 
 @test "clean_jianying_pro_generated_caches targets only whitelisted regenerable subdirs" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
@@ -189,6 +189,9 @@ mkdir -p "$cache_root/effect"
 mkdir -p "$cache_root/music"
 mkdir -p "$cache_root/AigcMaterailCache"
 mkdir -p "$cache_root/agencycache"
+# Copies of user-imported material (must be preserved, see the exclusion note)
+mkdir -p "$cache_root/image"
+mkdir -p "$cache_root/importcache3"
 # The user's editable drafts (must never be touched)
 mkdir -p "$HOME/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/my-project"
 
@@ -211,13 +214,15 @@ EOF
     [[ "$output" == *"CLEAN:JianyingPro generated cache"* ]] || return 1
     [[ "$output" != *"Cache/effect"* ]] || return 1
     [[ "$output" != *"Cache/music"* ]] || return 1
+    [[ "$output" != *"Cache/image"* ]] || return 1
+    [[ "$output" != *"importcache3"* ]] || return 1
     [[ "$output" != *"AigcMaterailCache"* ]] || return 1
     [[ "$output" != *"agencycache"* ]] || return 1
     [[ "$output" != *"Projects"* ]] || return 1
 }
 
 @test "jianying_pro_is_running ignores the resident menu-bar tray helper" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
@@ -262,7 +267,7 @@ EOF
 }
 
 @test "clean_jianying_pro_generated_caches skips while JianyingPro is running" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
@@ -285,7 +290,7 @@ EOF
 @test "clean_jianying_pro_generated_caches is a no-op when cache root is absent" {
     local empty_home
     empty_home="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-app-caches.XXXXXX")"
-    run env HOME="$empty_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$empty_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
