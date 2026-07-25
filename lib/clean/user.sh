@@ -2,24 +2,6 @@
 # User Data Cleanup Module
 set -euo pipefail
 
-_darwin_user_runtime_retention_days() {
-    local legacy_days="${MOLE_DARWIN_USER_RUNTIME_AGE_DAYS:-}"
-    if declare -f resolve_retention_days > /dev/null 2>&1; then
-        resolve_retention_days 7 "$legacy_days"
-        return
-    fi
-    [[ "$legacy_days" =~ ^[0-9]+$ ]] && printf '%s\n' "$legacy_days" || printf '7\n'
-}
-
-_support_cache_retention_days() {
-    local legacy_days="${MOLE_SUPPORT_CACHE_AGE_DAYS:-}"
-    if declare -f resolve_retention_days > /dev/null 2>&1; then
-        resolve_retention_days 30 "$legacy_days"
-        return
-    fi
-    [[ "$legacy_days" =~ ^[0-9]+$ ]] && printf '%s\n' "$legacy_days" || printf '30\n'
-}
-
 clean_trash() {
     if is_path_whitelisted "$HOME/.Trash"; then
         return 0
@@ -255,8 +237,7 @@ _clean_darwin_user_runtime_dir() {
     local runtime_dir="$1"
     local kind="$2"
     local label="$3"
-    local age_days
-    age_days=$(_darwin_user_runtime_retention_days)
+    local age_days="${MOLE_DARWIN_USER_RUNTIME_AGE_DAYS:-7}"
     local max_items="${MOLE_DARWIN_USER_RUNTIME_MAX_ITEMS:-1500}"
     local scan_timeout="${MOLE_DARWIN_USER_RUNTIME_SCAN_TIMEOUT:-8}"
 
@@ -706,8 +687,8 @@ clean_finder_metadata() {
 
 # Conservative cleanup for support caches not covered by generic rules.
 clean_support_app_data() {
-    local support_age_days
-    support_age_days=$(_support_cache_retention_days)
+    local support_age_days="${MOLE_SUPPORT_CACHE_AGE_DAYS:-30}"
+    [[ "$support_age_days" =~ ^[0-9]+$ ]] || support_age_days=30
 
     local crash_reporter_dir="$HOME/Library/Application Support/CrashReporter"
     if [[ -d "$crash_reporter_dir" && ! -L "$crash_reporter_dir" ]]; then

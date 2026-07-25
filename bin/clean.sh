@@ -1296,11 +1296,6 @@ start_cleanup() {
     # Set current command for operation logging
     export MOLE_CURRENT_COMMAND="clean"
     log_operation_session_start "clean"
-    if [[ "${MOLE_RETENTION_DAYS:-}" =~ ^[0-9]+$ ]]; then
-        local retention_override
-        retention_override=$(_normalize_retention_days "$MOLE_RETENTION_DAYS")
-        debug_log "Retention override: ${retention_override} days"
-    fi
     DRY_RUN_SEEN_IDENTITIES=()
     DRY_RUN_TOTAL_PARTIAL=false
 

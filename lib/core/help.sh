@@ -11,9 +11,6 @@ show_clean_help() {
     echo "  --whitelist       Manage protected paths"
     echo "  --debug           Show detailed operation logs"
     echo "  -h, --help        Show this help message"
-    echo ""
-    echo "Environment:"
-    echo "  MOLE_RETENTION_DAYS=N  Override selected retention periods with non-negative days"
 }
 
 show_installer_help() {

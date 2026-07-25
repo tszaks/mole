@@ -84,16 +84,6 @@ mo analyze /Volumes          # Analyze external drives only
 mo analyze /private/tmp      # Review user-owned temporary directories
 ```
 
-**Retention override**
-
-Set one non-negative number of days when you want the orphan app data, Claude VM, Darwin runtime, and Application Support cache cleanups to use the same retention period:
-
-```bash
-MOLE_RETENTION_DAYS=14 mo clean
-```
-
-When it is not set, each cleanup keeps its existing default.
-
 Selections made with `mo clean --whitelist` persist in `~/.config/mole/whitelist`.
 
 ## Security & Safety Design
