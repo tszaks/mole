@@ -8,8 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Deep scan surfaces root-owned system areas that the normal, unprivileged
@@ -188,4 +192,106 @@ func startSudoKeepalive() {
 			time.Sleep(30 * time.Second)
 		}
 	}()
+}
+
+// elevatedBreakdownRows caps how many children a deep-mode drill-down renders.
+// Deep system trees fold hundreds of daemon temp dirs; the largest few carry
+// the attribution value ("com.apple.idleassetsd holds the bytes"), and a fixed
+// cap keeps the view a one-screen summary rather than a dashboard.
+const elevatedBreakdownRows = 20
+
+// elevatedBreakdownMsg carries the result of a one-level `sudo du -d 1` of a
+// root-owned system path. It drives a view-only breakdown during deep-mode
+// drill-down and is never written to any cache.
+type elevatedBreakdownMsg struct {
+	path      string
+	entries   []dirEntry
+	totalSize int64
+	err       error
+}
+
+// elevatedBreakdownCmd measures the immediate children of a root-owned system
+// path with the primed `sudo du` funnel (deepDuCommand), so trees the normal
+// unprivileged scan cannot enter still show which subsystem holds the bytes. It
+// is strictly read-only: du only reads, the argv never contains a deletion verb,
+// and the result is rendered ephemerally, never cached, so a lapsed sudo
+// credential can never leave a stale undercount behind.
+func elevatedBreakdownCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), duTimeout)
+		defer cancel()
+
+		// -k KB blocks, -P do not follow symlinks, -x stay on one filesystem,
+		// -d 1 one level deep. Same elevation gate as every other deep read:
+		// deepDuCommand only prefixes `sudo -n` for /private targets in deep mode.
+		cmd := deepDuCommand(ctx, path, "-kPx", "-d", "1", path)
+		out, err := cmd.Output()
+		if err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return elevatedBreakdownMsg{path: path, err: fmt.Errorf("measurement timed out after %v", duTimeout)}
+			}
+			return elevatedBreakdownMsg{path: path, err: err}
+		}
+
+		entries, total := parseDuDepth1(string(out), path)
+		return elevatedBreakdownMsg{path: path, entries: entries, totalSize: total}
+	}
+}
+
+// parseDuDepth1 turns `du -k -d 1 <root>` output into child dirEntry rows,
+// largest first, capped at elevatedBreakdownRows. The root's own aggregate line
+// is dropped and returned separately as the total. It is a pure function (string
+// in, rows out, no exec) so it can be unit-tested without sudo or a real du.
+func parseDuDepth1(out, root string) ([]dirEntry, int64) {
+	cleanRoot := filepath.Clean(root)
+	var entries []dirEntry
+	var total int64
+
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		// du separates size and path with a tab, but fall back to whitespace
+		// splitting for builds/locales that use spaces.
+		var sizeField, pathField string
+		if before, after, found := strings.Cut(line, "\t"); found {
+			sizeField = strings.TrimSpace(before)
+			pathField = strings.TrimSpace(after)
+		} else {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			sizeField = fields[0]
+			pathField = strings.Join(fields[1:], " ")
+		}
+
+		kb, err := strconv.ParseInt(sizeField, 10, 64)
+		if err != nil {
+			continue
+		}
+		clean := filepath.Clean(pathField)
+		if clean == cleanRoot {
+			total = kb * 1024
+			continue
+		}
+		entries = append(entries, dirEntry{
+			Name:  filepath.Base(clean),
+			Path:  clean,
+			Size:  kb * 1024,
+			IsDir: true,
+		})
+	}
+
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Size > entries[j].Size })
+	if len(entries) > elevatedBreakdownRows {
+		entries = entries[:elevatedBreakdownRows]
+	}
+	if total == 0 {
+		for _, e := range entries {
+			total += e.Size
+		}
+	}
+	return entries, total
 }

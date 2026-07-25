@@ -390,6 +390,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.status = fmt.Sprintf("Scanned %s", humanizeBytes(m.totalSize))
 		return m, nil
+	case elevatedBreakdownMsg:
+		// Staleness guard: a breakdown that resolved after the user navigated
+		// away must not overwrite the new view.
+		if msg.path != m.path {
+			return m, nil
+		}
+		m.scanning = false
+		m.isOverview = false
+		if msg.err != nil {
+			// Never fall back to the unprivileged walk here: that is the exact
+			// permission-denied undercount deep mode exists to avoid. Surface a
+			// single explanatory row instead, and write nothing to cache.
+			m.entriesAll = nil
+			m.entries = nil
+			m.totalSize = 0
+			m.status = fmt.Sprintf("Cannot measure %s: %v", displayPath(m.path), msg.err)
+			return m, nil
+		}
+		m.entriesAll = msg.entries
+		m.entries = msg.entries
+		m.totalSize = msg.totalSize
+		m.selected = 0
+		m.offset = 0
+		m.clampEntrySelection()
+		// Deliberately no m.cache / on-disk cache write: elevated listings stay
+		// ephemeral so a lapsed sudo credential can never mask a later run.
+		m.status = fmt.Sprintf("%s (view only, run mo clean to reclaim)", humanizeBytes(m.totalSize))
+		return m, nil
 	case liveScanStartMsg:
 		if msg.path != m.path {
 			if msg.cancel != nil {
@@ -898,6 +926,18 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "delete", "backspace":
+		// Core safety invariant: analyze never deletes with sudo. A deep-mode
+		// elevated breakdown lists root-owned rows for visibility only, so the
+		// delete-confirm flow must never start for them. Check both the current
+		// path and the highlighted row so a root-owned entry can never be queued.
+		// Gated on deep mode so ordinary /private/tmp deletion (a user-owned,
+		// non-elevated view) still works exactly as before.
+		if deepScanUsesSudo() && !m.inOverviewMode() &&
+			(isDeepSystemPath(m.path) ||
+				(m.selected < len(m.entries) && isDeepSystemPath(m.entries[m.selected].Path))) {
+			m.status = "View only. Run mo clean to reclaim system temp files."
+			return m, nil
+		}
 		if m.scanning {
 			m.status = "Delete is available after the scan finishes"
 			return m, nil
@@ -1165,6 +1205,25 @@ func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
 		}
 
 		m.resetLargeFilter()
+
+		// Root-owned system trees (mode 700) cannot be listed unprivileged, so
+		// the normal scan/cache path dead-ends at an empty view. In deep mode,
+		// bypass it entirely and render a view-only, one-level `sudo du`
+		// breakdown of the largest children. Results are never cached and never
+		// deletable (see the delete handler guard), so this stays strictly
+		// read-only. history was already snapshotted above, so Back still works.
+		if deepScanUsesSudo() && isDeepSystemPath(m.path) {
+			m.entriesAll = nil
+			m.entries = nil
+			m.largeFilesAll = nil
+			m.largeFiles = nil
+			m.totalSize = 0
+			m.totalFiles = 0
+			m.status = fmt.Sprintf("Measuring %s...", displayPath(m.path))
+			m.scanning = true
+			return m, tea.Batch(elevatedBreakdownCmd(m.path), tickCmd())
+		}
+
 		if cached, ok := m.cache[m.path]; ok {
 			m.entriesAll = slices.Clone(cached.Entries)
 			m.entries = m.entriesAll
