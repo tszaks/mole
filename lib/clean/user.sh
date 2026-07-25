@@ -1418,7 +1418,7 @@ clean_browsers() {
     fi
     local _chrome_profile
     for _chrome_profile in "$HOME/Library/Application Support/Google/Chrome"/*/; do
-        clean_service_worker_cache "Chrome" "$_chrome_profile/Service Worker/CacheStorage"
+        clean_service_worker_cache "Chrome" "${_chrome_profile%/}/Service Worker/CacheStorage"
     done
     safe_clean ~/Library/Application\ Support/Google/GoogleUpdater/crx_cache/* "GoogleUpdater CRX cache"
     safe_clean ~/Library/Application\ Support/Google/GoogleUpdater/*.old "GoogleUpdater old files"
@@ -1454,11 +1454,11 @@ clean_browsers() {
             safe_clean ~/Library/Application\ Support/Arc/User\ Data/Crashpad/completed/* "Arc crash reports"
         fi
         for _arc_profile in "$HOME/Library/Application Support/Arc"/*/; do
-            clean_service_worker_cache "Arc" "$_arc_profile/Service Worker/CacheStorage"
+            clean_service_worker_cache "Arc" "${_arc_profile%/}/Service Worker/CacheStorage"
         done
         for _arc_profile in "$HOME/Library/Application Support/Arc/User Data"/*/; do
             [[ -d "$_arc_profile" ]] || continue
-            clean_service_worker_cache "Arc" "$_arc_profile/Service Worker/CacheStorage"
+            clean_service_worker_cache "Arc" "${_arc_profile%/}/Service Worker/CacheStorage"
         done
     fi
     # Dia Browser. company.thebrowser.dia only holds Sentry crash state; the real
@@ -1487,7 +1487,7 @@ clean_browsers() {
         fi
         for _dia_profile in "$HOME/Library/Application Support/Dia/User Data"/*/; do
             [[ -d "$_dia_profile" ]] || continue
-            clean_service_worker_cache "Dia" "$_dia_profile/Service Worker/CacheStorage"
+            clean_service_worker_cache "Dia" "${_dia_profile%/}/Service Worker/CacheStorage"
         done
     fi
     if [[ -d ~/Library/Application\ Support/BraveSoftware ]]; then
@@ -1509,7 +1509,7 @@ clean_browsers() {
             safe_clean ~/Library/Application\ Support/BraveSoftware/Brave-Browser/Crashpad/completed/* "Brave crash reports"
         fi
         for _brave_profile in "$HOME/Library/Application Support/BraveSoftware/Brave-Browser"/*/; do
-            clean_service_worker_cache "Brave" "$_brave_profile/Service Worker/CacheStorage"
+            clean_service_worker_cache "Brave" "${_brave_profile%/}/Service Worker/CacheStorage"
         done
     fi
     # Helium Browser.
@@ -1560,7 +1560,7 @@ clean_browsers() {
             safe_clean ~/Library/Application\ Support/Vivaldi/Crashpad/completed/* "Vivaldi crash reports"
         fi
         for _vivaldi_profile in "$HOME/Library/Application Support/Vivaldi"/*/; do
-            clean_service_worker_cache "Vivaldi" "$_vivaldi_profile/Service Worker/CacheStorage"
+            clean_service_worker_cache "Vivaldi" "${_vivaldi_profile%/}/Service Worker/CacheStorage"
         done
     fi
     safe_clean ~/Library/Caches/Comet/* "Comet cache"
