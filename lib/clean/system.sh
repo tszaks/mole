@@ -271,6 +271,32 @@ clean_deep_system() {
         log_success "Accessible rebuildable GPU caches, $gpu_cache_cleaned $gpu_cache_label"
     fi
 
+    # Aborted Aerial / dynamic-wallpaper downloads. com.apple.idleassetsd runs
+    # as root, so its per-user Darwin temp dir sits under root's
+    # /private/var/folders tree (mode 700) and is invisible to an unprivileged
+    # scan: macOS buries the bytes in the opaque "System Data" bucket, and a
+    # stuck (re)download can leave hundreds of GB of ~1GB CFNetworkDownload_*.tmp
+    # files behind (#1253). Scope the removal to the idleassetsd temp dir and to
+    # that exact aborted-download name, older than the temp-file retention
+    # window, so an in-progress download (recent mtime) is never touched. macOS
+    # re-fetches assets on demand, so the removal is non-destructive. The locator
+    # needs sudo because the whole tree is root-owned; safe_sudo_find_delete then
+    # re-applies the shared protection and whitelist gates per file.
+    start_section_spinner "Scanning stale wallpaper downloads..."
+    local idle_tmp_cleaned=0
+    local idle_tmp_dir=""
+    while IFS= read -r -d '' idle_tmp_dir; do
+        # Only act when a stale aborted download actually exists, so the summary
+        # line stays truthful and the delete is skipped otherwise.
+        if sudo -n find "$idle_tmp_dir" -maxdepth 5 -type f -name "CFNetworkDownload_*.tmp" -mtime "+$MOLE_TEMP_FILE_AGE_DAYS" -print -quit 2> /dev/null | grep -q .; then
+            if safe_sudo_find_delete "$idle_tmp_dir" "CFNetworkDownload_*.tmp" "$MOLE_TEMP_FILE_AGE_DAYS" "f"; then
+                idle_tmp_cleaned=$((idle_tmp_cleaned + 1))
+            fi
+        fi
+    done < <(run_with_timeout 8 sudo -n find /private/var/folders -maxdepth 5 -type d -name "com.apple.idleassetsd" -path "*/T/*" -print0 2> /dev/null || true) # 8s: deep root-owned /private/var/folders walk
+    stop_section_spinner
+    [[ $idle_tmp_cleaned -gt 0 ]] && log_success "Stale wallpaper downloads"
+
     local diag_base="/private/var/db/diagnostics"
     start_section_spinner "Cleaning system diagnostic logs..."
     safe_sudo_find_delete "$diag_base" "*" "$MOLE_LOG_AGE_DAYS" "f" || true

@@ -159,6 +159,113 @@ EOF
     [[ "$output" == *"safe_sudo_remove:/Library/Logs/adobegc.log"* ]]
 }
 
+@test "clean_deep_system removes stale idleassetsd aerial downloads scoped to the temp dir (#1253)" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/system_calls_idle.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+IDLE_DIR="/private/var/folders/zz/abcdef/T/com.apple.idleassetsd"
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    if [[ "$1" == "test" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "find" ]]; then
+        # Locator: enumerate idleassetsd temp dirs under the root-owned tree.
+        if [[ "$2" == "/private/var/folders" ]]; then
+            printf '%s\0' "$IDLE_DIR"
+            return 0
+        fi
+        # Probe: report a stale aborted download inside that dir.
+        if [[ "$2" == "$IDLE_DIR" ]]; then
+            echo "$IDLE_DIR/CFNetworkDownload_abc.tmp"
+            return 0
+        fi
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "0"
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 0
+}
+safe_sudo_remove() { return 0; }
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+get_file_mtime() { echo 0; }
+get_path_size_kb() { echo 0; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    # Scoped to the idleassetsd temp dir and the aborted-download name only:
+    # never a bare CFNetworkDownload_*.tmp sweep across all of /private/var/folders.
+    [[ "$output" == *"safe_sudo_find_delete:/private/var/folders/zz/abcdef/T/com.apple.idleassetsd:CFNetworkDownload_*.tmp"* ]] || return 1
+    [[ "$output" == *"SUCCESS:Stale wallpaper downloads"* ]] || return 1
+}
+
+@test "clean_deep_system skips idleassetsd sweep when no stale download exists (#1253)" {
+    run bash --noprofile --norc << 'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/system_calls_idle_empty.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+IDLE_DIR="/private/var/folders/zz/abcdef/T/com.apple.idleassetsd"
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    if [[ "$1" == "test" ]]; then
+        return 0
+    fi
+    if [[ "$1" == "find" ]]; then
+        # Locator returns the dir, but the probe finds nothing stale in it.
+        if [[ "$2" == "/private/var/folders" ]]; then
+            printf '%s\0' "$IDLE_DIR"
+            return 0
+        fi
+        return 0
+    fi
+    if [[ "$1" == "stat" ]]; then
+        echo "0"
+        return 0
+    fi
+    return 0
+}
+safe_sudo_find_delete() {
+    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    return 0
+}
+safe_sudo_remove() { return 0; }
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+get_file_mtime() { echo 0; }
+get_path_size_kb() { echo 0; }
+find() { return 0; }
+run_with_timeout() { shift; "$@"; }
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"safe_sudo_find_delete:$IDLE_DIR:CFNetworkDownload"* ]] || return 1
+    [[ "$output" != *"SUCCESS:Stale wallpaper downloads"* ]] || return 1
+}
+
 @test "clean_deep_system does not report third-party adobe log success when no old files exist" {
     run bash --noprofile --norc << 'EOF2'
 set -euo pipefail
