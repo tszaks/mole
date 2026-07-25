@@ -313,7 +313,7 @@ func renderBanner(style lipgloss.Style, text string, width int) string {
 	return style.Render(text)
 }
 
-func renderCPUCard(cpu CPUStatus, thermal ThermalStatus) cardData {
+func renderCPUCard(cpu CPUStatus, thermal ThermalStatus, cpuCores int) cardData {
 	var lines []string
 
 	// Line 1: Usage + Temp (Format: 15% @ 30.4°C)
@@ -339,7 +339,12 @@ func renderCPUCard(cpu CPUStatus, thermal ThermalStatus) cardData {
 		}
 		sort.Slice(cores, func(i, j int) bool { return cores[i].val > cores[j].val })
 
-		maxCores := min(len(cores), 2)
+		// cpuCores selects how many of the busiest cores to list; 0 (or any
+		// value >= the core count) means "all". Set via the 'c' key, persisted.
+		maxCores := len(cores)
+		if cpuCores > 0 {
+			maxCores = min(len(cores), cpuCores)
+		}
 		for i := range maxCores {
 			c := cores[i]
 			lines = append(lines, fmt.Sprintf("Core%-2d %s  %5.1f%%", c.idx+1, progressBar(c.val), c.val))
@@ -562,9 +567,9 @@ func processMemoryText(p ProcessInfo) string {
 	return ""
 }
 
-func buildCards(m MetricsSnapshot, width int) []cardData {
+func buildCards(m MetricsSnapshot, width int, cpuCores int) []cardData {
 	cards := []cardData{
-		renderCPUCard(m.CPU, m.Thermal),
+		renderCPUCard(m.CPU, m.Thermal, cpuCores),
 		renderMemoryCard(m.Memory, width),
 		renderDiskCard(m.Disks, m.DiskIO, m.TrashSize, m.TrashApprox),
 		renderBatteryCard(m.Batteries, m.Thermal),
