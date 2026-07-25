@@ -70,7 +70,7 @@ setup() {
 
     result=$(find_app_files "dev.zed.Zed-Nightly" "Zed Nightly")
 
-    [[ "$result" =~ .config/zed ]]
+    [[ "$result" =~ .config/zed ]] || return 1
     [[ "$result" =~ "Library/Application Support/Zed" ]]
 }
 
@@ -82,7 +82,7 @@ setup() {
 
     result=$(find_app_files "dev.zed.Zed-Nightly" "Zed Nightly")
 
-    [[ "$result" =~ Library/HTTPStorages/dev\.zed\.Zed-Preview ]]
+    [[ "$result" =~ Library/HTTPStorages/dev\.zed\.Zed-Preview ]] || return 1
     [[ ! "$result" =~ storage/default/https\+\+\+zed\.dev ]]
 }
 
@@ -104,12 +104,12 @@ setup() {
 
     result=$(find_app_files "com.maestro.studio" "Maestro Studio")
 
-    [[ "$result" =~ .config/maestro-studio ]]
-    [[ "$result" =~ .cache/maestro-studio ]]
-    [[ "$result" =~ "Library/Application Support/MaestroStudio" ]]
-    [[ "$result" =~ "Library/Application Support/Maestro-Studio" ]]
-    [[ "$result" =~ Library/Preferences/Maestro-Studio\.plist ]]
-    [[ "$result" =~ Library/Saved\ Application\ State/MaestroStudio\.savedState ]]
+    [[ "$result" =~ .config/maestro-studio ]] || return 1
+    [[ "$result" =~ .cache/maestro-studio ]] || return 1
+    [[ "$result" =~ "Library/Application Support/MaestroStudio" ]] || return 1
+    [[ "$result" =~ "Library/Application Support/Maestro-Studio" ]] || return 1
+    [[ "$result" =~ Library/Preferences/Maestro-Studio\.plist ]] || return 1
+    [[ "$result" =~ Library/Saved\ Application\ State/MaestroStudio\.savedState ]] || return 1
     [[ "$result" =~ .local/share/maestrostudio ]]
 }
 
@@ -132,11 +132,11 @@ setup() {
 
     result=$(find_app_files "com.tencent.xinWeChat" "WeChat")
 
-    [[ "$result" =~ Library/Application\ Support/FileProvider/com.tencent.xinWeChat.WeChatFileProviderExtension ]]
-    [[ "$result" =~ Library/Application\ Scripts/com.tencent.xinWeChat.WeChatMacShare ]]
-    [[ "$result" =~ Library/Application\ Scripts/5A4RE8SF68.com.tencent.xinWeChat ]]
-    [[ "$result" =~ Library/Containers/com.tencent.xinWeChat.WeChatFileProviderExtension ]]
-    [[ "$result" =~ Library/Group\ Containers/5A4RE8SF68.com.tencent.xinWeChat ]]
+    [[ "$result" =~ Library/Application\ Support/FileProvider/com.tencent.xinWeChat.WeChatFileProviderExtension ]] || return 1
+    [[ "$result" =~ Library/Application\ Scripts/com.tencent.xinWeChat.WeChatMacShare ]] || return 1
+    [[ "$result" =~ Library/Application\ Scripts/5A4RE8SF68.com.tencent.xinWeChat ]] || return 1
+    [[ "$result" =~ Library/Containers/com.tencent.xinWeChat.WeChatFileProviderExtension ]] || return 1
+    [[ "$result" =~ Library/Group\ Containers/5A4RE8SF68.com.tencent.xinWeChat ]] || return 1
     [[ ! "$result" =~ Library/Containers/com.tencent.otherapp.Helper ]]
 }
 
@@ -148,7 +148,7 @@ setup() {
 
     result=$(find_app_files "com.avid.sibelius" "Sibelius")
 
-    [[ "$result" =~ Library/Application\ Support/Avid/Sibelius ]]
+    [[ "$result" =~ Library/Application\ Support/Avid/Sibelius ]] || return 1
     [[ ! "$result" =~ Library/Application\ Support/OtherVendor/Sibelius ]]
 }
 
@@ -159,11 +159,11 @@ setup() {
 
     result=$(find_app_files "com.test" "" 2> /dev/null || true)
 
-    [[ ! "$result" =~ "Library/Application Support"$ ]]
-    [[ ! "$result" =~ "Library/Preferences"$ ]]
-    [[ ! "$result" =~ "$HOME/."$ ]]
-    [[ ! "$result" =~ ".config"$ ]]
-    [[ ! "$result" =~ ".cache"$ ]]
+    [[ ! "$result" =~ "Library/Application Support"$ ]] || return 1
+    [[ ! "$result" =~ "Library/Preferences"$ ]] || return 1
+    [[ ! "$result" =~ "$HOME/."$ ]] || return 1
+    [[ ! "$result" =~ ".config"$ ]] || return 1
+    [[ ! "$result" =~ ".cache"$ ]] || return 1
     [[ ! "$result" =~ ".local/share"$ ]]
 }
 
@@ -190,7 +190,7 @@ find_app_files 'invalid_bundle' ''"
     result=$(find_app_files "com.microsoft.VSCode" "Visual Studio Code")
 
     [[ "$result" =~ Library/Application\ Support/Code$'\n' ]] || [[ "$result" == *"Library/Application Support/Code"* ]]
-    [[ "$result" == *"/.vscode"* ]]
+    [[ "$result" == *"/.vscode"* ]] || return 1
     [[ "$result" != *"Code - Insiders"* ]]
 }
 
@@ -201,8 +201,8 @@ find_app_files 'invalid_bundle' ''"
 
     result=$(find_app_files "com.microsoft.VSCodeInsiders" "Visual Studio Code - Insiders")
 
-    [[ "$result" == *"Library/Application Support/Code - Insiders"* ]]
-    [[ "$result" == *"/.vscode-insiders"* ]]
+    [[ "$result" == *"Library/Application Support/Code - Insiders"* ]] || return 1
+    [[ "$result" == *"/.vscode-insiders"* ]] || return 1
     [[ ! "$result" =~ Library/Application\ Support/Code$'\n' ]]
 }
 
@@ -212,7 +212,7 @@ find_app_files 'invalid_bundle' ''"
 
     result=$(find_app_files "net.ankiweb.anki" "Anki")
 
-    [[ "$result" != *"Library/Application Support/Anki2"* ]]
+    [[ "$result" != *"Library/Application Support/Anki2"* ]] || return 1
     [[ "$result" == *"Library/Application Support/AnkiProgramFiles"* ]]
 }
 
@@ -227,8 +227,8 @@ find_app_files 'invalid_bundle' ''"
 
     result=$(find_app_files "com.anthropic.claudefordesktop" "Claude")
 
-    [[ "$result" == *"Library/Application Support/Claude"* ]]
-    [[ "$result" != *"$HOME/.claude"* ]]
+    [[ "$result" == *"Library/Application Support/Claude"* ]] || return 1
+    [[ "$result" != *"$HOME/.claude"* ]] || return 1
     [[ "$result" != *"$HOME/.Claude"* ]]
 }
 
@@ -240,9 +240,9 @@ find_app_files 'invalid_bundle' ''"
 
     result=$(find_app_files "ai.opencode.desktop" "opencode")
 
-    [[ "$result" == *"Library/Application Support/opencode"* ]]
-    [[ "$result" != *".local/share/opencode"* ]]
-    [[ "$result" != *".config/opencode"* ]]
+    [[ "$result" == *"Library/Application Support/opencode"* ]] || return 1
+    [[ "$result" != *".local/share/opencode"* ]] || return 1
+    [[ "$result" != *".config/opencode"* ]] || return 1
     [[ "$result" != *"$HOME/.opencode"* ]]
 }
 
@@ -253,8 +253,8 @@ find_app_files 'invalid_bundle' ''"
 
     result=$(find_app_files "com.openai.codex" "Codex")
 
-    [[ "$result" == *"Library/Application Support/Codex"* ]]
-    [[ "$result" != *"$HOME/.codex"* ]]
+    [[ "$result" == *"Library/Application Support/Codex"* ]] || return 1
+    [[ "$result" != *"$HOME/.codex"* ]] || return 1
     [[ "$result" != *".config/codex"* ]]
 }
 

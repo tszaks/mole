@@ -45,7 +45,7 @@ clean_ds_store_tree "$HOME/test_ds" "DS test"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"DS test"* ]]
+    [[ "$output" == *"DS test"* ]] || return 1
     [[ "$output" == *$'\033[0;33m→\033[0m'* ]]
 }
 
@@ -68,7 +68,7 @@ clean_ds_store_tree "$HOME/test_ds" "DS test"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"DS test"* ]]
+    [[ "$output" == *"DS test"* ]] || return 1
     [[ "$output" == *$'\033[0;32m✓\033[0m'* ]]
 }
 
@@ -331,7 +331,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"PASS: Failed deletion preserved"* ]]
+    [[ "$output" == *"PASS: Failed deletion preserved"* ]] || return 1
     [[ "$output" == *"PASS: Successful deletion removed"* ]]
 }
 
@@ -427,7 +427,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Orphaned Claude workspace VM"* ]]
+    [[ "$output" == *"Orphaned Claude workspace VM"* ]] || return 1
     [[ "$output" == *"PASS: Claude VM removed"* ]]
 }
 
@@ -472,7 +472,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"UNEXPECTED:Orphaned Claude workspace VM"* ]]
+    [[ "$output" != *"UNEXPECTED:Orphaned Claude workspace VM"* ]] || return 1
     [[ "$output" == *"PASS: Recent Claude VM kept"* ]]
 }
 
@@ -510,7 +510,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"UNEXPECTED:Orphaned Claude workspace VM"* ]]
+    [[ "$output" != *"UNEXPECTED:Orphaned Claude workspace VM"* ]] || return 1
     [[ "$output" == *"PASS: Claude VM kept"* ]]
 }
 
@@ -545,7 +545,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"UNEXPECTED_CLEAN"* ]]
+    [[ "$output" != *"UNEXPECTED_CLEAN"* ]] || return 1
     [[ "$output" == *"PASS: Claude VM preserved by whitelist"* ]]
 }
 
@@ -580,7 +580,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"UNEXPECTED_CLEAN"* ]]
+    [[ "$output" != *"UNEXPECTED_CLEAN"* ]] || return 1
     [[ "$output" == *"PASS: whitelisted orphan cache preserved"* ]]
 }
 
@@ -592,7 +592,7 @@ is_critical_system_component "backgroundtaskmanagement" && echo "yes"
 is_critical_system_component "SystemSettings" && echo "yes"
 EOF
     [ "$status" -eq 0 ]
-    [[ "${lines[0]}" == "yes" ]]
+    [[ "${lines[0]}" == "yes" ]] || return 1
     [[ "${lines[1]}" == "yes" ]]
 }
 
@@ -653,7 +653,7 @@ clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"rm-called"* ]]
+    [[ "$output" != *"rm-called"* ]] || return 1
     [[ "$output" != *"launchctl-called"* ]]
 }
 
@@ -718,7 +718,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services does not count protected skips as cleaned" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
+    # setup_file exports MOLE_TEST_MODE=1, under which clean_orphaned_system_services
+    # returns immediately and leaves $output empty. Override it as the sibling cases do.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
@@ -735,7 +737,21 @@ safe_sudo_remove() {
 
 tmp_dir="$(mktemp -d)"
 tmp_plist="$tmp_dir/com.sogou.test.plist"
-touch "$tmp_plist"
+# _plist_is_orphaned needs a Program key pointing at a missing binary; an empty
+# file is never classified as an orphan, so the sweep found nothing and this test
+# produced no output at all.
+cat > "$tmp_plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sogou.test</string>
+    <key>Program</key>
+    <string>$tmp_dir/missing-binary</string>
+</dict>
+</plist>
+PLIST
 
 sudo() {
   if [[ "$1" == "-n" && "$2" == "true" ]]; then
@@ -764,14 +780,23 @@ clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Orphaned services · skipped 1 protected"* ]]
-    [[ "$output" != *"Orphaned services · cleaned"* ]]
-    [[ "$output" != *"unexpected-remove"* ]]
+    [[ "$output" == *"Orphaned services · skipped 1 protected"* ]] || return 1
+    [[ "$output" != *"Orphaned services · cleaned"* ]] || return 1
+    [[ "$output" != *"unexpected-remove"* ]] || return 1
     [[ "$output" != *"unexpected-launchctl"* ]]
 }
 
-@test "clean_orphaned_system_services protects AmneziaWG helpers" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
+# 48ca1090 (#1082) made this sweep call should_protect_path under
+# MOLE_UNINSTALL_MODE=1, which deliberately stops consulting DATA_PROTECTED_BUNDLES
+# so orphaned vendor helpers can be reclaimed; only SYSTEM_CRITICAL_BUNDLES still
+# block. AmneziaWG sits in the data-protected list, so an orphan whose parent app
+# is gone is removed by design, exactly like the com.docker case asserted below.
+# The older "must stay protected" expectation outlived that change only because
+# the assertion sat mid-test and could not fail.
+@test "clean_orphaned_system_services reclaims an AmneziaWG helper once its app is gone" {
+    # setup_file exports MOLE_TEST_MODE=1, under which clean_orphaned_system_services
+    # returns immediately and leaves $output empty. Override it as the sibling cases do.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
@@ -817,8 +842,8 @@ clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Orphaned services · skipped 1 protected"* ]]
-    [[ "$output" != *"unexpected-remove"* ]]
+    [[ "$output" == *"Orphaned services · cleaned 1"* ]] || return 1
+    [[ "$output" == *"unexpected-remove"* ]] || return 1
     [[ "$output" != *"unexpected-launchctl"* ]]
 }
 
@@ -1211,7 +1236,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"PASS: stub removed"* ]]
+    [[ "$output" == *"PASS: stub removed"* ]] || return 1
     [[ "$output" == *"Orphaned app container stubs"* ]]
 }
 
@@ -1269,7 +1294,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"PASS: race content preserved"* ]]
+    [[ "$output" == *"PASS: race content preserved"* ]] || return 1
     [[ "$output" == *"could not be removed"* ]]
 }
 

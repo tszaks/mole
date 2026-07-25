@@ -167,7 +167,7 @@ EOF
     set_mock_sudo_uncached
     run_clean_dry_run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Dry Run Mode"* ]]
+    [[ "$output" == *"Dry Run Mode"* ]] || return 1
     [[ "$output" == *"sudo -v && mo clean --dry-run"* ]]
     [[ "$output" != *"system preview included"* ]]
 }
@@ -192,8 +192,8 @@ MOCK
     for removed_flag in "--select" "--categories" "--exclude"; do
         run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean "$removed_flag"
         [ "$status" -eq 1 ]
-        [[ "$output" == *"was removed in this release"* ]]
-        [[ "$output" == *"mo clean --dry-run"* ]]
+        [[ "$output" == *"was removed in this release"* ]] || return 1
+        [[ "$output" == *"mo clean --dry-run"* ]] || return 1
     done
 }
 
@@ -201,7 +201,7 @@ MOCK
     set_mock_sudo_uncached
     run_clean_dry_run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"sudo -v"* ]]
+    [[ "$output" == *"sudo -v"* ]] || return 1
     [[ "$output" == *"full preview"* ]]
 }
 
@@ -234,10 +234,10 @@ printf 'MOLE_SUDO_KEEPALIVE_PID=%s\n' "$MOLE_SUDO_KEEPALIVE_PID"
 SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"sudo -n -v"* ]]
-    [[ "$output" == *"keepalive"* ]]
-    [[ "$output" == *"SYSTEM_CLEAN=true"* ]]
-    [[ "$output" == *"MOLE_SUDO_ESTABLISHED=true"* ]]
+    [[ "$output" == *"sudo -n -v"* ]] || return 1
+    [[ "$output" == *"keepalive"* ]] || return 1
+    [[ "$output" == *"SYSTEM_CLEAN=true"* ]] || return 1
+    [[ "$output" == *"MOLE_SUDO_ESTABLISHED=true"* ]] || return 1
     [[ "$output" == *"MOLE_SUDO_KEEPALIVE_PID=keepalive-pid"* ]]
 }
 
@@ -270,11 +270,11 @@ printf '\nSYSTEM_CLEAN=%s\n' "$SYSTEM_CLEAN"
 SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"continue"* ]]
-    [[ "$output" != *"Enter"*"password"* ]]
-    [[ "$output" == *"ENSURE_PASSWORD=secret"* ]]
-    [[ "$output" != *"ENSURE_PLAIN"* ]]
-    [[ "$output" == *"SYSTEM_CLEAN=true"* ]]
+    [[ "$output" == *"continue"* ]] || return 1
+    [[ "$output" != *"Enter"*"password"* ]] || return 1
+    [[ "$output" == *"ENSURE_PASSWORD=secret"* ]] || return 1
+    [[ "$output" != *"ENSURE_PLAIN"* ]] || return 1
+    [[ "$output" == *"SYSTEM_CLEAN=true"* ]] || return 1
     [[ "$output" != *"Skipped"* ]]
 }
 
@@ -298,8 +298,8 @@ printf '\nSYSTEM_CLEAN=%s\n' "$SYSTEM_CLEAN"
 SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Skipped"* ]]
-    [[ "$output" != *"ENSURE_SUDO"* ]]
+    [[ "$output" == *"Skipped"* ]] || return 1
+    [[ "$output" != *"ENSURE_SUDO"* ]] || return 1
     [[ "$output" == *"SYSTEM_CLEAN=false"* ]]
 }
 
@@ -380,11 +380,11 @@ perform_cleanup
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Free space: 75.16GB"* ]]
-    [[ "$output" == *"Tracked cleanup:"* ]]
-    [[ "$output" == *"1.02GB"* ]]
-    [[ "$output" == *"Free space: 76.19GB (+1.02GB)"* ]]
-    [[ "$output" != *"Space freed:"* ]]
+    [[ "$output" == *"Free space: 75.16GB"* ]] || return 1
+    [[ "$output" == *"Tracked cleanup:"* ]] || return 1
+    [[ "$output" == *"1.02GB"* ]] || return 1
+    [[ "$output" == *"Free space: 76.19GB (+1.02GB)"* ]] || return 1
+    [[ "$output" != *"Space freed:"* ]] || return 1
     [ "$(cat "$HOME/df.count")" = "2" ]
 }
 
@@ -403,8 +403,8 @@ EOF
         "$PROJECT_ROOT/mole" clean --dry-run
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"mktemp:"* ]]
-    [[ "$output" != *"Failed to create temporary file"* ]]
+    [[ "$output" != *"mktemp:"* ]] || return 1
+    [[ "$output" != *"Failed to create temporary file"* ]] || return 1
     [ -d "$HOME/.cache/mole/tmp" ]
 }
 
@@ -414,8 +414,8 @@ EOF
 
     run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean --dry-run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"User app cache"* ]]
-    [[ "$output" == *"Potential space"* ]]
+    [[ "$output" == *"User app cache"* ]] || return 1
+    [[ "$output" == *"Potential space"* ]] || return 1
     [ -f "$HOME/Library/Caches/TestApp/cache.tmp" ]
 }
 
@@ -557,7 +557,7 @@ EOF
 
     run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean --dry-run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Protected"* ]]
+    [[ "$output" == *"Protected"* ]] || return 1
     [ -f "$HOME/Library/Caches/WhitelistedApp/data.tmp" ]
 }
 
@@ -571,7 +571,7 @@ EOF
 
     run env HOME="$HOME" MOLE_TEST_MODE=1 "$PROJECT_ROOT/mole" clean --dry-run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Protected"* ]]
+    [[ "$output" == *"Protected"* ]] || return 1
     [ -f "$HOME/Library/Caches/WhitelistedApp/data.tmp" ]
 }
 
@@ -592,23 +592,44 @@ EOF
     mkdir -p "$HOME/Documents"
     touch "$HOME/Documents/.DS_Store"
 
+    # The sentinel's value is FINDER_METADATA; FINDER_METADATA_SENTINEL is the
+    # variable name and matches nothing in a whitelist file.
     cat > "$HOME/.config/mole/whitelist" << EOF
-FINDER_METADATA_SENTINEL
+FINDER_METADATA
 EOF
 
-    # Test whitelist logic directly instead of running full clean
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+    # Two halves of the real mechanism: load_whitelist must surface the sentinel so
+    # bin/clean.sh's scan can see it, and clean_finder_metadata must bail once that
+    # scan has flipped the flag. The previous version called is_whitelisted, which
+    # answers "is this exact pattern already in the whitelist" for the management UI
+    # and never matches a file path, so it asserted nothing.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
 load_whitelist
-if is_whitelisted "$HOME/Documents/.DS_Store"; then
-    echo "protected by whitelist"
+sentinel_loaded=false
+if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+    for entry in "${WHITELIST_PATTERNS[@]}"; do
+        if [[ "$entry" == "$FINDER_METADATA_SENTINEL" ]]; then
+            sentinel_loaded=true
+            break
+        fi
+    done
 fi
-EOF
+echo "sentinel_loaded=$sentinel_loaded"
+
+PROTECT_FINDER_METADATA=true
+clean_ds_store_tree() { echo "CLEANED:$1"; }
+clean_finder_metadata
+echo "done"
+SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"protected by whitelist"* ]]
+    [[ "$output" == *"sentinel_loaded=true"* ]] || return 1
+    [[ "$output" != *"CLEANED:"* ]] || return 1
+    [[ "$output" == *"done"* ]] || return 1
     [ -f "$HOME/Documents/.DS_Store" ]
 }
 
@@ -692,7 +713,16 @@ EOF
     touch "$HOME/Library/Mail Downloads/old.pdf"
     touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true MOLE_MAIL_DOWNLOADS_MIN_KB=1 /bin/bash --noprofile --norc << 'EOF'
+    # MOLE_MAIL_DOWNLOADS_MIN_KB is readonly in base.sh, so an env override is
+    # discarded and the sweep stays below threshold. Grow the directory instead,
+    # the same way the non-dry-run case above does.
+    if command -v mkfile > /dev/null 2>&1; then
+        mkfile -n 6000k "$HOME/Library/Mail Downloads/dummy.dat"
+    else
+        truncate -s 6000k "$HOME/Library/Mail Downloads/dummy.dat"
+    fi
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -701,8 +731,8 @@ _clean_mail_downloads
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Would clean 1 mail attachments"* ]]
-    [[ "$output" != *"Cleaned 1 mail attachments"* ]]
+    [[ "$output" == *"Would clean 1 mail attachments"* ]] || return 1
+    [[ "$output" != *"Cleaned 1 mail attachments"* ]] || return 1
     [ -f "$HOME/Library/Mail Downloads/old.pdf" ]
 }
 
@@ -933,7 +963,7 @@ EOF
             start_section "Project artifacts"
             log_success "Project cache"
             end_section
-            [[ ! -s "$EXPORT_LIST_FILE" ]]
+            [[ ! -s "$EXPORT_LIST_FILE" ]] || return 1
         '
     [ "$status" -eq 0 ]
     [[ "$output" == *"Project cache"* ]] || return 1

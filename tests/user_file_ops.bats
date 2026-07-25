@@ -107,7 +107,7 @@ printf 'AFTER:%s\n' "$([[ -f "$temp_file" ]] && echo leaked || echo cleaned)"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"BEFORE:exists"* ]]
+    [[ "$output" == *"BEFORE:exists"* ]] || return 1
     [[ "$output" == *"AFTER:cleaned"* ]]
 }
 

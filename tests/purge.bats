@@ -467,8 +467,8 @@ confirm_purge_cleanup 2 1024 0 "~/www/app/node_modules" "~/www/app/dist" <<< ''
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Selected paths:"* ]]
-	[[ "$output" == *"~/www/app/node_modules"* ]]
+	[[ "$output" == *"Selected paths:"* ]] || return 1
+	[[ "$output" == *"~/www/app/node_modules"* ]] || return 1
 	[[ "$output" == *"~/www/app/dist"* ]]
 }
 
@@ -932,8 +932,8 @@ EOF
         source '$PROJECT_ROOT/lib/clean/project.sh'
         echo \"\${PURGE_TARGETS[@]}\"
     ")
-	[[ "$result" == *"node_modules"* ]]
-	[[ "$result" == *"target"* ]]
+	[[ "$result" == *"node_modules"* ]] || return 1
+	[[ "$result" == *"target"* ]] || return 1
 	[[ "$result" == *".terragrunt-cache"* ]]
 }
 
@@ -1070,7 +1070,7 @@ echo "SIZE=$(cat "$stats_dir/purge_stats" 2> /dev/null || echo missing)"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"COUNT=1"* ]]
+	[[ "$output" == *"COUNT=1"* ]] || return 1
 	[[ "$output" == *"SIZE=0"* ]]
 }
 
@@ -1091,7 +1091,7 @@ clean_project_artifacts </dev/null
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"No artifacts found to purge"* ]]
+	[[ "$output" == *"No artifacts found to purge"* ]] || return 1
 	[[ "$output" != *"0B"* ]]
 }
 
@@ -1103,11 +1103,19 @@ source "$PROJECT_ROOT/lib/clean/project.sh"
 
 mkdir -p "$HOME/.cache/mole"
 echo "0" > "$HOME/.cache/mole/purge_stats"
+# purge_count must be seeded too: without it this reads a previous test's file
+# through the shared HOME, or reports "missing" when run alone.
+echo "0" > "$HOME/.cache/mole/purge_count"
 
 mkdir -p "$HOME/www/test-project/node_modules"
 echo "test data" > "$HOME/www/test-project/node_modules/file.js"
 touch "$HOME/www/test-project/package.json"
-touch -t 202001010101 "$HOME/www/test-project/node_modules" "$HOME/www/test-project/package.json" "$HOME/www/test-project"
+# The contained file has to be aged as well. Recency is judged from the newest
+# entry inside the artifact, so a fresh file.js marks the whole node_modules as
+# recent, the non-interactive branch skips it, and the failed-removal path this
+# test exists for is never reached.
+touch -t 202001010101 "$HOME/www/test-project/node_modules/file.js" \
+    "$HOME/www/test-project/node_modules" "$HOME/www/test-project/package.json" "$HOME/www/test-project"
 
 PURGE_SEARCH_PATHS=("$HOME/www")
 safe_remove() { return 1; }
@@ -1122,7 +1130,7 @@ echo "SIZE=$(cat "$stats_dir/purge_stats" 2> /dev/null || echo missing)"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"COUNT=0"* ]]
+	[[ "$output" == *"COUNT=0"* ]] || return 1
 	[[ "$output" == *"SIZE=0"* ]]
 }
 
@@ -1192,7 +1200,7 @@ EOF
 @test "mo purge --help includes include-empty option" {
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" purge --help
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"--include-empty"* ]]
+	[[ "$output" == *"--include-empty"* ]] || return 1
 	[[ "$output" == *"Show zero-size project artifact directories"* ]]
 }
 
@@ -1487,7 +1495,7 @@ SCRIPT
 
 	# Index 0 → largest artifact → beta's path.
 	# With the bug path0 = alpha (discovery order) → [[ ... == *beta* ]] fails.
-	[[ "$path0" == *"beta"* ]]
+	[[ "$path0" == *"beta"* ]] || return 1
 
 	# Index 1 → smaller artifact → alpha's path.
 	[[ "$path1" == *"alpha"* ]]

@@ -344,7 +344,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"TIMEOUT_CALL:30:brew autoremove"* ]]
+    [[ "$output" == *"TIMEOUT_CALL:30:brew autoremove"* ]] || return 1
     [[ "$output" != *"Checking brew dependencies"* ]]
 }
 

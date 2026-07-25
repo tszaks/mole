@@ -44,7 +44,7 @@ mole_delete "$victim"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ ! -e "$victim" ]]
+    [[ ! -e "$victim" ]] || return 1
     # Trash dir must remain empty in permanent mode.
     [[ -z "$(ls -A "$MOLE_TEST_TRASH_DIR" 2> /dev/null || true)" ]]
 }
@@ -61,7 +61,7 @@ mole_delete "$victim"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ ! -e "$victim" ]]
+    [[ ! -e "$victim" ]] || return 1
     # Something landed in the stub trash dir.
     [[ -n "$(ls -A "$MOLE_TEST_TRASH_DIR" 2> /dev/null || true)" ]]
 }
@@ -108,8 +108,8 @@ mole_delete "$victim" true
 EOF
 
     [ "$status" -eq 0 ]
-    [[ ! -e "$victim" ]]
-    [[ -d "$fake_home/.Trash/$(basename "$victim")" ]]
+    [[ ! -e "$victim" ]] || return 1
+    [[ -d "$fake_home/.Trash/$(basename "$victim")" ]] || return 1
     [[ "$(grep -c '^sudo -n mv ' "$trace" 2> /dev/null || true)" -eq 1 ]]
     [[ "$(grep -c '^sudo -n trash ' "$trace" 2> /dev/null || true)" -eq 0 ]]
     [[ "$(grep -c '^trash ' "$trace" 2> /dev/null || true)" -eq 0 ]]
@@ -153,7 +153,7 @@ mole_delete "$victim" true
 EOF
 
     [ "$status" -ne 0 ]
-    [[ -e "$victim" ]]
+    [[ -e "$victim" ]] || return 1
     [[ -z "$(ls -A "$redirected" 2> /dev/null || true)" ]]
     [[ "$(grep -c '^sudo -n mv ' "$trace" 2> /dev/null || true)" -eq 0 ]]
 
@@ -194,9 +194,9 @@ mole_delete "$victim" true
 EOF
 
     [ "$status" -eq 0 ]
-    [[ ! -e "$victim" ]]
-    [[ -d "$fake_home/.Trash/$(basename "$victim")" ]]
-    [[ -n "$(find "$fake_home/.Trash" -mindepth 1 -maxdepth 1 -name "$(basename "$victim").*" -print -quit)" ]]
+    [[ ! -e "$victim" ]] || return 1
+    [[ -d "$fake_home/.Trash/$(basename "$victim")" ]] || return 1
+    [[ -n "$(find "$fake_home/.Trash" -mindepth 1 -maxdepth 1 -name "$(basename "$victim").*" -print -quit)" ]] || return 1
     [[ "$(grep -c '^sudo -n mv -n ' "$trace" 2> /dev/null || true)" -eq 1 ]]
 
     local status_col
@@ -266,9 +266,9 @@ mole_delete "$victim" false
 EOF
 
     [ "$status" -eq 0 ]
-    [[ ! -e "$victim" ]]
-    [[ -d "$existing" ]]
-    [[ -n "$(find "$fake_home/.Trash" -mindepth 1 -maxdepth 1 -name 'com.microsoft.Word.*' -print -quit)" ]]
+    [[ ! -e "$victim" ]] || return 1
+    [[ -d "$existing" ]] || return 1
+    [[ -n "$(find "$fake_home/.Trash" -mindepth 1 -maxdepth 1 -name 'com.microsoft.Word.*' -print -quit)" ]] || return 1
     [ "$(stat -f '%Lp' "$fake_home/.Trash")" = "700" ]
     [[ "$(grep -c '^trash:' "$trace" 2> /dev/null || true)" -eq 0 ]]
     [[ "$(grep -c '^osascript:' "$trace" 2> /dev/null || true)" -eq 0 ]]
@@ -292,7 +292,7 @@ mole_delete "$victim" false
 EOF
 
     [ "$status" -ne 0 ]
-    [[ -d "$victim" ]]
+    [[ -d "$victim" ]] || return 1
     [[ -z "$(ls -A "$redirected" 2> /dev/null || true)" ]]
 }
 
@@ -335,11 +335,11 @@ printf 'RC=%s\n' "\$rc"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ -d "$victim" ]]
-    [[ "$output" == *"App Data or Full Disk Access"* ]]
-    [[ "$output" != *"Touch ID"* ]]
-    [[ "$output" == *"RC=14"* ]]
-    [[ ! -s "$trace" ]]
+    [[ -d "$victim" ]] || return 1
+    [[ "$output" == *"App Data or Full Disk Access"* ]] || return 1
+    [[ "$output" != *"Touch ID"* ]] || return 1
+    [[ "$output" == *"RC=14"* ]] || return 1
+    [[ ! -s "$trace" ]] || return 1
     [ "$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")" = "privacy-denied" ]
 }
 
@@ -366,7 +366,7 @@ printf 'RC=%s\n' "\$rc"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ -d "$victim" ]]
+    [[ -d "$victim" ]] || return 1
     [[ "$output" == *"RC=14"* ]]
 }
 
@@ -407,8 +407,8 @@ set -e
 EOF
 
     [ "$status" -eq 0 ]
-    [[ -d "$victim" ]]
-    [[ ! -s "$trace" ]]
+    [[ -d "$victim" ]] || return 1
+    [[ ! -s "$trace" ]] || return 1
     [[ "$output" == *"refusing permanent delete"* ]]
 }
 
@@ -419,9 +419,9 @@ diagnose_removal_failure "\$MOLE_ERR_PRIVACY_DENIED" "Microsoft Word"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"macOS privacy permission denied"* ]]
-    [[ "$output" == *"App Data or Full Disk Access"* ]]
-    [[ "$output" != *"touchid"* ]]
+    [[ "$output" == *"macOS privacy permission denied"* ]] || return 1
+    [[ "$output" == *"App Data or Full Disk Access"* ]] || return 1
+    [[ "$output" != *"touchid"* ]] || return 1
     [[ "$output" != *"Touch ID"* ]]
 }
 
@@ -435,7 +435,7 @@ mole_delete "$victim"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ -s "$MOLE_DELETE_LOG" ]]
+    [[ -s "$MOLE_DELETE_LOG" ]] || return 1
 
     # Expect 5 tab-separated fields: timestamp, mode, size_kb, status, path.
     local fields
@@ -458,7 +458,7 @@ mole_delete "$victim"
 EOF
 
     [ "$status" -eq 1 ]
-    [[ -L "$victim" ]]
+    [[ -L "$victim" ]] || return 1
 
     local status_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
@@ -476,7 +476,7 @@ mole_delete "$victim"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ -e "$victim" ]]
+    [[ -e "$victim" ]] || return 1
 
     local status_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
@@ -492,7 +492,7 @@ EOF
     [ "$status" -ne 0 ]
     # Rejection IS logged (security-relevant), with status="rejected" and size=0.
     # Audit trails need to distinguish refused-by-policy from never-attempted.
-    [[ -s "$MOLE_DELETE_LOG" ]]
+    [[ -s "$MOLE_DELETE_LOG" ]] || return 1
     local status_col size_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
     size_col=$(awk -F'\t' 'END { print $3 }' "$MOLE_DELETE_LOG")
@@ -521,7 +521,7 @@ mole_delete "$victim"
 EOF
 
     [ "$status" -ne 0 ]
-    [[ -e "$victim" ]]
+    [[ -e "$victim" ]] || return 1
 
     local mode_col status_col
     mode_col=$(awk -F'\t' 'END { print $2 }' "$MOLE_DELETE_LOG")
@@ -550,8 +550,8 @@ set -e
 EOF
 
     [ "$status" -eq 0 ]
-    [[ -e "$first" ]]
-    [[ -e "$second" ]]
+    [[ -e "$first" ]] || return 1
+    [[ -e "$second" ]] || return 1
     [[ "$(grep -c 'invalid MOLE_DELETE_MODE' <<< "$output")" -eq 1 ]]
 }
 
@@ -575,7 +575,7 @@ EOF
     chmod 0755 "$(dirname "$blocked")"
 
     [ "$status" -ne 0 ]
-    [[ -e "$victim" ]]
+    [[ -e "$victim" ]] || return 1
 
     local status_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
@@ -609,8 +609,8 @@ EOF
     chmod 0755 "$(dirname "$blocked")"
 
     [ "$status" -eq 0 ]
-    [[ -e "$first" ]]
-    [[ -e "$second" ]]
+    [[ -e "$first" ]] || return 1
+    [[ -e "$second" ]] || return 1
     [[ "$(grep -c "Trash unavailable" <<< "$output")" -eq 1 ]]
 }
 
@@ -628,7 +628,7 @@ mole_delete "$victim"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ ! -e "$victim" ]]
+    [[ ! -e "$victim" ]] || return 1
     local size_col
     size_col=$(awk -F'\t' 'END { print $3 }' "$MOLE_DELETE_LOG")
     [ "$size_col" = "unknown" ]

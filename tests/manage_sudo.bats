@@ -43,7 +43,7 @@ setup() {
     local pid
     pid=$(/bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/core/sudo.sh'; _start_sudo_keepalive")
 
-    [[ "$pid" =~ ^[0-9]+$ ]]
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
 
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true

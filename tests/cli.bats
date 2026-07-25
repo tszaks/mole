@@ -110,9 +110,9 @@ setup() {
 @test "mole --help prints command overview" {
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" --help
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"mo clean"* ]]
-	[[ "$output" == *"mo optimize"* ]]
-	[[ "$output" == *"mo analyze"* ]]
+	[[ "$output" == *"mo clean"* ]] || return 1
+	[[ "$output" == *"mo optimize"* ]] || return 1
+	[[ "$output" == *"mo analyze"* ]] || return 1
 	[[ "$output" != *"mo optimise"* ]]
 }
 
@@ -148,7 +148,7 @@ EOF
 
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" --version
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Mole version $expected_version"* ]]
+	[[ "$output" == *"Mole version $expected_version"* ]] || return 1
 	[[ "$output" == *"Channel: Nightly"* ]]
 }
 
@@ -228,8 +228,8 @@ show_main_menu 1 true
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Clean        Free up disk space"* ]]
-	[[ "$output" != *"History"* ]]
+	[[ "$output" == *"Clean        Free up disk space"* ]] || return 1
+	[[ "$output" != *"History"* ]] || return 1
 	[[ "$output" != *"history"* ]]
 }
 
@@ -334,7 +334,7 @@ interactive_main_menu < <(printf '2\n')
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"NO_LEAK"* ]]
+	[[ "$output" == *"NO_LEAK"* ]] || return 1
 	[[ "$output" != *"LEAK:"* ]]
 }
 
@@ -399,7 +399,7 @@ EOF
 @test "mo clean --help includes external volume option" {
 	run env HOME="$HOME" "$PROJECT_ROOT/mole" clean --help
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"--external PATH"* ]]
+	[[ "$output" == *"--external PATH"* ]] || return 1
 	[[ "$output" == *"already-uninstalled apps"* ]]
 }
 
@@ -427,7 +427,7 @@ EOF
 	run env HOME="$HOME" PATH="$mock_bin:$PATH" MOLE_EXTERNAL_VOLUMES_ROOT="$link_root" \
 		MOLE_TEST_NO_AUTH=1 "$PROJECT_ROOT/mole" clean --external "$link_root/USB" --dry-run
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Clean External Volume"* ]]
+	[[ "$output" == *"Clean External Volume"* ]] || return 1
 	[[ "$output" == *"External volume cleanup"* ]]
 }
 
@@ -439,7 +439,7 @@ EOF
 
 	run env MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" status
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"not configured"* ]]
+	[[ "$output" == *"not configured"* ]] || return 1
 
 	cat >"$pam_file" <<'EOF'
 auth       sufficient     pam_tid.so
@@ -489,7 +489,7 @@ EOF
 
 	run env MOLE_PAM_SUDO_FILE="$pam_file" "$PROJECT_ROOT/bin/touchid.sh" enable --dry-run
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"DRY RUN MODE"* ]]
+	[[ "$output" == *"DRY RUN MODE"* ]] || return 1
 
 	run grep "pam_tid.so" "$pam_file"
 	[ "$status" -ne 0 ]

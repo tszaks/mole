@@ -36,8 +36,8 @@ setup() {
 @test "check.sh --help shows usage information" {
     run "$PROJECT_ROOT/scripts/check.sh" --help
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage"* ]]
-    [[ "$output" == *"--format"* ]]
+    [[ "$output" == *"Usage"* ]] || return 1
+    [[ "$output" == *"--format"* ]] || return 1
     [[ "$output" == *"--no-format"* ]]
 }
 
@@ -122,8 +122,8 @@ EOF
     run env HOME="$HOME" TERM="dumb" PATH="$fake_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
         "$PROJECT_ROOT/scripts/setup-quick-launchers.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Raycast: Mole Clean | Alfred keyword: clean"* ]]
-    [[ "$output" == *"Raycast: Mole Status | Alfred keyword: status"* ]]
+    [[ "$output" == *"Raycast: Mole Clean | Alfred keyword: clean"* ]] || return 1
+    [[ "$output" == *"Raycast: Mole Status | Alfred keyword: status"* ]] || return 1
 
     local raycast_dir="$HOME/Library/Application Support/Raycast/script-commands"
     [ -d "$raycast_dir" ]

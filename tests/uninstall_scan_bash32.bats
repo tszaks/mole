@@ -190,7 +190,7 @@ cat "$apps_file"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"|$app_path|SizedApp|com.example.SizedApp|4KB|"* ]]
+	[[ "$output" == *"|$app_path|SizedApp|com.example.SizedApp|4KB|"* ]] || return 1
 	[[ "$output" == *"|4" ]]
 }
 
@@ -223,7 +223,7 @@ cat "$apps_file"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"|$app_path|DuApp|com.example.DuApp|2.1MB|"* ]]
+	[[ "$output" == *"|$app_path|DuApp|com.example.DuApp|2.1MB|"* ]] || return 1
 	[[ "$output" == *"|2048" ]]
 }
 
@@ -256,7 +256,7 @@ cat "$apps_file"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"|$app_path|CapApp|com.example.CapApp|--|"* ]]
+	[[ "$output" == *"|$app_path|CapApp|com.example.CapApp|--|"* ]] || return 1
 	[[ "$output" == *"|0" ]]
 }
 
@@ -356,7 +356,7 @@ cat "$apps_file"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"|$local_app|Dupe|com.example.Dupe|"* ]]
+	[[ "$output" == *"|$local_app|Dupe|com.example.Dupe|"* ]] || return 1
 	[[ "$output" != *"|$backup_app|Dupe|com.example.Dupe|"* ]]
 }
 
@@ -385,7 +385,7 @@ cat "$apps_file"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"|$stable_app|"* ]]
+	[[ "$output" == *"|$stable_app|"* ]] || return 1
 	[[ "$output" == *"|$beta_app|"* ]]
 }
 

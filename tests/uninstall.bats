@@ -62,14 +62,14 @@ find_app_files "com.example.TestApp" "TestApp"
 EOF
 	)"
 
-	[[ "$result" == *"Application Support/TestApp"* ]]
-	[[ "$result" == *"Caches/TestApp"* ]]
-	[[ "$result" == *"Preferences/com.example.TestApp.plist"* ]]
-	[[ "$result" == *"Preferences/TestApp.plist"* ]]
-	[[ "$result" == *"Saved Application State/com.example.TestApp.savedState"* ]]
-	[[ "$result" == *"Saved Application State/TestApp.savedState"* ]]
-	[[ "$result" == *"Containers/com.example.TestApp"* ]]
-	[[ "$result" == *"LaunchAgents/com.example.TestApp.plist"* ]]
+	[[ "$result" == *"Application Support/TestApp"* ]] || return 1
+	[[ "$result" == *"Caches/TestApp"* ]] || return 1
+	[[ "$result" == *"Preferences/com.example.TestApp.plist"* ]] || return 1
+	[[ "$result" == *"Preferences/TestApp.plist"* ]] || return 1
+	[[ "$result" == *"Saved Application State/com.example.TestApp.savedState"* ]] || return 1
+	[[ "$result" == *"Saved Application State/TestApp.savedState"* ]] || return 1
+	[[ "$result" == *"Containers/com.example.TestApp"* ]] || return 1
+	[[ "$result" == *"LaunchAgents/com.example.TestApp.plist"* ]] || return 1
 	[[ "$result" == *".cache/testapp"* ]]
 }
 
@@ -88,9 +88,9 @@ find_app_files "com.rogueamoeba.soundsource" "SoundSource"
 EOF
 	)"
 
-	[[ "$result" == *"com.rogueamoeba.soundsource.sfl2"* ]]
-	[[ "$result" == *"com.rogueamoeba.soundsource.sfl3"* ]]
-	[[ "$result" == *"com.rogueamoeba.soundsource.sfl4"* ]]
+	[[ "$result" == *"com.rogueamoeba.soundsource.sfl2"* ]] || return 1
+	[[ "$result" == *"com.rogueamoeba.soundsource.sfl3"* ]] || return 1
+	[[ "$result" == *"com.rogueamoeba.soundsource.sfl4"* ]] || return 1
 	[[ "$result" != *"com.apple.systemsettings.sfl3"* ]]
 }
 
@@ -135,10 +135,10 @@ find_app_files "com.rogueamoeba.soundsource" "SoundSource" "$APP"
 EOF
 	)"
 
-	[[ "$result" == *"Library/Preferences/com.rogueamoeba.RemoteAUHost.plist"* ]]
-	[[ "$result" == *"Library/Caches/com.rogueamoeba.RemoteAUHost"* ]]
-	[[ "$result" != *"Library/Caches/com.rogueamoeba.RemoteAUHost.shared"* ]]
-	[[ "$result" != *"org.sparkle-project.Sparkle.Autoupdate.plist"* ]]
+	[[ "$result" == *"Library/Preferences/com.rogueamoeba.RemoteAUHost.plist"* ]] || return 1
+	[[ "$result" == *"Library/Caches/com.rogueamoeba.RemoteAUHost"* ]] || return 1
+	[[ "$result" != *"Library/Caches/com.rogueamoeba.RemoteAUHost.shared"* ]] || return 1
+	[[ "$result" != *"org.sparkle-project.Sparkle.Autoupdate.plist"* ]] || return 1
 	[[ "$result" != *"org.sparkle-project.DownloaderService"* ]]
 }
 
@@ -192,9 +192,9 @@ EOF
 		find . -maxdepth 1 \( -name 'com.foo.plist' -o -name 'com.foo.*.plist' \) | sort
 	"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"com.foo.plist"* ]]
-	[[ "$output" == *"com.foo.helper.plist"* ]]
-	[[ "$output" != *"com.foobar.plist"* ]]
+	[[ "$output" == *"com.foo.plist"* ]] || return 1
+	[[ "$output" == *"com.foo.helper.plist"* ]] || return 1
+	[[ "$output" != *"com.foobar.plist"* ]] || return 1
 	[[ "$output" != *"com.foobaz.helper.plist"* ]]
 }
 
@@ -294,7 +294,7 @@ format_uninstall_preview_path "$HOME/preview-size-file"
 EOF
 	)"
 
-	[[ "$result" == *"~/preview-size-file"* ]]
+	[[ "$result" == *"~/preview-size-file"* ]] || return 1
 	[[ "$result" == *"1KB"* ]]
 }
 
@@ -610,7 +610,7 @@ fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"requires the official CrowdStrike uninstaller"* ]]
+	[[ "$output" == *"requires the official CrowdStrike uninstaller"* ]] || return 1
 	[[ "$output" != *"MOLE_DELETE"* ]]
 }
 
@@ -1144,8 +1144,8 @@ printf '\n' | batch_uninstall_applications
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Local Network permissions"* ]]
-	[[ "$output" == *"NetworkApp"* ]]
+	[[ "$output" == *"Local Network permissions"* ]] || return 1
+	[[ "$output" == *"NetworkApp"* ]] || return 1
 	[[ "$output" == *"Recovery mode"* ]]
 }
 
@@ -1246,7 +1246,7 @@ printf '\nq' | batch_uninstall_applications
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"~/Library/Logs/TestApp/log6.log"* ]]
+	[[ "$output" == *"~/Library/Logs/TestApp/log6.log"* ]] || return 1
 	[[ "$output" != *"more files"* ]]
 }
 
@@ -1682,9 +1682,9 @@ cat "$log_file"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"RESULT:ok"* ]]
-	[[ "$output" == *"CALL2:15:/bin/echo -r -f -domain local -domain user -domain system"* ]]
-	[[ "$output" == *"CALL3:10:/bin/echo -r -f -domain local -domain user"* ]]
+	[[ "$output" == *"RESULT:ok"* ]] || return 1
+	[[ "$output" == *"CALL2:15:/bin/echo -r -f -domain local -domain user -domain system"* ]] || return 1
+	[[ "$output" == *"CALL3:10:/bin/echo -r -f -domain local -domain user"* ]] || return 1
 	[[ "$output" == *"DEBUG:LaunchServices rebuild timed out, trying lighter version"* ]]
 }
 
@@ -1752,7 +1752,7 @@ printf '\n' | "$PROJECT_ROOT/mole" remove --dry-run
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"DRY RUN MODE"* ]]
+	[[ "$output" == *"DRY RUN MODE"* ]] || return 1
 	[ -f "$HOME/.local/bin/mole" ]
 	[ -f "$HOME/.local/bin/mo" ]
 	[ -d "$HOME/.config/mole" ]
@@ -1785,10 +1785,10 @@ EOF
 	rm -rf "$fake_global_bin"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"$HOME/.local/bin/mole"* ]]
-	[[ "$output" == *"$HOME/.local/bin/mo"* ]]
-	[[ "$output" != *"$fake_global_bin/mole"* ]]
-	[[ "$output" != *"$fake_global_bin/mo"* ]]
+	[[ "$output" == *"$HOME/.local/bin/mole"* ]] || return 1
+	[[ "$output" == *"$HOME/.local/bin/mo"* ]] || return 1
+	[[ "$output" != *"$fake_global_bin/mole"* ]] || return 1
+	[[ "$output" != *"$fake_global_bin/mo"* ]] || return 1
 	[[ "$output" != *"brew uninstall --force mole"* ]]
 }
 @test "match_apps_by_name finds exact match case-insensitively" {
@@ -1807,7 +1807,7 @@ echo "match=${selected_apps[0]}"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"count=1"* ]]
+	[[ "$output" == *"count=1"* ]] || return 1
 	[[ "$output" == *"TestApp"* ]]
 }
 
@@ -1825,7 +1825,7 @@ echo "match=${selected_apps[0]}"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"count=1"* ]]
+	[[ "$output" == *"count=1"* ]] || return 1
 	[[ "$output" == *"Test Application"* ]]
 }
 
@@ -1842,7 +1842,7 @@ echo "count=${#selected_apps[@]}"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Warning: No application found matching 'nonexistent'"* ]]
+	[[ "$output" == *"Warning: No application found matching 'nonexistent'"* ]] || return 1
 	[[ "$output" == *"count=0"* ]]
 }
 
@@ -1865,8 +1865,8 @@ done
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"count=2"* ]]
-	[[ "$output" == *"matched=TestApp2"* ]]
+	[[ "$output" == *"count=2"* ]] || return 1
+	[[ "$output" == *"matched=TestApp2"* ]] || return 1
 	[[ "$output" == *"matched=TestApp3"* ]]
 }
 
@@ -1888,7 +1888,7 @@ done
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"count=1"* ]]
+	[[ "$output" == *"count=1"* ]] || return 1
 	[[ "$output" == *"matched=TestApp"* ]]
 }
 
@@ -2128,8 +2128,8 @@ echo "result=${MOLE_SELECTION_RESULT:-}"
 INNER
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"rc=1"* ]]
-	[[ "$output" == *"result="* ]]
+	[[ "$output" == *"rc=1"* ]] || return 1
+	[[ "$output" == *"result="* ]] || return 1
 	[[ "$output" != *"result=0"* ]]
 }
 
@@ -2165,8 +2165,8 @@ echo "result=${MOLE_SELECTION_RESULT:-}"
 INNER
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"rc=0"* ]]
-	[[ "$output" == *"mode=date"* ]]
+	[[ "$output" == *"rc=0"* ]] || return 1
+	[[ "$output" == *"mode=date"* ]] || return 1
 	[[ "$output" == *"result=0"* ]]
 }
 
@@ -2210,9 +2210,9 @@ echo "reverse=${MOLE_SELECTION_RESULT:-}"
 INNER
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"default_rc=0"* ]]
-	[[ "$output" == *"reverse_rc=0"* ]]
-	[[ "$output" == *"default=1"* ]]
+	[[ "$output" == *"default_rc=0"* ]] || return 1
+	[[ "$output" == *"reverse_rc=0"* ]] || return 1
+	[[ "$output" == *"default=1"* ]] || return 1
 	[[ "$output" == *"reverse=0"* ]]
 }
 
@@ -2425,10 +2425,10 @@ INNER
 	rm -f "$apps_cache"
 	[ "$status" -eq 0 ]
 	# Bats pipes stdout, so output is JSON. Assert both apps and uninstall_name.
-	[[ "$output" == *'"name": "Slack"'* ]]
-	[[ "$output" == *'"name": "Zoom"'* ]]
-	[[ "$output" == *'"uninstall_name": "Slack"'* ]]
-	[[ "$output" == *'"bundle_id": "com.tinyspeck.slackmacgap"'* ]]
+	[[ "$output" == *'"name": "Slack"'* ]] || return 1
+	[[ "$output" == *'"name": "Zoom"'* ]] || return 1
+	[[ "$output" == *'"uninstall_name": "Slack"'* ]] || return 1
+	[[ "$output" == *'"bundle_id": "com.tinyspeck.slackmacgap"'* ]] || return 1
 	[[ "$output" == *'"source": "App"'* ]]
 }
 
@@ -2469,8 +2469,8 @@ INNER
 	rm -f "$apps_cache"
 	[ "$status" -eq 0 ]
 	# Output should start with '[' and end with ']' to be a valid JSON array.
-	[[ "${output:0:1}" == "[" ]]
-	[[ "${output: -1}" == "]" ]]
+	[[ "${output:0:1}" == "[" ]] || return 1
+	[[ "${output: -1}" == "]" ]] || return 1
 	# Round-trip via python to confirm it parses as JSON.
 	if command -v python3 > /dev/null; then
 		printf '%s\n' "$output" | python3 -c 'import sys, json; d=json.load(sys.stdin); assert isinstance(d, list) and len(d)==1 and d[0]["name"]=="Slack"'
@@ -2548,7 +2548,7 @@ INNER
 
 	rm -f "$apps_cache"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *'"uninstall_name": "visual-studio-code"'* ]]
+	[[ "$output" == *'"uninstall_name": "visual-studio-code"'* ]] || return 1
 	[[ "$output" == *'"source": "Homebrew"'* ]]
 }
 

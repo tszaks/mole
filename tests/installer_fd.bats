@@ -88,9 +88,9 @@ require_fd() {
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"App1.dmg"* ]]
-    [[ "$output" == *"App2.pkg"* ]]
-    [[ "$output" == *"App3.iso"* ]]
+    [[ "$output" == *"App1.dmg"* ]] || return 1
+    [[ "$output" == *"App2.pkg"* ]] || return 1
+    [[ "$output" == *"App3.iso"* ]] || return 1
     [[ "$output" == *"App.mpkg"* ]]
 }
 
@@ -113,9 +113,9 @@ require_fd() {
 
     [ "$status" -eq 0 ]
     # Default max depth is 2
-    [[ "$output" == *"shallow.dmg"* ]]
-    [[ "$output" == *"mid.dmg"* ]]
-    [[ "$output" == *"deep.dmg"* ]]
+    [[ "$output" == *"shallow.dmg"* ]] || return 1
+    [[ "$output" == *"mid.dmg"* ]] || return 1
+    [[ "$output" == *"deep.dmg"* ]] || return 1
     [[ "$output" != *"too-deep.dmg"* ]]
 }
 
@@ -135,7 +135,7 @@ require_fd() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"top.dmg"* ]]
+    [[ "$output" == *"top.dmg"* ]] || return 1
     [[ "$output" != *"nested.dmg"* ]]
 }
 
@@ -171,9 +171,9 @@ require_fd() {
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"document.pdf"* ]]
-    [[ "$output" != *"image.jpg"* ]]
-    [[ "$output" != *"archive.tar.gz"* ]]
+    [[ "$output" != *"document.pdf"* ]] || return 1
+    [[ "$output" != *"image.jpg"* ]] || return 1
+    [[ "$output" != *"archive.tar.gz"* ]] || return 1
     [[ "$output" == *"Installer.dmg"* ]]
 }
 
@@ -246,7 +246,7 @@ require_fd() {
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"real.dmg"* ]]
-    [[ "$output" != *"symlink.dmg"* ]]
+    [[ "$output" == *"real.dmg"* ]] || return 1
+    [[ "$output" != *"symlink.dmg"* ]] || return 1
     [[ "$output" != *"dangling.lnk"* ]]
 }

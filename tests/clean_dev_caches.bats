@@ -49,8 +49,8 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"pnpm cache"* ]]
-    [[ "$output" != *"Orphaned pnpm store"* ]]
+    [[ "$output" == *"pnpm cache"* ]] || return 1
+    [[ "$output" != *"Orphaned pnpm store"* ]] || return 1
     [[ "$output" != *"pnpm store"* ]]
 }
 
@@ -76,9 +76,9 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"npm cache directory|$HOME/.npm/_cacache/*"* ]]
-    [[ "$output" == *"npm npx cache|$HOME/.npm/_npx/*"* ]]
-    [[ "$output" == *"npm logs|$HOME/.npm/_logs/*"* ]]
+    [[ "$output" == *"npm cache directory|$HOME/.npm/_cacache/*"* ]] || return 1
+    [[ "$output" == *"npm npx cache|$HOME/.npm/_npx/*"* ]] || return 1
+    [[ "$output" == *"npm logs|$HOME/.npm/_logs/*"* ]] || return 1
     [[ "$output" == *"npm prebuilds|$HOME/.npm/_prebuilds/*"* ]]
 }
 
@@ -97,7 +97,7 @@ clean_conda_metadata_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"conda index/tarball/log caches · skipped (whitelist)"* ]]
+    [[ "$output" == *"conda index/tarball/log caches · skipped (whitelist)"* ]] || return 1
     [[ "$output" != *"conda called"* ]]
 }
 
@@ -123,10 +123,10 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"npm cache directory|$HOME/.npm/_cacache/*"* ]]
-    [[ "$output" == *"npm cache directory (custom path)|/tmp/mole-custom-npm-cache/_cacache/*"* ]]
-    [[ "$output" == *"npm npx cache (custom path)|/tmp/mole-custom-npm-cache/_npx/*"* ]]
-    [[ "$output" == *"npm logs (custom path)|/tmp/mole-custom-npm-cache/_logs/*"* ]]
+    [[ "$output" == *"npm cache directory|$HOME/.npm/_cacache/*"* ]] || return 1
+    [[ "$output" == *"npm cache directory (custom path)|/tmp/mole-custom-npm-cache/_cacache/*"* ]] || return 1
+    [[ "$output" == *"npm npx cache (custom path)|/tmp/mole-custom-npm-cache/_npx/*"* ]] || return 1
+    [[ "$output" == *"npm logs (custom path)|/tmp/mole-custom-npm-cache/_logs/*"* ]] || return 1
     [[ "$output" == *"npm prebuilds (custom path)|/tmp/mole-custom-npm-cache/_prebuilds/*"* ]]
 }
 
@@ -152,7 +152,7 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"npm cache directory|$HOME/.npm/_cacache/*"* ]]
+    [[ "$output" == *"npm cache directory|$HOME/.npm/_cacache/*"* ]] || return 1
     [[ "$output" != *"(custom path)"* ]]
 }
 
@@ -178,7 +178,7 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"npm cache directory|$HOME/.npm/_cacache/*"* ]]
+    [[ "$output" == *"npm cache directory|$HOME/.npm/_cacache/*"* ]] || return 1
     [[ "$output" != *"(custom path)"* ]]
 }
 
@@ -200,8 +200,8 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Bun cache|$HOME/.bun/install/cache/*"* ]]
-    [[ "$output" != *"bun cache|bun cache bun pm cache rm"* ]]
+    [[ "$output" == *"Bun cache|$HOME/.bun/install/cache/*"* ]] || return 1
+    [[ "$output" != *"bun cache|bun cache bun pm cache rm"* ]] || return 1
     [[ "$output" != *"Orphaned bun cache"* ]]
 }
 
@@ -236,8 +236,8 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"bun cache"* ]]
-    [[ "$output" != *"Bun cache|$HOME/.bun/install/cache/*"* ]]
+    [[ "$output" == *"bun cache"* ]] || return 1
+    [[ "$output" != *"Bun cache|$HOME/.bun/install/cache/*"* ]] || return 1
     [[ "$output" != *"Orphaned bun cache"* ]]
 }
 
@@ -272,7 +272,7 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"bun cache"* ]]
+    [[ "$output" == *"bun cache"* ]] || return 1
     [[ "$output" == *"Orphaned bun cache|$HOME/.bun/install/cache/*"* ]]
 }
 
@@ -307,7 +307,7 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"bun cache"* ]]
+    [[ "$output" == *"bun cache"* ]] || return 1
     [[ "$output" != *"Orphaned bun cache"* ]]
 }
 
@@ -342,7 +342,7 @@ clean_dev_npm
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Bun cache|/tmp/mole-bun-cache/*"* ]]
+    [[ "$output" == *"Bun cache|/tmp/mole-bun-cache/*"* ]] || return 1
     [[ "$output" == *"Orphaned bun cache|$HOME/.bun/install/cache/*"* ]]
 }
 
@@ -361,8 +361,8 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Docker unused data · skipped (review: docker system df)"* ]]
-    [[ "$output" == *"Docker BuildX cache"* ]]
+    [[ "$output" == *"Docker unused data · skipped (review: docker system df)"* ]] || return 1
+    [[ "$output" == *"Docker BuildX cache"* ]] || return 1
     [[ "$output" != *"docker called"* ]]
 }
 
@@ -402,9 +402,9 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"OrbStack container data · skipped (4M, review: docker system df)"* ]]
-    [[ "$output" == *"Docker BuildX cache|$HOME/.docker/buildx/cache/*"* ]]
-    [[ "$output" != *"data.img.raw"* ]]
+    [[ "$output" == *"OrbStack container data · skipped (4M, review: docker system df)"* ]] || return 1
+    [[ "$output" == *"Docker BuildX cache|$HOME/.docker/buildx/cache/*"* ]] || return 1
+    [[ "$output" != *"data.img.raw"* ]] || return 1
     [[ "$output" != *"swap.img"* ]]
 }
 
@@ -428,9 +428,9 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Docker unused data · skipped (review: docker system df)"* ]]
-    [[ "$output" != *"whitelisted"* ]]
-    [[ "$output" != *"mo clean --whitelist"* ]]
+    [[ "$output" == *"Docker unused data · skipped (review: docker system df)"* ]] || return 1
+    [[ "$output" != *"whitelisted"* ]] || return 1
+    [[ "$output" != *"mo clean --whitelist"* ]] || return 1
     [[ "$output" != *"docker called"* ]]
 }
 
@@ -453,7 +453,7 @@ clean_codex_runtimes
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Codex runtimes · manual review"* ]]
+    [[ "$output" == *"Codex runtimes · manual review"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:Codex CLI runtimes|$HOME/.cache/codex-runtimes/codex-primary-runtime"* ]]
 }
 
@@ -477,7 +477,7 @@ clean_codex_runtimes
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"SAFE_CLEAN:Codex CLI runtimes|$HOME/.cache/codex-runtimes/incomplete-old"* ]]
+    [[ "$output" == *"SAFE_CLEAN:Codex CLI runtimes|$HOME/.cache/codex-runtimes/incomplete-old"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:Codex CLI runtimes|$HOME/.cache/codex-runtimes/codex-primary-runtime"* ]]
 }
 
@@ -501,7 +501,7 @@ clean_codex_runtimes
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Codex runtimes · skipped (Codex running)"* ]]
+    [[ "$output" == *"Codex runtimes · skipped (Codex running)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]]
 }
 
@@ -522,7 +522,7 @@ clean_codex_runtimes
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Codex runtimes · skipped (whitelist)"* ]]
+    [[ "$output" == *"Codex runtimes · skipped (whitelist)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]]
 }
 
@@ -543,8 +543,8 @@ clean_codex_runtimes
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Codex runtimes · manual review"* ]]
-    [[ "$output" == *"Codex runtimes · skipped (whitelist)"* ]]
+    [[ "$output" == *"Codex runtimes · manual review"* ]] || return 1
+    [[ "$output" == *"Codex runtimes · skipped (whitelist)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]]
 }
 
@@ -706,7 +706,7 @@ clean_dev_mise
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"mise cache|/tmp/mise-cache/*"* ]]
+    [[ "$output" == *"mise cache|/tmp/mise-cache/*"* ]] || return 1
     [[ "$output" != *".local/share/mise"* ]]
 }
 
@@ -720,7 +720,7 @@ clean_dev_other_langs
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"PHP Composer cache (legacy)|"* ]]
+    [[ "$output" == *"PHP Composer cache (legacy)|"* ]] || return 1
     [[ "$output" == *"PHP Composer cache|"* ]]
 }
 
@@ -767,8 +767,8 @@ clean_developer_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"npm"* ]]
-    [[ "$output" == *"mise"* ]]
+    [[ "$output" == *"npm"* ]] || return 1
+    [[ "$output" == *"mise"* ]] || return 1
     [[ "$output" == *"brew"* ]]
 }
 
@@ -782,9 +782,9 @@ clean_dev_ruby
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"rbenv download cache|"* ]]
-    [[ "$output" == *"gem spec cache|"* ]]
-    [[ "$output" == *"gem package cache|"* ]]
+    [[ "$output" == *"rbenv download cache|"* ]] || return 1
+    [[ "$output" == *"gem spec cache|"* ]] || return 1
+    [[ "$output" == *"gem package cache|"* ]] || return 1
     [[ "$output" == *"Ruby Bundler cache|"* ]]
 }
 
@@ -798,7 +798,7 @@ clean_dev_perl
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CPAN build artifacts|"* ]]
+    [[ "$output" == *"CPAN build artifacts|"* ]] || return 1
     [[ "$output" == *"CPAN source cache|"* ]]
 }
 
@@ -833,7 +833,7 @@ clean_project_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Flutter build cache (.dart_tool)"* ]]
+    [[ "$output" == *"Flutter build cache (.dart_tool)"* ]] || return 1
     [[ "$output" == *"Flutter build cache (build/)"* ]]
 }
 
@@ -856,7 +856,7 @@ clean_dev_misc
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Chrome DevTools MCP browser cache"* ]]
+    [[ "$output" == *"Chrome DevTools MCP browser cache"* ]] || return 1
     [[ "$output" != *"Chrome DevTools MCP cache"* ]]
 }
 
@@ -879,7 +879,7 @@ clean_dev_misc
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Chrome DevTools MCP caches · skipped"* ]]
+    [[ "$output" == *"Chrome DevTools MCP caches · skipped"* ]] || return 1
     [[ "$output" != *"Chrome DevTools MCP browser cache"* ]]
 }
 
@@ -905,12 +905,12 @@ clean_chrome_devtools_mcp_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP browser cache|$profile/Default/Cache/"* ]]
-    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP code cache|$profile/Default/Code Cache/"* ]]
-    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP GPU cache|$profile/Default/GPUCache/"* ]]
-    [[ "$output" == *"SWC:Chrome DevTools MCP|$profile/Default/Service Worker/CacheStorage"* ]]
-    [[ "$output" != *"Cookies"* ]]
-    [[ "$output" != *"Local Storage"* ]]
+    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP browser cache|$profile/Default/Cache/"* ]] || return 1
+    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP code cache|$profile/Default/Code Cache/"* ]] || return 1
+    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP GPU cache|$profile/Default/GPUCache/"* ]] || return 1
+    [[ "$output" == *"SWC:Chrome DevTools MCP|$profile/Default/Service Worker/CacheStorage"* ]] || return 1
+    [[ "$output" != *"Cookies"* ]] || return 1
+    [[ "$output" != *"Local Storage"* ]] || return 1
     [[ "$output" != *"Local State"* ]]
 }
 

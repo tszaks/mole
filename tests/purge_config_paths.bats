@@ -37,8 +37,8 @@ setup() {
     
     [ "$status" -eq 0 ]
     
-    [[ "$output" == *"$HOME/Projects"* ]]
-    [[ "$output" == *"$HOME/GitHub"* ]]
+    [[ "$output" == *"$HOME/Projects"* ]] || return 1
+    [[ "$output" == *"$HOME/GitHub"* ]] || return 1
     [[ "$output" == *"$HOME/dev"* ]]
 }
 
@@ -54,8 +54,8 @@ EOF
     
     [ "$status" -eq 0 ]
     
-    [[ "$output" == *"$HOME/custom/projects"* ]]
-    [[ "$output" == *"$HOME/work"* ]]
+    [[ "$output" == *"$HOME/custom/projects"* ]] || return 1
+    [[ "$output" == *"$HOME/work"* ]] || return 1
     [[ "$output" != *"$HOME/GitHub"* ]]
 }
 
@@ -71,8 +71,8 @@ EOF
     
     [ "$status" -eq 0 ]
     
-    [[ "$output" == *"$HOME/tilde/expanded"* ]]
-    [[ "$output" == *"$HOME/another/one"* ]]
+    [[ "$output" == *"$HOME/tilde/expanded"* ]] || return 1
+    [[ "$output" == *"$HOME/another/one"* ]] || return 1
     [[ "$output" != *"~"* ]]
 }
 
@@ -95,7 +95,7 @@ EOF
     local count="${lines[0]}"
     
     [ "$count" -eq 2 ]
-    [[ "$output" == *"$HOME/valid/path"* ]]
+    [[ "$output" == *"$HOME/valid/path"* ]] || return 1
     [[ "$output" == *"$HOME/another/path"* ]]
 }
 

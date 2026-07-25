@@ -191,8 +191,8 @@ SCRIPT
 		"$manual_bin/mo" update
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Mole installation needs repair"* ]]
-	[[ "$output" == *"missing analyze-go"* ]]
+	[[ "$output" == *"Mole installation needs repair"* ]] || return 1
+	[[ "$output" == *"missing analyze-go"* ]] || return 1
 	[ -f "$installer_args_log" ]
 	if grep -q -- "--update" "$installer_args_log"; then
 		return 1
@@ -266,7 +266,7 @@ SCRIPT
 		"$manual_bin/mo" update --nightly
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Already on latest nightly, e31d46f"* ]]
+	[[ "$output" == *"Already on latest nightly, e31d46f"* ]] || return 1
 	[ ! -e "$installer_args_log" ]
 	grep -q "api.github.com/repos/tw93/mole/commits/main" "$curl_url_log"
 	if grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"; then
@@ -423,8 +423,8 @@ EOF
 		"$fake_brew_bin/mo" update
 
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"Homebrew upgrade failed"* ]]
-	[[ "$output" == *"Please update to Xcode 27.0 (or delete it)."* ]]
+	[[ "$output" == *"Homebrew upgrade failed"* ]] || return 1
+	[[ "$output" == *"Please update to Xcode 27.0 (or delete it)."* ]] || return 1
 	[[ "$output" == *"https://developer.apple.com/download/all/"* ]]
 }
 
@@ -445,7 +445,7 @@ EOF
 		"$fake_brew_bin/mo" update
 
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"Homebrew upgrade failed"* ]]
-	[[ "$output" == *"The upgrade command was interrupted"* ]]
+	[[ "$output" == *"Homebrew upgrade failed"* ]] || return 1
+	[[ "$output" == *"The upgrade command was interrupted"* ]] || return 1
 	[[ "$output" != *"Updated to latest version"* ]]
 }

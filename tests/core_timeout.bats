@@ -256,7 +256,7 @@ setup() {
 	run /usr/bin/expect "$PROJECT_ROOT/tests/timeout_tty_restore.exp" "$PROJECT_ROOT"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"TIMEOUT:124"* ]]
+	[[ "$output" == *"TIMEOUT:124"* ]] || return 1
 	[[ "$output" == *"READ-AFTER:typed-after"* ]]
 }
 
@@ -354,7 +354,7 @@ _tty_bg_field() {
                 kill \"\$pid\" 2>/dev/null || true
             fi
         done
-        [[ -z \"\$leaked\" ]]
+        [[ -z \"\$leaked\" ]] || return 1
     "
 }
 

@@ -92,9 +92,9 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"App1.dmg"* ]]
-	[[ "$output" == *"App2.pkg"* ]]
-	[[ "$output" == *"App3.iso"* ]]
+	[[ "$output" == *"App1.dmg"* ]] || return 1
+	[[ "$output" == *"App2.pkg"* ]] || return 1
+	[[ "$output" == *"App3.iso"* ]] || return 1
 	[[ "$output" == *"App.mpkg"* ]]
 }
 
@@ -112,11 +112,13 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	# Default max depth is 2
-	[[ "$output" == *"shallow.dmg"* ]]
-	[[ "$output" == *"mid.dmg"* ]]
-	[[ "$output" == *"deep.dmg"* ]]
-	[[ "$output" != *"too-deep.dmg"* ]]
+	# Default max depth is 2 (INSTALLER_SCAN_MAX_DEPTH_DEFAULT), so level2 and below
+	# must be excluded. Assert on the containing path, not the bare filename:
+	# *"deep.dmg"* also matches too-deep.dmg, which hid the boundary entirely.
+	[[ "$output" == *"/shallow.dmg"* ]] || return 1
+	[[ "$output" == *"/level1/mid.dmg"* ]] || return 1
+	[[ "$output" != *"/level1/level2/deep.dmg"* ]] || return 1
+	[[ "$output" != *"/level1/level2/level3/too-deep.dmg"* ]]
 }
 
 @test "scan_installers_in_path (fallback find): honors MOLE_INSTALLER_SCAN_MAX_DEPTH" {
@@ -131,7 +133,7 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"top.dmg"* ]]
+	[[ "$output" == *"top.dmg"* ]] || return 1
 	[[ "$output" != *"nested.dmg"* ]]
 }
 
@@ -159,9 +161,9 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" != *"document.pdf"* ]]
-	[[ "$output" != *"image.jpg"* ]]
-	[[ "$output" != *"archive.tar.gz"* ]]
+	[[ "$output" != *"document.pdf"* ]] || return 1
+	[[ "$output" != *"image.jpg"* ]] || return 1
+	[[ "$output" != *"archive.tar.gz"* ]] || return 1
 	[[ "$output" == *"Installer.dmg"* ]]
 }
 
@@ -247,8 +249,8 @@ setup() {
     " bash "$PROJECT_ROOT/bin/installer.sh" "$HOME/Downloads"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"real.dmg"* ]]
-	[[ "$output" != *"symlink.dmg"* ]]
+	[[ "$output" == *"real.dmg"* ]] || return 1
+	[[ "$output" != *"symlink.dmg"* ]] || return 1
 	[[ "$output" != *"dangling.lnk"* ]]
 }
 
@@ -271,8 +273,8 @@ setup() {
 
         delete_selected_installers < <(printf "\n")
         printf "deleted=%s failed=%s freed=%s\n" "$total_deleted" "${total_delete_failed:-0}" "$total_size_freed_kb"
-        [[ ! -e "$2" ]]
-        [[ ! -e "$3" ]]
+        [[ ! -e "$2" ]] || return 1
+        [[ ! -e "$3" ]] || return 1
         grep -F "[installer] REMOVED $2" "$HOME/Library/Logs/mole/operations.log" > /dev/null
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$first" "$second"
 
@@ -304,11 +306,11 @@ setup() {
         if [[ ${total_delete_failed:-0} -gt 0 ]]; then
             printf "failure=%s\n" "${INSTALLER_DELETE_FAILURES[0]}"
         fi
-        [[ ! -e "$2" ]]
+        [[ ! -e "$2" ]] || return 1
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$removable"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"rc=3 deleted=1 failed=1"* ]]
+	[[ "$output" == *"rc=3 deleted=1 failed=1"* ]] || return 1
 	[[ "$output" == *"failure=/System (delete failed)"* ]]
 }
 
@@ -336,12 +338,12 @@ setup() {
         set -e
 
         printf "rc=%s deleted=%s failed=%s failure=%s\n" "$rc" "$total_deleted" "$total_delete_failed" "${INSTALLER_DELETE_FAILURES[0]}"
-        [[ -e "$2" ]]
-        [[ -e "$2.old" ]]
+        [[ -e "$2" ]] || return 1
+        [[ -e "$2.old" ]] || return 1
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$target" "$replacement"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"rc=3 deleted=0 failed=1"* ]]
+	[[ "$output" == *"rc=3 deleted=0 failed=1"* ]] || return 1
 	[[ "$output" == *"Replaced.dmg (changed since scan)"* ]]
 }
 
@@ -366,11 +368,11 @@ setup() {
         set -e
 
         printf "rc=%s deleted=%s failed=%s failure=%s\n" "$rc" "$total_deleted" "$total_delete_failed" "${INSTALLER_DELETE_FAILURES[0]}"
-        [[ -e "$2" ]]
+        [[ -e "$2" ]] || return 1
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$target"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"rc=3 deleted=0 failed=1"* ]]
+	[[ "$output" == *"rc=3 deleted=0 failed=1"* ]] || return 1
 	[[ "$output" == *"Grew.dmg (changed since scan)"* ]]
 }
 
@@ -389,12 +391,12 @@ setup() {
     ' bash "$PROJECT_ROOT/bin/installer.sh"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Installer cleanup incomplete"* ]]
-	[[ "$output" == *"Failed to remove"* ]]
-	[[ "$output" == *"Blocked.dmg"* ]]
-	[[ "$output" == *"protected path"* ]]
-	[[ "$output" == *"Stale.pkg"* ]]
-	[[ "$output" == *"still exists"* ]]
+	[[ "$output" == *"Installer cleanup incomplete"* ]] || return 1
+	[[ "$output" == *"Failed to remove"* ]] || return 1
+	[[ "$output" == *"Blocked.dmg"* ]] || return 1
+	[[ "$output" == *"protected path"* ]] || return 1
+	[[ "$output" == *"Stale.pkg"* ]] || return 1
+	[[ "$output" == *"still exists"* ]] || return 1
 	[[ "$output" != *"Your Mac is cleaner now!"* ]]
 }
 
@@ -432,7 +434,7 @@ setup() {
     ' bash "$PROJECT_ROOT/bin/installer.sh" "$removable"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Installer cleanup incomplete"* ]]
-	[[ "$output" == *"rc=1"* ]]
+	[[ "$output" == *"Installer cleanup incomplete"* ]] || return 1
+	[[ "$output" == *"rc=1"* ]] || return 1
 	[[ "$output" == *"removed=yes"* ]]
 }

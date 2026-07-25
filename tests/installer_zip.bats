@@ -351,8 +351,8 @@ EOF
 
     # Should succeed and find the readable.zip but skip restricted.zip
     [ "$status" -eq 0 ]
-    [[ "$output" == *"readable.zip"* ]]
-    [[ "$output" != *"restricted.zip"* ]]
+    [[ "$output" == *"readable.zip"* ]] || return 1
+    [[ "$output" != *"restricted.zip"* ]] || return 1
 
     # Cleanup: restore permissions for teardown
     chmod 644 "$HOME/Downloads/restricted.zip"
@@ -379,6 +379,6 @@ EOF
 
     # Should find the valid ZIP and silently skip the corrupt one
     [ "$status" -eq 0 ]
-    [[ "$output" == *"valid-installer.zip"* ]]
+    [[ "$output" == *"valid-installer.zip"* ]] || return 1
     [[ "$output" != *"corrupt.zip"* ]]
 }

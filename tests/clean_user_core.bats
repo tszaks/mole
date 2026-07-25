@@ -78,7 +78,7 @@ clean_user_essentials
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Trash · emptied, 2 items"* ]]
+    [[ "$output" == *"Trash · emptied, 2 items"* ]] || return 1
     [[ "$output" != *"osascript called"* ]]
 }
 
@@ -154,7 +154,7 @@ clean_app_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"Autosave information"* ]]
+    [[ "$output" != *"Autosave information"* ]] || return 1
     [[ "$output" != *"Library/Autosave Information"* ]]
 }
 
@@ -224,12 +224,12 @@ rm -rf "$HOME/Library/Application Support/com.apple.idleassetsd"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"FIND:$support_home/Library/Application Support/CrashReporter:30:f"* ]]
-    [[ "$output" == *"FIND:$support_home/Library/Application Support/com.apple.idleassetsd:30:f"* ]]
-    [[ "$output" != *"Aerial wallpaper videos"* ]]
-    [[ "$output" == *"Messages sticker cache"* ]]
-    [[ "$output" == *"Messages preview attachment cache"* ]]
-    [[ "$output" == *"Messages preview sticker cache"* ]]
+    [[ "$output" == *"FIND:$support_home/Library/Application Support/CrashReporter:30:f"* ]] || return 1
+    [[ "$output" == *"FIND:$support_home/Library/Application Support/com.apple.idleassetsd:30:f"* ]] || return 1
+    [[ "$output" != *"Aerial wallpaper videos"* ]] || return 1
+    [[ "$output" == *"Messages sticker cache"* ]] || return 1
+    [[ "$output" == *"Messages preview attachment cache"* ]] || return 1
+    [[ "$output" == *"Messages preview sticker cache"* ]] || return 1
     [[ "$output" != *"Messages attachments"* ]]
 }
 
@@ -248,8 +248,8 @@ clean_support_app_data
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Messages sticker cache"* ]]
-    [[ "$output" == *"Messages preview attachment cache"* ]]
+    [[ "$output" == *"Messages sticker cache"* ]] || return 1
+    [[ "$output" == *"Messages preview attachment cache"* ]] || return 1
     [[ "$output" == *"Messages preview sticker cache"* ]]
 }
 
@@ -346,7 +346,7 @@ clean_app_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Sandboxed app caches"* ]]
+    [[ "$output" == *"Sandboxed app caches"* ]] || return 1
     [[ "$output" != *"SHOULD_NOT_SIZE_SCAN"* ]]
 }
 
@@ -375,10 +375,10 @@ rm -rf "$HOME/Library/Application Support"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Application Support logs/caches"* ]]
+    [[ "$output" == *"Application Support logs/caches"* ]] || return 1
     local total_kb
     total_kb=$(printf '%s\n' "$output" | sed -n 's/.*TOTAL_KB=\([0-9][0-9]*\).*/\1/p' | tail -1)
-    [[ -n "$total_kb" ]]
+    [[ -n "$total_kb" ]] || return 1
     [[ "$total_kb" -ge 2 ]]
 }
 
@@ -411,9 +411,9 @@ rm -rf "$HOME/Library/Application Support"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"SPIN:Scanning Application Support... 1/1 [adspower_global, bulk clean]"* ]]
-    [[ "$output" == *"Application Support logs/caches"* ]]
-    [[ "$output" != *"151250 items"* ]]
+    [[ "$output" == *"SPIN:Scanning Application Support... 1/1 [adspower_global, bulk clean]"* ]] || return 1
+    [[ "$output" == *"Application Support logs/caches"* ]] || return 1
+    [[ "$output" != *"151250 items"* ]] || return 1
     [[ "$output" != *"REMOVE:"* ]]
 }
 
@@ -637,7 +637,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Group Containers logs/caches"* ]]
+    [[ "$output" == *"Group Containers logs/caches"* ]] || return 1
     [[ "$output" == *"PASS"* ]]
 }
 
@@ -863,7 +863,7 @@ fi
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"PASS"* ]]
+    [[ "$output" == *"PASS"* ]] || return 1
     [[ "$output" != *"Group Containers logs/caches"* ]]
 }
 
@@ -893,7 +893,7 @@ clean_group_container_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Group Containers logs/caches"* ]]
+    [[ "$output" == *"Group Containers logs/caches"* ]] || return 1
     [[ "$output" != *"SHOULD_NOT_SIZE_SCAN"* ]]
 }
 
@@ -927,8 +927,8 @@ clean_browsers
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Safari cache"* ]]
-    [[ "$output" == *"Firefox cache"* ]]
+    [[ "$output" == *"Safari cache"* ]] || return 1
+    [[ "$output" == *"Firefox cache"* ]] || return 1
     [[ "$output" == *"Puppeteer browser cache"* ]]
 }
 
@@ -997,8 +997,8 @@ clean_browsers
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Brave SW Brave"* ]]
-    [[ "$output" != *"Brave Service Worker ScriptCache"* ]]
+    [[ "$output" == *"Brave SW Brave"* ]] || return 1
+    [[ "$output" != *"Brave Service Worker ScriptCache"* ]] || return 1
 
     rm -rf "$HOME/Library"
 }
@@ -1021,11 +1021,11 @@ clean_browsers
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Arc code cache|$HOME/Library/Application Support/Arc/User Data/"* ]]
-    [[ "$output" == *"Arc component CRX cache|$HOME/Library/Application Support/Arc/User Data/component_crx_cache/"* ]]
-    [[ "$output" == *"Arc extensions CRX cache|$HOME/Library/Application Support/Arc/User Data/extensions_crx_cache/"* ]]
-    [[ "$output" == *"Arc SW $HOME/Library/Application Support/Arc/User Data/Default/Service Worker/CacheStorage"* ]]
-    [[ "$output" != *"Arc Service Worker ScriptCache|$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache/"* ]]
+    [[ "$output" == *"Arc code cache|$HOME/Library/Application Support/Arc/User Data/"* ]] || return 1
+    [[ "$output" == *"Arc component CRX cache|$HOME/Library/Application Support/Arc/User Data/component_crx_cache/"* ]] || return 1
+    [[ "$output" == *"Arc extensions CRX cache|$HOME/Library/Application Support/Arc/User Data/extensions_crx_cache/"* ]] || return 1
+    [[ "$output" == *"Arc SW $HOME/Library/Application Support/Arc/User Data/Default/Service Worker/CacheStorage"* ]] || return 1
+    [[ "$output" != *"Arc Service Worker ScriptCache|$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache/"* ]] || return 1
 
     rm -rf "$HOME/Library"
 }
@@ -1052,13 +1052,13 @@ EOF
 
     [ "$status" -eq 0 ]
     # CacheStorage cleanup still runs (it has its own protection logic).
-    [[ "$output" == *"SW-CALL Chrome"* ]]
+    [[ "$output" == *"SW-CALL Chrome"* ]] || return 1
     # ScriptCache cleanup must NOT run at all: wiping V8 bytecode can break
     # Chromium MV3 extension service workers even after the browser exits.
-    [[ "$output" != *"Chrome Service Worker ScriptCache"* ]]
-    [[ "$output" != *"Arc Service Worker ScriptCache"* ]]
-    [[ "$output" != *"Brave Service Worker ScriptCache"* ]]
-    [[ "$output" != *"Vivaldi Service Worker ScriptCache"* ]]
+    [[ "$output" != *"Chrome Service Worker ScriptCache"* ]] || return 1
+    [[ "$output" != *"Arc Service Worker ScriptCache"* ]] || return 1
+    [[ "$output" != *"Brave Service Worker ScriptCache"* ]] || return 1
+    [[ "$output" != *"Vivaldi Service Worker ScriptCache"* ]] || return 1
 
     rm -rf "$HOME/Library"
 }
@@ -1083,8 +1083,8 @@ clean_browsers
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Arc SW $HOME/Library/Application Support/Arc/User Data/Default/Service Worker/CacheStorage"* ]]
-    [[ "$output" != *"Arc Service Worker ScriptCache|$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache/"* ]]
+    [[ "$output" == *"Arc SW $HOME/Library/Application Support/Arc/User Data/Default/Service Worker/CacheStorage"* ]] || return 1
+    [[ "$output" != *"Arc Service Worker ScriptCache|$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache/"* ]] || return 1
 
     rm -rf "$HOME/Library"
 }
@@ -1107,9 +1107,9 @@ clean_browsers
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"QQ Browser cache|$HOME/Library/Caches/com.tencent.QQBrowser3/"* ]]
-    [[ "$output" == *"QQ Browser code cache|$HOME/Library/Application Support/QQBrowser3/"* ]]
-    [[ "$output" == *"QQ Browser component cache|$HOME/Library/Application Support/QQBrowser3/component_crx_cache/"* ]]
+    [[ "$output" == *"QQ Browser cache|$HOME/Library/Caches/com.tencent.QQBrowser3/"* ]] || return 1
+    [[ "$output" == *"QQ Browser code cache|$HOME/Library/Application Support/QQBrowser3/"* ]] || return 1
+    [[ "$output" == *"QQ Browser component cache|$HOME/Library/Application Support/QQBrowser3/component_crx_cache/"* ]] || return 1
 
     rm -rf "$HOME/Library"
 }
@@ -1134,9 +1134,9 @@ clean_browsers
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"QQ Browser cache|$HOME/Library/Caches/com.tencent.QQBrowser3/"* ]]
-    [[ "$output" != *"QQ Browser code cache"* ]]
-    [[ "$output" != *"QQ Browser GPU cache"* ]]
+    [[ "$output" == *"QQ Browser cache|$HOME/Library/Caches/com.tencent.QQBrowser3/"* ]] || return 1
+    [[ "$output" != *"QQ Browser code cache"* ]] || return 1
+    [[ "$output" != *"QQ Browser GPU cache"* ]] || return 1
 
     rm -rf "$HOME/Library"
 }
@@ -1186,10 +1186,10 @@ echo "COUNT: $count"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"COUNT: 5"* ]]
-    [[ "$output" == *"FOUND: .hidden_file"* ]]
-    [[ "$output" == *"FOUND: .DS_Store"* ]]
-    [[ "$output" == *"FOUND: .hidden_dir"* ]]
+    [[ "$output" == *"COUNT: 5"* ]] || return 1
+    [[ "$output" == *"FOUND: .hidden_file"* ]] || return 1
+    [[ "$output" == *"FOUND: .DS_Store"* ]] || return 1
+    [[ "$output" == *"FOUND: .hidden_dir"* ]] || return 1
     [[ "$output" == *"FOUND: regular_file.txt"* ]]
 }
 
@@ -1219,7 +1219,7 @@ echo "RESOLVED=$resolved"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"RESOLVED="*"/USB"* ]]
+    [[ "$output" == *"RESOLVED="*"/USB"* ]] || return 1
     [[ "$output" != *"must be under"* ]]
 }
 
@@ -1260,7 +1260,7 @@ echo "SIZE_CALLS=$(cat "$count_file")"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Sandboxed app caches"* ]]
+    [[ "$output" == *"Sandboxed app caches"* ]] || return 1
     [[ "$output" == *"SIZE_CALLS=2"* ]]
 }
 

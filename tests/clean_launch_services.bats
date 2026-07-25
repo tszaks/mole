@@ -85,9 +85,9 @@ clean_stale_launch_services_registrations
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"LaunchServices stale app registrations"* ]]
-    [[ "$output" == *"would unregister 1"* ]]
-    [[ "$output" == *"Missing App.app"* ]]
+    [[ "$output" == *"LaunchServices stale app registrations"* ]] || return 1
+    [[ "$output" == *"would unregister 1"* ]] || return 1
+    [[ "$output" == *"Missing App.app"* ]] || return 1
     grep -q 'arg=-dump' "$log_file"
     if grep -q 'arg=-u' "$log_file"; then
         return 1
@@ -134,7 +134,7 @@ clean_stale_launch_services_registrations
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"LaunchServices stale app registrations, 1 removed"* ]]
+    [[ "$output" == *"LaunchServices stale app registrations, 1 removed"* ]] || return 1
     grep -q 'arg=-dump' "$log_file"
     grep -q 'argc=2' "$log_file"
     grep -q 'arg=-u' "$log_file"
@@ -212,6 +212,6 @@ clean_stale_launch_services_registrations
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == "" ]]
+    [[ "$output" == "" ]] || return 1
     grep -q 'arg=-dump' "$log_file"
 }

@@ -83,7 +83,7 @@ EOF
     in_trash=$(find "$MOLE_TEST_TRASH_DIR" -type f | wc -l | tr -d ' ')
     [ "$in_trash" -eq 5 ]
     for f in "$f1" "$f2" "$f3" "$f4" "$f5"; do
-        [[ ! -e "$f" ]]
+        [[ ! -e "$f" ]] || return 1
     done
 
     # Single batch invocation, with all five paths.
@@ -124,10 +124,10 @@ remove_file_list "$list" "false"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"2"* ]]
+    [[ "$output" == *"2"* ]] || return 1
 
-    [[ ! -e "$f1" ]]
-    [[ ! -e "$f2" ]]
+    [[ ! -e "$f1" ]] || return 1
+    [[ ! -e "$f2" ]] || return 1
 
     local fallback_calls
     fallback_calls=$(wc -l < "$trace" | tr -d ' ')
@@ -184,7 +184,7 @@ EOF
     [ "$status" -eq 0 ]
 
     # Sudo path must avoid the batch helper entirely.
-    [[ ! -s "$batch_count" ]]
+    [[ ! -s "$batch_count" ]] || return 1
 
     local n
     n=$(wc -l < "$fallback_count" | tr -d ' ')
@@ -235,6 +235,6 @@ EOF
     grep -qF "$app_scripts|false" "$direct_trace"
     [ "$(wc -l < "$batch_trace" | tr -d ' ')" -eq 1 ]
     grep -qxF "$ordinary" "$batch_trace"
-    [[ "$output" != *"trash CLI must not be called"* ]]
+    [[ "$output" != *"trash CLI must not be called"* ]] || return 1
     [[ "$output" != *"Finder must not be called"* ]]
 }

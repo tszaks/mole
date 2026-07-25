@@ -52,9 +52,9 @@ printf 'examples=%s\n' "${PROJECT_ARTIFACT_HINT_EXAMPLES[*]}"
 EOT1
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"count=1"* ]]
-    [[ "$output" == *"node_modules"* ]]
-    [[ "$output" != *"vendor"* ]]
+    [[ "$output" == *"count=1"* ]] || return 1
+    [[ "$output" == *"node_modules"* ]] || return 1
+    [[ "$output" != *"vendor"* ]] || return 1
     [[ "$output" != *"/bin"* ]]
 }
 
@@ -147,7 +147,7 @@ printf 'skipped=%s\n' "$PROJECT_ARTIFACT_HINT_SCAN_SKIPPED"
 EOT2D
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"count=0"* ]]
+    [[ "$output" == *"count=0"* ]] || return 1
     [[ "$output" == *"skipped=true"* ]]
 }
 
@@ -194,7 +194,7 @@ printf 'skipped=%s\n' "$PROJECT_ARTIFACT_HINT_SCAN_SKIPPED"
 EOT_NESTED
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"count=0"* ]]
+    [[ "$output" == *"count=0"* ]] || return 1
     [[ "$output" == *"skipped=true"* ]]
 }
 
@@ -435,7 +435,7 @@ show_orphan_dotdir_hint_notice
 EOTD
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *".custom-orphan-keep"* ]]
+    [[ "$output" != *".custom-orphan-keep"* ]] || return 1
     [[ "$output" != *"Orphan dotfiles"* ]] || return 1
 }
 
@@ -656,7 +656,7 @@ show_orphan_dotdir_hint_notice
 EOTD
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *".bridge"* ]]
+    [[ "$output" != *".bridge"* ]] || return 1
     [[ "$output" != *"Orphan dotfiles"* ]] || return 1
 }
 
@@ -688,7 +688,7 @@ show_orphan_dotdir_hint_notice
 EOTD
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *".bridge"* ]]
+    [[ "$output" != *".bridge"* ]] || return 1
     [[ "$output" != *"Orphan dotfiles"* ]] || return 1
 }
 

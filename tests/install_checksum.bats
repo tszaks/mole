@@ -152,10 +152,10 @@ fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" != *"SOURCE_BUILD_INVOKED"* ]]
-	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]]
-	[[ "$output" != *"TAMPERED_INSTALLED"* ]]
-	[[ "$output" != *"SOURCE_INSTALLED"* ]]
+	[[ "$output" != *"SOURCE_BUILD_INVOKED"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]] || return 1
+	[[ "$output" != *"TAMPERED_INSTALLED"* ]] || return 1
+	[[ "$output" != *"SOURCE_INSTALLED"* ]] || return 1
 	[[ "$output" == *"aborting instead of falling back"* ]]
 }
 
@@ -210,7 +210,7 @@ fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]]
+	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]] || return 1
 	[[ "$output" != *"STAGING_FILE_LEAKED"* ]]
 }
 
@@ -270,8 +270,8 @@ fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" != *"SOURCE_BUILD_INVOKED"* ]]
-	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]]
+	[[ "$output" != *"SOURCE_BUILD_INVOKED"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]] || return 1
 	[[ "$output" == *"aborting instead of falling back"* ]]
 }
 
@@ -328,8 +328,8 @@ fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" != *"SOURCE_BUILD_INVOKED"* ]]
-	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]]
+	[[ "$output" != *"SOURCE_BUILD_INVOKED"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SUCCESS"* ]] || return 1
 	[[ "$output" == *"aborting instead of falling back"* ]]
 }
 

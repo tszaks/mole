@@ -61,9 +61,9 @@ setup() {
 
 @test "check_tcc_permissions validates protected directories" {
 
-    [[ -d "$HOME/Library/Caches" ]]
-    [[ -d "$HOME/Library/Logs" ]]
-    [[ -d "$HOME/.cache/mole" ]]
+    [[ -d "$HOME/Library/Caches" ]] || return 1
+    [[ -d "$HOME/Library/Logs" ]] || return 1
+    [[ -d "$HOME/.cache/mole" ]] || return 1
 
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; check_tcc_permissions < /dev/null"
     [ "$status" -eq 0 ]
@@ -120,7 +120,7 @@ setup() {
     "
     [ "$status" -eq 0 ]
 
-    [[ -d "$test_cache/abc123_https_capcut.com_0" ]]
+    [[ -d "$test_cache/abc123_https_capcut.com_0" ]] || return 1
 
     rm -rf "$test_cache"
 }
@@ -162,11 +162,11 @@ setup() {
 
     [ "$status" -eq 0 ]
     # Whitelisted dir must never be passed to safe_remove
-    [[ "$output" != *"REMOVE:$test_cache/abc123hash_extension"* ]]
+    [[ "$output" != *"REMOVE:$test_cache/abc123hash_extension"* ]] || return 1
     # Non-whitelisted dir must be removed
-    [[ "$output" == *"REMOVE:$test_cache/def456hash_other"* ]]
+    [[ "$output" == *"REMOVE:$test_cache/def456hash_other"* ]] || return 1
     # UI reports the protection count
-    [[ "$output" == *"1 protected"* ]]
+    [[ "$output" == *"1 protected"* ]] || return 1
 
     rm -rf "$test_cache"
 }
@@ -200,8 +200,8 @@ clean_service_worker_cache 'TestBrowser' '$test_cache'
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"TestBrowser Service Worker"* ]]
-    [[ "$output" == *$'\033[0;32m1.0MB\033[0m'* ]]
+    [[ "$output" == *"TestBrowser Service Worker"* ]] || return 1
+    [[ "$output" == *$'\033[0;32m1.0MB\033[0m'* ]] || return 1
 
     rm -rf "$test_cache"
 }
@@ -280,10 +280,10 @@ DRY_RUN=true
 clean_project_caches
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Python bytecode cache"* ]]
-    [[ "$output" == *"~/Projects/python-app"* ]]
-    [[ "$output" == *"2 dirs"* ]]
-    [[ "$output" != *"module.pyc"* ]]
+    [[ "$output" == *"Python bytecode cache"* ]] || return 1
+    [[ "$output" == *"Python bytecode cache · python-app"* ]] || return 1
+    [[ "$output" == *"2 dirs"* ]] || return 1
+    [[ "$output" != *"module.pyc"* ]] || return 1
 
     rm -rf "$HOME/Projects"
 }
@@ -303,8 +303,8 @@ DRY_RUN=true
 clean_project_caches
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Python bytecode cache"* ]]
-    [[ "$output" == *"1 dirs"* ]]
+    [[ "$output" == *"Python bytecode cache"* ]] || return 1
+    [[ "$output" == *"1 dirs"* ]] || return 1
 
     rm -rf "$HOME/Projects"
 }
@@ -377,12 +377,12 @@ cat "$EXPORT_LIST_FILE"
 printf '\nSKIPPED=%s\n' "$whitelist_skipped_count"
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"1 dirs"* ]]
-    [[ "$output" == *"1 skipped"* ]]
-    [[ "$output" == *"EXPORT"* ]]
-    [[ "$output" == *"$HOME/Projects/python-app/pkg/__pycache__"* ]]
-    [[ "$output" != *"$HOME/Projects/python-app/protected/__pycache__"* ]]
-    [[ "$output" == *"SKIPPED=1"* ]]
+    [[ "$output" == *"1 dirs"* ]] || return 1
+    [[ "$output" == *"1 skipped"* ]] || return 1
+    [[ "$output" == *"EXPORT"* ]] || return 1
+    [[ "$output" == *"$HOME/Projects/python-app/pkg/__pycache__"* ]] || return 1
+    [[ "$output" != *"$HOME/Projects/python-app/protected/__pycache__"* ]] || return 1
+    [[ "$output" == *"SKIPPED=1"* ]] || return 1
 
     rm -rf "$HOME/Projects" "$HOME/export.txt"
 }
@@ -424,7 +424,7 @@ safe_clean() { echo "$2|$1"; }
 clean_project_caches
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Next.js build cache"* ]]
+    [[ "$output" == *"Next.js build cache"* ]] || return 1
     grep -q -- "-P $HOME/CustomProjects " "$find_log"
     run grep -q -- "-P $HOME " "$find_log"
     [ "$status" -eq 1 ]
@@ -445,7 +445,7 @@ safe_clean() { echo "$2|$1"; }
 clean_project_caches
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Next.js build cache|$HOME/go/src/demo/.next/cache/test.cache"* ]]
+    [[ "$output" == *"Next.js build cache|$HOME/go/src/demo/.next/cache/test.cache"* ]] || return 1
 
     rm -rf "$HOME/go"
 }
@@ -463,7 +463,7 @@ safe_clean() { echo "$2|$1"; }
 clean_project_caches
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Next.js build cache|$HOME/go/src/github.com/example/demo/.next/cache/test.cache"* ]]
+    [[ "$output" == *"Next.js build cache|$HOME/go/src/github.com/example/demo/.next/cache/test.cache"* ]] || return 1
 
     rm -rf "$HOME/go"
 }
@@ -528,9 +528,9 @@ clean_project_caches
 echo "ELAPSED=$SECONDS"
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"ELAPSED="* ]]
+    [[ "$output" == *"ELAPSED="* ]] || return 1
     elapsed=$(printf '%s\n' "$output" | awk -F= '/ELAPSED=/{print $2}' | tail -1)
-    [[ "$elapsed" =~ ^[0-9]+$ ]]
+    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
     (( elapsed < 5 ))
 
     rm -rf "$HOME/.config/mole" "$HOME/SlowProjects" "$fake_bin"
@@ -557,9 +557,9 @@ scan_project_cache_root "$HOME/Projects" "$output_file"
 cat "$output_file"
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"app/__pycache__"* ]]
-    [[ "$output" != *"miniconda3"* ]]
-    [[ "$output" != *"site-packages"* ]]
+    [[ "$output" == *"app/__pycache__"* ]] || return 1
+    [[ "$output" != *"miniconda3"* ]] || return 1
+    [[ "$output" != *"site-packages"* ]] || return 1
 
     rm -rf "$HOME/Projects" "$output_file"
 }

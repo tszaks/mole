@@ -139,6 +139,10 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 note_activity() { :; }
+# Without this the real pgrep runs against the host, so the result depends on
+# whether the developer happens to have Xcode open. The sibling case mocks the
+# running side; this one has to mock the not-running side.
+pgrep() { return 1; }
 has_sudo_session() { return 0; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
@@ -150,7 +154,7 @@ clean_xcode_documentation_cache
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"CLEAN:$doc_root/DeveloperDocumentation-16.0.index:Xcode documentation cache (old indexes)"* ]]
+	[[ "$output" == *"CLEAN:$doc_root/DeveloperDocumentation-16.0.index:Xcode documentation cache (old indexes)"* ]] || return 1
 	[[ "$output" != *"CLEAN:$doc_root/DeveloperDocumentation.index:Xcode documentation cache (old indexes)"* ]]
 }
 
@@ -171,7 +175,7 @@ clean_xcode_documentation_cache
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Xcode documentation cache · skipped (Xcode running)"* ]]
+	[[ "$output" == *"Xcode documentation cache · skipped (Xcode running)"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
 }
 
@@ -194,8 +198,8 @@ clean_xcode_system_coresimulator_caches
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"REMOVE:$cache_root/dyld"* ]]
-	[[ "$output" == *"REMOVE:$cache_root/metadata"* ]]
+	[[ "$output" == *"REMOVE:$cache_root/dyld"* ]] || return 1
+	[[ "$output" == *"REMOVE:$cache_root/metadata"* ]] || return 1
 	[[ "$output"$'\n' != *"REMOVE:$cache_root"$'\n'* ]]
 }
 
@@ -214,7 +218,7 @@ clean_xcode_system_coresimulator_caches
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Xcode Simulator system cache · skipped (CoreSimulator running)"* ]]
+	[[ "$output" == *"Xcode Simulator system cache · skipped (CoreSimulator running)"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
 }
 
@@ -233,7 +237,7 @@ clean_xcode_xctest_devices
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"SAFE:$developer_root/XCTestDevices|Xcode XCTestDevices test data"* ]]
+	[[ "$output" == *"SAFE:$developer_root/XCTestDevices|Xcode XCTestDevices test data"* ]] || return 1
 	[[ "$output" != *"XCTestDevices-old"* ]]
 }
 
@@ -254,7 +258,7 @@ clean_xcode_xctest_devices
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Xcode or XCTest is running"* ]]
+	[[ "$output" == *"Xcode or XCTest running"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
 }
 
@@ -274,8 +278,8 @@ clean_xcode_xctest_devices
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Xcode XCTestDevices test data"* ]]
-	[[ "$output" == *"dry"* ]]
+	[[ "$output" == *"Xcode XCTestDevices test data"* ]] || return 1
+	[[ "$output" == *"dry"* ]] || return 1
 	[[ "$output" == *"STILL_EXISTS"* ]]
 }
 
@@ -295,7 +299,7 @@ printf 'WHITELIST_SKIPPED:%s\n' "$whitelist_skipped_count"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"STILL_EXISTS"* ]]
+	[[ "$output" == *"STILL_EXISTS"* ]] || return 1
 	[[ "$output" == *"WHITELIST_SKIPPED:1"* ]]
 }
 
@@ -343,7 +347,7 @@ clean_dev_jetbrains_toolbox
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"/241.1"* ]]
+	[[ "$output" == *"/241.1"* ]] || return 1
 	[[ "$output" != *"/241.2"* ]]
 }
 
@@ -364,7 +368,7 @@ clean_dev_jetbrains_toolbox
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"/241.1"* ]]
+	[[ "$output" == *"/241.1"* ]] || return 1
 	[[ "$output" != *"/241.2"* ]]
 }
 
@@ -394,13 +398,13 @@ clean_dev_ai_agents
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"/2.1.112|Claude Code old version"* ]]
-	[[ "$output" == *"/2.1.113|Claude Code old version"* ]]
-	[[ "$output" != *"/2.1.114|"* ]]
-	[[ "$output" == *"/2026.04.08-old|Cursor Agent old version"* ]]
-	[[ "$output" != *"/2026.04.15-new|"* ]]
-	[[ "$output" == *"/1.0.5|GitHub Copilot CLI old version"* ]]
-	[[ "$output" == *"/1.0.32|GitHub Copilot CLI old version"* ]]
+	[[ "$output" == *"/2.1.112|Claude Code old version"* ]] || return 1
+	[[ "$output" == *"/2.1.113|Claude Code old version"* ]] || return 1
+	[[ "$output" != *"/2.1.114|"* ]] || return 1
+	[[ "$output" == *"/2026.04.08-old|Cursor Agent old version"* ]] || return 1
+	[[ "$output" != *"/2026.04.15-new|"* ]] || return 1
+	[[ "$output" == *"/1.0.5|GitHub Copilot CLI old version"* ]] || return 1
+	[[ "$output" == *"/1.0.32|GitHub Copilot CLI old version"* ]] || return 1
 	[[ "$output" != *"/1.0.34|"* ]]
 }
 
@@ -434,11 +438,11 @@ clean_dev_ai_agents
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"/2.1.112|Claude Code old version"* ]]
-	[[ "$output" != *"/2.1.113|"* ]]
-	[[ "$output" != *"/2.1.114|"* ]]
-	[[ "$output" == *"/2026.04.01-old|Cursor Agent old version"* ]]
-	[[ "$output" != *"/2026.04.10-active|"* ]]
+	[[ "$output" == *"/2.1.112|Claude Code old version"* ]] || return 1
+	[[ "$output" != *"/2.1.113|"* ]] || return 1
+	[[ "$output" != *"/2.1.114|"* ]] || return 1
+	[[ "$output" == *"/2026.04.01-old|Cursor Agent old version"* ]] || return 1
+	[[ "$output" != *"/2026.04.10-active|"* ]] || return 1
 	[[ "$output" != *"/2026.04.20-newest|"* ]]
 }
 
@@ -464,14 +468,17 @@ clean_dev_ai_agents
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" != *"|Claude Code old version"* ]]
-	[[ "$output" == *"Claude Code old version · skipped (active symlink broken)"* ]]
+	[[ "$output" != *"|Claude Code old version"* ]] || return 1
+	[[ "$output" == *"Claude Code old version · skipped (active symlink broken)"* ]] || return 1
 
 	rm -f "$bin_dir/claude"
 }
 
 @test "clean_dev_ai_agents respects MOLE_AI_AGENTS_KEEP and skips missing roots" {
 	local claude_root="$HOME/.local/share/claude/versions"
+	# Earlier cases in this file seed versions under the shared HOME; without a
+	# reset this sees five versions instead of three and KEEP=2 sweeps 2.1.101 too.
+	rm -rf "$claude_root"
 	mkdir -p "$claude_root"
 	touch -t 202604170000 "$claude_root/2.1.100"
 	touch -t 202604180000 "$claude_root/2.1.101"
@@ -487,8 +494,8 @@ MOLE_AI_AGENTS_KEEP=2 clean_dev_ai_agents
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"/2.1.100"* ]]
-	[[ "$output" != *"/2.1.101"* ]]
+	[[ "$output" == *"/2.1.100"* ]] || return 1
+	[[ "$output" != *"/2.1.101"* ]] || return 1
 	[[ "$output" != *"/2.1.102"* ]]
 }
 
@@ -502,7 +509,7 @@ clean_dev_jetbrains_logs
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"$HOME/Library/Logs/JetBrains/*|JetBrains IDE logs"* ]]
+	[[ "$output" == *"$HOME/Library/Logs/JetBrains/*|JetBrains IDE logs"* ]] || return 1
 	[[ "$output" != *"Library/Caches/JetBrains"* ]]
 }
 
@@ -547,7 +554,7 @@ clean_developer_tools
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"$HOME/Library/Logs/JetBrains/*|JetBrains IDE logs"* ]]
+	[[ "$output" == *"$HOME/Library/Logs/JetBrains/*|JetBrains IDE logs"* ]] || return 1
 	[[ "$output" != *"Library/Caches/JetBrains"* ]]
 }
 
@@ -571,12 +578,12 @@ clean_dev_misc
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" != *"$HOME/.claude/projects"* ]]
-	[[ "$output" != *"$HOME/.claude/plugins/cache"* ]]
-	[[ "$output" != *"$HOME/.claude/plugins/marketplaces"* ]]
-	[[ "$output" != *"$HOME/.claude/paste-cache"* ]]
-	[[ "$output" != *"$HOME/.claude/tmp"* ]]
-	[[ "$output" != *"$HOME/.claude/session-env"* ]]
+	[[ "$output" != *"$HOME/.claude/projects"* ]] || return 1
+	[[ "$output" != *"$HOME/.claude/plugins/cache"* ]] || return 1
+	[[ "$output" != *"$HOME/.claude/plugins/marketplaces"* ]] || return 1
+	[[ "$output" != *"$HOME/.claude/paste-cache"* ]] || return 1
+	[[ "$output" != *"$HOME/.claude/tmp"* ]] || return 1
+	[[ "$output" != *"$HOME/.claude/session-env"* ]] || return 1
 	[[ "$output" != *"$HOME/.claude/shell-snapshots"* ]]
 }
 
@@ -586,7 +593,9 @@ EOF
 	mkdir -p "$volumes_root/in-use-runtime" "$volumes_root/unused-runtime"
 	mkdir -p "$cryptex_root"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT="$volumes_root" MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT="$cryptex_root" /bin/bash --noprofile --norc <<'EOF'
+	# The "scanning N entries" line is deliberately gated behind MO_DEBUG (the
+	# spinner carries the feedback otherwise), so this case has to ask for it.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=1 MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT="$volumes_root" MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT="$cryptex_root" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -619,10 +628,12 @@ cat "$size_log"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Xcode runtime volumes · scanning 2 entries"* ]]
-	[[ "$output" == *"Xcode runtime volumes · cleaning 1 unused"* ]]
-	[[ "$output" == *"REMOVE:$volumes_root/unused-runtime"* ]]
-	[[ "$output" == *"$volumes_root/unused-runtime"* ]]
+	[[ "$output" == *"Xcode runtime volumes · scanning 2 entries"* ]] || return 1
+	# 16a8bcaf consolidated the per-stage "cleaning N unused" line into one final
+	# result message; assert the line that survived.
+	[[ "$output" == *"Xcode runtime volumes · removed 1 ("* ]] || return 1
+	[[ "$output" == *"REMOVE:$volumes_root/unused-runtime"* ]] || return 1
+	[[ "$output" == *"$volumes_root/unused-runtime"* ]] || return 1
 	[[ "$output" != *"$volumes_root/in-use-runtime"* ]]
 }
 

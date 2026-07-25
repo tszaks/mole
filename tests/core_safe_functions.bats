@@ -184,7 +184,7 @@ teardown() {
                 validate_path_for_deletion \"\$alias_path\" && exit 90
             fi
         done
-        [[ \$checked -gt 0 ]]
+        [[ \$checked -gt 0 ]] || return 1
     "
     [ "$status" -eq 0 ]
 }
@@ -317,7 +317,7 @@ EOF
 
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$link_path' true 2>&1"
     [ "$status" -eq 1 ]
-    [[ -L "$link_path" ]]
+    [[ -L "$link_path" ]] || return 1
     [[ "$output" != *"Symlink points to protected system path"* ]]
 }
 
@@ -452,7 +452,7 @@ echo "RC=$rc"
 SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=11"* ]]
+    [[ "$output" == *"RC=11"* ]] || return 1
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
 }
 
@@ -525,10 +525,10 @@ SCRIPT
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=0"* ]]
-    [[ "$output" == *"SUDO:-n test -d "* ]]
-    [[ "$output" == *"SUDO:-n test -L "* ]]
-    [[ "$output" == *"SUDO:-n find "* ]]
+    [[ "$output" == *"RC=0"* ]] || return 1
+    [[ "$output" == *"SUDO:-n test -d "* ]] || return 1
+    [[ "$output" == *"SUDO:-n test -L "* ]] || return 1
+    [[ "$output" == *"SUDO:-n find "* ]] || return 1
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
 }
 
@@ -803,7 +803,7 @@ SCRIPT
 
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$link_dir' '*.tmp' 7 'f' 2>&1"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"symlink"* ]]
+    [[ "$output" == *"symlink"* ]] || return 1
 
     rm -rf "$link_dir" "$real_dir"
 }

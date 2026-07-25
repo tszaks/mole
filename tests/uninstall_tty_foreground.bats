@@ -13,7 +13,7 @@ setup_file() {
 	run /usr/bin/expect "$PROJECT_ROOT/tests/uninstall_tty_foreground.exp" "$PROJECT_ROOT"
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"TTY-STATE:foreground"* ]]
+	[[ "$output" == *"TTY-STATE:foreground"* ]] || return 1
 	[[ "$output" == *"TTY-STATE:background"* ]]
 }
 

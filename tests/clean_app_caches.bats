@@ -37,8 +37,8 @@ clean_xcode_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Xcode DerivedData/Documentation · skipped (Xcode running)"* ]]
-    [[ "$output" != *"derived data"* ]]
+    [[ "$output" == *"Xcode DerivedData/Documentation · skipped (Xcode running)"* ]] || return 1
+    [[ "$output" != *"derived data"* ]] || return 1
     [[ "$output" != *"documentation cache"* ]]
 }
 
@@ -53,9 +53,11 @@ clean_xcode_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Xcode derived data"* ]]
-    [[ "$output" != *"Xcode archives"* ]]
-    [[ "$output" == *"Xcode documentation cache"* ]]
+    # clean_xcode_tools does not touch DerivedData (that is clean_xcode_derived_data),
+    # so assert the documentation cache this test is actually named for.
+    [[ "$output" == *"Xcode documentation cache"* ]] || return 1
+    [[ "$output" != *"Xcode archives"* ]] || return 1
+    [[ "$output" == *"Xcode documentation cache"* ]] || return 1
     [[ "$output" == *"Xcode documentation index"* ]]
 }
 
@@ -78,7 +80,7 @@ clean_media_players
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"CLEAN:Spotify cache"* ]]
+    [[ "$output" != *"CLEAN:Spotify cache"* ]] || return 1
     [[ "$output" == *"Spotify cache protected"* ]]
 }
 
@@ -94,7 +96,7 @@ clean_media_players
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"Spotify cache protected"* ]]
+    [[ "$output" != *"Spotify cache protected"* ]] || return 1
     [[ "$output" == *"CLEAN:Spotify cache"* ]]
 }
 
@@ -114,10 +116,10 @@ clean_user_gui_applications
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"xcode"* ]]
-    [[ "$output" != *"editors"* ]]
-    [[ "$output" == *"comm"* ]]
-    [[ "$output" == *"dingtalk"* ]]
+    [[ "$output" != *"xcode"* ]] || return 1
+    [[ "$output" != *"editors"* ]] || return 1
+    [[ "$output" == *"comm"* ]] || return 1
+    [[ "$output" == *"dingtalk"* ]] || return 1
     [[ "$output" == *"ai"* ]]
 }
 
@@ -149,12 +151,12 @@ clean_final_cut_pro_generated_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CLEAN:$HOME/Movies/Project.fcpbundle/Event/Render Files/High Quality Media"* ]]
-    [[ "$output" == *"CLEAN:$HOME/Movies/Project.fcpbundle/Event/Transcoded Media/Proxy Media"* ]]
-    [[ "$output" == *"CLEAN:Final Cut Pro generated cache"* ]]
-    [[ "$output" != *"Transcoded Media/High Quality Media"* ]]
-    [[ "$output" != *"Analysis Files"* ]]
-    [[ "$output" != *"Original Media"* ]]
+    [[ "$output" == *"CLEAN:$HOME/Movies/Project.fcpbundle/Event/Render Files/High Quality Media"* ]] || return 1
+    [[ "$output" == *"CLEAN:$HOME/Movies/Project.fcpbundle/Event/Transcoded Media/Proxy Media"* ]] || return 1
+    [[ "$output" == *"CLEAN:Final Cut Pro generated cache"* ]] || return 1
+    [[ "$output" != *"Transcoded Media/High Quality Media"* ]] || return 1
+    [[ "$output" != *"Analysis Files"* ]] || return 1
+    [[ "$output" != *"Original Media"* ]] || return 1
     [[ "$output" != *"Documents/Other.fcpbundle"* ]]
 }
 
@@ -175,7 +177,7 @@ clean_final_cut_pro_generated_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Final Cut Pro generated caches · skipped (Final Cut Pro running)"* ]]
+    [[ "$output" == *"Final Cut Pro generated caches · skipped (Final Cut Pro running)"* ]] || return 1
     [[ "$output" != *"unexpected safe_clean"* ]]
 }
 
@@ -346,9 +348,9 @@ clean_ai_apps
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"ChatGPT cache"* ]]
-    [[ "$output" == *"Claude desktop cache"* ]]
-    [[ "$output" == *"Google Clearcut logs"* ]]
+    [[ "$output" == *"ChatGPT cache"* ]] || return 1
+    [[ "$output" == *"Claude desktop cache"* ]] || return 1
+    [[ "$output" == *"Google Clearcut logs"* ]] || return 1
     [[ "$output" == *"LM Studio cache"* ]] || return 1
     [[ "$output" != *"Codex"* ]]
 }
@@ -389,9 +391,9 @@ clean_ai_apps
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Codex Desktop state · preserved (sessions, credentials)"* ]]
-    [[ "$output" == *"NOTE_ACTIVITY"* ]]
-    [[ "$output" != *"Codex cache"* ]]
+    [[ "$output" == *"Codex Desktop state · preserved (sessions, credentials)"* ]] || return 1
+    [[ "$output" == *"NOTE_ACTIVITY"* ]] || return 1
+    [[ "$output" != *"Codex cache"* ]] || return 1
     [[ "$output" != *"Codex CLI logs"* ]]
 }
 
@@ -404,7 +406,7 @@ clean_design_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Sketch cache"* ]]
+    [[ "$output" == *"Sketch cache"* ]] || return 1
     [[ "$output" == *"Figma cache"* ]]
 }
 
@@ -418,7 +420,7 @@ clean_dingtalk
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"DingTalk iDingTalk cache"* ]]
+    [[ "$output" == *"DingTalk iDingTalk cache"* ]] || return 1
     [[ "$output" == *"DingTalk logs"* ]]
 }
 
@@ -431,7 +433,7 @@ clean_download_managers
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Aria2 cache"* ]]
+    [[ "$output" == *"Aria2 cache"* ]] || return 1
     [[ "$output" == *"qBittorrent cache"* ]]
 }
 
@@ -444,7 +446,7 @@ clean_productivity_apps
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"MiaoYan cache"* ]]
+    [[ "$output" == *"MiaoYan cache"* ]] || return 1
     [[ "$output" == *"Flomo cache"* ]]
 }
 
@@ -457,7 +459,7 @@ clean_screenshot_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CleanShot cache"* ]]
+    [[ "$output" == *"CleanShot cache"* ]] || return 1
     [[ "$output" == *"Xnip cache"* ]]
 }
 
@@ -471,7 +473,7 @@ clean_office_applications
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Microsoft Word cache"* ]]
+    [[ "$output" == *"Microsoft Word cache"* ]] || return 1
     [[ "$output" == *"Apple iWork cache"* ]]
 }
 
@@ -485,7 +487,7 @@ clean_communication_apps
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Microsoft Teams legacy cache"* ]]
+    [[ "$output" == *"Microsoft Teams legacy cache"* ]] || return 1
     [[ "$output" == *"Microsoft Teams legacy logs"* ]]
 }
 
@@ -501,9 +503,9 @@ clean_gaming_platforms
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Steam app cache"* ]]
-    [[ "$output" == *"Steam shader cache"* ]]
-    [[ "$output" == *"Minecraft logs"* ]]
+    [[ "$output" == *"Steam app cache"* ]] || return 1
+    [[ "$output" == *"Steam shader cache"* ]] || return 1
+    [[ "$output" == *"Minecraft logs"* ]] || return 1
     [[ "$output" == *"Lunar Client logs"* ]]
 }
 
@@ -544,8 +546,8 @@ clean_code_editors
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CLEAN:$HOME/Library/Application Support/Code/WebStorage/29/CacheStorage/uuid-1|VS Code webview cache"* ]]
-    [[ "$output" != *"Local Storage"* ]]
+    [[ "$output" == *"CLEAN:$HOME/Library/Application Support/Code/WebStorage/29/CacheStorage/uuid-1|VS Code webview cache"* ]] || return 1
+    [[ "$output" != *"Local Storage"* ]] || return 1
     [[ "$output" != *"QuotaManager"* ]]
 }
 
@@ -559,9 +561,9 @@ clean_shell_utils
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Warp cache"* ]]
-    [[ "$output" == *"Warp log"* ]]
-    [[ "$output" == *"Warp Sentry crash reports"* ]]
+    [[ "$output" == *"Warp cache"* ]] || return 1
+    [[ "$output" == *"Warp log"* ]] || return 1
+    [[ "$output" == *"Warp Sentry crash reports"* ]] || return 1
     [[ "$output" == *"Ghostty cache"* ]]
 }
 
@@ -576,7 +578,7 @@ clean_video_players
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Stremio cache"* ]]
+    [[ "$output" == *"Stremio cache"* ]] || return 1
     [[ "$output" == *"Stremio server cache"* ]]
 }
 
@@ -635,7 +637,7 @@ clean_editor_obsolete_extensions
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CLEAN:$HOME/.vscode/extensions/pub.ext-old-1.0.0"* ]]
+    [[ "$output" == *"CLEAN:$HOME/.vscode/extensions/pub.ext-old-1.0.0"* ]] || return 1
     [[ "$output" != *"pub.ext-new-1.1.0"* ]]
 }
 
@@ -675,7 +677,7 @@ clean_code_editors
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CodeBuddy Extension cache"* ]]
+    [[ "$output" == *"CodeBuddy Extension cache"* ]] || return 1
     [[ "$output" == *"CodeBuddy Extension logs"* ]]
 }
 
@@ -691,8 +693,8 @@ clean_code_editors
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CodeBuddy CN cache"* ]]
-    [[ "$output" == *"CodeBuddy CN logs"* ]]
+    [[ "$output" == *"CodeBuddy CN cache"* ]] || return 1
+    [[ "$output" == *"CodeBuddy CN logs"* ]] || return 1
     [[ "$output" == *"CodeBuddy CN GPU cache"* ]]
 }
 
@@ -723,9 +725,9 @@ clean_media_players
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"QQ Music Mac cache"* ]]
-    [[ "$output" == *"QQ Music streaming cache"* ]]
-    [[ "$output" == *"QQ Music logs"* ]]
+    [[ "$output" == *"QQ Music Mac cache"* ]] || return 1
+    [[ "$output" == *"QQ Music streaming cache"* ]] || return 1
+    [[ "$output" == *"QQ Music logs"* ]] || return 1
     [[ "$output" == *"QQ Music container cache"* ]]
 }
 
@@ -756,8 +758,8 @@ clean_video_players
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Tencent Video old installer"* ]]
-    [[ "$output" == *"Tencent Video native cache"* ]]
+    [[ "$output" == *"Tencent Video old installer"* ]] || return 1
+    [[ "$output" == *"Tencent Video native cache"* ]] || return 1
     [[ "$output" == *"Tencent Video document cache"* ]]
 }
 
@@ -794,7 +796,7 @@ clean_neatdm_stale_segments
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"NeatDM stale downloads"* ]]
+    [[ "$output" == *"NeatDM stale downloads"* ]] || return 1
     [[ "$output" == *"1 items"* ]]
 }
 
@@ -816,7 +818,11 @@ clean_neatdm_stale_segments
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"NeatDM stale downloads"* ]]
+    [[ "$output" != *"NeatDM stale downloads"* ]] || return 1
+    # The absence of a label is weak evidence on its own: this run prints nothing at
+    # all, so assert the survival the test is actually named for.
+    [ -f "$neatdm_dir/67890/seg.x0" ]
+    [ -d "$neatdm_dir/67890" ]
 }
 
 @test "clean_neatdm_stale_segments skips non-numeric segment-like directories" {

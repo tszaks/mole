@@ -37,7 +37,7 @@ clean_cloud_storage
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Dropbox cache"* ]]
+    [[ "$output" == *"Dropbox cache"* ]] || return 1
     [[ "$output" == *"Google Drive cache"* ]]
 }
 
@@ -53,10 +53,10 @@ clean_virtualization_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"VMware Fusion cache"* ]]
-    [[ "$output" == *"Parallels cache"* ]]
-    [[ "$output" == *"UTM app cache|$HOME/Library/Caches/com.utmapp.UTM/"* ]]
-    [[ "$output" == *"UTM sandbox cache|$HOME/Library/Containers/com.utmapp.UTM/Data/Library/Caches/"* ]]
+    [[ "$output" == *"VMware Fusion cache"* ]] || return 1
+    [[ "$output" == *"Parallels cache"* ]] || return 1
+    [[ "$output" == *"UTM app cache|$HOME/Library/Caches/com.utmapp.UTM/"* ]] || return 1
+    [[ "$output" == *"UTM sandbox cache|$HOME/Library/Containers/com.utmapp.UTM/Data/Library/Caches/"* ]] || return 1
     [[ "$output" == *"UTM temporary files|$HOME/Library/Containers/com.utmapp.UTM/Data/tmp/"* ]]
 }
 
@@ -75,9 +75,9 @@ clean_virtualization_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"VMware Fusion cache"* ]]
-    [[ "$output" == *"Parallels cache"* ]]
-    [[ "$output" != *"UTM app cache"* ]]
+    [[ "$output" == *"VMware Fusion cache"* ]] || return 1
+    [[ "$output" == *"Parallels cache"* ]] || return 1
+    [[ "$output" != *"UTM app cache"* ]] || return 1
     [[ "$output" != *"UTM sandbox cache"* ]]
 }
 
@@ -90,7 +90,7 @@ clean_email_clients
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Spark cache"* ]]
+    [[ "$output" == *"Spark cache"* ]] || return 1
     [[ "$output" == *"Airmail cache"* ]]
 }
 
@@ -250,7 +250,7 @@ clean_note_apps
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Notion cache"* ]]
+    [[ "$output" == *"Notion cache"* ]] || return 1
     [[ "$output" == *"Obsidian cache"* ]]
 }
 
@@ -263,7 +263,7 @@ clean_task_apps
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Todoist cache"* ]]
+    [[ "$output" == *"Todoist cache"* ]] || return 1
     [[ "$output" == *"Any.do cache"* ]]
 }
 
@@ -276,7 +276,7 @@ clean_video_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"ScreenFlow cache"* ]]
+    [[ "$output" == *"ScreenFlow cache"* ]] || return 1
     [[ "$output" == *"Final Cut Pro cache"* ]]
 }
 
@@ -289,7 +289,7 @@ clean_video_players
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"IINA cache"* ]]
+    [[ "$output" == *"IINA cache"* ]] || return 1
     [[ "$output" == *"VLC cache"* ]]
 }
 
@@ -302,7 +302,7 @@ clean_3d_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Blender cache"* ]]
+    [[ "$output" == *"Blender cache"* ]] || return 1
     [[ "$output" == *"Cinema 4D cache"* ]]
 }
 
@@ -315,7 +315,7 @@ clean_gaming_platforms
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Steam cache"* ]]
+    [[ "$output" == *"Steam cache"* ]] || return 1
     [[ "$output" == *"Epic Games cache"* ]]
 }
 
@@ -328,7 +328,7 @@ clean_translation_apps
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Youdao Dictionary cache"* ]]
+    [[ "$output" == *"Youdao Dictionary cache"* ]] || return 1
     [[ "$output" == *"Eudict cache"* ]]
 }
 
@@ -341,7 +341,7 @@ clean_launcher_apps
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Alfred cache"* ]]
+    [[ "$output" == *"Alfred cache"* ]] || return 1
     [[ "$output" == *"The Unarchiver cache"* ]]
 }
 
@@ -354,7 +354,7 @@ clean_remote_desktop
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"TeamViewer cache"* ]]
+    [[ "$output" == *"TeamViewer cache"* ]] || return 1
     [[ "$output" == *"AnyDesk cache"* ]]
 }
 
@@ -367,7 +367,7 @@ clean_system_utils
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Input Source Pro cache"* ]]
+    [[ "$output" == *"Input Source Pro cache"* ]] || return 1
     [[ "$output" == *"WakaTime cache"* ]]
 }
 
@@ -380,6 +380,6 @@ clean_shell_utils
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Zsh completion cache"* ]]
+    [[ "$output" == *"Zsh completion cache"* ]] || return 1
     [[ "$output" == *"wget HSTS cache"* ]]
 }

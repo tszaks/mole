@@ -123,9 +123,9 @@ set -e
 echo "STATUS=$status ELAPSED=$SECONDS"
 EOF
     [ "$status" -eq 0 ]
-    [[ "$output" == *"STATUS=124"* ]]
+    [[ "$output" == *"STATUS=124"* ]] || return 1
     elapsed=$(printf '%s\n' "$output" | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^ELAPSED=/) {split($i, kv, "="); print kv[2]}}' | tail -1)
-    [[ "$elapsed" =~ ^[0-9]+$ ]]
+    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
     (( elapsed < 6 ))
 }
 

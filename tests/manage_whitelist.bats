@@ -56,7 +56,7 @@ setup() {
 @test "save_whitelist_patterns keeps unique entries and preserves header" {
     HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/manage/whitelist.sh'; save_whitelist_patterns \"\$HOME/.cache/foo\" \"\$HOME/.cache/foo\" \"\$HOME/.cache/bar\""
 
-    [[ -f "$WHITELIST_PATH" ]]
+    [[ -f "$WHITELIST_PATH" ]] || return 1
 
     lines=()
     while IFS= read -r line; do
@@ -111,7 +111,7 @@ get_all_cache_items
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"LM Studio app cache|\$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache"* ]]
+    [[ "$output" == *"LM Studio app cache|\$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache"* ]] || return 1
     [[ "$output" != *".cache/lm-studio"* ]]
 }
 
@@ -166,12 +166,12 @@ EOF
 
     run /bin/bash --noprofile --norc -c "cd '$PROJECT_ROOT'; printf \$'\\n' | HOME='$HOME' ./mo clean --whitelist"
     [ "$status" -eq 0 ]
-    [[ -f "$whitelist_file" ]]
+    [[ -f "$whitelist_file" ]] || return 1
     before_hash=$(shasum "$whitelist_file" | awk '{print $1}')
 
     run /bin/bash --noprofile --norc -c "cd '$PROJECT_ROOT'; printf 'q' | HOME='$HOME' ./mo clean --whitelist"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Cancelled"* ]]
+    [[ "$output" == *"Cancelled"* ]] || return 1
     after_hash=$(shasum "$whitelist_file" | awk '{print $1}')
     [ "$before_hash" = "$after_hash" ]
 }
@@ -189,9 +189,9 @@ EOF
         [[ \$'tab\there' =~ [[:cntrl:]] ]] && echo REJECT_TAB || echo FAIL
     "
     [ "$status" -eq 0 ]
-    [[ "$output" == *"ACCEPT"* ]]
-    [[ "$output" != *"REJECT /Users"* ]]
-    [[ "$output" == *"REJECT_NEWLINE"* ]]
+    [[ "$output" == *"ACCEPT"* ]] || return 1
+    [[ "$output" != *"REJECT /Users"* ]] || return 1
+    [[ "$output" == *"REJECT_NEWLINE"* ]] || return 1
     [[ "$output" == *"REJECT_TAB"* ]]
 }
 

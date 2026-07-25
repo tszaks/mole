@@ -51,11 +51,11 @@ EOF
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Mole History"* ]]
-    [[ "$output" == *"purge"* ]]
-    [[ "$output" == *"1 items, 10KB"* ]]
-    [[ "$output" == *"clean"* ]]
-    [[ "$output" == *"removed 1, trashed 1, skipped 1, failed 1"* ]]
+    [[ "$output" == *"Mole History"* ]] || return 1
+    [[ "$output" == *"purge"* ]] || return 1
+    [[ "$output" == *"1 items, 10KB"* ]] || return 1
+    [[ "$output" == *"clean"* ]] || return 1
+    [[ "$output" == *"removed 1, trashed 1, skipped 1, failed 1"* ]] || return 1
     [[ "$output" == *"/tmp/Old App.app"* ]]
 }
 
@@ -103,9 +103,9 @@ assert data["deletions"][0]["path"] == "/tmp/unicode-\u96ea-quote\"slash\\tab\tb
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history --limit 1
     [ "$status" -eq 0 ]
-    [[ "$output" == *"purge"* ]]
-    [[ "$output" != *"clean      2026-05-24 10:00:00"* ]]
-    [[ "$output" == *"/tmp/build"* ]]
+    [[ "$output" == *"purge"* ]] || return 1
+    [[ "$output" != *"clean      2026-05-24 10:00:00"* ]] || return 1
+    [[ "$output" == *"/tmp/build"* ]] || return 1
     [[ "$output" != *"/tmp/Old App.app"* ]]
 }
 
@@ -114,8 +114,8 @@ assert data["deletions"][0]["path"] == "/tmp/unicode-\u96ea-quote\"slash\\tab\tb
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history --limit 0001
     [ "$status" -eq 0 ]
-    [[ "$output" == *"purge"* ]]
-    [[ "$output" != *"clean      2026-05-24 10:00:00"* ]]
+    [[ "$output" == *"purge"* ]] || return 1
+    [[ "$output" != *"clean      2026-05-24 10:00:00"* ]] || return 1
     [[ "$output" != *"value too great for base"* ]]
 }
 
@@ -124,7 +124,7 @@ assert data["deletions"][0]["path"] == "/tmp/unicode-\u96ea-quote\"slash\\tab\tb
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history
     [ "$status" -eq 0 ]
-    [[ "$output" == *"No operation history yet"* ]]
+    [[ "$output" == *"No operation history yet"* ]] || return 1
     [[ "$output" == *"No deletion audit entries yet"* ]]
 }
 
@@ -137,8 +137,8 @@ EOF
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history
     [ "$status" -eq 0 ]
-    [[ "$output" == *"clean      2026-05-24 10:00:00, 0 items, 0B"* ]]
-    [[ "$output" == *"removed 1, ended malformed summary"* ]]
+    [[ "$output" == *"clean      2026-05-24 10:00:00, 0 items, 0B"* ]] || return 1
+    [[ "$output" == *"removed 1, ended malformed summary"* ]] || return 1
     [[ "$output" != *"malformed summary items"* ]]
 }
 
@@ -147,7 +147,7 @@ EOF
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history
     [ "$status" -eq 0 ]
-    [[ "$output" == *"No operation history yet"* ]]
+    [[ "$output" == *"No operation history yet"* ]] || return 1
     [ ! -e "$HOME/Library/Logs/mole/operations.log" ]
     [ ! -e "$HOME/Library/Logs/mole/mole.log" ]
 }
@@ -163,19 +163,19 @@ source "$PROJECT_ROOT/mole"
 echo sourced
 '
     [ "$status" -eq 0 ]
-    [[ "$output" == *"sourced"* ]]
+    [[ "$output" == *"sourced"* ]] || return 1
     [[ "$output" != *"Mole History"* ]]
 }
 
 @test "mo history early dispatch keeps global debug flag behavior" {
     run env HOME="$HOME" "$PROJECT_ROOT/mole" --debug history --limit 0001
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Mole History"* ]]
-    [[ "$output" != *"Unknown option"* ]]
+    [[ "$output" == *"Mole History"* ]] || return 1
+    [[ "$output" != *"Unknown option"* ]] || return 1
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history --debug --limit 0001
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Mole History"* ]]
+    [[ "$output" == *"Mole History"* ]] || return 1
     [[ "$output" != *"Unknown option"* ]]
 }
 
@@ -188,14 +188,14 @@ echo sourced
 @test "mo history rejects invalid limit values" {
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history --limit nope
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Invalid value for --limit"* ]]
+    [[ "$output" == *"Invalid value for --limit"* ]] || return 1
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history --limit 500
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Invalid value for --limit"* ]]
+    [[ "$output" == *"Invalid value for --limit"* ]] || return 1
 
     run env HOME="$HOME" "$PROJECT_ROOT/mole" history --limit 999999999999999999999999
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Invalid value for --limit"* ]]
+    [[ "$output" == *"Invalid value for --limit"* ]] || return 1
     [[ "$output" != *"value too great for base"* ]]
 }

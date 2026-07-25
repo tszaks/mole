@@ -56,7 +56,7 @@ fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"optimal"* ]]
+	[[ "$output" == *"optimal"* ]] || return 1
 	[[ "$output" != *"needs"* ]]
 }
 
@@ -101,7 +101,7 @@ opt_system_maintenance
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"DNS cache flushed"* ]]
+	[[ "$output" == *"DNS cache flushed"* ]] || return 1
 	[[ "$output" == *"Spotlight index verified"* ]]
 }
 
@@ -115,7 +115,7 @@ opt_network_optimization
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"DNS cache refreshed"* ]]
+	[[ "$output" == *"DNS cache refreshed"* ]] || return 1
 	[[ "$output" == *"mDNSResponder restarted"* ]]
 }
 
@@ -150,11 +150,11 @@ cat "$CALL_LOG"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"count=3"* ]]
-	[[ "$output" == *"remove:$test_home/Library/Preferences/com.example.broken.plist"* ]]
-	[[ "$output" == *"remove:$test_home/Library/Preferences/ByHost/com.example.byhost.plist"* ]]
-	[[ "$output" == *"remove:$test_home/Library/Preferences/ByHost/loginwindow.plist"* ]]
-	[[ "$output" != *"lint:$test_home/Library/Preferences/com.apple.broken.plist"* ]]
+	[[ "$output" == *"count=3"* ]] || return 1
+	[[ "$output" == *"remove:$test_home/Library/Preferences/com.example.broken.plist"* ]] || return 1
+	[[ "$output" == *"remove:$test_home/Library/Preferences/ByHost/com.example.byhost.plist"* ]] || return 1
+	[[ "$output" == *"remove:$test_home/Library/Preferences/ByHost/loginwindow.plist"* ]] || return 1
+	[[ "$output" != *"lint:$test_home/Library/Preferences/com.apple.broken.plist"* ]] || return 1
 	[[ "$output" != *"lint:$test_home/Library/Preferences/loginwindow.plist"* ]]
 }
 
@@ -200,7 +200,7 @@ echo "count=$count"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"count=0"* ]]
+	[[ "$output" == *"count=0"* ]] || return 1
 	[[ "$output" == *"still-present"* ]]
 }
 
@@ -284,9 +284,9 @@ cat "$CALL_LOG"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"QuickLook thumbnails refreshed"* ]]
-	[[ "$output" == *"cleaned=42"* ]]
-	[[ "$output" == *"remove:$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache:42"* ]]
+	[[ "$output" == *"QuickLook thumbnails refreshed"* ]] || return 1
+	[[ "$output" == *"cleaned=42"* ]] || return 1
+	[[ "$output" == *"remove:$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache:42"* ]] || return 1
 	[ "$(grep -c "size:$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache" <<< "$output")" -eq 1 ]
 }
 
@@ -319,7 +319,7 @@ opt_quarantine_cleanup
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Quarantine history cleared"* ]]
+	[[ "$output" == *"Quarantine history cleared"* ]] || return 1
 	[[ "$output" == *"2 entries"* ]]
 }
 
@@ -505,14 +505,18 @@ EOF
 	[[ "$output" != *"DELETE_CALLED"* ]] || return 1
 }
 
-@test "prevent_network_dsstore is optional in optimize health json" {
+# cc31ee3a ("Remove optimize confirmation prompt, run all tasks automatically")
+# flipped every health item to safe=true before V1.34.0. The old "optional"
+# expectation outlived that decision only because the assertion sat mid-test and
+# could not fail.
+@test "prevent_network_dsstore is auto-run and described in optimize health json" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/check/health_json.sh"
 json="$(generate_health_json | tr '\n' ' ')"
 
-if printf '%s\n' "$json" | grep -q '"action": "prevent_network_dsstore".*"safe": false'; then
-    echo "optional"
+if printf '%s\n' "$json" | grep -q '"action": "prevent_network_dsstore".*"safe": true'; then
+    echo "auto-run"
 fi
 if printf '%s\n' "$json" | grep -q 'persistent Finder preference'; then
     echo "described"
@@ -520,7 +524,7 @@ fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"optional"* ]]
+	[[ "$output" == *"auto-run"* ]] || return 1
 	[[ "$output" == *"described"* ]]
 }
 
@@ -575,11 +579,11 @@ opt_prune_spotlight_orphan_rules
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Removed 1 orphan"* ]]
-	[[ "$output" == *"DEFAULTS: write"* ]]
-	[[ "$output" == *"System.iphoneApps"* ]]
-	[[ "$output" == *"com.apple.Safari"* ]]
-	[[ "$output" == *"com.installed.App"* ]]
+	[[ "$output" == *"Removed 1 orphan"* ]] || return 1
+	[[ "$output" == *"DEFAULTS: write"* ]] || return 1
+	[[ "$output" == *"System.iphoneApps"* ]] || return 1
+	[[ "$output" == *"com.apple.Safari"* ]] || return 1
+	[[ "$output" == *"com.installed.App"* ]] || return 1
 	[[ "$output" != *"com.lm.william.TwinklingCard"* ]]
 }
 
@@ -607,8 +611,8 @@ opt_prune_spotlight_orphan_rules
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Would remove 1 orphan"* ]]
-	[[ "$output" != *"DEFAULTS: write"* ]]
+	[[ "$output" == *"Would remove 1 orphan"* ]] || return 1
+	[[ "$output" != *"DEFAULTS: write"* ]] || return 1
 	[[ "$output" != *"DEFAULTS: delete"* ]]
 }
 
@@ -637,7 +641,7 @@ opt_prune_spotlight_orphan_rules
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"already clean"* ]]
+	[[ "$output" == *"already clean"* ]] || return 1
 	[[ "$output" != *"DEFAULTS: write"* ]]
 }
 
@@ -742,7 +746,7 @@ echo "survived"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"lsregister not found"* ]]
+	[[ "$output" == *"lsregister not found"* ]] || return 1
 	[[ "$output" == *"survived"* ]]
 }
 
@@ -899,7 +903,7 @@ rm -rf "$tmpdir"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"already current"* ]]
+	[[ "$output" == *"already current"* ]] || return 1
 	[[ "$output" != *"unbound variable"* ]]
 }
 
@@ -947,7 +951,7 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Likely bottleneck: CloudShell / AliEntSafe"* ]]
+	[[ "$output" == *"Likely bottleneck: CloudShell / AliEntSafe"* ]] || return 1
 	[[ "$output" == *"Mole will not terminate enterprise security processes"* ]]
 }
 
@@ -966,9 +970,9 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]]
-	[[ "$output" == *"Gatekeeper status: assessments enabled"* ]]
-	[[ "$output" == *"Only system-managed CoreSimulator images are mounted"* ]]
+	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]] || return 1
+	[[ "$output" == *"Gatekeeper status: assessments enabled"* ]] || return 1
+	[[ "$output" == *"Only system-managed CoreSimulator images are mounted"* ]] || return 1
 	[[ "$output" != *"assessment overhead:"* ]]
 }
 
@@ -1003,10 +1007,10 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]]
-	[[ "$output" == *"Mounted image adds assessment overhead:"* ]]
-	[[ "$output" == *"TestInstaller.dmg"* ]]
-	[[ "$output" == *"/Volumes/Test Installer"* ]]
+	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]] || return 1
+	[[ "$output" == *"Mounted image adds assessment overhead:"* ]] || return 1
+	[[ "$output" == *"TestInstaller.dmg"* ]] || return 1
+	[[ "$output" == *"/Volumes/Test Installer"* ]] || return 1
 	[[ "$output" == *"Would offer detach for 1 mounted image"* ]]
 }
 
@@ -1024,9 +1028,9 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"No sustained high-CPU bottleneck detected"* ]]
-	[[ "$output" != *"assessment overhead:"* ]]
-	[[ "$output" != *"Would offer detach"* ]]
+	[[ "$output" == *"No sustained high-CPU bottleneck detected"* ]] || return 1
+	[[ "$output" != *"assessment overhead:"* ]] || return 1
+	[[ "$output" != *"Would offer detach"* ]] || return 1
 	[[ "$output" != *"/Volumes/Test Installer"* ]]
 }
 
@@ -1047,8 +1051,8 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]]
-	[[ "$output" != *"assessment overhead:"* ]]
+	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]] || return 1
+	[[ "$output" != *"assessment overhead:"* ]] || return 1
 	[[ "$output" != *"Would offer detach"* ]]
 }
 
@@ -1074,8 +1078,8 @@ run_optimize_diagnostics
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]]
-	[[ "$output" != *"assessment overhead:"* ]]
+	[[ "$output" == *"Likely bottleneck: syspolicyd"* ]] || return 1
+	[[ "$output" != *"assessment overhead:"* ]] || return 1
 	[[ "$output" != *"Would offer detach"* ]]
 }
 
@@ -1159,7 +1163,7 @@ execute_optimization dock_refresh
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Skipped (whitelisted): dock_refresh"* ]]
+	[[ "$output" == *"Skipped (whitelisted): dock_refresh"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_DOCK"* ]]
 }
 
@@ -1198,8 +1202,8 @@ show_system_health "$health_json"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"6/8 GB RAM"* ]]
-	[[ "$output" == *"288/351 GB Disk"* ]]
+	[[ "$output" == *"6/8 GB RAM"* ]] || return 1
+	[[ "$output" == *"288/351 GB Disk"* ]] || return 1
 	[[ "$output" == *"Uptime 6d"* ]]
 }
 
@@ -1211,7 +1215,7 @@ get_optimize_whitelist_items
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Permission Repair|disk_permissions_repair|optimize_task"* ]]
+	[[ "$output" == *"Permission Repair|disk_permissions_repair|optimize_task"* ]] || return 1
 	[[ "$output" == *"Login Items Audit|login_items_audit|optimize_task"* ]]
 }
 
@@ -1284,7 +1288,7 @@ fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"found"* ]]
+	[[ "$output" == *"found"* ]] || return 1
 	[[ "$output" == *"resolved by login item path"* ]]
 }
 
@@ -1436,7 +1440,7 @@ EOF
 	# Expect exactly one pair: image=/Volumes/EXT3/Mail/TB.dmg mount=/Volumes/mail
 	line_count=$(printf '%s\n' "$output" | awk 'NF' | wc -l | tr -d ' ')
 	[ "$line_count" = "1" ]
-	[[ "$output" == *"/Volumes/EXT3/Mail/TB.dmg"$'\t'"/Volumes/mail"* ]]
+	[[ "$output" == *"/Volumes/EXT3/Mail/TB.dmg"$'\t'"/Volumes/mail"* ]] || return 1
 	# Critical regression guard: image-alias line must not surface as a mount.
 	[[ "$output" != *"/Volumes/EXT3/Mail/TB.dmg"$'\t'"/Volumes/EXT3/Mail/TB.dmg"* ]]
 }
@@ -1453,8 +1457,8 @@ if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"vpn"* ]]
-	[[ "$output" != *"no_vpn"* ]]
+	[[ "$output" == *"vpn"* ]] || return 1
+	[[ "$output" != *"no_vpn"* ]] || return 1
 	[[ "$output" != *"should not be called"* ]]
 }
 
@@ -1470,7 +1474,7 @@ if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"no_vpn"* ]]
+	[[ "$output" == *"no_vpn"* ]] || return 1
 	[[ "$output" != *"should not be called"* ]]
 }
 
@@ -1492,7 +1496,7 @@ if has_active_vpn_interface; then echo "vpn"; else echo "no_vpn"; fi
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"vpn"* ]]
+	[[ "$output" == *"vpn"* ]] || return 1
 	[[ "$output" != *"should not be called"* ]]
 }
 
@@ -1615,8 +1619,8 @@ opt_diag_parse_image_mount_pairs "$sample" | awk 'NF' | sort
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"/Users/test/Sample.dmg"$'\t'"/Volumes/Sample"* ]]
-	[[ "$output" == *"/Library/Developer/CoreSimulator/Volumes/iOS_17.dmg"$'\t'"/Library/Developer/CoreSimulator/Volumes/iOS_17.0"* ]]
+	[[ "$output" == *"/Users/test/Sample.dmg"$'\t'"/Volumes/Sample"* ]] || return 1
+	[[ "$output" == *"/Library/Developer/CoreSimulator/Volumes/iOS_17.dmg"$'\t'"/Library/Developer/CoreSimulator/Volumes/iOS_17.0"* ]] || return 1
 	line_count=$(printf '%s\n' "$output" | awk 'NF' | wc -l | tr -d ' ')
 	[ "$line_count" = "2" ]
 }

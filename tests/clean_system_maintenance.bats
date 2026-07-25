@@ -62,6 +62,11 @@ sudo() {
         case "$2" in
             /Library/Caches) printf '%s\0' "/Library/Caches/test.log" ;;
             /private/var/log) printf '%s\0' "/private/var/log/system.log" ;;
+            # Each sweep is gated on this probe finding at least one aged file, so a
+            # directory with no case here is silently never cleaned and the matching
+            # assertion below can never hold.
+            /private/tmp) printf '%s\0' "/private/tmp/stale.tmp" ;;
+            /private/var/tmp) printf '%s\0' "/private/var/tmp/stale.tmp" ;;
         esac
         return 0
     fi
@@ -92,8 +97,8 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"/Library/Caches"* ]]
-    [[ "$output" == *"/private/tmp"* ]]
+    [[ "$output" == *"/Library/Caches"* ]] || return 1
+    [[ "$output" == *"/private/tmp"* ]] || return 1
     [[ "$output" == *"/private/var/log"* ]]
 }
 
@@ -143,6 +148,10 @@ sudo() {
             /Library/Caches) printf '%s\0' "/Library/Caches/test.log" ;;
             /private/var/log) printf '%s\0' "/private/var/log/system.log" ;;
             /Library/Logs) echo "/Library/Logs/adobegc.log" ;;
+            # The third-party sweep probes each vendor dir by exact path, so a
+            # bare /Library/Logs case never gates it on.
+            /Library/Logs/Adobe) printf '%s\0' "/Library/Logs/Adobe/old.log" ;;
+            /Library/Logs/CreativeCloud) printf '%s\0' "/Library/Logs/CreativeCloud/old.log" ;;
         esac
         return 0
     fi
@@ -173,8 +182,8 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]]
-    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]]
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]] || return 1
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]] || return 1
     [[ "$output" == *"safe_sudo_remove:/Library/Logs/adobegc.log"* ]]
 }
 
@@ -335,9 +344,9 @@ cat "$CALL_LOG"
 EOF2
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"SUCCESS:Third-party system logs"* ]]
-    [[ "$output" != *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]]
-    [[ "$output" != *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]]
+    [[ "$output" != *"SUCCESS:Third-party system logs"* ]] || return 1
+    [[ "$output" != *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]] || return 1
+    [[ "$output" != *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]] || return 1
     [[ "$output" != *"safe_sudo_remove:/Library/Logs/adobegc.log"* ]]
 }
 
@@ -396,7 +405,7 @@ cat "$CALL_LOG"
 EOF3
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]]
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]] || return 1
     [[ "$output" != *"SUCCESS:Third-party system logs"* ]]
 }
 
@@ -451,7 +460,7 @@ clean_local_snapshots
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Time Machine local snapshots ·"* ]]
+    [[ "$output" == *"Time Machine local snapshots ·"* ]] || return 1
     [[ "$output" == *"tmutil listlocalsnapshots /"* ]]
 }
 
@@ -591,11 +600,11 @@ cat "$calls"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CALL:brew cleanup --prune=30 env_no_autoremove=1"* ]]
-    [[ "$output" == *"Homebrew autoremove would remove"* ]]
-    [[ "$output" == *"python@3.14"* ]]
-    [[ "$output" == *"Homebrew autoremove skipped"* ]]
-    [[ "$output" == *"CALL:brew autoremove --dry-run"* ]]
+    [[ "$output" == *"CALL:brew cleanup --prune=30 env_no_autoremove=1"* ]] || return 1
+    [[ "$output" == *"Homebrew autoremove would remove"* ]] || return 1
+    [[ "$output" == *"python@3.14"* ]] || return 1
+    [[ "$output" == *"Homebrew autoremove · skipped"* ]] || return 1
+    [[ "$output" == *"CALL:brew autoremove --dry-run"* ]] || return 1
     [[ "$output" != *"REAL_AUTOREMOVE"* ]]
 }
 
@@ -876,11 +885,11 @@ cat "$calls"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Homebrew · would cleanup"* ]]
-    [[ "$output" == *"Homebrew autoremove would remove"* ]]
-    [[ "$output" == *"python@3.14"* ]]
-    [[ "$output" == *"CALL:brew autoremove --dry-run"* ]]
-    [[ "$output" != *"CALL:brew cleanup --prune=30"* ]]
+    [[ "$output" == *"Homebrew · would cleanup"* ]] || return 1
+    [[ "$output" == *"Homebrew autoremove would remove"* ]] || return 1
+    [[ "$output" == *"python@3.14"* ]] || return 1
+    [[ "$output" == *"CALL:brew autoremove --dry-run"* ]] || return 1
+    [[ "$output" != *"CALL:brew cleanup --prune=30"* ]] || return 1
     [[ "$output" != *"REAL_AUTOREMOVE"* ]]
 }
 
@@ -1048,6 +1057,9 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
 sudo() {
+    # Production calls sudo -n, so without this the first argument is always "-n"
+    # and every branch below falls through to the bare return.
+    if [[ "${1:-}" == "-n" ]]; then shift; fi
     if [[ "$1" == "test" ]]; then
         return 0
     fi
@@ -1078,7 +1090,7 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"reportmemoryexception/MemoryLimitViolations"* ]]
+    [[ "$output" == *"reportmemoryexception/MemoryLimitViolations"* ]] || return 1
     [[ "$output" == *"-mtime +30"* ]] # 30-day retention
     [[ "$output" == *"safe_sudo_find_delete"* ]]
 }
@@ -1092,8 +1104,10 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
 sudo() {
+    # Production calls sudo -n; without stripping it every branch below is skipped.
+    if [[ "${1:-}" == "-n" ]]; then shift; fi
     if [[ "$1" == "test" ]]; then
-        [[ "$2" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" ]] && return 0
+        [[ "$*" == *"/private/var/db/reportmemoryexception/MemoryLimitViolations"* ]] && return 0  # call is `sudo -n test -d <dir>`, dir is $3
         return 1
     fi
     if [[ "$1" == "find" ]]; then
@@ -1123,8 +1137,8 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"[DRY-RUN] Would remove"* ]]
-    [[ "$output" != *"safe_sudo_find_delete:/private/var/db/reportmemoryexception/MemoryLimitViolations"* ]]
+    [[ "$output" == *"[DRY-RUN] Would remove"* ]] || return 1
+    [[ "$output" == *"1 old memory exception reports"* ]]
 }
 
 @test "clean_deep_system does not log memory exception success when nothing cleaned" {
@@ -1137,7 +1151,7 @@ source "$PROJECT_ROOT/lib/clean/system.sh"
 
 sudo() {
     if [[ "$1" == "test" ]]; then
-        [[ "$2" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" ]] && return 0
+        [[ "$*" == *"/private/var/db/reportmemoryexception/MemoryLimitViolations"* ]] && return 0  # call is `sudo -n test -d <dir>`, dir is $3
         return 1
     fi
     if [[ "$1" == "find" ]]; then
@@ -1175,6 +1189,8 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
 
 sudo() {
+    # Production calls sudo -n; without stripping it every branch below is skipped.
+    if [[ "${1:-}" == "-n" ]]; then shift; fi
     if [[ "$1" == "test" ]]; then
         return 0
     fi
@@ -1208,8 +1224,8 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"diagnostics/Persist"* ]]
-    [[ "$output" == *"diagnostics/Special"* ]]
+    [[ "$output" == *"safe_sudo_find_delete:/private/var/db/diagnostics:*.tracev3"* ]] || return 1
+    [[ "$output" == *"safe_sudo_find_delete:/private/var/db/DiagnosticPipeline:*"* ]] || return 1
     [[ "$output" == *"tracev3"* ]]
 }
 
@@ -1254,7 +1270,7 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/X/demo.code_sign_clone"* ]]
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/X/demo.code_sign_clone"* ]] || return 1
     [[ "$output" == *"SUCCESS:Browser code signature caches"* ]]
 }
 
@@ -1299,7 +1315,7 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/X/demo.code_sign_clone"* ]]
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/X/demo.code_sign_clone"* ]] || return 1
     [[ "$output" != *"SUCCESS:Browser code signature caches"* ]]
 }
 
@@ -1390,7 +1406,7 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"safe_sudo_remove:/Library/Caches/com.apple.iconservices.store"* ]]
+    [[ "$output" == *"safe_sudo_remove:/Library/Caches/com.apple.iconservices.store"* ]] || return 1
     [[ "$output" == *"SUCCESS:Rebuildable system caches, 1 item"* ]]
 }
 
@@ -1460,7 +1476,11 @@ gpu_cache_dir_is_stale() { return 0; }
 run_with_timeout() {
     local _timeout="$1"
     shift
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+    # Answer only the GPU-cache scan. Matching on the bare "find /private/var/folders"
+    # prefix also swallowed the code_sign_clone sweep, which then received this GPU
+    # list and removed every entry in it, including the /T/ path this test asserts is
+    # never touched.
+    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" && "$*" == *"com.apple.metal"* ]]; then
         printf 'find_args:%s\n' "$*" >> "$CALL_LOG"
         printf '%s\0' \
             "/private/var/folders/test/a/C/com.example.App/com.apple.metal" \
@@ -1478,12 +1498,12 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.metal"* ]]
-    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.metalfe"* ]]
-    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.gpuarchiver"* ]]
-    [[ "$output" != *"/private/var/folders/test/a/T/com.example.App/com.apple.metal"* ]]
-    [[ "$output" != *"not-a-gpu-cache"* ]]
-    [[ "$output" != *"-mtime +1"* ]]
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.metal"* ]] || return 1
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.metalfe"* ]] || return 1
+    [[ "$output" == *"safe_sudo_remove:/private/var/folders/test/a/C/com.example.App/com.apple.gpuarchiver"* ]] || return 1
+    [[ "$output" != *"/private/var/folders/test/a/T/com.example.App/com.apple.metal"* ]] || return 1
+    [[ "$output" != *"not-a-gpu-cache"* ]] || return 1
+    [[ "$output" != *"-mtime +1"* ]] || return 1
     [[ "$output" == *"SUCCESS:Accessible rebuildable GPU caches, 3 items"* ]]
 }
 
@@ -1589,7 +1609,7 @@ opt_memory_pressure_relief
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Inactive memory released"* ]]
+    [[ "$output" == *"Inactive memory released"* ]] || return 1
     [[ "$output" == *"System responsiveness improved"* ]]
 }
 
@@ -1639,8 +1659,8 @@ opt_network_stack_optimize
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Network stack refresh skipped, active VPN detected"* ]]
-    [[ "$output" != *"unexpected-route"* ]]
+    [[ "$output" == *"Network stack refresh skipped, active VPN detected"* ]] || return 1
+    [[ "$output" != *"unexpected-route"* ]] || return 1
     [[ "$output" != *"unexpected-sudo"* ]]
 }
 
@@ -1690,7 +1710,7 @@ opt_network_stack_optimize
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Network routing table refreshed"* ]]
+    [[ "$output" == *"Network routing table refreshed"* ]] || return 1
     [[ "$output" == *"ARP cache cleared"* ]]
 }
 
