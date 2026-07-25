@@ -341,6 +341,51 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "discover_project_dirs includes agent worktree containers" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+mkdir -p "$HOME/.codex/worktrees/checkout/node_modules"
+discover_project_dirs | grep -q "^$HOME/.codex/worktrees$"
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "discover_project_dirs still ignores unlisted dot directories" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+mkdir -p "$HOME/.local/share/app"
+touch "$HOME/.local/share/app/package.json"
+if discover_project_dirs | grep -q "$HOME/.local"; then
+	echo "leaked"
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"leaked"* ]] || return 1
+}
+
+@test "agent worktree container does not allow direct-child artifact removal" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+mkdir -p "$HOME/.codex/worktrees/node_modules"
+mkdir -p "$HOME/.codex/worktrees/checkout/node_modules"
+if is_safe_project_artifact "$HOME/.codex/worktrees/node_modules" "$HOME/.codex/worktrees"; then
+	echo "direct-child-allowed"
+fi
+if is_safe_project_artifact "$HOME/.codex/worktrees/checkout/node_modules" "$HOME/.codex/worktrees"; then
+	echo "nested-allowed"
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"nested-allowed"* ]] || return 1
+	[[ "$output" != *"direct-child-allowed"* ]] || return 1
+}
+
 @test "save_discovered_paths writes config with tilde" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

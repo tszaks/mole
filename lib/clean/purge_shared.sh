@@ -56,6 +56,14 @@ readonly MOLE_PURGE_DEFAULT_SEARCH_PATHS=(
     "$HOME/Repos"
     "$HOME/Development"
     "$HOME/Library/CloudStorage"
+    # AI agent worktree containers. These sit under dot directories, which
+    # discover_project_dirs cannot reach: it globs "$HOME"/*/ and
+    # is_project_container rejects any basename starting with a dot. Listing
+    # the exact containers keeps the checkouts inside them in scope for
+    # rebuildable-artifact cleanup without widening discovery to dot
+    # directories in general. The worktrees themselves are never removed.
+    "$HOME/.codex/worktrees"
+    "$HOME/.claude/worktrees"
 )
 
 readonly MOLE_PURGE_MONOREPO_INDICATORS=(
