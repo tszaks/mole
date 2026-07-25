@@ -988,7 +988,8 @@ _batch_preview_and_confirm() {
 # Reads:  app_details
 # Writes: success_count, failed_count, failed_items, success_items,
 #         success_dock_targets, local_network_warning_apps,
-#         system_extension_warning_apps, running_at_uninstall_apps,
+#         system_extension_warning_apps, review_only_system_leftovers,
+#         review_only_system_leftover_keys, running_at_uninstall_apps,
 #         total_size_freed, brew_apps_removed,
 #         files_cleaned, total_items (the latter two via dynamic scope)
 _batch_execute_removals() {
@@ -1002,6 +1003,7 @@ _batch_execute_removals() {
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local diag_system=$(decode_file_list "$encoded_diag_system" "$app_name")
+        local review_only_system_files=$(decode_file_list "$encoded_review_system" "$app_name")
         local login_item_helpers=$(decode_bundle_id_list "$encoded_login_item_helpers" "$app_name")
         local reason=""
         local suggestion=""
@@ -1265,6 +1267,22 @@ _batch_execute_removals() {
                 ((total_kb < 0)) && total_kb=0
             fi
 
+            # System-level matches stay review-only. Recheck them after the
+            # app and user-owned files are gone so the final summary names
+            # only exact paths that still exist.
+            if ! is_uninstall_dry_run; then
+                local _review_path _review_key
+                while IFS= read -r _review_path; do
+                    [[ -n "$_review_path" && (-e "$_review_path" || -L "$_review_path") ]] || continue
+                    _review_key=$(mole_normalize_path "$_review_path")
+                    if [[ ${#review_only_system_leftover_keys[@]} -eq 0 ]] ||
+                        ! mole_identity_in_list "$_review_key" "${review_only_system_leftover_keys[@]}"; then
+                        review_only_system_leftover_keys+=("$_review_key")
+                        review_only_system_leftovers+=("$_review_path")
+                    fi
+                done <<< "$review_only_system_files"
+            fi
+
             total_size_freed=$((total_size_freed + total_kb))
             success_count=$((success_count + 1))
             [[ "$used_brew_successfully" == "true" ]] && brew_apps_removed=$((brew_apps_removed + 1))
@@ -1316,8 +1334,8 @@ _batch_execute_removals() {
 # warnings) and emit it as a single summary block.
 # Reads:  success_count, failed_count, failed_items, success_items,
 #         total_size_freed, local_network_warning_apps,
-#         system_extension_warning_apps, background_items_warning_apps,
-#         running_at_uninstall_apps
+#         system_extension_warning_apps, review_only_system_leftovers,
+#         background_items_warning_apps, running_at_uninstall_apps
 _batch_render_summary() {
     # Summary
     local freed_display
@@ -1417,6 +1435,19 @@ _batch_render_summary() {
     if [[ $success_count -eq 0 && $failed_count -eq 0 ]]; then
         summary_status="info"
         summary_details+=("No applications were uninstalled.")
+    fi
+
+    if [[ ${#review_only_system_leftovers[@]} -gt 0 ]]; then
+        summary_status="warn"
+        summary_details+=("${ICON_REVIEW} System files left untouched after removal:")
+
+        local system_leftover
+        local tilde_display='~'
+        for system_leftover in "${review_only_system_leftovers[@]}"; do
+            summary_details+=("${GRAY}${ICON_SUBLIST}${NC} ${system_leftover/#$HOME/$tilde_display}")
+        done
+
+        summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Review these paths before removing them manually; prefer the app's official uninstaller when available")
     fi
 
     if [[ ${#local_network_warning_apps[@]} -gt 0 ]]; then
@@ -1574,6 +1605,8 @@ batch_uninstall_applications() {
     local -a success_dock_targets=()
     local -a local_network_warning_apps=()
     local -a system_extension_warning_apps=()
+    local -a review_only_system_leftovers=()
+    local -a review_only_system_leftover_keys=()
     # Apps whose process was still running after the kill ladder. We do not
     # abort the uninstall for these: macOS allows deleting a running bundle
     # (the process keeps using its mmap'd code), but we warn the user so they

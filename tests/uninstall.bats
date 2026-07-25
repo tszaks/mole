@@ -657,6 +657,9 @@ total_size_cleaned=0
 printf '\n' | batch_uninstall_applications > "$HOME/output.log" 2>&1
 
 grep -q "Review only: ~/system/com.example.review.helper" "$HOME/output.log"
+grep -q "System files left untouched after removal:" "$HOME/output.log"
+[[ "$(grep -cF "~/system/com.example.review.helper" "$HOME/output.log")" -eq 2 ]]
+grep -q "Review these paths before removing them manually; prefer the app's official uninstaller when available" "$HOME/output.log"
 ! grep -q "$HOME/system/com.example.review.helper" "$HOME/remove.log"
 [[ -e "$HOME/system/com.example.review.helper" ]]
 EOF
@@ -683,6 +686,11 @@ remove_apps_from_dock() { :; }
 pgrep() { return 1; }
 pkill() { return 0; }
 sudo() { return 0; }
+find_app_system_files() {
+    mkdir -p "$HOME/system"
+    touch "$HOME/system/com.example.TestApp.helper"
+    printf '%s\n' "$HOME/system/com.example.TestApp.helper"
+}
 
 export MOLE_DRY_RUN=1
 export MOLE_DELETE_MODE=trash
@@ -708,6 +716,7 @@ output=$(cat "$output_file")
 [[ "$output" == *"Uninstall dry run complete"* ]] || { echo "WRONG: missing dry-run summary"; cat "$output_file"; exit 1; }
 [[ "$output" == *"Would remove 1 app"* ]] || { echo "WRONG: missing would-remove summary"; cat "$output_file"; exit 1; }
 [[ "$output" != *"Could not remove"* ]] || { echo "WRONG: dry-run reported expected leftovers"; cat "$output_file"; exit 1; }
+[[ "$output" != *"System files left untouched after removal"* ]] || { echo "WRONG: dry-run reported post-removal system leftovers"; cat "$output_file"; exit 1; }
 [[ "$output" != *"Uninstall incomplete"* ]] || { echo "WRONG: dry-run marked incomplete"; cat "$output_file"; exit 1; }
 EOF
 
