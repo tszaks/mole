@@ -993,6 +993,95 @@ clean_xcode_simulator_runtime_volumes() {
     fi
 }
 
+_MOLE_SIMCTL_DEVELOPER_DIR=""
+_MOLE_SIMCTL_RESOLUTION_STATUS="unavailable"
+_MOLE_SIMCTL_XCODE_APP_ROOTS=(
+    "/Applications"
+    "$HOME/Applications"
+)
+
+_simctl_developer_dir_is_usable() {
+    local developer_dir="$1"
+    [[ -d "$developer_dir" ]] || return 1
+
+    run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        env "DEVELOPER_DIR=$developer_dir" xcrun --find simctl > /dev/null 2>&1
+}
+
+# Resolve simctl without changing the machine-wide xcode-select setting.
+# An explicit DEVELOPER_DIR is authoritative: if it is invalid, do not
+# silently switch the caller to a different Xcode installation.
+_resolve_simctl_developer_dir() {
+    _MOLE_SIMCTL_DEVELOPER_DIR=""
+    _MOLE_SIMCTL_RESOLUTION_STATUS="unavailable"
+
+    if [[ -n "${DEVELOPER_DIR:-}" ]]; then
+        if _simctl_developer_dir_is_usable "$DEVELOPER_DIR"; then
+            _MOLE_SIMCTL_DEVELOPER_DIR="$DEVELOPER_DIR"
+            _MOLE_SIMCTL_RESOLUTION_STATUS="ready"
+            return 0
+        fi
+
+        _MOLE_SIMCTL_RESOLUTION_STATUS="explicit-invalid"
+        debug_log "Explicit DEVELOPER_DIR does not provide simctl: $DEVELOPER_DIR"
+        return 1
+    fi
+
+    local selected_developer_dir=""
+    if command -v xcode-select > /dev/null 2>&1; then
+        selected_developer_dir=$(xcode-select -p 2> /dev/null || true)
+    fi
+    if [[ -n "$selected_developer_dir" ]] && _simctl_developer_dir_is_usable "$selected_developer_dir"; then
+        _MOLE_SIMCTL_DEVELOPER_DIR="$selected_developer_dir"
+        _MOLE_SIMCTL_RESOLUTION_STATUS="ready"
+        return 0
+    fi
+
+    local -a candidates=()
+    local app_root candidate_app candidate_developer_dir
+    local nullglob_was_set=0
+    shopt -q nullglob && nullglob_was_set=1
+    shopt -s nullglob
+    for app_root in "${_MOLE_SIMCTL_XCODE_APP_ROOTS[@]}"; do
+        [[ -d "$app_root" ]] || continue
+        for candidate_app in "$app_root"/Xcode*.app; do
+            [[ -d "$candidate_app" ]] || continue
+            candidate_developer_dir="$candidate_app/Contents/Developer"
+            if _simctl_developer_dir_is_usable "$candidate_developer_dir"; then
+                candidates+=("$candidate_developer_dir")
+            fi
+        done
+    done
+    if [[ $nullglob_was_set -eq 0 ]]; then
+        shopt -u nullglob
+    fi
+
+    if [[ ${#candidates[@]} -eq 1 ]]; then
+        _MOLE_SIMCTL_DEVELOPER_DIR="${candidates[0]}"
+        _MOLE_SIMCTL_RESOLUTION_STATUS="ready"
+        debug_log "Using detected Xcode for simctl: ${candidates[0]%/Contents/Developer}"
+        return 0
+    fi
+
+    if [[ ${#candidates[@]} -gt 1 ]]; then
+        _MOLE_SIMCTL_RESOLUTION_STATUS="ambiguous"
+        for candidate_developer_dir in "${candidates[@]}"; do
+            debug_log "simctl Xcode candidate: ${candidate_developer_dir%/Contents/Developer}"
+        done
+    fi
+
+    return 1
+}
+
+_run_simctl() {
+    local timeout_seconds="$1"
+    shift
+
+    [[ "$_MOLE_SIMCTL_RESOLUTION_STATUS" == "ready" ]] || return 127
+    run_with_timeout "$timeout_seconds" \
+        env "DEVELOPER_DIR=$_MOLE_SIMCTL_DEVELOPER_DIR" xcrun simctl "$@"
+}
+
 clean_dev_mobile() {
     check_android_ndk
     clean_xcode_documentation_cache
@@ -1001,164 +1090,178 @@ clean_dev_mobile() {
     clean_xcode_xctest_devices
 
     if command -v xcrun > /dev/null 2>&1; then
-        debug_log "Checking for unavailable Xcode simulators"
-        local unavailable_before=0
-        local unavailable_after=0
-        local removed_unavailable=0
-        local unavailable_size_kb=0
-        local unavailable_size_human="0B"
-        local -a unavailable_udids=()
-        local unavailable_udid=""
+        _resolve_simctl_developer_dir || true
+        if [[ "$_MOLE_SIMCTL_RESOLUTION_STATUS" == "ambiguous" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · multiple Xcode apps found; set DEVELOPER_DIR"
+            note_activity
+        elif [[ "$_MOLE_SIMCTL_RESOLUTION_STATUS" == "explicit-invalid" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · DEVELOPER_DIR has no simctl"
+            note_activity
+        elif [[ "$_MOLE_SIMCTL_RESOLUTION_STATUS" == "ready" ]]; then
+            debug_log "Checking for unavailable Xcode simulators"
+            local unavailable_before=0
+            local unavailable_after=0
+            local removed_unavailable=0
+            local unavailable_size_kb=0
+            local unavailable_size_human="0B"
+            local -a unavailable_udids=()
+            local unavailable_udid=""
 
-        # Check if simctl is accessible and working; timeout prevents hang when CLT-only.
-        # CoreSimulatorService may need >2s to warm up on cold boot, so we retry once
-        # with a longer timeout. See #890.
-        local simctl_available=true
-        local simctl_probe_ok=false
-        if declare -F xcrun > /dev/null 2>&1; then
-            if xcrun simctl list devices > /dev/null 2>&1; then
-                simctl_probe_ok=true
-            fi
-        else
-            if run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" xcrun simctl list devices > /dev/null 2>&1; then
+            # Check if simctl is accessible and working; timeout prevents hang when CLT-only.
+            # CoreSimulatorService may need >2s to warm up on cold boot, so we retry once
+            # with a longer timeout. See #890.
+            local simctl_available=true
+            local simctl_probe_ok=false
+            if _run_simctl "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" list devices > /dev/null 2>&1; then
                 simctl_probe_ok=true
             else
                 sleep 1
-                if run_with_timeout 8 xcrun simctl list devices > /dev/null 2>&1; then # 8s: simctl retry after warmup, see lib/core/timeouts.sh
+                if _run_simctl 8 list devices > /dev/null 2>&1; then # 8s: simctl retry after warmup, see lib/core/timeouts.sh
                     simctl_probe_ok=true
                     debug_log "simctl probe succeeded on retry (CoreSimulatorService warmup)"
                 else
                     debug_log "simctl probe failed after retry (5s + 8s timeouts)"
                 fi
             fi
-        fi
-        if [[ "$simctl_probe_ok" != "true" ]]; then
-            debug_log "simctl not accessible or CoreSimulator service not running"
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl not available"
-            note_activity
-            simctl_available=false
-        fi
-
-        if [[ "$simctl_available" == "true" ]]; then
-            unavailable_before=$(xcrun simctl list devices unavailable 2> /dev/null | command awk '/\(unavailable/ { count++ } END { print count+0 }' || echo "0")
-            [[ "$unavailable_before" =~ ^[0-9]+$ ]] || unavailable_before=0
-            while IFS= read -r unavailable_udid; do
-                [[ -n "$unavailable_udid" ]] && unavailable_udids+=("$unavailable_udid")
-            done < <(
-                xcrun simctl list devices unavailable 2> /dev/null |
-                    command sed -nE 's/.*\(([0-9A-Fa-f-]{36})\).*\(unavailable.*/\1/p' || true
-            )
-            if [[ ${#unavailable_udids[@]} -gt 0 ]]; then
-                local udid
-                for udid in "${unavailable_udids[@]}"; do
-                    local simulator_device_path="$HOME/Library/Developer/CoreSimulator/Devices/$udid"
-                    if [[ -d "$simulator_device_path" ]]; then
-                        unavailable_size_kb=$((unavailable_size_kb + $(get_path_size_kb "$simulator_device_path")))
-                    fi
-                done
-            fi
-            unavailable_size_human=$(bytes_to_human "$((unavailable_size_kb * 1024))")
-
-            if [[ "$DRY_RUN" == "true" ]]; then
-                if ((unavailable_before > 0)); then
-                    echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode unavailable simulators · would clean ${unavailable_before}, ${unavailable_size_human}"
-                else
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
-                fi
+            if [[ "$simctl_probe_ok" != "true" ]]; then
+                debug_log "simctl not accessible or CoreSimulator service not running"
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl not available"
                 note_activity
-            else
-                # Skip if no unavailable simulators
-                if ((unavailable_before == 0)); then
-                    echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
+                simctl_available=false
+            fi
+
+            if [[ "$simctl_available" == "true" ]]; then
+                local unavailable_devices_output=""
+                unavailable_devices_output=$(_run_simctl "$MOLE_TIMEOUT_PKG_LIST_SEC" list devices unavailable 2> /dev/null || true)
+                unavailable_before=$(printf '%s\n' "$unavailable_devices_output" | command awk '/\(unavailable/ { count++ } END { print count+0 }')
+                [[ "$unavailable_before" =~ ^[0-9]+$ ]] || unavailable_before=0
+                while IFS= read -r unavailable_udid; do
+                    [[ -n "$unavailable_udid" ]] && unavailable_udids+=("$unavailable_udid")
+                done < <(
+                    printf '%s\n' "$unavailable_devices_output" |
+                        command sed -nE 's/.*\(([0-9A-Fa-f-]{36})\).*\(unavailable.*/\1/p' || true
+                )
+                if [[ ${#unavailable_udids[@]} -gt 0 ]]; then
+                    local udid
+                    for udid in "${unavailable_udids[@]}"; do
+                        local simulator_device_path="$HOME/Library/Developer/CoreSimulator/Devices/$udid"
+                        if [[ -d "$simulator_device_path" ]]; then
+                            unavailable_size_kb=$((unavailable_size_kb + $(get_path_size_kb "$simulator_device_path")))
+                        fi
+                    done
+                fi
+                unavailable_size_human=$(bytes_to_human "$((unavailable_size_kb * 1024))")
+
+                if [[ "$DRY_RUN" == "true" ]]; then
+                    if ((unavailable_before > 0)); then
+                        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode unavailable simulators · would clean ${unavailable_before}, ${unavailable_size_human}"
+                    else
+                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
+                    fi
                     note_activity
                 else
-                    start_section_spinner "Checking unavailable simulators..."
-
-                    # Capture error output for diagnostics
-                    local delete_output
-                    local delete_exit_code=0
-                    delete_output=$(xcrun simctl delete unavailable 2>&1) || delete_exit_code=$?
-
-                    if [[ $delete_exit_code -eq 0 ]]; then
-                        stop_section_spinner
-                        unavailable_after=$(xcrun simctl list devices unavailable 2> /dev/null | command awk '/\(unavailable/ { count++ } END { print count+0 }' || echo "0")
-                        [[ "$unavailable_after" =~ ^[0-9]+$ ]] || unavailable_after=0
-
-                        removed_unavailable=$((unavailable_before - unavailable_after))
-                        if ((removed_unavailable < 0)); then
-                            removed_unavailable=0
-                        fi
-
-                        local line_color
-                        line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
-                        if ((removed_unavailable > 0)); then
-                            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${removed_unavailable}, ${line_color}${unavailable_size_human}${NC}"
-                        else
-                            echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · cleanup completed, ${line_color}${unavailable_size_human}${NC}"
-                        fi
+                    # Skip if no unavailable simulators
+                    if ((unavailable_before == 0)); then
+                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
+                        note_activity
                     else
-                        stop_section_spinner
+                        start_section_spinner "Checking unavailable simulators..."
 
-                        # Analyze error and provide helpful message
-                        local error_hint=""
-                        if echo "$delete_output" | grep -qi "permission denied"; then
-                            error_hint=" (permission denied)"
-                        elif echo "$delete_output" | grep -qi "in use\|busy"; then
-                            error_hint=" (device in use)"
-                        elif echo "$delete_output" | grep -qi "unable to boot\|failed to boot"; then
-                            error_hint=" (boot failure)"
-                        elif echo "$delete_output" | grep -qi "service"; then
-                            error_hint=" (CoreSimulator service issue)"
-                        fi
+                        # Capture error output for diagnostics
+                        local delete_output
+                        local delete_exit_code=0
+                        delete_output=$(_run_simctl "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" delete unavailable 2>&1) || delete_exit_code=$?
 
-                        # Try fallback: manual deletion of unavailable device directories
-                        if [[ ${#unavailable_udids[@]} -gt 0 ]]; then
-                            debug_log "Attempting fallback: manual deletion of unavailable simulators"
-                            local manually_removed=0
-                            local manual_failed=0
+                        if [[ $delete_exit_code -eq 0 ]]; then
+                            stop_section_spinner
+                            unavailable_devices_output=$(_run_simctl "$MOLE_TIMEOUT_PKG_LIST_SEC" list devices unavailable 2> /dev/null || true)
+                            unavailable_after=$(printf '%s\n' "$unavailable_devices_output" | command awk '/\(unavailable/ { count++ } END { print count+0 }')
+                            [[ "$unavailable_after" =~ ^[0-9]+$ ]] || unavailable_after=0
 
-                            for udid in "${unavailable_udids[@]}"; do
-                                # Validate UUID format (36 chars: 8-4-4-4-12 hex pattern)
-                                if [[ ! "$udid" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
-                                    debug_log "Invalid UUID format, skipping: $udid"
-                                    ((manual_failed++)) || true
-                                    continue
-                                fi
+                            removed_unavailable=$((unavailable_before - unavailable_after))
+                            if ((removed_unavailable < 0)); then
+                                removed_unavailable=0
+                            fi
 
-                                local device_path="$HOME/Library/Developer/CoreSimulator/Devices/$udid"
-                                if [[ -d "$device_path" ]]; then
-                                    # Use safe_remove for validated simulator device directory
-                                    if safe_remove "$device_path" true; then
-                                        ((manually_removed++)) || true
-                                        debug_log "Manually removed simulator: $udid"
-                                    else
+                            local line_color
+                            line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
+                            if ((removed_unavailable > 0)); then
+                                echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${removed_unavailable}, ${line_color}${unavailable_size_human}${NC}"
+                            else
+                                echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · cleanup completed, ${line_color}${unavailable_size_human}${NC}"
+                            fi
+                        else
+                            stop_section_spinner
+
+                            # Analyze error and provide helpful message
+                            local error_hint=""
+                            if echo "$delete_output" | grep -qi "permission denied"; then
+                                error_hint=" (permission denied)"
+                            elif echo "$delete_output" | grep -qi "in use\|busy"; then
+                                error_hint=" (device in use)"
+                            elif echo "$delete_output" | grep -qi "unable to boot\|failed to boot"; then
+                                error_hint=" (boot failure)"
+                            elif echo "$delete_output" | grep -qi "service"; then
+                                error_hint=" (CoreSimulator service issue)"
+                            fi
+
+                            # A timeout does not prove simctl stopped working on the
+                            # device set. Avoid racing it with manual directory removal.
+                            if [[ $delete_exit_code -eq 124 ]]; then
+                                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · cleanup timed out; manual fallback skipped"
+                                debug_log "simctl delete unavailable timed out"
+                            # Try fallback for completed, non-timeout failures only.
+                            elif [[ ${#unavailable_udids[@]} -gt 0 ]]; then
+                                debug_log "Attempting fallback: manual deletion of unavailable simulators"
+                                local manually_removed=0
+                                local manual_failed=0
+
+                                for udid in "${unavailable_udids[@]}"; do
+                                    # Validate UUID format (36 chars: 8-4-4-4-12 hex pattern)
+                                    if [[ ! "$udid" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+                                        debug_log "Invalid UUID format, skipping: $udid"
                                         ((manual_failed++)) || true
-                                        debug_log "Failed to manually remove simulator: $udid"
+                                        continue
                                     fi
-                                fi
-                            done
 
-                            if ((manually_removed > 0)); then
-                                if ((manual_failed == 0)); then
-                                    local line_color
-                                    line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
-                                    echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${manually_removed} (fallback), ${line_color}${unavailable_size_human}${NC}"
+                                    local device_path="$HOME/Library/Developer/CoreSimulator/Devices/$udid"
+                                    if [[ -d "$device_path" ]]; then
+                                        # Use safe_remove for validated simulator device directory
+                                        if safe_remove "$device_path" true; then
+                                            ((manually_removed++)) || true
+                                            debug_log "Manually removed simulator: $udid"
+                                        else
+                                            ((manual_failed++)) || true
+                                            debug_log "Failed to manually remove simulator: $udid"
+                                        fi
+                                    fi
+                                done
+
+                                if ((manually_removed > 0)); then
+                                    if ((manual_failed == 0)); then
+                                        local line_color
+                                        line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
+                                        echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${manually_removed} (fallback), ${line_color}${unavailable_size_human}${NC}"
+                                    else
+                                        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode unavailable simulators · partially cleaned ${manually_removed}/${#unavailable_udids[@]}, ${unavailable_size_human}"
+                                    fi
                                 else
-                                    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode unavailable simulators · partially cleaned ${manually_removed}/${#unavailable_udids[@]}, ${unavailable_size_human}"
+                                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators cleanup failed${error_hint}"
+                                    debug_log "simctl delete error: $delete_output"
                                 fi
                             else
                                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators cleanup failed${error_hint}"
                                 debug_log "simctl delete error: $delete_output"
                             fi
-                        else
-                            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators cleanup failed${error_hint}"
-                            debug_log "simctl delete error: $delete_output"
                         fi
                     fi
-                fi
-            fi # Close if ((unavailable_before == 0))
+                fi # Close if ((unavailable_before == 0))
+                note_activity
+            fi # End of simctl_available check
+        else
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl not available"
             note_activity
-        fi # End of simctl_available check
+        fi
     fi
     # Old iOS/watchOS/tvOS DeviceSupport versions (debug symbols for connected devices).
     # Each iOS version creates a 1-3 GB folder of debug symbols. Only the versions

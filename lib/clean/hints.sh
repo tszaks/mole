@@ -636,7 +636,9 @@ show_user_launch_agent_hint_notice() {
         if [[ -n "$program" ]] && hint_is_system_binary "$program"; then
             continue
         fi
-        if [[ -n "$program" ]] && hint_is_app_scoped_launch_target "$program" && [[ ! -e "$program" ]]; then
+        if [[ "$program" == /* && -f "$program" && -x "$program" ]]; then
+            continue
+        elif [[ -n "$program" ]] && hint_is_app_scoped_launch_target "$program" && [[ ! -e "$program" ]]; then
             reason="Missing app/helper target"
             target="${program/#$HOME/~}"
         else

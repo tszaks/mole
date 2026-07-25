@@ -55,6 +55,7 @@ create_test_app_bundle() {
 	local app_path="$1"
 	local bundle_id="$2"
 	local display_name="$3"
+	local background_only="${4:-false}"
 
 	mkdir -p "$app_path/Contents"
 	cat > "$app_path/Contents/Info.plist" <<PLIST
@@ -69,6 +70,11 @@ create_test_app_bundle() {
 </dict>
 </plist>
 PLIST
+
+	if [[ "$background_only" == "true" ]]; then
+		/usr/libexec/PlistBuddy -c "Add :LSBackgroundOnly bool true" \
+			"$app_path/Contents/Info.plist" > /dev/null 2>&1
+	fi
 }
 
 @test "scan_applications: Pass 2 tolerates empty app_data_tuples on /bin/bash 3.2 (#863)" {
@@ -292,27 +298,17 @@ EOF
 	[[ "$output" == *"|$app_path|Artpaper|andriiliakh.Artpaper|"* ]]
 }
 
-@test "scan_applications includes top-level OneDrive even when background-only (#970)" {
+@test "scan_applications includes top-level background apps but excludes nested helpers (#970/#1265)" {
 	src="$HOME/uninstall_source.sh"
 	sourceable_uninstall_sh "$src"
 
 	apps_root="$HOME/Applications"
-	app_path="$apps_root/OneDrive.app"
-	mkdir -p "$app_path/Contents"
-	cat > "$app_path/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleIdentifier</key>
-    <string>com.microsoft.OneDrive-mac</string>
-    <key>CFBundleName</key>
-    <string>OneDrive</string>
-    <key>LSBackgroundOnly</key>
-    <true/>
-</dict>
-</plist>
-PLIST
+	onedrive_app="$apps_root/OneDrive.app"
+	betterdisplay_app="$apps_root/BetterDisplay.app"
+	nested_helper="$apps_root/Vendor/Helper.app"
+	create_test_app_bundle "$onedrive_app" "com.microsoft.OneDrive-mac" "OneDrive" true
+	create_test_app_bundle "$betterdisplay_app" "pro.betterdisplay.BetterDisplay" "BetterDisplay" true
+	create_test_app_bundle "$nested_helper" "com.example.Helper" "Helper" true
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
 		MOLE_TEST_NO_AUTH=1 APPS_ROOT="$apps_root" SRC_PATH="$src" \
@@ -329,7 +325,9 @@ cat "$apps_file"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"|$app_path|OneDrive|com.microsoft.OneDrive-mac|"* ]]
+	[[ "$output" == *"|$onedrive_app|OneDrive|com.microsoft.OneDrive-mac|"* ]] || return 1
+	[[ "$output" == *"|$betterdisplay_app|BetterDisplay|pro.betterdisplay.BetterDisplay|"* ]] || return 1
+	[[ "$output" != *"|$nested_helper|Helper|com.example.Helper|"* ]] || return 1
 }
 
 @test "scan_applications dedupes backup Applications clones by bundle id (#975)" {

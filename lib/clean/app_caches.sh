@@ -73,49 +73,6 @@ clean_xcode_tools() {
         safe_clean ~/Library/Developer/CoreSimulator/Caches/* "Simulator cache"
         safe_clean ~/Library/Developer/CoreSimulator/Devices/*/data/tmp/* "Simulator temp files"
         safe_clean ~/Library/Logs/CoreSimulator/* "CoreSimulator logs"
-        # Remove unavailable simulator devices (not supported by the current Xcode SDK).
-        # run_with_timeout guards against xcrun blocking when only CLT is installed
-        # (can launch an invisible install dialog or wait on CoreSimulator XPC indefinitely).
-        if command -v xcrun > /dev/null 2>&1; then
-            local unavail_count
-            local unavailable_devices_output=""
-
-            # Tests may mock xcrun as a shell function. Timeout wrappers execute
-            # in a separate process and cannot reliably invoke exported functions.
-            # Prefer direct function invocation in that case.
-            if declare -F xcrun > /dev/null 2>&1; then
-                unavailable_devices_output=$(xcrun simctl list devices unavailable 2> /dev/null || true)
-            else
-                unavailable_devices_output=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" xcrun simctl list devices unavailable 2> /dev/null || true)
-                if [[ -z "$unavailable_devices_output" ]]; then
-                    unavailable_devices_output=$(xcrun simctl list devices unavailable 2> /dev/null || true)
-                fi
-            fi
-            unavail_count=$(printf '%s\n' "$unavailable_devices_output" | command awk '/\([0-9A-F-]{36}\)/ { count++ } END { print count+0 }')
-            [[ "$unavail_count" =~ ^[0-9]+$ ]] || unavail_count=0
-            if [[ "$unavail_count" -gt 0 ]]; then
-                if [[ "${DRY_RUN:-false}" == "true" ]]; then
-                    echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Unavailable simulators · would delete ${unavail_count} devices"
-                    note_activity
-                else
-                    # Capture exit code so a timeout (124) or simctl error
-                    # is reported instead of falsely echoing SUCCESS.
-                    local _delete_rc=0
-                    if declare -F xcrun > /dev/null 2>&1; then
-                        xcrun simctl delete unavailable > /dev/null 2>&1 || _delete_rc=$?
-                    else
-                        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" xcrun simctl delete unavailable > /dev/null 2>&1 || _delete_rc=$?
-                    fi
-                    if [[ $_delete_rc -eq 0 ]]; then
-                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Unavailable simulators · deleted ${unavail_count} devices"
-                    else
-                        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Unavailable simulators · simctl delete failed (exit=${_delete_rc})"
-                        debug_log "xcrun simctl delete unavailable returned $_delete_rc"
-                    fi
-                fi
-                note_activity
-            fi
-        fi
     else
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Simulator caches · skipped (Simulator running)"
         note_activity

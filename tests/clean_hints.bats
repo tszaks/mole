@@ -254,6 +254,50 @@ EOT4
     [[ "$output" == *"Missing app/helper target"* ]] || return 1
 }
 
+@test "show_user_launch_agent_hint_notice trusts an existing executable Program target (#1262)" {
+    local updater="$HOME/Library/Application Support/Google/GoogleUpdater/GoogleUpdater.app/Contents/MacOS/GoogleUpdater"
+    mkdir -p "$HOME/Library/LaunchAgents" "$(dirname "$updater")"
+    touch "$updater"
+    chmod +x "$updater"
+    cat > "$HOME/Library/LaunchAgents/com.google.GoogleUpdater.wake.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.google.GoogleUpdater.wake</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$updater</string>
+        <string>--wake</string>
+    </array>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.google.GoogleUpdater</string>
+    </array>
+</dict>
+</plist>
+PLIST
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" UPDATER="$updater" bash --noprofile --norc <<'EOT4A'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+bundle_has_installed_app() { return 1; }
+note_activity() { :; }
+
+live_output=$(show_user_launch_agent_hint_notice)
+[[ "$live_output" != *"Stale login item"* ]]
+
+chmod -x "$UPDATER"
+show_user_launch_agent_hint_notice
+EOT4A
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stale login item · com.google.GoogleUpdater.wake.plist"* ]] || return 1
+    [[ "$output" == *"Associated app not found: com.google.GoogleUpdater"* ]] || return 1
+}
+
 @test "show_user_launch_agent_hint_notice skips custom shell wrappers" {
     mkdir -p "$HOME/Library/LaunchAgents"
     cat > "$HOME/Library/LaunchAgents/com.example.custom.plist" <<'PLIST'

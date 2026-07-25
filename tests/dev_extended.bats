@@ -653,27 +653,43 @@ EOF
 }
 
 @test "clean_dev_mobile continues cleanup when simctl is unavailable" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	local tmp_bin
+	tmp_bin="$HOME/simctl-unavailable-bin"
+	mkdir -p "$tmp_bin"
+	cat > "$tmp_bin/xcrun" <<'XEOF'
+#!/bin/bash
+exit 1
+XEOF
+	cat > "$tmp_bin/xcode-select" <<'XEOF'
+#!/bin/bash
+printf '/Library/Developer/CommandLineTools\n'
+XEOF
+	chmod +x "$tmp_bin/xcrun" "$tmp_bin/xcode-select"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 
+_MOLE_SIMCTL_XCODE_APP_ROOTS=("$HOME/EmptyApplications")
+mkdir -p "${_MOLE_SIMCTL_XCODE_APP_ROOTS[0]}"
 check_android_ndk() { :; }
 clean_xcode_documentation_cache() { :; }
+clean_xcode_system_coresimulator_caches() { :; }
 clean_xcode_simulator_runtime_volumes() { :; }
+clean_xcode_xctest_devices() { :; }
 clean_xcode_device_support() { echo "DEVICE_SUPPORT:$2"; }
 safe_clean() { echo "SAFE_CLEAN:$2"; }
 note_activity() { :; }
 debug_log() { :; }
-xcrun() { return 1; }
 
 clean_dev_mobile
 EOF
 
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"simctl not available"* ]]
-	[[ "$output" == *"DEVICE_SUPPORT:iOS DeviceSupport"* ]]
-	[[ "$output" == *"SAFE_CLEAN:Android SDK cache"* ]]
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"simctl not available"* ]] || return 1
+	[[ "$output" == *"DEVICE_SUPPORT:iOS DeviceSupport"* ]] || return 1
+	[[ "$output" == *"SAFE_CLEAN:Android SDK cache"* ]] || return 1
 }
 
 @test "clean_dev_mobile retries simctl probe on cold-boot timeout (#890)" {
@@ -688,22 +704,28 @@ EOF
 	#     `xcrun simctl list devices unavailable` call so we take the
 	#     "already clean" branch and don't try to delete anything.
 	local tmp_bin
-	tmp_bin="$(mktemp -d)"
+	tmp_bin="$HOME/simctl-retry-bin"
+	mkdir -p "$tmp_bin" "$HOME/Xcode.app/Contents/Developer"
 	cat > "$tmp_bin/xcrun" <<'XEOF'
 #!/bin/bash
 exit 0
 XEOF
-	chmod +x "$tmp_bin/xcrun"
+	cat > "$tmp_bin/xcode-select" <<XEOF
+#!/bin/bash
+printf '$HOME/Xcode.app/Contents/Developer\n'
+XEOF
+	chmod +x "$tmp_bin/xcrun" "$tmp_bin/xcode-select"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TMP_XCRUN_BIN="$tmp_bin" DRY_RUN=false bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" DRY_RUN=false bash --noprofile --norc <<'EOF'
 set -euo pipefail
-PATH="$TMP_XCRUN_BIN:$PATH"
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 
 check_android_ndk() { :; }
 clean_xcode_documentation_cache() { :; }
+clean_xcode_system_coresimulator_caches() { :; }
 clean_xcode_simulator_runtime_volumes() { :; }
+clean_xcode_xctest_devices() { :; }
 clean_xcode_device_support() { :; }
 safe_clean() { :; }
 note_activity() { :; }
@@ -714,19 +736,239 @@ sleep() { :; }  # skip the 1s pause between probes for fast tests
 # Second call (8s timeout) succeeds.
 __rwt_count=0
 run_with_timeout() {
-    __rwt_count=$((__rwt_count + 1))
-    if [[ $__rwt_count -eq 1 ]]; then
-        return 124
-    fi
-    return 0
+    shift
+    case " $* " in
+        *" xcrun simctl list devices ")
+            __rwt_count=$((__rwt_count + 1))
+            if [[ $__rwt_count -eq 1 ]]; then
+                return 124
+            fi
+            ;;
+    esac
+    "$@"
 }
 
 clean_dev_mobile
 EOF
 
-	rm -rf "$tmp_bin"
-
-	[ "$status" -eq 0 ]
+	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"simctl probe succeeded on retry"* ]] || return 1
 	[[ "$output" != *"simctl not available"* ]] || return 1
+}
+
+@test "clean_dev_mobile uses the sole Xcode Beta candidate when CLT is selected (#1261)" {
+	local tmp_bin candidate developer_dir
+	tmp_bin="$HOME/simctl-single-bin"
+	candidate="$HOME/Applications/Xcode-Beta.app"
+	developer_dir="$candidate/Contents/Developer"
+	mkdir -p "$tmp_bin" "$developer_dir"
+
+	cat > "$tmp_bin/xcrun" <<'XEOF'
+#!/bin/bash
+if [[ "$*" == "--find simctl" ]]; then
+    [[ "${DEVELOPER_DIR:-}" == "$EXPECTED_DEVELOPER_DIR" ]]
+    exit
+fi
+printf '%s|%s\n' "${DEVELOPER_DIR:-}" "$*" >> "$SIMCTL_CALL_LOG"
+case "$*" in
+    "simctl list devices")
+        exit 0
+        ;;
+    "simctl list devices unavailable")
+        printf '    iPhone 12 (ABCDEF01-2345-6789-ABCD-EF0123456789) (Shutdown) (unavailable)\n'
+        exit 0
+        ;;
+esac
+exit 1
+XEOF
+	cat > "$tmp_bin/xcode-select" <<'XEOF'
+#!/bin/bash
+printf '/Library/Developer/CommandLineTools\n'
+XEOF
+	chmod +x "$tmp_bin/xcrun" "$tmp_bin/xcode-select"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" \
+		DRY_RUN=true EXPECTED_DEVELOPER_DIR="$developer_dir" \
+		SIMCTL_CALL_LOG="$HOME/simctl-single.log" \
+		bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+
+_MOLE_SIMCTL_XCODE_APP_ROOTS=("$HOME/Applications")
+check_android_ndk() { :; }
+clean_xcode_documentation_cache() { :; }
+clean_xcode_system_coresimulator_caches() { :; }
+clean_xcode_simulator_runtime_volumes() { :; }
+clean_xcode_xctest_devices() { :; }
+clean_xcode_device_support() { :; }
+safe_clean() { :; }
+note_activity() { :; }
+debug_log() { :; }
+
+clean_dev_mobile
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Xcode unavailable simulators · would clean 1"* ]] || return 1
+	[[ -s "$HOME/simctl-single.log" ]] || return 1
+	while IFS= read -r call; do
+		[[ "$call" == "$developer_dir|"* ]] || return 1
+	done < "$HOME/simctl-single.log"
+}
+
+@test "clean_dev_mobile skips ambiguous Xcode candidates without choosing one (#1261)" {
+	local tmp_bin
+	tmp_bin="$HOME/simctl-ambiguous-bin"
+	mkdir -p "$tmp_bin"
+	for app in Xcode.app Xcode-Beta.app; do
+		mkdir -p "$HOME/Applications/$app/Contents/Developer"
+	done
+
+	cat > "$tmp_bin/xcrun" <<'XEOF'
+#!/bin/bash
+if [[ "$*" == "--find simctl" ]]; then
+    [[ "${DEVELOPER_DIR:-}" == "$HOME/Applications/Xcode.app/Contents/Developer" ||
+        "${DEVELOPER_DIR:-}" == "$HOME/Applications/Xcode-Beta.app/Contents/Developer" ]]
+    exit
+fi
+printf '%s\n' "$*" >> "$SIMCTL_CALL_LOG"
+exit 0
+XEOF
+	cat > "$tmp_bin/xcode-select" <<'XEOF'
+#!/bin/bash
+printf '/Library/Developer/CommandLineTools\n'
+XEOF
+	chmod +x "$tmp_bin/xcrun" "$tmp_bin/xcode-select"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" \
+		SIMCTL_CALL_LOG="$HOME/simctl-ambiguous.log" \
+		bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+
+_MOLE_SIMCTL_XCODE_APP_ROOTS=("$HOME/Applications")
+check_android_ndk() { :; }
+clean_xcode_documentation_cache() { :; }
+clean_xcode_system_coresimulator_caches() { :; }
+clean_xcode_simulator_runtime_volumes() { :; }
+clean_xcode_xctest_devices() { :; }
+clean_xcode_device_support() { :; }
+safe_clean() { :; }
+note_activity() { :; }
+debug_log() { echo "DEBUG:$*"; }
+
+clean_dev_mobile
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"multiple Xcode apps found; set DEVELOPER_DIR"* ]] || return 1
+	[[ "$output" == *"DEBUG:simctl Xcode candidate: $HOME/Applications/Xcode.app"* ]] || return 1
+	[[ "$output" == *"DEBUG:simctl Xcode candidate: $HOME/Applications/Xcode-Beta.app"* ]] || return 1
+	[[ ! -e "$HOME/simctl-ambiguous.log" ]] || return 1
+}
+
+@test "clean_dev_mobile does not override an invalid explicit DEVELOPER_DIR (#1261)" {
+	local tmp_bin candidate
+	tmp_bin="$HOME/simctl-explicit-invalid-bin"
+	candidate="$HOME/Applications/Xcode-Beta.app/Contents/Developer"
+	mkdir -p "$tmp_bin" "$candidate"
+
+	cat > "$tmp_bin/xcrun" <<'XEOF'
+#!/bin/bash
+printf '%s\n' "$*" >> "$SIMCTL_CALL_LOG"
+exit 0
+XEOF
+	cat > "$tmp_bin/xcode-select" <<'XEOF'
+#!/bin/bash
+printf '%s\n' "$*" >> "$XCODE_SELECT_CALL_LOG"
+printf '/Library/Developer/CommandLineTools\n'
+XEOF
+	chmod +x "$tmp_bin/xcrun" "$tmp_bin/xcode-select"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" \
+		DEVELOPER_DIR="$HOME/MissingXcode.app/Contents/Developer" \
+		SIMCTL_CALL_LOG="$HOME/simctl-explicit-invalid.log" \
+		XCODE_SELECT_CALL_LOG="$HOME/xcode-select-explicit-invalid.log" \
+		bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+
+_MOLE_SIMCTL_XCODE_APP_ROOTS=("$HOME/Applications")
+check_android_ndk() { :; }
+clean_xcode_documentation_cache() { :; }
+clean_xcode_system_coresimulator_caches() { :; }
+clean_xcode_simulator_runtime_volumes() { :; }
+clean_xcode_xctest_devices() { :; }
+clean_xcode_device_support() { :; }
+safe_clean() { :; }
+note_activity() { :; }
+debug_log() { :; }
+
+clean_dev_mobile
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"DEVELOPER_DIR has no simctl"* ]] || return 1
+	[[ ! -e "$HOME/simctl-explicit-invalid.log" ]] || return 1
+	[[ ! -e "$HOME/xcode-select-explicit-invalid.log" ]] || return 1
+}
+
+@test "clean_dev_mobile does not race a timed-out simctl delete with manual removal" {
+	local tmp_bin developer_dir
+	tmp_bin="$HOME/simctl-delete-failure-bin"
+	developer_dir="$HOME/Xcode-delete-failure.app/Contents/Developer"
+	mkdir -p "$tmp_bin" "$developer_dir" \
+		"$HOME/Library/Developer/CoreSimulator/Devices/ABCDEF01-2345-6789-ABCD-EF0123456789"
+
+	cat > "$tmp_bin/xcrun" <<'XEOF'
+#!/bin/bash
+case "$*" in
+    "--find simctl" | "simctl list devices")
+        exit 0
+        ;;
+    "simctl list devices unavailable")
+        printf '    iPhone 12 (ABCDEF01-2345-6789-ABCD-EF0123456789) (Shutdown) (unavailable)\n'
+        exit 0
+        ;;
+    "simctl delete unavailable")
+        exit 124
+        ;;
+esac
+exit 1
+XEOF
+	cat > "$tmp_bin/xcode-select" <<XEOF
+#!/bin/bash
+printf '$developer_dir\n'
+XEOF
+	chmod +x "$tmp_bin/xcrun" "$tmp_bin/xcode-select"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" \
+		DRY_RUN=false bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+
+check_android_ndk() { :; }
+clean_xcode_documentation_cache() { :; }
+clean_xcode_system_coresimulator_caches() { :; }
+clean_xcode_simulator_runtime_volumes() { :; }
+clean_xcode_xctest_devices() { :; }
+clean_xcode_device_support() { :; }
+safe_clean() { :; }
+safe_remove() { echo "UNEXPECTED_FALLBACK:$1"; return 1; }
+note_activity() { :; }
+debug_log() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+
+clean_dev_mobile
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Xcode unavailable simulators · cleanup timed out; manual fallback skipped"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_FALLBACK"* ]] || return 1
+	[[ "$output" != *"Xcode unavailable simulators · removed"* ]] || return 1
 }

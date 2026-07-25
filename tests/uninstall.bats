@@ -1359,8 +1359,9 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+uninstall_print_app_search_dirs() { printf '%s\n' "$HOME/Applications"; }
 
-app_path="$HOME/Applications/Helper.app"
+app_path="$HOME/Applications/Vendor/Helper.app"
 mkdir -p "$app_path/Contents"
 cat > "$app_path/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1389,6 +1390,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+uninstall_print_app_search_dirs() { printf '%s\n' "$HOME/Applications"; }
 
 app_path="$HOME/Applications/OneDrive.app"
 mkdir -p "$app_path/Contents"

@@ -466,17 +466,17 @@ uninstall_app_is_background_only() {
     return 1
 }
 
-uninstall_app_is_top_level_onedrive() {
+uninstall_app_is_directly_in_search_root() {
     local app_path="$1"
-    local bundle_id="${2:-}"
+    local app_parent="${app_path%/*}"
+    local app_dir
 
-    [[ "$bundle_id" == com.microsoft.OneDrive* ]] || return 1
-
-    case "$app_path" in
-        /Applications/OneDrive.app | "$HOME"/Applications/OneDrive.app)
+    while IFS= read -r app_dir; do
+        [[ -n "$app_dir" ]] || continue
+        if [[ "$app_parent" == "$app_dir" ]]; then
             return 0
-            ;;
-    esac
+        fi
+    done < <(uninstall_print_app_search_dirs)
 
     return 1
 }
@@ -491,7 +491,7 @@ uninstall_app_is_currently_eligible() {
         return 1
     fi
 
-    if uninstall_app_is_background_only "$app_path" && ! uninstall_app_is_top_level_onedrive "$app_path" "$bundle_id"; then
+    if uninstall_app_is_background_only "$app_path" && ! uninstall_app_is_directly_in_search_root "$app_path"; then
         return 1
     fi
 
