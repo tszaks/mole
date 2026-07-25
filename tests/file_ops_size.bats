@@ -30,7 +30,7 @@ EOF
 }
 
 @test "get_path_size_kb returns 0 for empty path" {
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb ""
 EOF
@@ -39,7 +39,7 @@ EOF
 }
 
 @test "get_path_size_kb returns 0 for non-existent path" {
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/does-not-exist"
 EOF
@@ -49,7 +49,7 @@ EOF
 
 @test "get_path_size_kb returns 0 for empty file" {
     : > "$SANDBOX/empty"
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/empty"
 EOF
@@ -60,7 +60,7 @@ EOF
 @test "get_path_size_kb rounds up sub-KB files to 1 KB" {
     # 500 bytes is < 1 KB; ceiling rounding should report 1.
     dd if=/dev/zero of="$SANDBOX/small" bs=500 count=1 2> /dev/null
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/small"
 EOF
@@ -70,7 +70,7 @@ EOF
 
 @test "get_path_size_kb reports exact 1 KB for 1024-byte file" {
     dd if=/dev/zero of="$SANDBOX/onek" bs=1024 count=1 2> /dev/null
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/onek"
 EOF
@@ -81,7 +81,7 @@ EOF
 @test "get_path_size_kb rounds up odd byte counts" {
     # 50000 bytes / 1024 = 48.83..., ceiling is 49.
     dd if=/dev/zero of="$SANDBOX/odd" bs=50000 count=1 2> /dev/null
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/odd"
 EOF
@@ -94,12 +94,12 @@ EOF
     dd if=/dev/zero of="$SANDBOX/target" bs=1024 count=100 2> /dev/null
     ln -s "$SANDBOX/target" "$SANDBOX/link"
 
-    target_kb=$(bash --noprofile --norc << EOF
+    target_kb=$(/bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/target"
 EOF
 )
-    link_kb=$(bash --noprofile --norc << EOF
+    link_kb=$(/bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/link"
 EOF
@@ -114,7 +114,7 @@ EOF
 
 @test "get_path_size_kb still returns 0 for broken symlinks" {
     ln -s "$SANDBOX/missing" "$SANDBOX/broken"
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/broken"
 EOF
@@ -128,7 +128,7 @@ EOF
     dd if=/dev/zero of="$SANDBOX/dir/a" bs=1024 count=10 2> /dev/null
     dd if=/dev/zero of="$SANDBOX/dir/sub/b" bs=1024 count=20 2> /dev/null
 
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$SANDBOX/dir"
 EOF
@@ -143,7 +143,7 @@ EOF
     mkdir -p "$quirky"
     dd if=/dev/zero of="$quirky/payload" bs=1024 count=5 2> /dev/null
 
-    run bash --noprofile --norc << EOF
+    run /bin/bash --noprofile --norc << EOF
 $(prelude)
 get_path_size_kb "$quirky/payload"
 EOF

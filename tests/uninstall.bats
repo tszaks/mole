@@ -55,7 +55,7 @@ create_app_artifacts() {
 	create_app_artifacts
 
 	result="$(
-		HOME="$HOME" bash --noprofile --norc <<'EOF'
+		HOME="$HOME" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 find_app_files "com.example.TestApp" "TestApp"
@@ -81,7 +81,7 @@ EOF
 	touch "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments/com.apple.systemsettings.sfl3"
 
 	result="$(
-		HOME="$HOME" bash --noprofile --norc <<'EOF'
+		HOME="$HOME" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 find_app_files "com.rogueamoeba.soundsource" "SoundSource"
@@ -128,7 +128,7 @@ PLIST
 	touch "$HOME/Library/Preferences/org.sparkle-project.Sparkle.Autoupdate.plist"
 
 	result="$(
-		HOME="$HOME" APP="$app" bash --noprofile --norc <<'EOF'
+		HOME="$HOME" APP="$app" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 find_app_files "com.rogueamoeba.soundsource" "SoundSource" "$APP"
@@ -160,7 +160,7 @@ esac
 SCRIPT
 	chmod +x "$fakebin/find"
 
-	run env HOME="$HOME" PATH="$fakebin:$PATH" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PATH="$fakebin:$PATH" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -187,7 +187,7 @@ EOF
 
 	# Verify the find pattern itself, since the production find is hard-coded
 	# to /Library/* paths. This mirrors what app_protection.sh emits.
-	run bash --noprofile --norc -c "
+	run /bin/bash --noprofile --norc -c "
 		cd '$fakebase/Library/LaunchDaemons'
 		find . -maxdepth 1 \( -name 'com.foo.plist' -o -name 'com.foo.*.plist' \) | sort
 	"
@@ -199,7 +199,7 @@ EOF
 }
 
 @test "get_diagnostic_report_paths_for_app avoids executable prefix collisions" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -247,7 +247,7 @@ EOF
 	dd if=/dev/zero of="$HOME/sized/file2" bs=1024 count=2 >/dev/null 2>&1
 
 	result="$(
-		HOME="$HOME" bash --noprofile --norc <<'EOF'
+		HOME="$HOME" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 files="$(printf '%s
@@ -265,7 +265,7 @@ EOF
 	dd if=/dev/zero of="$HOME/sized-parent/child/payload" bs=1024 count=2 >/dev/null 2>&1
 
 	result="$(
-		HOME="$HOME" bash --noprofile --norc <<'EOF'
+		HOME="$HOME" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 parent="$HOME/sized-parent"
@@ -286,7 +286,7 @@ EOF
 	dd if=/dev/zero of="$HOME/preview-size-file" bs=1024 count=1 >/dev/null 2>&1
 
 	result="$(
-		HOME="$HOME" bash --noprofile --norc <<'EOF'
+		HOME="$HOME" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -301,7 +301,7 @@ EOF
 @test "batch_uninstall_applications removes selected app data" {
 	create_app_artifacts
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -345,7 +345,7 @@ EOF
 @test "uninstall_bundle_id_has_surviving_sibling detects unselected same-bundle install" {
 	mkdir -p "$HOME/Applications/Shared.app" "$HOME/Applications/Shared-beta.app"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -392,7 +392,7 @@ EOF
 	touch "$HOME/Library/Preferences/com.example.Shared.plist"
 	mkdir -p "$HOME/Library/Caches/Shared-beta"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -460,7 +460,7 @@ EOF
 	printf '%s' "$HOME/Applications/SharedName-beta.app/Contents/MacOS/SharedName" > "$HOME/Library/LaunchAgents/com.thirdparty.betahelper.plist"
 	printf '%s' "$HOME/Applications/SharedName.app/Contents/MacOS/SharedName" > "$HOME/Library/LaunchAgents/com.thirdparty.stablehelper.plist"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -590,7 +590,7 @@ EOF
 @test "batch_uninstall_applications blocks official-uninstaller apps" {
 	mkdir -p "$HOME/Applications/Falcon.app"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -618,7 +618,7 @@ EOF
 	mkdir -p "$HOME/Applications/ReviewOnly.app" "$HOME/system"
 	touch "$HOME/system/com.example.review.helper"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -667,7 +667,7 @@ EOF
 @test "batch_uninstall_applications dry-run does not report expected leftovers as failures" {
 	create_app_artifacts
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -731,7 +731,7 @@ STUB
 	chmod +x "$stubdir/osascript"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$stubdir:$PATH" \
-		TRACE_PATH="$trace" bash --noprofile --norc <<'EOF'
+		TRACE_PATH="$trace" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -807,7 +807,7 @@ STUB
 	chmod +x "$stubdir/osascript"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$stubdir:$PATH" \
-		TRACE_PATH="$trace" bash --noprofile --norc <<'EOF'
+		TRACE_PATH="$trace" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -877,7 +877,7 @@ STUB
 	chmod +x "$stubdir/osascript"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$stubdir:$PATH" \
-		TRACE_PATH="$trace" bash --noprofile --norc <<'EOF'
+		TRACE_PATH="$trace" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -946,7 +946,7 @@ STUB
 	for spoofed in Finder Dock loginwindow WindowServer SystemUIServer; do
 		: > "$trace"
 		run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$stubdir:$PATH" \
-			TRACE_PATH="$trace" SPOOFED="$spoofed" bash --noprofile --norc <<'EOF'
+			TRACE_PATH="$trace" SPOOFED="$spoofed" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -997,7 +997,7 @@ EOF
 	# running app's bundle; we should warn the user but proceed.
 	create_app_artifacts
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1056,7 +1056,7 @@ EOF
 	touch "$HOME/Library/LaunchAgents/com.example.TestApp.helper.plist"
 	touch "$HOME/Library/LaunchAgents/com.example.TestApplication.plist"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1093,7 +1093,7 @@ EOF
 }
 
 @test "batch_uninstall_applications warns when removed app declares Local Network usage" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1141,7 +1141,7 @@ EOF
 }
 
 @test "batch_uninstall_applications skips Local Network warning for regular apps" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1196,7 +1196,7 @@ EOF
 	touch "$HOME/Library/Logs/TestApp/log5.log"
 	touch "$HOME/Library/Logs/TestApp/log6.log"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1242,7 +1242,7 @@ EOF
 }
 
 @test "uninstall_persist_cache_file heals non-writable destination" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 # Source only the helper by evaluating its function definition.
@@ -1273,7 +1273,7 @@ EOF
 	# PIDs get recycled quickly on CI and a stale `kill -9 $pid` can succeed
 	# against an unrelated process, producing a false HANG. The marker
 	# approach only cares about whether the helper itself completed.
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 eval "$(sed -n '/^uninstall_persist_cache_file()/,/^}$/p' "$PROJECT_ROOT/bin/uninstall.sh")"
 
@@ -1308,7 +1308,7 @@ EOF
 }
 
 @test "uninstall_persist_cache_file is a no-op when source is empty" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 eval "$(sed -n '/^uninstall_persist_cache_file()/,/^}$/p' "$PROJECT_ROOT/bin/uninstall.sh")"
 
@@ -1327,7 +1327,7 @@ EOF
 }
 
 @test "cached uninstall metadata is rejected when the current bundle is protected" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
@@ -1355,7 +1355,7 @@ EOF
 }
 
 @test "cached uninstall metadata is rejected when the app is background-only" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
@@ -1386,7 +1386,7 @@ EOF
 }
 
 @test "OneDrive Mac App Store bundle is eligible even when marked background-only" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
@@ -1418,7 +1418,7 @@ EOF
 }
 
 @test "eligible uninstall metadata uses the current bundle id over stale cache" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 eval "$(sed -n '/^uninstall_resolve_bundle_id()/,/^uninstall_app_inventory_fingerprint()/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
@@ -1450,7 +1450,7 @@ EOF
 	mkdir -p "$HOME/test_dir"
 	touch "$HOME/test_dir/file.txt"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -1461,7 +1461,7 @@ EOF
 }
 
 @test "decode_file_list validates base64 encoding" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1476,7 +1476,7 @@ EOF
 }
 
 @test "decode_file_list rejects invalid base64" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1492,7 +1492,7 @@ EOF
 }
 
 @test "bootout_login_item_helpers never touches the com.apple namespace" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1518,7 +1518,7 @@ EOF
 }
 
 @test "decode_bundle_id_list preserves login item helper ids" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1546,7 +1546,7 @@ EOF
 }
 
 @test "uninstall_resolve_display_name keeps versioned app names when metadata is generic" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -1584,7 +1584,7 @@ EOF
 }
 
 @test "decode_file_list handles empty input" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1598,7 +1598,7 @@ EOF
 }
 
 @test "decode_file_list rejects non-absolute paths" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1615,7 +1615,7 @@ EOF
 }
 
 @test "decode_file_list handles both BSD and GNU base64 formats" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1637,7 +1637,7 @@ EOF
 }
 
 @test "refresh_launch_services_after_uninstall falls back after timeout" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -1685,7 +1685,7 @@ EOF
 	touch "$HOME/.local/bin/mo"
 	mkdir -p "$HOME/.config/mole" "$HOME/.cache/mole" "$HOME/Library/Logs/mole"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" MOLE_TEST_MODE=1 bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }
@@ -1734,7 +1734,7 @@ EOF
 	touch "$HOME/.local/bin/mo"
 	mkdir -p "$HOME/.config/mole" "$HOME/.cache/mole" "$HOME/Library/Logs/mole"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" MOLE_TEST_MODE=1 bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }
@@ -1765,7 +1765,7 @@ exit 0
 EOF
 	chmod +x "$fake_global_bin/brew"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_global_bin:/usr/bin:/bin" MOLE_TEST_MODE=1 bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_global_bin:/usr/bin:/bin" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }
@@ -1783,7 +1783,7 @@ EOF
 	[[ "$output" != *"brew uninstall --force mole"* ]]
 }
 @test "match_apps_by_name finds exact match case-insensitively" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 selected_apps=()
 apps_data=(
@@ -1803,7 +1803,7 @@ EOF
 }
 
 @test "match_apps_by_name finds by directory name" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 selected_apps=()
 apps_data=(
@@ -1821,7 +1821,7 @@ EOF
 }
 
 @test "match_apps_by_name warns on no match" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 selected_apps=()
 apps_data=(
@@ -1838,7 +1838,7 @@ EOF
 }
 
 @test "match_apps_by_name handles multiple app names" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 selected_apps=()
 apps_data=(
@@ -1862,7 +1862,7 @@ EOF
 }
 
 @test "match_apps_by_name falls back to substring match" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 selected_apps=()
 apps_data=(
@@ -1884,7 +1884,7 @@ EOF
 }
 
 @test "match_apps_by_name does not duplicate when same name given twice" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 selected_apps=()
 apps_data=(
@@ -1900,7 +1900,7 @@ EOF
 }
 
 @test "main clears pending input before app selection after scan (#726)" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 
 trace_file="$HOME/uninstall-trace.log"
@@ -1943,7 +1943,7 @@ INNER
 }
 
 @test "main keeps scan and selector on one alternate screen until cancel (#1194)" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 
 trace_file="$HOME/uninstall-screen-trace.log"
@@ -1997,7 +1997,7 @@ INNER
 }
 
 @test "scan_applications starts feedback before discovery and cleans no-app state" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_FORCE_SCAN_SPINNER=1 bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_FORCE_SCAN_SPINNER=1 /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 
 trace_file="$HOME/scan-feedback-trace.log"
@@ -2053,7 +2053,7 @@ INNER
 @test "select_apps_for_uninstall drains pending input before opening paginated menu" {
 	mkdir -p "$HOME/Applications/TraceApp.app"
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 
 trace_file="$HOME/selector-drain-trace.log"
@@ -2092,7 +2092,7 @@ INNER
 }
 
 @test "paginated menu can ignore one initial Enter for uninstall launch guard" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2125,7 +2125,7 @@ INNER
 }
 
 @test "paginated menu skips Size sort when size metadata is unavailable (#1126)" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2162,7 +2162,7 @@ INNER
 }
 
 @test "paginated menu reverses Size order when size metadata is available (#1126)" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="xterm-256color" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2221,7 +2221,7 @@ CACHE
 CACHE
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" FIRST_CACHE="$first_cache" SECOND_CACHE="$second_cache" \
-		bash --noprofile --norc <<'INNER'
+		/bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -2307,7 +2307,7 @@ INNER
 	apps_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-723-trash.XXXXXX")"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+		APPS_CACHE_FILE="$apps_cache" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -2340,7 +2340,7 @@ INNER
 	apps_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-723-perm.XXXXXX")"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+		APPS_CACHE_FILE="$apps_cache" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -2382,7 +2382,7 @@ INNER
 CACHE
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+		APPS_CACHE_FILE="$apps_cache" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -2431,7 +2431,7 @@ INNER
 CACHE
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+		APPS_CACHE_FILE="$apps_cache" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -2475,7 +2475,7 @@ INNER
 	echo "" > "$apps_cache"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+		APPS_CACHE_FILE="$apps_cache" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -2512,7 +2512,7 @@ INNER
 CACHE
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+		APPS_CACHE_FILE="$apps_cache" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -2551,7 +2551,7 @@ _bg_items_runner() {
 	HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
 		DETAIL="$1" SUCCESS_PATH="$2" LAUNCHCTL_RC="${3:-113}" \
 		MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
-		bash --noprofile --norc <<'EOF'
+		/bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -2580,7 +2580,7 @@ EOF
 	# Sibling guard demotes bundle_id to "unknown" while helper ids stay
 	# valid; a loaded helper job must still be reported.
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
-		bash --noprofile --norc <<'EOF'
+		/bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -2604,7 +2604,7 @@ EOF
 	# Test mode must not probe launchctl at all; summaries stay silent so
 	# end-to-end uninstall tests never see a background-item warning.
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-		bash --noprofile --norc <<'EOF'
+		/bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"

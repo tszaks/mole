@@ -351,7 +351,7 @@ SCRIPT
 }
 
 @test "installer sudo reuse uses non-interactive sudo checks" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"

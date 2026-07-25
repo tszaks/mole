@@ -61,7 +61,7 @@ require_fd() {
 
     touch "$HOME/Downloads/Chrome.dmg"
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
@@ -81,7 +81,7 @@ require_fd() {
     touch "$HOME/Downloads/App3.iso"
     touch "$HOME/Downloads/App.mpkg"
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
@@ -105,7 +105,7 @@ require_fd() {
     touch "$HOME/Downloads/level1/level2/deep.dmg"
     touch "$HOME/Downloads/level1/level2/level3/too-deep.dmg"
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
@@ -128,7 +128,7 @@ require_fd() {
     touch "$HOME/Downloads/top.dmg"
     touch "$HOME/Downloads/level1/nested.dmg"
 
-    run env MOLE_INSTALLER_SCAN_MAX_DEPTH=1 bash -euo pipefail -c "
+    run env MOLE_INSTALLER_SCAN_MAX_DEPTH=1 /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -144,7 +144,7 @@ require_fd() {
         return 0
     fi
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
@@ -164,7 +164,7 @@ require_fd() {
     touch "$HOME/Downloads/archive.tar.gz"
     touch "$HOME/Downloads/Installer.dmg"
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
@@ -184,7 +184,7 @@ require_fd() {
 
     touch "$HOME/Downloads/My App Installer.dmg"
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
@@ -201,7 +201,7 @@ require_fd() {
 
     touch "$HOME/Downloads/App-v1.2.3_beta.pkg"
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
@@ -220,7 +220,7 @@ require_fd() {
     touch "$HOME/Downloads/document.pdf"
     touch "$HOME/Downloads/image.png"
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"
@@ -239,7 +239,7 @@ require_fd() {
     ln -s "$HOME/Downloads/real.dmg" "$HOME/Downloads/symlink.dmg"
     ln -s /nonexistent "$HOME/Downloads/dangling.lnk"
 
-    run bash -euo pipefail -c '
+    run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_installers_in_path "$2"

@@ -33,7 +33,7 @@ setup() {
 }
 
 @test "load_purge_config loads default paths when config file is missing" {
-    run env HOME="$HOME" bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
+    run env HOME="$HOME" /bin/bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
     
     [ "$status" -eq 0 ]
     
@@ -50,7 +50,7 @@ $HOME/custom/projects
 $HOME/work
 EOF
 
-    run env HOME="$HOME" bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
+    run env HOME="$HOME" /bin/bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
     
     [ "$status" -eq 0 ]
     
@@ -67,7 +67,7 @@ EOF
 ~/another/one
 EOF
 
-    run env HOME="$HOME" bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
+    run env HOME="$HOME" /bin/bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
     
     [ "$status" -eq 0 ]
     
@@ -86,7 +86,7 @@ $HOME/valid/path
 $HOME/another/path
 EOF
 
-    run env HOME="$HOME" bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${#PURGE_SEARCH_PATHS[@]}\"; echo \"\${PURGE_SEARCH_PATHS[*]}\""
+    run env HOME="$HOME" /bin/bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${#PURGE_SEARCH_PATHS[@]}\"; echo \"\${PURGE_SEARCH_PATHS[*]}\""
     
     [ "$status" -eq 0 ]
     
@@ -103,7 +103,7 @@ EOF
     local config_file="$HOME/.config/mole/purge_paths"
     touch "$config_file"
 
-    run env HOME="$HOME" bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
+    run env HOME="$HOME" /bin/bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
     
     [ "$status" -eq 0 ]
     
@@ -114,7 +114,7 @@ EOF
     local config_file="$HOME/.config/mole/purge_paths"
     echo "# Just a comment" > "$config_file"
 
-    run env HOME="$HOME" bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
+    run env HOME="$HOME" /bin/bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${PURGE_SEARCH_PATHS[*]}\""
 
     [ "$status" -eq 0 ]
 
@@ -131,7 +131,7 @@ $HOME/code
 $HOME/Code
 EOF
 
-    run env HOME="$HOME" bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${#PURGE_SEARCH_PATHS[@]}\""
+    run env HOME="$HOME" /bin/bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; echo \"\${#PURGE_SEARCH_PATHS[@]}\""
 
     [ "$status" -eq 0 ]
 
@@ -150,7 +150,7 @@ EOF
     touch "$HOME/code/myproject/package.json"
 
     # No config file, triggers discovery
-    run env HOME="$HOME" bash -c "
+    run env HOME="$HOME" /bin/bash -c "
         source '$PROJECT_ROOT/lib/clean/project.sh'
         discover_project_dirs
     "

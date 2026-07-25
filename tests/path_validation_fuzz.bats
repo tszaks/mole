@@ -54,7 +54,7 @@ setup() {
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "$line" ]] && continue
 
-        run bash --noprofile --norc -s -- "$line" <<'EOF'
+        run /bin/bash --noprofile --norc -s -- "$line" <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 validate_path_for_deletion "$1"
@@ -76,14 +76,14 @@ EOF
 }
 
 @test "generated control-character paths are rejected" {
-    run bash --noprofile --norc <<'EOF'
+    run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 validate_path_for_deletion $'/Users/me/with\nnewline'
 EOF
     [ "$status" -eq 1 ]
 
-    run bash --noprofile --norc <<'EOF'
+    run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 validate_path_for_deletion $'/Users/me/with\tab'
@@ -110,7 +110,7 @@ EOF
         # Victim sits directly under the redirected dir, so its parent (the
         # symlink) really resolves: this is the shape a hijacked cache root
         # takes, and the shape the guard must catch.
-        run bash --noprofile --norc <<EOF
+        run /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 validate_path_for_deletion "$link/victim"

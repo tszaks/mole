@@ -45,7 +45,7 @@ setup() {
     [ -f "$PROJECT_ROOT/scripts/check.sh" ]
     [ -x "$PROJECT_ROOT/scripts/check.sh" ]
 
-    run bash -c "grep -q 'Mole Check' '$PROJECT_ROOT/scripts/check.sh'"
+    run /bin/bash -c "grep -q 'Mole Check' '$PROJECT_ROOT/scripts/check.sh'"
     [ "$status" -eq 0 ]
 }
 
@@ -53,24 +53,24 @@ setup() {
     [ -f "$PROJECT_ROOT/scripts/test.sh" ]
     [ -x "$PROJECT_ROOT/scripts/test.sh" ]
 
-    run bash -c "grep -q 'Mole Test Runner' '$PROJECT_ROOT/scripts/test.sh'"
+    run /bin/bash -c "grep -q 'Mole Test Runner' '$PROJECT_ROOT/scripts/test.sh'"
     [ "$status" -eq 0 ]
 }
 
 @test "test.sh includes test lint step" {
-    run bash -c "grep -q 'Test script lint' '$PROJECT_ROOT/scripts/test.sh'"
+    run /bin/bash -c "grep -q 'Test script lint' '$PROJECT_ROOT/scripts/test.sh'"
     [ "$status" -eq 0 ]
 }
 
 @test "Makefile has build target for Go binaries" {
-    run bash -c "grep -Eq '(^|[[:space:]])(go|\\$\\(GO\\))[[:space:]]+build' '$PROJECT_ROOT/Makefile'"
+    run /bin/bash -c "grep -Eq '(^|[[:space:]])(go|\\$\\(GO\\))[[:space:]]+build' '$PROJECT_ROOT/Makefile'"
     [ "$status" -eq 0 ]
 }
 
 @test "release builds disable cgo and check minimum macOS version" {
-    run bash -c "grep -q '^RELEASE_GO_ENV := CGO_ENABLED=0$' '$PROJECT_ROOT/Makefile'"
+    run /bin/bash -c "grep -q '^RELEASE_GO_ENV := CGO_ENABLED=0$' '$PROJECT_ROOT/Makefile'"
     [ "$status" -eq 0 ]
-    run bash -c "grep -q 'scripts/check_release_minos.sh' '$PROJECT_ROOT/.github/workflows/release.yml'"
+    run /bin/bash -c "grep -q 'scripts/check_release_minos.sh' '$PROJECT_ROOT/.github/workflows/release.yml'"
     [ "$status" -eq 0 ]
     [ -x "$PROJECT_ROOT/scripts/check_release_minos.sh" ]
 }
@@ -99,14 +99,14 @@ setup() {
 }
 
 @test "setup-quick-launchers.sh has detect_mo function" {
-    run bash -c "grep -q 'detect_mo()' '$PROJECT_ROOT/scripts/setup-quick-launchers.sh'"
+    run /bin/bash -c "grep -q 'detect_mo()' '$PROJECT_ROOT/scripts/setup-quick-launchers.sh'"
     [ "$status" -eq 0 ]
 }
 
 @test "setup-quick-launchers.sh has Raycast script generation" {
-    run bash -c "grep -q 'create_raycast_commands' '$PROJECT_ROOT/scripts/setup-quick-launchers.sh'"
+    run /bin/bash -c "grep -q 'create_raycast_commands' '$PROJECT_ROOT/scripts/setup-quick-launchers.sh'"
     [ "$status" -eq 0 ]
-    run bash -c "grep -q 'write_raycast_script' '$PROJECT_ROOT/scripts/setup-quick-launchers.sh'"
+    run /bin/bash -c "grep -q 'write_raycast_script' '$PROJECT_ROOT/scripts/setup-quick-launchers.sh'"
     [ "$status" -eq 0 ]
 }
 
@@ -164,9 +164,9 @@ EOF
 }
 
 @test "install.sh supports dev branch installs" {
-    run bash -c "grep -q 'refs/heads/dev.tar.gz' '$PROJECT_ROOT/install.sh'"
+    run /bin/bash -c "grep -q 'refs/heads/dev.tar.gz' '$PROJECT_ROOT/install.sh'"
     [ "$status" -eq 0 ]
-    run bash -c "grep -q 'MOLE_VERSION=\"dev\"' '$PROJECT_ROOT/install.sh'"
+    run /bin/bash -c "grep -q 'MOLE_VERSION=\"dev\"' '$PROJECT_ROOT/install.sh'"
     [ "$status" -eq 0 ]
 }
 

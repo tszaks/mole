@@ -39,7 +39,7 @@ load_installer_binary_helpers() {
 export -f load_installer_binary_helpers
 
 @test "download_binary installs release asset only after checksum verification" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -92,7 +92,7 @@ EOF
 }
 
 @test "download_binary aborts on checksum mismatch without downgrading to a source build" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -156,7 +156,7 @@ EOF
 }
 
 @test "download_binary preserves the installed helper when verification and rebuild fail (#1193)" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -211,7 +211,7 @@ EOF
 }
 
 @test "download_binary aborts when SHA256SUMS has no matching asset entry" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -268,7 +268,7 @@ EOF
 }
 
 @test "download_binary aborts when SHA256SUMS cannot be downloaded" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -326,7 +326,7 @@ EOF
 }
 
 @test "download_binary verifies fallback release asset against fallback checksums" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -377,7 +377,7 @@ EOF
 }
 
 @test "download_binary aborts on fallback-tag checksum mismatch without a source build" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -449,7 +449,7 @@ EOF
 	# ("Updated to latest version, 1.45.0" while fetching V1.47.0).
 	# MOLE_TEST_NO_AUTH must not leak in: it would take the blocked-in-test-mode
 	# branch instead of the real ensure_sudo_ready gate. sudo is a function mock.
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=0 MOLE_TEST_MODE=0 bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=0 MOLE_TEST_MODE=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 eval "$(sed -n '/^needs_sudo() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
@@ -492,7 +492,7 @@ EOF
 }
 
 @test "verify_installation rejects a stale entry script after an update (#update-incident)" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -uo pipefail
 
 eval "$(sed -n '/^get_source_version() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
@@ -530,7 +530,7 @@ EOF
 	# Regression: the previous `[[ -n "$h" ]] && printf` form returned 1
 	# whenever the commit hash was empty (always the case on stable), making
 	# the block redirect look like an I/O failure and tripping the warning.
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 CONFIG_DIR="$HOME/config"
 mkdir -p "$CONFIG_DIR"
@@ -561,7 +561,7 @@ EOF
 }
 
 @test "verify_release_attestation maps gh availability and result to 2/0/1" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 eval "$(sed -n '/^verify_release_attestation()/,/^}/p' "$PROJECT_ROOT/install.sh")"
@@ -601,7 +601,7 @@ EOF
 }
 
 @test "verify_release_asset_checksum enforces attestation policy gate" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 
 eval "$(sed -n '/^extract_release_checksum()/,/^}/p' "$PROJECT_ROOT/install.sh")"

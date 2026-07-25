@@ -27,7 +27,7 @@ run_hook() {
     local payload="$1"
     # shellcheck disable=SC2016  # the inner bash receives payload and hook as argv
     run env PATH="$STUB_BIN:$PATH" FORMAT_LOG="$FORMAT_LOG" \
-        bash -c 'printf "%s\n" "$1" | /bin/bash "$2"' _ "$payload" "$HOOK"
+        /bin/bash -c 'printf "%s\n" "$1" | /bin/bash "$2"' _ "$payload" "$HOOK"
 }
 
 @test "Claude file_path payload formats one repository file" {

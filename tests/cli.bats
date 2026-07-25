@@ -198,23 +198,23 @@ EOF
 	# The controls line is rendered only under a tty, so test the pure builder
 	# directly. Both the negative and positive cases run so the assertion
 	# cannot pass vacuously.
-	run bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true false"
+	run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true false"
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" != *"U Update"* ]] || return 1
 
-	run bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true true"
+	run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line true true"
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"U Update"* ]] || return 1
 
 	# TouchID setup takes precedence: no update shortcut even if one is ready.
-	run bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line false true"
+	run /bin/bash --noprofile --norc -c "MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1 HOME=\"\$(mktemp -d)\" source '$PROJECT_ROOT/mole'; _main_menu_controls_line false true"
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"T TouchID"* ]] || return 1
 	[[ "$output" != *"U Update"* ]] || return 1
 }
 
 @test "show_main_menu keeps history out of the primary menu" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 HOME="$(mktemp -d)"
 export HOME MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1
@@ -234,7 +234,7 @@ EOF
 }
 
 @test "interactive_main_menu ignores U shortcut when update notice is hidden" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 HOME="$(mktemp -d)"
 export HOME MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1
@@ -262,7 +262,7 @@ EOF
 }
 
 @test "read_update_message_cache ignores notices older than current script" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 HOME="$(mktemp -d)"
 export HOME MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1
@@ -280,7 +280,7 @@ EOF
 }
 
 @test "interactive_main_menu accepts U shortcut when update notice is visible" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 HOME="$(mktemp -d)"
 export HOME MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1
@@ -302,7 +302,7 @@ EOF
 }
 
 @test "interactive_main_menu drains numeric shortcut Enter before launching uninstall" {
-	run bash --noprofile --norc <<'EOF'
+	run /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 HOME="$(mktemp -d)"
 export HOME MOLE_TEST_MODE=1 MOLE_SKIP_MAIN=1
@@ -345,7 +345,7 @@ EOF
 }
 
 @test "mo optimize command is recognized" {
-	run bash -c "grep -Eq '\"optimi[sz]e\"[[:space:]]*\\|[[:space:]]*\"optimi[sz]e\"' '$PROJECT_ROOT/mole'"
+	run /bin/bash -c "grep -Eq '\"optimi[sz]e\"[[:space:]]*\\|[[:space:]]*\"optimi[sz]e\"' '$PROJECT_ROOT/mole'"
 	[ "$status" -eq 0 ]
 }
 

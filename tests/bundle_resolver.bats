@@ -70,7 +70,7 @@ EOF
 @test "bundle_has_installed_app finds an app by CFBundleIdentifier (Spotlight miss)" {
     make_app "$FAKE_APPS/KeePassXC.app" "org.keepassxc.KeePassXC"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "org.keepassxc.KeePassXC"
 EOF
@@ -85,7 +85,7 @@ EOF
     # timeout path here proves the filesystem fallback still executes.
     make_app "$FAKE_APPS/KeePassXC.app" "org.keepassxc.KeePassXC"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/base.sh"
 source "$PROJECT_ROOT/lib/core/timeout.sh"
@@ -113,7 +113,7 @@ EOF
     mkdir -p "$app/Contents/Library/LaunchServices"
     : > "$app/Contents/Library/LaunchServices/com.adobe.ARMDC.SMJobBlessHelper"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.adobe.ARMDC.SMJobBlessHelper"
 EOF
@@ -124,7 +124,7 @@ EOF
 @test "bundle_has_installed_app returns non-zero when no app declares the bundle ID" {
     make_app "$FAKE_APPS/SomeoneElse.app" "com.example.someone"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.ghost.app"
 EOF
@@ -135,7 +135,7 @@ EOF
 @test "bundle_has_installed_app finds parent app via .helper suffix (issue #753)" {
     make_app "$FAKE_APPS/AlDente Pro.app" "com.apphousekitchen.aldente-pro"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.apphousekitchen.aldente-pro.helper"
 EOF
@@ -146,7 +146,7 @@ EOF
 @test "bundle_has_installed_app finds parent app via capitalized .Helper suffix (issue #1210)" {
     make_app "$FAKE_APPS/App Tamer.app" "com.stclairsoft.AppTamer"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.stclairsoft.AppTamer.Helper"
 EOF
@@ -157,7 +157,7 @@ EOF
 @test "bundle_has_installed_app matches CFBundleIdentifier case-insensitively" {
     make_app "$FAKE_APPS/Example.app" "com.Example.MyApp"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.example.myapp"
 EOF
@@ -168,7 +168,7 @@ EOF
 @test "bundle_has_installed_app finds parent app via .daemon suffix" {
     make_app "$FAKE_APPS/Example.app" "com.example.myapp"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.example.myapp.daemon"
 EOF
@@ -179,7 +179,7 @@ EOF
 @test "bundle_has_installed_app finds parent app via .service suffix" {
     make_app "$FAKE_APPS/Clash Verge.app" "io.github.clash-verge-rev.clash-verge-rev"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "io.github.clash-verge-rev.clash-verge-rev.service"
 EOF
@@ -190,7 +190,7 @@ EOF
 @test "bundle_has_installed_app returns non-zero for .helper when parent app absent" {
     make_app "$FAKE_APPS/Other.app" "com.example.other"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.apphousekitchen.aldente-pro.helper"
 EOF
@@ -199,7 +199,7 @@ EOF
 }
 
 @test "bundle_has_installed_app rejects malformed bundle IDs" {
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "has spaces"
 EOF
@@ -212,7 +212,7 @@ EOF
     # com.microsoft.autoupdate.helper should match Office apps only.
     make_app "$FAKE_APPS/Microsoft Word.app" "com.microsoft.Word"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.microsoft.autoupdate.helper"
 EOF
@@ -223,7 +223,7 @@ EOF
 @test "bundle_has_installed_app does not use broad Microsoft vendor prefix" {
     make_app "$FAKE_APPS/Microsoft Teams.app" "com.microsoft.teams2"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.microsoft.some.other.helper"
 EOF
@@ -237,7 +237,7 @@ EOF
     make_app "$FAKE_APPS/SomeApp.app" "com.example.someapp"
     make_app "$FAKE_APPS/AnotherApp.app" "com.example.otherapp"
 
-    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env FAKE_APPS="$FAKE_APPS" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 $(prelude)
 bundle_has_installed_app "com.example.unmapped.id"
 EOF

@@ -154,7 +154,7 @@ EOF
 
 @test "mo history early dispatch respects source guard" {
     # shellcheck disable=SC2016
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc -c '
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc -c '
 set -euo pipefail
 set -- history
 MOLE_TEST_MODE=1

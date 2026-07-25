@@ -33,7 +33,7 @@ setup() {
 }
 
 @test "mo_spinner_chars returns default sequence" {
-    result="$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mo_spinner_chars")"
+    result="$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mo_spinner_chars")"
     [ "$result" = "|/-\\" ]
 }
 
@@ -42,12 +42,12 @@ setup() {
     if [[ "$(uname -m)" == "arm64" ]]; then
         expected="Apple Silicon"
     fi
-    result="$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; detect_architecture")"
+    result="$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; detect_architecture")"
     [ "$result" = "$expected" ]
 }
 
 @test "get_free_space returns a non-empty value" {
-    result="$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; get_free_space")"
+    result="$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; get_free_space")"
     [[ -n "$result" ]]
 }
 
@@ -62,7 +62,7 @@ MOCK
     chmod +x "$mock_bin/df"
 
     output="$(
-        HOME="$HOME" PATH="$mock_bin:$PATH" bash --noprofile --norc <<'EOF'
+        HOME="$HOME" PATH="$mock_bin:$PATH" /bin/bash --noprofile --norc <<'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
 get_free_space_kb
 get_free_space
@@ -87,7 +87,7 @@ EOF
 }
 
 @test "cleanup_result_color_kb always returns green" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -105,7 +105,7 @@ EOF
 }
 
 @test "mole_is_reverse_dns_bundle_id rejects defaults domains and glob-like ids" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -128,7 +128,7 @@ EOF
 }
 
 @test "mole_name_has_bundle_id_boundary rejects sibling bundle prefixes" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -185,7 +185,7 @@ EOF
 @test "log_info prints message and appends to log file" {
     local message="Informational message from test"
     local stdout_output
-    stdout_output="$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; log_info '$message'")"
+    stdout_output="$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; log_info '$message'")"
     [[ "$stdout_output" == *"$message"* ]]
 
     local log_file="$HOME/Library/Logs/mole/mole.log"
@@ -197,7 +197,7 @@ EOF
     local message="Something went wrong"
     local stderr_file="$HOME/log_error_stderr.txt"
 
-    HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; log_error '$message' 1>/dev/null 2>'$stderr_file'"
+    HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; log_error '$message' 1>/dev/null 2>'$stderr_file'"
 
     [[ -s "$stderr_file" ]]
     grep -q "$message" "$stderr_file"
@@ -208,7 +208,7 @@ EOF
 }
 
 @test "log_operation recreates operations log if the log directory disappears mid-session" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 rm -rf "$HOME/Library/Logs/mole"
@@ -223,7 +223,7 @@ EOF
 
 @test "should_protect_path protects Mole runtime logs" {
     result="$(
-        HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc -c \
+        HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc -c \
             'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$HOME/Library/Logs/mole/operations.log" && echo protected || echo not-protected'
     )"
     [ "$result" = "protected" ]
@@ -238,16 +238,16 @@ EOF
         truncate -s 1100k "$log_file"
     fi
 
-    HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'"
+    HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'"
     [[ -f "${log_file}.old" ]]
 
-    result=$(HOME="$HOME" MOLE_LOG_ROTATED=1 bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_LOG_ROTATED")
+    result=$(HOME="$HOME" MOLE_LOG_ROTATED=1 /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_LOG_ROTATED")
     [[ "$result" == "1" ]]
 }
 
 @test "drain_pending_input clears stdin buffer" {
     result=$(
-        (echo -e "test\ninput" | HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; drain_pending_input; echo done") &
+        (echo -e "test\ninput" | HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; drain_pending_input; echo done") &
         pid=$!
         sleep 2
         if kill -0 "$pid" 2> /dev/null; then
@@ -263,7 +263,7 @@ EOF
 
 @test "bytes_to_human converts byte counts into readable units" {
     output="$(
-        HOME="$HOME" bash --noprofile --norc << 'EOF'
+        HOME="$HOME" /bin/bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
 bytes_to_human 512
 bytes_to_human 2000
@@ -285,7 +285,7 @@ EOF
 
 @test "percent_encode_path encodes spaces and multibyte characters per byte" {
     output="$(
-        HOME="$HOME" bash --noprofile --norc << 'EOF'
+        HOME="$HOME" /bin/bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
 percent_encode_path "/Users/x/Library/Application Support/中文 dir"
 printf '\n'
@@ -305,7 +305,7 @@ EOF
 
 @test "format_path_link falls back to plain tilde path without a TTY" {
     output="$(
-        HOME="$HOME" bash --noprofile --norc << 'EOF'
+        HOME="$HOME" /bin/bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
 format_path_link "$HOME/Library/Application Support/MobileSync/Backup"
 printf '\n'
@@ -319,7 +319,7 @@ EOF
 
 @test "colorize_human_size colors dry-run size units by suffix" {
     output="$(
-        env -u NO_COLOR HOME="$HOME" bash --noprofile --norc << 'EOF'
+        env -u NO_COLOR HOME="$HOME" /bin/bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
 colorize_human_size "1.00GB"
 printf '\n'
@@ -344,7 +344,7 @@ EOF
 }
 
 @test "create_temp_file and create_temp_dir are tracked and cleaned" {
-    HOME="$HOME" bash --noprofile --norc << 'EOF'
+    HOME="$HOME" /bin/bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
 create_temp_file > "$HOME/temp_file_path.txt"
 create_temp_dir > "$HOME/temp_dir_path.txt"
@@ -360,22 +360,22 @@ EOF
 
 
 @test "should_protect_data protects system and critical apps" {
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.apple.Safari' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.apple.Safari' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.clash.app' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.clash.app' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'io.github.clash-verge-rev.clash-verge-rev' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'io.github.clash-verge-rev.clash-verge-rev' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.amnezia.awg' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.amnezia.awg' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.wireguard.macos' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.wireguard.macos' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.example.RegularApp' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.example.RegularApp' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 }
 
@@ -383,25 +383,25 @@ EOF
 # so the orphan sweep deleted them and users lost their default printer
 # and recent-printer list. See #731.
 @test "should_protect_data protects CUPS printing prefs (#731)" {
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.cups.PrintingPrefs' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.cups.PrintingPrefs' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.cups.printers' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.cups.printers' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 }
 
 @test "should_protect_data protects Codex runtime identifiers" {
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'Codex' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'Codex' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.openai.codex' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.openai.codex' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'codex-runtimes' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'codex-runtimes' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
     local codex_runtimes_path="$HOME/.cache/codex-runtimes"
-    result=$(HOME="$HOME" TARGET_PATH="$codex_runtimes_path" bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
+    result=$(HOME="$HOME" TARGET_PATH="$codex_runtimes_path" /bin/bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
     [ "$result" = "protected" ]
 
     for codex_state_path in \
@@ -412,97 +412,97 @@ EOF
         "$HOME/.codex/cache/codex_app_directory/index.json" \
         "$HOME/.codex/state_5.sqlite" \
         "$HOME/.codex/logs_2.sqlite"; do
-        result=$(HOME="$HOME" TARGET_PATH="$codex_state_path" bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
+        result=$(HOME="$HOME" TARGET_PATH="$codex_state_path" /bin/bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
         [ "$result" = "protected" ]
     done
 }
 
 @test "should_protect_data covers Raycast wildcard variants" {
     for id in com.raycast.macos com.raycast.shared com.raycast.macos.BrowserExtension com.raycast-x.macos; do
-        result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data '$id' && echo 'protected' || echo 'not-protected'")
+        result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data '$id' && echo 'protected' || echo 'not-protected'")
         [ "$result" = "protected" ]
     done
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.raycastfoo.bar' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.raycastfoo.bar' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 }
 
 @test "should_protect_path protects NetworkExtension VPN preferences" {
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_path '/Volumes/Data/Library/Preferences/com.apple.networkextension.plist' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_path '/Volumes/Data/Library/Preferences/com.apple.networkextension.plist' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
     local user_network_ext_pref="$HOME/Library/Preferences/com.apple.networkextension.necp.plist"
-    result=$(HOME="$HOME" TARGET_PATH="$user_network_ext_pref" bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
+    result=$(HOME="$HOME" TARGET_PATH="$user_network_ext_pref" /bin/bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo "protected" || echo "not-protected"')
     [ "$result" = "protected" ]
 }
 
 @test "input methods are protected during cleanup but allowed for uninstall" {
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.tencent.inputmethod.QQInput' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.tencent.inputmethod.QQInput' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.sogou.inputmethod.pinyin' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'com.sogou.inputmethod.pinyin' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.tencent.inputmethod.QQInput' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.tencent.inputmethod.QQInput' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.inputmethod.SCIM' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.inputmethod.SCIM' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 }
 
 @test "Karabiner-Elements is protected during cleanup but allowed for uninstall" {
     # Keyboard config and preferences stay protected during clean
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.pqrs.Karabiner-Elements.Settings' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.pqrs.Karabiner-Elements.Settings' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
     # But the app itself is a third-party app, not a system component, so it can be uninstalled
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'org.pqrs.Karabiner-Elements.Settings' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'org.pqrs.Karabiner-Elements.Settings' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 
     # The main app bundle id (the actual `mo uninstall --list` key) behaves the same:
     # removable from uninstall, still data-protected during clean.
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'org.pqrs.Karabiner-Elements' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'org.pqrs.Karabiner-Elements' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.pqrs.Karabiner-Elements' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_data 'org.pqrs.Karabiner-Elements' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 }
 
 @test "Apple apps from App Store can be uninstalled (Issue #386)" {
     # Xcode should NOT be protected from uninstall
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.dt.Xcode' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.dt.Xcode' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 
     # Final Cut Pro should NOT be protected from uninstall
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.FinalCutPro' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.FinalCutPro' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 
     # GarageBand should NOT be protected from uninstall
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.GarageBand' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.GarageBand' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 
     # iWork apps should NOT be protected from uninstall
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.iWork.Pages' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.iWork.Pages' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "not-protected" ]
 
     # But Safari (system app) should still be protected
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.Safari' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.Safari' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 
     # And Finder should still be protected
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.finder' && echo 'protected' || echo 'not-protected'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; should_protect_from_uninstall 'com.apple.finder' && echo 'protected' || echo 'not-protected'")
     [ "$result" = "protected" ]
 }
 
 @test "print_summary_block formats output correctly" {
-    result=$(HOME="$HOME" bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; print_summary_block 'success' 'Test Summary' 'Detail 1' 'Detail 2'")
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; print_summary_block 'success' 'Test Summary' 'Detail 1' 'Detail 2'")
     [[ "$result" == *"Test Summary"* ]]
     [[ "$result" == *"Detail 1"* ]]
     [[ "$result" == *"Detail 2"* ]]
 }
 
 @test "start_inline_spinner and stop_inline_spinner work in non-TTY" {
-    result=$(HOME="$HOME" bash --noprofile --norc << 'EOF'
+    result=$(HOME="$HOME" /bin/bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
 MOLE_SPINNER_PREFIX="  " start_inline_spinner "Testing..."
 sleep 0.1
@@ -538,7 +538,7 @@ EOF
 }
 
 @test "update_inline_spinner_message returns 1 without an active spinner" {
-    run bash --noprofile --norc -c \
+    run /bin/bash --noprofile --norc -c \
         "source '$PROJECT_ROOT/lib/core/common.sh'; update_inline_spinner_message 'New text'"
     [ "$status" -eq 1 ]
 }
@@ -601,7 +601,7 @@ EOF
 
 @test "safe_clear_lines emits the same erase sequence per line to the target device" {
     local out="$HOME/clear-lines.out"
-    run bash --noprofile --norc -c \
+    run /bin/bash --noprofile --norc -c \
         "export MOLE_ANSI_SUPPORTED_CACHE=0; source '$PROJECT_ROOT/lib/core/common.sh'; safe_clear_lines 2 '$out'"
     [ "$status" -eq 0 ]
 
@@ -610,32 +610,32 @@ EOF
 }
 
 @test "read_key maps j/k/h/l to navigation" {
-    run bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'j' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'j' | read_key"
     [ "$output" = "DOWN" ]
 
-    run bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'k' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'k' | read_key"
     [ "$output" = "UP" ]
 
-    run bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'h' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'h' | read_key"
     [ "$output" = "LEFT" ]
 
-    run bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'l' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'l' | read_key"
     [ "$output" = "RIGHT" ]
 }
 
 @test "read_key maps uppercase J/K/H/L to navigation" {
-    run bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'J' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'J' | read_key"
     [ "$output" = "DOWN" ]
 
-    run bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'K' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'K' | read_key"
     [ "$output" = "UP" ]
 }
 
 @test "read_key maps gg to TOP and a lone g to OTHER" {
-    run bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf 'gg' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf 'gg' | read_key"
     [ "$output" = "TOP" ]
 
-    run bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf 'g' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf 'g' | read_key"
     [ "$output" = "OTHER" ]
 }
 
@@ -653,17 +653,17 @@ EOF
 }
 
 @test "read_key respects MOLE_READ_KEY_FORCE_CHAR" {
-    run bash -c "export MOLE_BASE_LOADED=1; export MOLE_READ_KEY_FORCE_CHAR=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'j' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; export MOLE_READ_KEY_FORCE_CHAR=1; source '$PROJECT_ROOT/lib/core/ui.sh'; echo -n 'j' | read_key"
     [ "$output" = "CHAR:j" ]
 }
 
 @test "read_key keeps Ctrl-C as quit when forcing printable characters" {
-    run bash -c "export MOLE_BASE_LOADED=1; export MOLE_READ_KEY_FORCE_CHAR=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf '\\003' | read_key"
+    run /bin/bash -c "export MOLE_BASE_LOADED=1; export MOLE_READ_KEY_FORCE_CHAR=1; source '$PROJECT_ROOT/lib/core/ui.sh'; printf '\\003' | read_key"
     [ "$output" = "QUIT" ]
 }
 
 @test "ensure_sudo_session returns 1 and sets MOLE_SUDO_ESTABLISHED=false in test mode" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'SCRIPT'
 source "$PROJECT_ROOT/lib/core/base.sh"
 source "$PROJECT_ROOT/lib/core/sudo.sh"
 MOLE_SUDO_ESTABLISHED=""
@@ -678,7 +678,7 @@ SCRIPT
 }
 
 @test "sudo helpers do not invoke sudo in no-auth test mode" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'SCRIPT'
 source "$PROJECT_ROOT/lib/core/base.sh"
 source "$PROJECT_ROOT/lib/core/sudo.sh"
 sudo() {
@@ -704,7 +704,7 @@ SCRIPT
 }
 
 @test "ensure_sudo_session short-circuits to 0 when session already established" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/base.sh"
 source "$PROJECT_ROOT/lib/core/sudo.sh"
@@ -720,7 +720,7 @@ SCRIPT
 }
 
 @test "adopt_sudo_session starts keepalive for cached sudo" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/base.sh"
 source "$PROJECT_ROOT/lib/core/sudo.sh"

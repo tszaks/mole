@@ -38,7 +38,7 @@ create_logical_file() {
 	mkdir -p "$nc_db_dir"
 	create_logical_file "$nc_db_dir/db" 1k
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -58,7 +58,7 @@ EOF
 	mkdir -p "$nc_db_dir"
 	create_logical_file "$nc_db_dir/db" 60m
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -79,7 +79,7 @@ EOF
 	local knowledge_db="$tmp_dir/Library/Application Support/Knowledge/knowledgeC.db"
 	create_logical_file "$knowledge_db" 1k
 
-	run env HOME="$tmp_dir" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+	run env HOME="$tmp_dir" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -105,7 +105,7 @@ echo "112640 total"
 EOF
 	chmod +x "$fake_bin/du"
 
-	run env HOME="$tmp_dir" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_bin:$PATH" bash --noprofile --norc <<EOF
+	run env HOME="$tmp_dir" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_bin:$PATH" /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/optimize/tasks.sh"

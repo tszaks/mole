@@ -73,7 +73,7 @@ bundle id: 3
 DUMP
     : > "$log_file"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" LSREGISTER_DUMP="$dump_file" LSREGISTER_LOG="$log_file" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" LSREGISTER_DUMP="$dump_file" LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/launch_services.sh"
@@ -121,7 +121,7 @@ bundle id: 3
 DUMP
     : > "$log_file"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" LSREGISTER_DUMP="$dump_file" LSREGISTER_LOG="$log_file" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" LSREGISTER_DUMP="$dump_file" LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/launch_services.sh"
@@ -151,7 +151,7 @@ EOF
 }
 
 @test "launch_services_stale_app_path_is_safe rejects unsafe, live, and malformed paths" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TEST_ROOT="$TEST_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TEST_ROOT="$TEST_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/launch_services.sh"
@@ -200,7 +200,7 @@ EOF
     write_lsregister_stub "$lsregister"
     : > "$log_file"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" LSREGISTER_DUMP="$dump_file" LSREGISTER_LOG="$log_file" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" LSREGISTER_DUMP="$dump_file" LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/launch_services.sh"

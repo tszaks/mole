@@ -41,7 +41,7 @@ teardown() {
     touch "$root/proj/package.json"
     printf '%s\n' "$root" > "$HOME/.config/mole/purge_paths"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOT1'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOT1'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -59,7 +59,7 @@ EOT1
 }
 
 @test "show_project_artifact_hint_notice renders sampled summary" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOT2'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOT2'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -84,7 +84,7 @@ EOT2
 }
 
 @test "show_project_artifact_hint_notice points zero-size samples to include-empty (#869)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOT2B'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOT2B'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -112,7 +112,7 @@ EOT2B
     mkdir -p "$root"
     printf '%s\n' "$root" > "$HOME/.config/mole/purge_paths"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOT2C'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOT2C'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -136,7 +136,7 @@ EOT2C
     printf '%s\n' "$root" > "$HOME/.config/mole/purge_paths"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TIMEOUT_HINT_SCAN_SEC=0 \
-        bash --noprofile --norc << 'EOT2D'
+        /bin/bash --noprofile --norc << 'EOT2D'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -173,7 +173,7 @@ EOT2D
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         MOLE_TIMEOUT_HINT_SCAN_SEC=1 \
         HINTS_ROOT="$root" \
-        bash --noprofile --norc << 'EOT_NESTED'
+        /bin/bash --noprofile --norc << 'EOT_NESTED'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -201,7 +201,7 @@ EOT_NESTED
 @test "show_system_data_hint_notice reports large clue paths" {
     mkdir -p "$HOME/Library/Developer/Xcode/DerivedData"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOT3'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOT3'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -241,7 +241,7 @@ EOT3
 </plist>
 PLIST
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOT4'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOT4'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -279,7 +279,7 @@ EOT4
 </plist>
 PLIST
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" UPDATER="$updater" bash --noprofile --norc <<'EOT4A'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" UPDATER="$updater" /bin/bash --noprofile --norc <<'EOT4A'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -317,7 +317,7 @@ EOT4A
 </plist>
 PLIST
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOT5'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOT5'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -348,7 +348,7 @@ EOT5
 </plist>
 PLIST
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOT6'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOT6'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -367,7 +367,7 @@ EOT6
     mkdir -p "$HOME/.ssh" "$HOME/.config" "$HOME/.npm" "$HOME/.cargo" "$HOME/.putty"
     touch -t 202401010000 "$HOME/.ssh" "$HOME/.config" "$HOME/.npm" "$HOME/.cargo" "$HOME/.putty"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -385,7 +385,7 @@ EOTD
     mkdir -p "$HOME/.custom-orphan-keep"
     touch -t 202401010000 "$HOME/.custom-orphan-keep"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -405,7 +405,7 @@ EOTD
     mkdir -p "$HOME/.fakecli-test-orphan"
     touch -t 202401010000 "$HOME/.fakecli-test-orphan"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -424,7 +424,7 @@ EOTD
     mkdir -p "$HOME/.fakecli-empty-orphan"
     touch -t 202401010000 "$HOME/.fakecli-empty-orphan"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -443,7 +443,7 @@ EOTD
     mkdir -p "$HOME/.fakecli-slow-orphan"
     touch -t 202401010000 "$HOME/.fakecli-slow-orphan"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -476,7 +476,7 @@ EOTD
 </plist>
 PLIST
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -503,7 +503,7 @@ EOTD
 }
 JSON
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -521,7 +521,7 @@ EOTD
     mkdir -p "$HOME/.cc-safety-net"
     touch -t 202401010000 "$HOME/.cc-safety-net"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -547,7 +547,7 @@ EOTD
     echo '{"theme":"dark"}' > "$HOME/.claude/settings.json"
     echo '{"marketplaces":{}}' > "$HOME/.claude/plugins/installed_plugins.json"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -565,7 +565,7 @@ EOTD
     mkdir -p "$HOME/.bash"
     touch -t 202401010000 "$HOME/.bash"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -582,7 +582,7 @@ EOTD
 @test "show_orphan_dotdir_hint_notice skips dirs younger than threshold" {
     mkdir -p "$HOME/.youngcli-test"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -604,7 +604,7 @@ EOTD
     mkdir -p "$fake_apps_root/Proton Mail Bridge.app"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" FAKE_APPS_ROOT="$fake_apps_root" \
-        bash --noprofile --norc <<'EOTD'
+        /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -630,7 +630,7 @@ EOTD
     mkdir -p "$empty_apps_root"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" EMPTY_APPS_ROOT="$empty_apps_root" \
-        bash --noprofile --norc <<'EOTD'
+        /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -662,7 +662,7 @@ EOTD
     mkdir -p "$empty_apps_root"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" EMPTY_APPS_ROOT="$empty_apps_root" \
-        bash --noprofile --norc <<'EOTD'
+        /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -695,7 +695,7 @@ EOTD
     mkdir -p "$fake_apps_root/AI.app"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" FAKE_APPS_ROOT="$fake_apps_root" \
-        bash --noprofile --norc <<'EOTD'
+        /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
@@ -719,7 +719,7 @@ EOTD
         touch -t 202401010000 "$HOME/.orphantest${i}"
     done
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOTD'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOTD'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"

@@ -81,7 +81,7 @@ run_clean_dry_run() {
     printf 'xxxx' > "$base/b"
     printf 'xxxx' > "$base/keep"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 bash --noprofile --norc <<EOF
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/bin/clean.sh"
@@ -156,7 +156,7 @@ MOCK
 }
 
 @test "mo clean adopts cached sudo before system cleanup (#1084)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 TRACE="$HOME/sudo-adopt.log"
 > "$TRACE"
@@ -193,7 +193,7 @@ SCRIPT
 
 @test "mo clean sudo prompt preserves a directly typed password (#1059)" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
-        bash --noprofile --norc <<'SCRIPT'
+        /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -230,7 +230,7 @@ SCRIPT
 
 @test "mo clean sudo prompt still skips on explicit Space (#1059)" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
-        bash --noprofile --norc <<'SCRIPT'
+        /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -254,10 +254,10 @@ SCRIPT
 }
 
 @test "cloud and office timeout path uses helper function instead of bash -c" {
-    run bash -c "grep -Eq 'run_with_shell_timeout 300 run_cloud_and_office_cleanup' '$PROJECT_ROOT/bin/clean.sh'"
+    run /bin/bash -c "grep -Eq 'run_with_shell_timeout 300 run_cloud_and_office_cleanup' '$PROJECT_ROOT/bin/clean.sh'"
     [ "$status" -eq 0 ]
 
-    run bash -c "! grep -Eq 'run_with_timeout 300[[:space:]]+bash[[:space:]]+-c' '$PROJECT_ROOT/bin/clean.sh'"
+    run /bin/bash -c "! grep -Eq 'run_with_timeout 300[[:space:]]+bash[[:space:]]+-c' '$PROJECT_ROOT/bin/clean.sh'"
     [ "$status" -eq 0 ]
 }
 
@@ -284,7 +284,7 @@ printf '/dev/disk1 200000000 126599680 %s 64%% /\n' "$available"
 MOCK
     chmod +x "$mock_bin/df"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" MOLE_DF_COUNT="$HOME/df.count" MOLE_TEST_MODE=0 bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" MOLE_DF_COUNT="$HOME/df.count" MOLE_TEST_MODE=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -457,7 +457,7 @@ FINDER_METADATA_SENTINEL
 EOF
 
     # Test whitelist logic directly instead of running full clean
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
@@ -478,7 +478,7 @@ EOF
     touch "$shared_dir/com.apple.LSSharedFileList.RecentApplications.sfl2"
     touch "$shared_dir/com.apple.LSSharedFileList.RecentDocuments.sfl2"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -495,7 +495,7 @@ EOF
 @test "_clean_recent_items handles missing shared directory" {
     rm -rf "$HOME/Library/Application Support/com.apple.sharedfilelist"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -512,7 +512,7 @@ EOF
     mkdir -p "$HOME/Library/Mail Downloads"
     echo "test" > "$HOME/Library/Mail Downloads/small.txt"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -536,7 +536,7 @@ EOF
 
     [ -f "$HOME/Library/Mail Downloads/old.pdf" ]
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -552,7 +552,7 @@ EOF
     touch "$HOME/Library/Mail Downloads/old.pdf"
     touch -t 202301010000 "$HOME/Library/Mail Downloads/old.pdf"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true MOLE_MAIL_DOWNLOADS_MIN_KB=1 bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true MOLE_MAIL_DOWNLOADS_MIN_KB=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -597,7 +597,7 @@ fi
 MOCK_TMUTIL
     chmod +x "$mock_bin/tmutil"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -643,7 +643,7 @@ fi
 MOCK_TMUTIL
     chmod +x "$mock_bin/tmutil"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -715,7 +715,7 @@ EOF
 @test "sections whose rows come only from log_success are not marked idle in pipes" {
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-        bash --noprofile --norc -c '
+        /bin/bash --noprofile --norc -c '
             source "$PROJECT_ROOT/bin/clean.sh"
             start_section "System"
             log_success "System crash reports"
@@ -730,7 +730,7 @@ EOF
     export_file="$HOME/e5rt-list.txt"
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-        bash --noprofile --norc -c '
+        /bin/bash --noprofile --norc -c '
             source "$PROJECT_ROOT/bin/clean.sh"
             DRY_RUN=true
             # Set after sourcing: clean.sh assigns EXPORT_LIST_FILE at load time.
@@ -752,7 +752,7 @@ EOF
 @test "active clean sections report isolated category totals" {
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-        bash --noprofile --norc -c '
+        /bin/bash --noprofile --norc -c '
             source "$PROJECT_ROOT/bin/clean.sh"
             start_section "First"
             total_size_cleaned=$((total_size_cleaned + 3000))
@@ -771,7 +771,7 @@ EOF
 @test "report-only clean sections omit the category total" {
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-        bash --noprofile --norc -c '
+        /bin/bash --noprofile --norc -c '
             source "$PROJECT_ROOT/bin/clean.sh"
             start_section "Large files"
             log_success "iOS backups"
@@ -788,7 +788,7 @@ EOF
     export_file="$HOME/purge-log-activity.txt"
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" EXPORT_LIST_FILE="$export_file" \
-        MOLE_SKIP_MAIN=1 MOLE_TEST_NO_AUTH=1 bash --noprofile --norc -c '
+        MOLE_SKIP_MAIN=1 MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc -c '
             source "$PROJECT_ROOT/bin/purge.sh"
             start_section "Project artifacts"
             log_success "Project cache"
@@ -801,7 +801,7 @@ EOF
 
 @test "root preview staging is published through the invoking-user boundary" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-        bash --noprofile --norc << 'EOF'
+        /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -830,7 +830,7 @@ EOF
 @test "end_section keeps the Nothing-to-clean fallback for piped output" {
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-        bash --noprofile --norc -c '
+        /bin/bash --noprofile --norc -c '
             source "$PROJECT_ROOT/bin/clean.sh"
             start_section "Idle Alpha"
             end_section

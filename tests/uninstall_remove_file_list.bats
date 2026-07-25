@@ -60,7 +60,7 @@ EOF
     # how many paths each call covered, (2) emulate the real test-harness
     # behavior by mv'ing each path into MOLE_TEST_TRASH_DIR. This lets the
     # test assert both "called once" and "every file landed in trash".
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 _mole_move_to_trash_batch() {
     mkdir -p "\$MOLE_TEST_TRASH_DIR"
@@ -112,7 +112,7 @@ EOF
     # Stub the batch helper to fail, and stub mole_delete to record per-file
     # invocations and act on the file. This proves the fallback path runs once
     # per file rather than silently dropping the batch.
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 _mole_move_to_trash_batch() { return 1; }
 mole_delete() {
@@ -142,7 +142,7 @@ EOF
 
     # Drop MOLE_TEST_TRASH_DIR so we exercise the real helper path; the
     # MOLE_TEST_NO_AUTH guard must fail closed before any AppleScript runs.
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 export MOLE_TEST_NO_AUTH=1
 unset MOLE_TEST_TRASH_DIR
@@ -167,7 +167,7 @@ EOF
     : > "$batch_count"
     : > "$fallback_count"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 _mole_move_to_trash_batch() {
     printf '1\n' >> "$batch_count"

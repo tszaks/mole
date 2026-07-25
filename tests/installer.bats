@@ -69,7 +69,7 @@ setup() {
 @test "scan_installers_in_path (fallback find): finds .dmg files" {
 	touch "$HOME/Downloads/Chrome.dmg"
 
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -85,7 +85,7 @@ setup() {
 	touch "$HOME/Downloads/App3.iso"
 	touch "$HOME/Downloads/App.mpkg"
 
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -105,7 +105,7 @@ setup() {
 	touch "$HOME/Downloads/level1/level2/deep.dmg"
 	touch "$HOME/Downloads/level1/level2/level3/too-deep.dmg"
 
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -124,7 +124,7 @@ setup() {
 	touch "$HOME/Downloads/top.dmg"
 	touch "$HOME/Downloads/level1/nested.dmg"
 
-	run env PATH="/usr/bin:/bin" MOLE_INSTALLER_SCAN_MAX_DEPTH=1 bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" MOLE_INSTALLER_SCAN_MAX_DEPTH=1 /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -136,7 +136,7 @@ setup() {
 }
 
 @test "scan_installers_in_path (fallback find): handles non-existent directory" {
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -152,7 +152,7 @@ setup() {
 	touch "$HOME/Downloads/archive.tar.gz"
 	touch "$HOME/Downloads/Installer.dmg"
 
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -178,7 +178,7 @@ setup() {
 	# Add an installer to the one directory that exists
 	touch "$HOME/Downloads/test.dmg"
 
-	run bash -euo pipefail -c '
+	run /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
         scan_all_installers
@@ -195,7 +195,7 @@ setup() {
 @test "scan_installers_in_path (fallback find): handles filenames with spaces" {
 	touch "$HOME/Downloads/My App Installer.dmg"
 
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -208,7 +208,7 @@ setup() {
 @test "scan_installers_in_path (fallback find): handles filenames with special characters" {
 	touch "$HOME/Downloads/App-v1.2.3_beta.pkg"
 
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -223,7 +223,7 @@ setup() {
 	touch "$HOME/Downloads/document.pdf"
 	touch "$HOME/Downloads/image.png"
 
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -240,7 +240,7 @@ setup() {
 	ln -s "$HOME/Downloads/real.dmg" "$HOME/Downloads/symlink.dmg"
 	ln -s /nonexistent "$HOME/Downloads/dangling.lnk"
 
-	run env PATH="/usr/bin:/bin" bash -euo pipefail -c "
+	run env PATH="/usr/bin:/bin" /bin/bash -euo pipefail -c "
         export MOLE_TEST_MODE=1
         source \"\$1\"
         scan_installers_in_path \"\$2\"
@@ -259,7 +259,7 @@ setup() {
 	printf 'two' > "$second"
 
 	# shellcheck disable=SC2016
-	run env HOME="$HOME" TERM="$TERM" bash -euo pipefail -c '
+	run env HOME="$HOME" TERM="$TERM" /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         export MOLE_TEST_NO_AUTH=1
         export MOLE_DELETE_LOG="$HOME/deletions.log"
@@ -285,7 +285,7 @@ setup() {
 	printf 'good' > "$removable"
 
 	# shellcheck disable=SC2016
-	run env HOME="$HOME" TERM="$TERM" bash -euo pipefail -c '
+	run env HOME="$HOME" TERM="$TERM" /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         export MOLE_TEST_NO_AUTH=1
         export MOLE_DELETE_LOG="$HOME/deletions.log"
@@ -319,7 +319,7 @@ setup() {
 	printf 'one' > "$replacement"
 
 	# shellcheck disable=SC2016
-	run env HOME="$HOME" TERM="$TERM" bash -euo pipefail -c '
+	run env HOME="$HOME" TERM="$TERM" /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         export MOLE_TEST_NO_AUTH=1
         source "$1"
@@ -350,7 +350,7 @@ setup() {
 	printf 'one' > "$target"
 
 	# shellcheck disable=SC2016
-	run env HOME="$HOME" TERM="$TERM" bash -euo pipefail -c '
+	run env HOME="$HOME" TERM="$TERM" /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         export MOLE_TEST_NO_AUTH=1
         source "$1"
@@ -376,7 +376,7 @@ setup() {
 
 @test "show_summary reports installer delete failures" {
 	# shellcheck disable=SC2016
-	run env HOME="$HOME" TERM="$TERM" bash -euo pipefail -c '
+	run env HOME="$HOME" TERM="$TERM" /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         source "$1"
 
@@ -403,7 +403,7 @@ setup() {
 	printf 'good' > "$removable"
 
 	# shellcheck disable=SC2016
-	run env HOME="$HOME" TERM="$TERM" bash -euo pipefail -c '
+	run env HOME="$HOME" TERM="$TERM" /bin/bash -euo pipefail -c '
         export MOLE_TEST_MODE=1
         export MOLE_TEST_NO_AUTH=1
         export MOLE_DELETE_LOG="$HOME/deletions.log"

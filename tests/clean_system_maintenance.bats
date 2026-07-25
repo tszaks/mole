@@ -27,7 +27,7 @@ teardown_file() {
 }
 
 @test "clean_deep_system issues safe sudo deletions" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls.log"
 > "$CALL_LOG"
@@ -79,7 +79,7 @@ EOF
 }
 
 @test "clean_deep_system does not touch /Library/Updates when directory absent" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_skip.log"
 > "$CALL_LOG"
@@ -107,7 +107,7 @@ EOF
 }
 
 @test "clean_deep_system cleans third-party adobe logs conservatively" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_adobe.log"
 > "$CALL_LOG"
@@ -160,7 +160,7 @@ EOF
 }
 
 @test "clean_deep_system removes stale idleassetsd aerial downloads scoped to the temp dir (#1253)" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_idle.log"
 > "$CALL_LOG"
@@ -217,7 +217,7 @@ EOF
 }
 
 @test "clean_deep_system skips idleassetsd sweep when no stale download exists (#1253)" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_idle_empty.log"
 > "$CALL_LOG"
@@ -267,7 +267,7 @@ EOF
 }
 
 @test "clean_deep_system does not report third-party adobe log success when no old files exist" {
-    run bash --noprofile --norc << 'EOF2'
+    run /bin/bash --noprofile --norc << 'EOF2'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_adobe_empty.log"
 > "$CALL_LOG"
@@ -323,7 +323,7 @@ EOF2
 }
 
 @test "clean_deep_system does not report third-party adobe log success when deletion fails" {
-    run bash --noprofile --norc << 'EOF3'
+    run /bin/bash --noprofile --norc << 'EOF3'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_adobe_fail.log"
 > "$CALL_LOG"
@@ -382,7 +382,7 @@ EOF3
 }
 
 @test "clean_time_machine_failed_backups exits when tmutil has no destinations" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -410,7 +410,7 @@ EOF
 }
 
 @test "clean_local_snapshots reports snapshot count" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -437,7 +437,7 @@ EOF
 }
 
 @test "clean_local_snapshots is quiet when no snapshots" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -459,7 +459,7 @@ EOF
 }
 
 @test "clean_homebrew skips when cleaned recently" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -477,7 +477,7 @@ EOF
 }
 
 @test "clean_homebrew runs cleanup with timeout stubs" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -522,7 +522,7 @@ EOF
 }
 
 @test "clean_homebrew prevents cleanup from implicitly autoremoving formulae" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -581,7 +581,7 @@ EOF
 }
 
 @test "clean_homebrew restores an active Cellar link removed by cleanup (#1206)" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -639,7 +639,7 @@ EOF
 }
 
 @test "clean_homebrew does not restore a link after its Cellar target is removed (#1206)" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -685,7 +685,7 @@ EOF
 }
 
 @test "clean_homebrew does not restore executable links outside the Cellar (#1206)" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -730,7 +730,7 @@ EOF
 }
 
 @test "restore_homebrew_active_links rejects paths outside Homebrew bin roots" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -770,7 +770,7 @@ EOF
 }
 
 @test "root Homebrew link restoration drops to the invoking user" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -820,7 +820,7 @@ EOF
 }
 
 @test "clean_homebrew dry-run shows brew autoremove preview without removing formulae" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/brew.sh"
@@ -866,7 +866,7 @@ EOF
 }
 
 @test "run_with_timeout succeeds without GNU timeout" {
-    run bash --noprofile --norc -c '
+    run /bin/bash --noprofile --norc -c '
         set -euo pipefail
         PATH="/usr/bin:/bin"
         unset MO_TIMEOUT_INITIALIZED MO_TIMEOUT_BIN
@@ -877,7 +877,7 @@ EOF
 }
 
 @test "run_with_timeout enforces timeout and returns 124" {
-    run bash --noprofile --norc -c '
+    run /bin/bash --noprofile --norc -c '
         set -euo pipefail
         PATH="/usr/bin:/bin"
         unset MO_TIMEOUT_INITIALIZED MO_TIMEOUT_BIN
@@ -894,7 +894,7 @@ EOF
 
     touch -t 202301010000 "$state_dir/com.example.app.savedState/data.plist"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -907,7 +907,7 @@ EOF
 @test "opt_saved_state_cleanup handles missing state directory" {
     rm -rf "$HOME/Library/Saved Application State"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -923,7 +923,7 @@ EOF
     mkdir -p "$state_dir/com.example.old.savedState"
     touch -t 202301010000 "$state_dir/com.example.old.savedState" 2> /dev/null || true
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -940,7 +940,7 @@ EOF
     mkdir -p "$cache_dir"
     touch "$cache_dir/test.db"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -957,7 +957,7 @@ EOF
     mkdir -p "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
     touch "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache/test.db"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -976,7 +976,7 @@ EOF
 }
 
 @test "get_path_size_kb returns zero for missing directory" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=0 bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 size=$(get_path_size_kb "/nonexistent/path")
@@ -991,7 +991,7 @@ EOF
     mkdir -p "$HOME/test_size"
     dd if=/dev/zero of="$HOME/test_size/file.dat" bs=1024 count=10 2> /dev/null
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=0 bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 size=$(get_path_size_kb "$HOME/test_size")
@@ -1003,7 +1003,7 @@ EOF
 }
 
 @test "opt_fix_broken_configs reports fixes" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/maintenance.sh"
@@ -1021,7 +1021,7 @@ EOF
 }
 
 @test "clean_deep_system cleans memory exception reports" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/memory_exception_calls.log"
 > "$CALL_LOG"
@@ -1065,7 +1065,7 @@ EOF
 }
 
 @test "clean_deep_system memory exception respects DRY_RUN flag" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/memory_exception_dryrun_calls.log"
 > "$CALL_LOG"
@@ -1109,7 +1109,7 @@ EOF
 }
 
 @test "clean_deep_system does not log memory exception success when nothing cleaned" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/memory_exception_success_calls.log"
 > "$CALL_LOG"
@@ -1148,7 +1148,7 @@ EOF
 }
 
 @test "clean_deep_system cleans diagnostic trace logs" {
-    run bash --noprofile --norc << 'EOF'
+    run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/diag_calls.log"
 > "$CALL_LOG"
@@ -1195,7 +1195,7 @@ EOF
 }
 
 @test "clean_deep_system cleans code_sign_clone caches via safe_sudo_remove" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/code_sign_clone_calls.log"
 > "$CALL_LOG"
@@ -1240,7 +1240,7 @@ EOF
 }
 
 @test "clean_deep_system skips code_sign_clone success when removal fails" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/code_sign_clone_fail_calls.log"
 > "$CALL_LOG"
@@ -1285,7 +1285,7 @@ EOF
 }
 
 @test "clean_deep_system skips EDR code_sign clones (CrowdStrike Falcon tamper)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/edr_code_sign_calls.log"
 > "$CALL_LOG"
@@ -1334,7 +1334,7 @@ EOF
 }
 
 @test "clean_deep_system cleans CleanMyMac-observed rebuildable system caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/rebuildable_cache_calls.log"
 > "$CALL_LOG"
@@ -1376,7 +1376,7 @@ EOF
 }
 
 @test "is_rebuildable_gpu_cache_dir only allows C GPU cache shards" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -1393,7 +1393,7 @@ EOF
 }
 
 @test "gpu_cache_dir_is_stale uses contained file mtimes" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -1412,7 +1412,7 @@ EOF
 }
 
 @test "clean_deep_system cleans only narrow private var GPU cache shards" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/gpu_cache_calls.log"
 > "$CALL_LOG"
@@ -1469,7 +1469,7 @@ EOF
 }
 
 @test "clean_deep_system skips EDR/security-agent GPU caches (CrowdStrike Falcon tamper)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/gpu_cache_edr_calls.log"
 > "$CALL_LOG"
@@ -1524,7 +1524,7 @@ EOF
 }
 
 @test "opt_memory_pressure_relief skips when pressure is normal" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -1543,7 +1543,7 @@ EOF
 }
 
 @test "opt_memory_pressure_relief executes purge when pressure is high" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -1575,7 +1575,7 @@ EOF
 }
 
 @test "opt_network_stack_optimize skips when network is healthy" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -1599,7 +1599,7 @@ EOF
 }
 
 @test "opt_network_stack_optimize skips when VPN is active" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=1 bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -1626,7 +1626,7 @@ EOF
 }
 
 @test "opt_network_stack_optimize flushes when network has issues" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -1676,7 +1676,7 @@ EOF
 }
 
 @test "opt_disk_permissions_repair skips when permissions are fine" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -1697,7 +1697,7 @@ EOF
 }
 
 @test "opt_disk_permissions_repair calls diskutil when needed" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
@@ -1734,7 +1734,7 @@ EOF
 }
 
 @test "opt_spotlight_index_optimize skips when search is fast" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"

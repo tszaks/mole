@@ -38,7 +38,7 @@ EOF
     mkdir -p "$victim"
     : > "$victim/keep.txt"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 mole_delete "$victim"
 EOF
@@ -54,7 +54,7 @@ EOF
     mkdir -p "$victim"
     printf 'payload' > "$victim/data.txt"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 export MOLE_DELETE_MODE=trash
 mole_delete "$victim"
@@ -96,7 +96,7 @@ exit 98
 SH
     chmod +x "$fake_bin/trash" "$fake_bin/sudo" "$fake_bin/osascript"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 unset MOLE_TEST_TRASH_DIR
 unset MOLE_TEST_NO_AUTH
@@ -141,7 +141,7 @@ fi
 SH
     chmod +x "$fake_bin/sudo"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 unset MOLE_TEST_TRASH_DIR
 unset MOLE_TEST_NO_AUTH
@@ -182,7 +182,7 @@ fi
 SH
     chmod +x "$fake_bin/sudo"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 unset MOLE_TEST_TRASH_DIR
 unset MOLE_TEST_NO_AUTH
@@ -208,7 +208,7 @@ EOF
     local victim="$SANDBOX/logged"
     : > "$victim"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 mole_delete "$victim"
 EOF
@@ -231,7 +231,7 @@ EOF
     local victim="$SANDBOX/system-link"
     ln -s "/System" "$victim"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 mole_delete "$victim"
 EOF
@@ -248,7 +248,7 @@ EOF
     local victim="$SANDBOX/dry"
     : > "$victim"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 export MOLE_DRY_RUN=1
 mole_delete "$victim"
@@ -263,7 +263,7 @@ EOF
 }
 
 @test "mole_delete records a forensic log entry for rejected paths" {
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 mole_delete "/tmp/../etc/hosts"
 EOF
@@ -280,7 +280,7 @@ EOF
 }
 
 @test "mole_delete is a no-op on a non-existent path" {
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 mole_delete "$SANDBOX/does-not-exist"
 EOF
@@ -293,7 +293,7 @@ EOF
     local victim="$SANDBOX/invalid_mode_target"
     : > "$victim"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 export MOLE_DELETE_MODE=surprise
 mole_delete "$victim"
@@ -316,7 +316,7 @@ EOF
     : > "$first"
     : > "$second"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 export MOLE_DELETE_MODE=surprise
 set +e
@@ -344,7 +344,7 @@ EOF
     mkdir -p "$(dirname "$blocked")"
     chmod 0555 "$(dirname "$blocked")"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 export MOLE_DELETE_MODE=trash
 export MOLE_TEST_TRASH_DIR="$blocked"
@@ -372,7 +372,7 @@ EOF
     mkdir -p "$(dirname "$blocked")"
     chmod 0555 "$(dirname "$blocked")"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 export MOLE_DELETE_MODE=trash
 export MOLE_TEST_TRASH_DIR="$blocked"
@@ -400,7 +400,7 @@ EOF
     local victim="$SANDBOX/measureless"
     : > "$victim"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 get_path_size_kb() { echo "ERR"; return 1; }
 mole_delete "$victim"
@@ -420,7 +420,7 @@ EOF
     mkdir -p "$(dirname "$broken_log_dir")"
     chmod 0555 "$(dirname "$broken_log_dir")"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 export MOLE_DELETE_LOG="$broken_log_dir/deletions.log"
 export MOLE_TEST_TRASH_DIR="$MOLE_TEST_TRASH_DIR"
@@ -461,7 +461,7 @@ STUB
 
     local started elapsed
     started=$SECONDS
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 export PATH="$stub_dir:\$PATH"
 export MOLE_TIMEOUT_DISK_VERIFY_SEC=1

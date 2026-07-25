@@ -46,7 +46,7 @@ setup() {
 }
 
 @test "check_tcc_permissions skips in non-interactive mode" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; check_tcc_permissions" < /dev/null
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; check_tcc_permissions" < /dev/null
     [ "$status" -eq 0 ]
     [[ ! -f "$HOME/.cache/mole/permissions_granted" ]]
 }
@@ -55,7 +55,7 @@ setup() {
     mkdir -p "$HOME/.cache/mole"
     touch "$HOME/.cache/mole/permissions_granted"
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; [[ -t 1 ]] || true; check_tcc_permissions"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; [[ -t 1 ]] || true; check_tcc_permissions"
     [ "$status" -eq 0 ]
 }
 
@@ -65,12 +65,12 @@ setup() {
     [[ -d "$HOME/Library/Logs" ]]
     [[ -d "$HOME/.cache/mole" ]]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; check_tcc_permissions < /dev/null"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; check_tcc_permissions < /dev/null"
     [ "$status" -eq 0 ]
 }
 
 @test "clean_service_worker_cache returns early when path doesn't exist" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; clean_service_worker_cache 'TestBrowser' '/nonexistent/path'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; source '$PROJECT_ROOT/lib/clean/caches.sh'; clean_service_worker_cache 'TestBrowser' '/nonexistent/path'"
     [ "$status" -eq 0 ]
 }
 
@@ -95,7 +95,7 @@ setup() {
     mkdir -p "$test_cache/abc123_https_capcut.com_0"
     mkdir -p "$test_cache/def456_https_example.com_0"
 
-    run bash -c "
+    run /bin/bash -c "
         export DRY_RUN=true
         export PROTECTED_SW_DOMAINS=(capcut.com photopea.com)
         source '$PROJECT_ROOT/lib/core/common.sh'
@@ -133,7 +133,7 @@ setup() {
     mkdir -p "$test_cache/abc123hash_extension"
     mkdir -p "$test_cache/def456hash_other"
 
-    run bash -c "
+    run /bin/bash -c "
         export DRY_RUN=false
         export PROTECTED_SW_DOMAINS=(nomatch.invalid)
         source '$PROJECT_ROOT/lib/core/common.sh'
@@ -175,7 +175,7 @@ setup() {
     local test_cache="$HOME/test_sw_cache_colored"
     mkdir -p "$test_cache/abc123_https_example.com_0"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -210,7 +210,7 @@ EOF
     local test_cache="$HOME/test_sw_cache_submb"
     mkdir -p "$test_cache/abc123_https_example.com_0"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -254,7 +254,7 @@ EOF
     touch "$HOME/Projects/test-app/.next/cache/test.cache"
     touch "$HOME/Projects/python-app/__pycache__/module.pyc"
 
-    run bash -c "
+    run /bin/bash -c "
         export DRY_RUN=true
         source '$PROJECT_ROOT/lib/core/common.sh'
         source '$PROJECT_ROOT/lib/clean/caches.sh'
@@ -272,7 +272,7 @@ EOF
     touch "$HOME/Projects/python-app/pkg/__pycache__/module.pyc"
     touch "$HOME/Projects/python-app/subpkg/__pycache__/other.pyc"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -295,7 +295,7 @@ EOF
     touch "$HOME/Projects/python-app/pkg/__pycache__/module.pyc"
     # empty/__pycache__ has no .pyc files
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -312,7 +312,7 @@ EOF
 @test "pycache_has_bytecode checks direct bytecode files without spawning find" {
     mkdir -p "$HOME/Projects/python-app/pkg/__pycache__"
 
-    run bash -c "
+    run /bin/bash -c "
 source '$PROJECT_ROOT/lib/clean/caches.sh'
 if pycache_has_bytecode '$HOME/Projects/python-app/pkg/__pycache__'; then
     echo has-bytecode
@@ -334,7 +334,7 @@ fi
 @test "pycache_has_bytecode tolerates empty matches when nullglob is enabled" {
     mkdir -p "$HOME/Projects/nullglob-app/pkg/__pycache__"
 
-    run bash -c "
+    run /bin/bash -c "
 set -euo pipefail
 source '$PROJECT_ROOT/lib/clean/caches.sh'
 shopt -s nullglob
@@ -361,7 +361,7 @@ fi
     touch "$HOME/Projects/python-app/pkg/__pycache__/module.pyc"
     touch "$HOME/Projects/python-app/protected/__pycache__/blocked.pyc"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -414,7 +414,7 @@ fi
 EOF
     chmod +x "$fake_bin/find"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_bin:$PATH" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_bin:$PATH" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 printf '%s\n' "$HOME/CustomProjects" > "$HOME/.config/mole/purge_paths"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -437,7 +437,7 @@ EOF
     touch "$HOME/go/src/demo/go.mod"
     touch "$HOME/go/src/demo/.next/cache/test.cache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -455,7 +455,7 @@ EOF
     touch "$HOME/go/src/github.com/example/demo/go.mod"
     touch "$HOME/go/src/github.com/example/demo/.next/cache/test.cache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -475,7 +475,7 @@ EOF
     ln -s "$HOME/code" "$HOME/Code"
     printf '%s\n' "$HOME/Code" > "$HOME/.config/mole/purge_paths"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -515,7 +515,7 @@ exit 0
 EOF
     chmod +x "$fake_bin/find"
 
-    run /usr/bin/perl -e 'alarm 5; exec @ARGV' env -i HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_bin:$PATH:/usr/bin:/bin:/usr/sbin:/sbin" TERM="${TERM:-xterm-256color}" bash --noprofile --norc <<'EOF'
+    run /usr/bin/perl -e 'alarm 5; exec @ARGV' env -i HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$fake_bin:$PATH:/usr/bin:/bin:/usr/sbin:/sbin" TERM="${TERM:-xterm-256color}" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -548,7 +548,7 @@ EOF
     local output_file
     output_file=$(mktemp)
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<EOF
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/clean/caches.sh"
@@ -570,7 +570,7 @@ EOF
     mkdir -p "$HOME/Projects/app/.next/cache"
     touch "$HOME/Projects/app/package.json"
 
-    run bash -c "
+    run /bin/bash -c "
         export DRY_RUN=true
         source '$PROJECT_ROOT/lib/core/common.sh'
         source '$PROJECT_ROOT/lib/clean/caches.sh'

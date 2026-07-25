@@ -38,68 +38,68 @@ teardown() {
 }
 
 @test "validate_path_for_deletion rejects empty path" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion ''"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion ''"
     [ "$status" -eq 1 ]
 }
 
 @test "validate_path_for_deletion rejects relative path" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion 'relative/path'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion 'relative/path'"
     [ "$status" -eq 1 ]
 }
 
 @test "validate_path_for_deletion rejects path traversal" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/tmp/../etc'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/tmp/../etc'"
     [ "$status" -eq 1 ]
 
     # Test other path traversal patterns
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/var/log/../../etc'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/var/log/../../etc'"
     [ "$status" -eq 1 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/..'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/..'"
     [ "$status" -eq 1 ]
 }
 
 @test "validate_path_for_deletion accepts Firefox-style ..files directories" {
     # Firefox uses ..files suffix in IndexedDB directory names
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/2753419432nreetyfallipx..files'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/2753419432nreetyfallipx..files'"
     [ "$status" -eq 0 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/storage/default/https+++www.netflix.com/idb/name..files/data'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/storage/default/https+++www.netflix.com/idb/name..files/data'"
     [ "$status" -eq 0 ]
 
     # Directories with .. in the middle of names should be allowed
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/test..backup/file.txt'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/test..backup/file.txt'"
     [ "$status" -eq 0 ]
 }
 
 @test "validate_path_for_deletion rejects system directories" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/'"
     [ "$status" -eq 1 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/System'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/System'"
     [ "$status" -eq 1 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/usr/bin'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/usr/bin'"
     [ "$status" -eq 1 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/etc'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/etc'"
     [ "$status" -eq 1 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Apple'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Apple'"
     [ "$status" -eq 1 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Applications/Finder.app'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Applications/Finder.app'"
     [ "$status" -eq 1 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Users'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Users'"
     [ "$status" -eq 1 ]
 }
 
 @test "validate_path_for_deletion rejects aliased critical paths" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '//etc/passwd'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '//etc/passwd'"
     [ "$status" -eq 1 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '///System'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '///System'"
     [ "$status" -eq 1 ]
 }
 
@@ -110,7 +110,7 @@ teardown() {
     local fake_caches="$TEST_DIR/redirected-Caches"
     ln -s /System "$fake_caches"
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_caches/Library/Caches/victim'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_caches/Library/Caches/victim'"
     [ "$status" -eq 1 ]
     [[ "$output" == *"resolves into a critical system path"* ]] || return 1
 }
@@ -122,7 +122,7 @@ teardown() {
     ln -s "$protected_home/Library" "$fake_cache_root"
 
     # should_protect_path is home-relative, so drive it against a fake HOME.
-    run bash -c "export HOME='$protected_home'; source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_cache_root/Keychains/login.keychain-db'"
+    run /bin/bash -c "export HOME='$protected_home'; source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$fake_cache_root/Keychains/login.keychain-db'"
     [ "$status" -eq 1 ]
 }
 
@@ -132,28 +132,28 @@ teardown() {
     mkdir -p "$TEST_DIR/real/Caches"
     : > "$TEST_DIR/real/Caches/cache.db"
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/real/Caches/cache.db'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/real/Caches/cache.db'"
     [ "$status" -eq 0 ]
 }
 
 @test "validate_path_for_deletion accepts valid path" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/valid'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/valid'"
     [ "$status" -eq 0 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$HOME/Library/Caches/com.example.app/cache.db'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$HOME/Library/Caches/com.example.app/cache.db'"
     [ "$status" -eq 0 ]
 }
 
 @test "validate_path_for_deletion accepts CoreSimulator system cache children" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Developer/CoreSimulator/Caches/dyld'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Developer/CoreSimulator/Caches/dyld'"
     [ "$status" -eq 0 ]
 }
 
 @test "validate_path_for_deletion allows Darwin C cache shards but rejects protected extension paths" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/test/a/C/com.example.App/com.apple.metal'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/test/a/C/com.example.App/com.apple.metal'"
     [ "$status" -eq 0 ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Extensions/com.example.driver/com.apple.metal' 2>&1"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Extensions/com.example.driver/com.apple.metal' 2>&1"
     [ "$status" -eq 1 ]
     [[ "$output" == *"critical system path"* ]]
 }
@@ -161,16 +161,16 @@ teardown() {
 @test "validate_path_for_deletion rejects endpoint-security agent var/folders caches" {
     # Central chokepoint: every safe_remove / safe_sudo_remove caller is covered,
     # not only the cleanup sweeps that pre-check the predicate.
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe'"
     [ "$status" -eq 1 ]
 
     # A normal app's Darwin cache shard stays deletable.
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.example.App/com.apple.metalfe'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.example.App/com.apple.metalfe'"
     [ "$status" -eq 0 ]
 }
 
 @test "should_protect_path applies high-risk cleanup denylist" {
-    run bash -c "
+    run /bin/bash -c "
         source '$PROJECT_ROOT/lib/core/common.sh'
         should_protect_path '$HOME/Library/Caches/ms-playwright/chromium-123'
         should_protect_path '$HOME/Library/Caches/com.apple.homed/state'
@@ -185,7 +185,7 @@ teardown() {
 }
 
 @test "is_endpoint_security_cache_path matches only EDR agent var/folders caches" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -220,7 +220,7 @@ EOF
 }
 
 @test "should_protect_path protects endpoint-security / EDR agent caches (CrowdStrike Falcon tamper)" {
-    run env PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -237,7 +237,7 @@ EOF
     local orb_group_data="$HOME/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data/data.img.raw"
     local orb_state="$HOME/.orbstack/state.db"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORB_GROUP_DATA="$orb_group_data" ORB_STATE="$orb_state" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORB_GROUP_DATA="$orb_group_data" ORB_STATE="$orb_state" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 should_protect_data "dev.orbstack.OrbStack"
@@ -250,7 +250,7 @@ EOF
 }
 
 @test "safe_remove validates path before deletion" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '/System/test' 2>&1"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '/System/test' 2>&1"
     [ "$status" -eq 1 ]
 }
 
@@ -258,7 +258,7 @@ EOF
     local link_path="$TEST_DIR/system-link"
     ln -s "/System" "$link_path"
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$link_path' 2>&1"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$link_path' 2>&1"
     [ "$status" -eq 1 ]
     [[ "$output" == *"protected system path"* ]]
 }
@@ -267,7 +267,7 @@ EOF
     local link_path="$TEST_DIR/silent-system-link"
     ln -s "/System" "$link_path"
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$link_path' true 2>&1"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$link_path' true 2>&1"
     [ "$status" -eq 1 ]
     [[ -L "$link_path" ]]
     [[ "$output" != *"Symlink points to protected system path"* ]]
@@ -277,7 +277,7 @@ EOF
     local test_file="$TEST_DIR/test_file.txt"
     echo "test" > "$test_file"
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$test_file' true"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$test_file' true"
     [ "$status" -eq 0 ]
     [ ! -f "$test_file" ]
 }
@@ -287,13 +287,13 @@ EOF
     mkdir -p "$test_subdir"
     touch "$test_subdir/file.txt"
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$test_subdir' true"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$test_subdir' true"
     [ "$status" -eq 0 ]
     [ ! -d "$test_subdir" ]
 }
 
 @test "safe_remove handles non-existent path gracefully" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$TEST_DIR/nonexistent' true"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '$TEST_DIR/nonexistent' true"
     [ "$status" -eq 0 ]
 }
 
@@ -301,7 +301,7 @@ EOF
     local test_file="$TEST_DIR/interrupt_file"
     echo "test" > "$test_file"
 
-    run bash -c "
+    run /bin/bash -c "
         source '$PROJECT_ROOT/lib/core/common.sh'
         rm() { return 130; }
         safe_remove '$test_file' true
@@ -311,13 +311,13 @@ EOF
 }
 
 @test "safe_remove in silent mode suppresses error output" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '/System/test' true 2>&1"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '/System/test' true 2>&1"
     [ "$status" -eq 1 ]
 }
 
 
 @test "safe_find_delete validates base directory" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '/nonexistent' '*.tmp' 7 'f' 2>&1"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '/nonexistent' '*.tmp' 7 'f' 2>&1"
     [ "$status" -eq 1 ]
 }
 
@@ -327,7 +327,7 @@ EOF
     mkdir -p "$target_dir"
     ln -s "$target_dir" "$link_dir"
 
-    run bash -c "
+    run /bin/bash -c "
         source '$PROJECT_ROOT/lib/core/common.sh'
         sudo() { return 0; }
         export -f sudo
@@ -342,7 +342,7 @@ EOF
     mkdir -p "$target_dir"
     touch "$target_dir/file"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -384,7 +384,7 @@ SCRIPT
     local target_dir="$TEST_DIR/sudo-expired"
     mkdir -p "$target_dir"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -411,7 +411,7 @@ SCRIPT
 @test "safe_sudo_remove returns protected-path code for safety skips" {
     local target_dir="/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
@@ -474,7 +474,7 @@ exit 0
 SCRIPT
     chmod +x "$script"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"RC=0"* ]]
@@ -544,7 +544,7 @@ exit 0
 SCRIPT
     chmod +x "$script"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"RC=0"* ]] || return 1
@@ -600,7 +600,7 @@ exit 0
 SCRIPT
     chmod +x "$script"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"RC=0"* ]] || return 1
@@ -662,7 +662,7 @@ SCRIPT
     chmod +x "$script"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
-        MO_NO_OPLOG=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+        MO_NO_OPLOG=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     # This test is environment-sensitive (errexit active during the call); on
     # failure surface the exit status, captured output, and an xtrace replay
@@ -676,7 +676,7 @@ SCRIPT
         echo "--- xtrace replay (tail) ---"
         env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
             MO_NO_OPLOG=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
-            bash --noprofile --norc -x "$script" 2>&1 | tail -60 || true
+            /bin/bash --noprofile --norc -x "$script" 2>&1 | tail -60 || true
         return 1
     fi
     [[ "$output" == *"SURVIVED_SET_E"* ]] || return 1
@@ -738,7 +738,7 @@ exit 0
 SCRIPT
     chmod +x "$script"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 bash --noprofile --norc "$script"
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"RC=0"* ]] || return 1
@@ -753,7 +753,7 @@ SCRIPT
     mkdir -p "$real_dir"
     ln -s "$real_dir" "$link_dir"
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$link_dir' '*.tmp' 7 'f' 2>&1"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$link_dir' '*.tmp' 7 'f' 2>&1"
     [ "$status" -eq 1 ]
     [[ "$output" == *"symlink"* ]]
 
@@ -761,7 +761,7 @@ SCRIPT
 }
 
 @test "safe_find_delete validates type filter" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$TEST_DIR' '*.tmp' 7 'x' 2>&1"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$TEST_DIR' '*.tmp' 7 'x' 2>&1"
     [ "$status" -eq 1 ]
     [[ "$output" == *"Invalid type filter"* ]]
 }
@@ -775,7 +775,7 @@ SCRIPT
 
     touch -t "$(date -v-8d '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '8 days ago' '+%Y%m%d%H%M.%S')" "$old_file" 2>/dev/null || true
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$TEST_DIR' '*.tmp' 7 'f'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$TEST_DIR' '*.tmp' 7 'f'"
     [ "$status" -eq 0 ]
 }
 
@@ -784,7 +784,7 @@ SCRIPT
     touch "$old_file"
     touch -t "$(date -v-8d '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '8 days ago' '+%Y%m%d%H%M.%S')" "$old_file" 2>/dev/null || true
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/file_ops.sh"
 safe_find_delete "$TEST_DIR" "*.tmp" 7 "f"
@@ -795,15 +795,15 @@ EOF
 }
 
 @test "MOLE_* constants are defined" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_TEMP_FILE_AGE_DAYS"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_TEMP_FILE_AGE_DAYS"
     [ "$status" -eq 0 ]
     [ "$output" = "7" ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_MAX_PARALLEL_JOBS"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_MAX_PARALLEL_JOBS"
     [ "$status" -eq 0 ]
     [ "$output" = "15" ]
 
-    run bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_TM_BACKUP_SAFE_HOURS"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_TM_BACKUP_SAFE_HOURS"
     [ "$status" -eq 0 ]
     [ "$output" = "48" ]
 }

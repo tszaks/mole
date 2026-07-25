@@ -34,22 +34,22 @@ setup() {
 }
 
 @test "is_root_user detects non-root correctly" {
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; is_root_user && echo 'root' || echo 'not-root'")
+    result=$(/bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; is_root_user && echo 'root' || echo 'not-root'")
     [ "$result" = "not-root" ]
 }
 
 @test "get_invoking_uid returns numeric UID" {
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_invoking_uid")
+    result=$(/bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_invoking_uid")
     [[ "$result" =~ ^[0-9]+$ ]]
 }
 
 @test "get_invoking_gid returns numeric GID" {
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_invoking_gid")
+    result=$(/bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_invoking_gid")
     [[ "$result" =~ ^[0-9]+$ ]]
 }
 
 @test "get_invoking_home returns home directory" {
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_invoking_home")
+    result=$(/bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_invoking_home")
     [ -n "$result" ]
     [ -d "$result" ]
 }
@@ -58,7 +58,7 @@ setup() {
     local writable_tmp="$HOME/custom-tmp"
     mkdir -p "$writable_tmp"
 
-    result=$(env HOME="$HOME" TMPDIR="$writable_tmp" bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; prepare_mole_tmpdir")
+    result=$(env HOME="$HOME" TMPDIR="$writable_tmp" /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; prepare_mole_tmpdir")
     [ "$result" = "$writable_tmp" ]
 }
 
@@ -67,7 +67,7 @@ setup() {
     mkdir -p "$blocked_tmp"
     chmod 500 "$blocked_tmp"
 
-    result=$(env HOME="$HOME" TMPDIR="$blocked_tmp" bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; prepare_mole_tmpdir")
+    result=$(env HOME="$HOME" TMPDIR="$blocked_tmp" /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; prepare_mole_tmpdir")
     [ "$result" = "$HOME/.cache/mole/tmp" ]
     [ -d "$HOME/.cache/mole/tmp" ]
 }
@@ -77,7 +77,7 @@ setup() {
     local second_tmp="$HOME/second-tmp"
     mkdir -p "$first_tmp" "$second_tmp"
 
-    result=$(env HOME="$HOME" TMPDIR="$first_tmp" bash -c "
+    result=$(env HOME="$HOME" TMPDIR="$first_tmp" /bin/bash -c "
         source '$PROJECT_ROOT/lib/core/base.sh'
         ensure_mole_temp_root
         first=\$MOLE_RESOLVED_TMPDIR
@@ -91,7 +91,7 @@ setup() {
 }
 
 @test "cleanup_temp_files removes command-substitution temp files (#1203)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/base.sh"
 
@@ -112,7 +112,7 @@ EOF
 }
 
 @test "cleanup_temp_files rejects registry paths outside the temp root (#1203)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/base.sh"
 
@@ -139,7 +139,7 @@ EOF
 }
 
 @test "prune_stale_mole_temp_files leaves persistent cache and fresh temps alone (#1203)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEMP_STALE_MINUTES=60 bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEMP_STALE_MINUTES=60 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/base.sh"
 
@@ -167,7 +167,7 @@ EOF
 }
 
 @test "prepare_mole_tmpdir falls back to /tmp when TMPDIR and invoking home are unavailable" {
-    result=$(env HOME="$HOME" TMPDIR="/var/empty" bash -c "
+    result=$(env HOME="$HOME" TMPDIR="/var/empty" /bin/bash -c "
         source '$PROJECT_ROOT/lib/core/base.sh'
         get_invoking_home() { echo '/var/empty'; }
         prepare_mole_tmpdir
@@ -181,54 +181,54 @@ EOF
     mkdir -p "$blocked_tmp"
     chmod 500 "$blocked_tmp"
 
-    result=$(env HOME="$HOME" TMPDIR="$blocked_tmp" bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; printf '%s\n' \"\$TMPDIR\"")
+    result=$(env HOME="$HOME" TMPDIR="$blocked_tmp" /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; printf '%s\n' \"\$TMPDIR\"")
     [ "$result" = "$HOME/.cache/mole/tmp" ]
 }
 
 @test "get_user_home returns home for valid user" {
     current_user="${USER:-$(whoami)}"
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_user_home '$current_user'")
+    result=$(/bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_user_home '$current_user'")
     [ -n "$result" ]
     [ -d "$result" ]
 }
 
 @test "get_user_home returns empty for invalid user" {
-    result=$(bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_user_home 'nonexistent_user_12345'")
+    result=$(/bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; get_user_home 'nonexistent_user_12345'")
     [ -z "$result" ] || [ "$result" = "~nonexistent_user_12345" ]
 }
 
 @test "ensure_user_dir creates simple directory" {
     test_dir="$HOME/.cache/test"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
     [ -d "$test_dir" ]
 }
 
 @test "ensure_user_dir creates nested directory" {
     test_dir="$HOME/.config/mole/deep/nested/path"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
     [ -d "$test_dir" ]
 }
 
 @test "ensure_user_dir handles tilde expansion" {
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '~/.cache/tilde-test'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '~/.cache/tilde-test'"
     [ -d "$HOME/.cache/tilde-test" ]
 }
 
 @test "ensure_user_dir is idempotent" {
     test_dir="$HOME/.cache/idempotent"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
     [ -d "$test_dir" ]
 }
 
 @test "ensure_user_dir handles empty path gracefully" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir ''"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir ''"
     [ "$status" -eq 0 ]
 }
 
 @test "ensure_user_dir preserves ownership for non-root users" {
     test_dir="$HOME/.cache/ownership-test"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
 
     current_uid=$(id -u)
     dir_uid=$(/usr/bin/stat -f%u "$test_dir")
@@ -238,39 +238,39 @@ EOF
 
 @test "ensure_user_file creates file and parent directories" {
     test_file="$HOME/.config/mole/test.log"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
     [ -f "$test_file" ]
     [ -d "$(dirname "$test_file")" ]
 }
 
 @test "ensure_user_file handles tilde expansion" {
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '~/.cache/tilde-file.txt'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '~/.cache/tilde-file.txt'"
     [ -f "$HOME/.cache/tilde-file.txt" ]
 }
 
 @test "ensure_user_file is idempotent" {
     test_file="$HOME/.cache/idempotent.txt"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
     echo "content" > "$test_file"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
     [ -f "$test_file" ]
     [ "$(cat "$test_file")" = "content" ]
 }
 
 @test "ensure_user_file handles empty path gracefully" {
-    run bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file ''"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file ''"
     [ "$status" -eq 0 ]
 }
 
 @test "ensure_user_file creates deeply nested files" {
     test_file="$HOME/.config/deep/very/nested/structure/file.log"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
     [ -f "$test_file" ]
 }
 
 @test "ensure_user_file preserves ownership for non-root users" {
     test_file="$HOME/.cache/file-ownership-test.txt"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$test_file'"
 
     current_uid=$(id -u)
     file_uid=$(/usr/bin/stat -f%u "$test_file")
@@ -279,9 +279,9 @@ EOF
 
 @test "ensure_user_dir early stop optimization works" {
     test_dir="$HOME/.cache/perf/test/nested"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
 
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$test_dir'"
     [ -d "$test_dir" ]
 
     current_uid=$(id -u)
@@ -293,15 +293,15 @@ EOF
     cache_dir="$HOME/.cache/mole"
     cache_file="$cache_dir/integration_test.log"
 
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$cache_dir'"
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$cache_file'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_dir '$cache_dir'"
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'; ensure_user_file '$cache_file'"
 
     [ -d "$cache_dir" ]
     [ -f "$cache_file" ]
 }
 
 @test "multiple ensure_user_file calls in same directory" {
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'
         ensure_user_file '$HOME/.config/mole/file1.txt'
         ensure_user_file '$HOME/.config/mole/file2.txt'
         ensure_user_file '$HOME/.config/mole/file3.txt'
@@ -313,7 +313,7 @@ EOF
 }
 
 @test "ensure functions handle concurrent calls safely" {
-    bash -c "source '$PROJECT_ROOT/lib/core/base.sh'
+    /bin/bash -c "source '$PROJECT_ROOT/lib/core/base.sh'
         ensure_user_dir '$HOME/.cache/concurrent' &
         ensure_user_dir '$HOME/.cache/concurrent' &
         wait

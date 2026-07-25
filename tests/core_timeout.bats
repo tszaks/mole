@@ -7,7 +7,7 @@ setup() {
 }
 
 @test "run_with_timeout: command completes before timeout" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 5 echo 'success'
@@ -16,7 +16,7 @@ setup() {
 }
 
 @test "run_with_timeout: zero timeout runs command normally" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 0 echo 'no_timeout'
@@ -25,7 +25,7 @@ setup() {
 }
 
 @test "run_with_timeout: invalid timeout runs command normally" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout invalid echo 'no_timeout'
@@ -34,7 +34,7 @@ setup() {
 }
 
 @test "run_with_timeout: negative timeout runs command normally" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout -5 echo 'no_timeout'
@@ -43,7 +43,7 @@ setup() {
 }
 
 @test "run_with_timeout: preserves command exit code on success" {
-    bash -c "
+    /bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 5 true
@@ -54,7 +54,7 @@ setup() {
 
 @test "run_with_timeout: preserves command exit code on failure" {
     set +e
-    bash -c "
+    /bin/bash -c "
         set +e
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 5 false
@@ -71,7 +71,7 @@ setup() {
     fi
 
     set +e
-    bash -c "
+    /bin/bash -c "
         set +e
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 1 sleep 3
@@ -85,7 +85,7 @@ setup() {
 @test "run_with_timeout: kills long-running command" {
     start_time=$(date +%s)
     set +e
-    bash -c "
+    /bin/bash -c "
         set +e
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 2 sleep 5
@@ -99,7 +99,7 @@ setup() {
 
 @test "run_with_timeout: handles fast-completing commands" {
     start_time=$(date +%s)
-    bash -c "
+    /bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 10 echo 'fast'
@@ -111,7 +111,7 @@ setup() {
 }
 
 @test "run_with_timeout: works in pipefail mode" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 5 echo 'pipefail_test'
@@ -120,7 +120,7 @@ setup() {
 }
 
 @test "run_with_timeout: doesn't cause unintended exits" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 5 true || true
@@ -130,7 +130,7 @@ setup() {
 }
 
 @test "run_with_timeout: handles commands with arguments" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 5 echo 'arg1' 'arg2' 'arg3'
@@ -139,7 +139,7 @@ setup() {
 }
 
 @test "run_with_timeout: handles commands with spaces in arguments" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         run_with_timeout 5 echo 'hello world'
@@ -148,7 +148,7 @@ setup() {
 }
 
 @test "run_with_timeout: debug logging when MO_DEBUG=1" {
-    output=$(bash -c "
+    output=$(/bin/bash -c "
         set -euo pipefail
         export MO_DEBUG=1
         source '$PROJECT_ROOT/lib/core/timeout.sh'
@@ -158,7 +158,7 @@ setup() {
 }
 
 @test "run_with_timeout: no debug logging when MO_DEBUG=0" {
-    output=$(bash -c "
+    output=$(/bin/bash -c "
         set -euo pipefail
         export MO_DEBUG=0
         unset MO_TIMEOUT_INITIALIZED
@@ -169,7 +169,7 @@ setup() {
 }
 
 @test "timeout.sh: prevents multiple sourcing" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         source '$PROJECT_ROOT/lib/core/timeout.sh'
@@ -179,7 +179,7 @@ setup() {
 }
 
 @test "timeout.sh: sets MOLE_TIMEOUT_LOADED flag" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         echo \"\$MOLE_TIMEOUT_LOADED\"
@@ -192,7 +192,7 @@ setup() {
         skip "perl not available"
     fi
     set +e
-    bash -c "
+    /bin/bash -c "
         set +e
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         MO_TIMEOUT_BIN=''
@@ -211,7 +211,7 @@ setup() {
     fi
     start_time=$(date +%s)
     set +e
-    bash -c "
+    /bin/bash -c "
         set +e
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         MO_TIMEOUT_BIN=''
@@ -326,7 +326,7 @@ _tty_bg_field() {
 }
 
 @test "run_with_timeout: shell fallback preserves caller INT trap" {
-    result=$(bash -c "
+    result=$(/bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         MO_TIMEOUT_BIN=''
@@ -339,7 +339,7 @@ _tty_bg_field() {
 }
 
 @test "run_with_timeout: shell fallback cleans up watchdog sleep" {
-    bash -c "
+    /bin/bash -c "
         set -euo pipefail
         source '$PROJECT_ROOT/lib/core/timeout.sh'
         MO_TIMEOUT_BIN=''

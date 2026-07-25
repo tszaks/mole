@@ -37,7 +37,7 @@ EOF
     printf 'keep me' > "$target/data.txt"
     ln -s "$target" "$link"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 safe_remove_symlink "$link"
 EOF
@@ -52,7 +52,7 @@ EOF
     local victim="$SANDBOX/not_a_link"
     printf 'data' > "$victim"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 safe_remove_symlink "$victim"
 EOF
@@ -67,7 +67,7 @@ EOF
     mkdir -p "$target"
     ln -s "$target" "$link"
 
-    run bash --noprofile --norc <<EOF
+    run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 export MOLE_DRY_RUN=1
 safe_remove_symlink "$link"

@@ -99,7 +99,7 @@ setup() {
 }
 
 @test "completion bash can be loaded in bash" {
-	run bash -c "eval \"\$(\"$PROJECT_ROOT/bin/completion.sh\" bash)\" && complete -p mole"
+	run /bin/bash -c "eval \"\$(\"$PROJECT_ROOT/bin/completion.sh\" bash)\" && complete -p mole"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"_mole_completions"* ]]
 }
@@ -168,7 +168,7 @@ setup() {
 	export SHELL=/bin/zsh
 
 	# Simulate auto-install (no interaction)
-	run bash -c "echo 'y' | \"$PROJECT_ROOT/bin/completion.sh\""
+	run /bin/bash -c "echo 'y' | \"$PROJECT_ROOT/bin/completion.sh\""
 
 	if [[ "$output" == *"Already configured"* ]]; then
 		skip "Already configured from previous test"
