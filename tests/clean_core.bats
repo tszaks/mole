@@ -54,7 +54,8 @@ MOCK
 }
 
 set_mock_sudo_uncached() {
-    TEST_MOCK_BIN="$HOME/bin"
+    local mock_home="${1:-$HOME}"
+    TEST_MOCK_BIN="$mock_home/bin"
     mkdir -p "$TEST_MOCK_BIN"
     cat > "$TEST_MOCK_BIN/sudo" << 'MOCK'
 #!/bin/bash
@@ -408,31 +409,39 @@ PLIST
 }
 
 @test "mo clean --dry-run keeps container totals and preview paths consistent (#1282)" {
-    local explicit_cache="$HOME/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches"
-    local generic_cache="$HOME/Library/Containers/com.example.generic/Data/Library/Caches"
+    # This assertion depends on an exact total. Give it a private HOME so
+    # hidden directories left by earlier cases cannot add cleanup candidates.
+    local test_home
+    test_home="$(mktemp -d "${BATS_TEST_TMPDIR}/clean-1282-home.XXXXXX")"
+    mkdir -p "$test_home/.config/mole"
+
+    local explicit_cache="$test_home/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches"
+    local generic_cache="$test_home/Library/Containers/com.example.generic/Data/Library/Caches"
     local compiled_cache="$generic_cache/com.apple.e5rt.e5bundlecache"
-    local whitelisted_cache="$HOME/Library/Containers/com.example.whitelisted/Data/Library/Caches"
-    local protected_cache="$HOME/Library/Containers/com.apple.Safari/Data/Library/Caches"
+    local whitelisted_cache="$test_home/Library/Containers/com.example.whitelisted/Data/Library/Caches"
+    local protected_cache="$test_home/Library/Containers/com.apple.Safari/Data/Library/Caches"
     mkdir -p "$explicit_cache" "$generic_cache" "$compiled_cache" "$whitelisted_cache" "$protected_cache"
     dd if=/dev/zero of="$explicit_cache/explicit.bin" bs=1024 count=1024 2> /dev/null
     dd if=/dev/zero of="$generic_cache/generic.bin" bs=1024 count=1024 2> /dev/null
     dd if=/dev/zero of="$compiled_cache/model.bin" bs=1024 count=1024 2> /dev/null
     dd if=/dev/zero of="$whitelisted_cache/keep.bin" bs=1024 count=1024 2> /dev/null
     dd if=/dev/zero of="$protected_cache/protected.bin" bs=1024 count=1024 2> /dev/null
-    printf '%s\n' "$whitelisted_cache/keep.bin" > "$HOME/.config/mole/whitelist"
-    local explicit_kb generic_kb expected_human
-    explicit_kb=$(du -skP "$explicit_cache/explicit.bin" | awk '{print $1}')
-    generic_kb=$(du -skP "$generic_cache/generic.bin" | awk '{print $1}')
+    printf '%s\n' "$whitelisted_cache/keep.bin" > "$test_home/.config/mole/whitelist"
+    local explicit_bytes generic_bytes explicit_kb generic_kb expected_human
+    explicit_bytes=$(stat -f%z "$explicit_cache/explicit.bin")
+    generic_bytes=$(stat -f%z "$generic_cache/generic.bin")
+    explicit_kb=$(((explicit_bytes + 1023) / 1024))
+    generic_kb=$(((generic_bytes + 1023) / 1024))
     # shellcheck disable=SC2016
     expected_human=$(env PROJECT_ROOT="$PROJECT_ROOT" EXPECTED_KB="$((explicit_kb + generic_kb))" \
         bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; bytes_to_human_kb "$EXPECTED_KB"')
 
-    set_mock_sudo_uncached
-    run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 PATH="$TEST_MOCK_BIN:$PATH" \
+    set_mock_sudo_uncached "$test_home"
+    run env HOME="$test_home" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 PATH="$TEST_MOCK_BIN:$PATH" \
         "$PROJECT_ROOT/mole" clean --dry-run
 
     [ "$status" -eq 0 ] || return 1
-    local preview="$HOME/.config/mole/clean-list.txt"
+    local preview="$test_home/.config/mole/clean-list.txt"
     [[ -f "$preview" ]] || return 1
     [[ "$(grep -cF "$explicit_cache/explicit.bin" "$preview")" -eq 1 ]] || return 1
     [[ "$(grep -cF "$generic_cache/generic.bin" "$preview")" -eq 1 ]] || return 1
