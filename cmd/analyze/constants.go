@@ -22,6 +22,22 @@ const (
 	cacheReuseWindow       = 24 * time.Hour
 	staleCacheTTL          = 3 * 24 * time.Hour
 
+	// Analyzer cache admission and eviction budget. A subtree is only worth a
+	// cache file when rescanning it is actually expensive: on a dev machine's
+	// 157k-entry cache the MEDIAN entry described a directory holding one file
+	// and 98% held fewer than 100, so nearly every file spent a 4KB APFS block
+	// plus an inode memoizing what a single readdir returns. Unbounded and
+	// admission-free, that reached 1.88M files / 7.82GB for one user. The
+	// thresholds keep the ~1.5% of entries that carry the reuse value; the
+	// count/byte caps are the backstop for trees that clear them anyway.
+	analyzerCacheDirName    = "analyzer"
+	subdirCacheMinFiles     = 100
+	subdirCacheMinSize      = 10 << 20
+	analyzerCacheMaxEntries = 5000
+	analyzerCacheMaxBytes   = 50 << 20
+	cacheDirReadBatch       = 512
+	legacySweepWorkers      = 4
+
 	// Worker pool limits. Deliberately conservative: the User Library scan
 	// blocks many goroutines in syscalls on high-fan-out trees (Steam
 	// workshop/temp, browser caches), and each blocked goroutine holds an

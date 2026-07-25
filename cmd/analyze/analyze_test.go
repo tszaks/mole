@@ -687,6 +687,233 @@ func TestPruneAnalyzerCacheDirIgnoresRemoveFailures(t *testing.T) {
 	}
 }
 
+// writeAgedCacheFiles lays down n fresh cache files, oldest first, one minute
+// apart so eviction order is unambiguous.
+func writeAgedCacheFiles(t *testing.T, cacheDir string, n int, payload int) []string {
+	t.Helper()
+	base := time.Now().Add(-time.Duration(n) * time.Minute)
+	names := make([]string, 0, n)
+	for i := range n {
+		name := filepath.Join(cacheDir, fmt.Sprintf("entry-%03d.cache", i))
+		if err := os.WriteFile(name, []byte(strings.Repeat("x", payload)), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		stamp := base.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(name, stamp, stamp); err != nil {
+			t.Fatalf("chtimes %s: %v", name, err)
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// A TTL alone cannot bound a store whose entries are all refreshed inside it;
+// the count cap is what keeps the newest N and drops the rest, oldest first.
+func TestPruneAnalyzerCacheDirEnforcesEntryCap(t *testing.T) {
+	cacheDir := t.TempDir()
+	names := writeAgedCacheFiles(t, cacheDir, 10, 16)
+
+	if err := pruneAnalyzerCacheDirWithLimits(cacheDir, time.Now(), 4, 0); err != nil {
+		t.Fatalf("pruneAnalyzerCacheDirWithLimits: %v", err)
+	}
+
+	for i, name := range names {
+		_, err := os.Stat(name)
+		if i < 6 && !os.IsNotExist(err) {
+			t.Fatalf("expected oldest entry %s to be evicted, stat err: %v", name, err)
+		}
+		if i >= 6 && err != nil {
+			t.Fatalf("expected newest entry %s to be retained: %v", name, err)
+		}
+	}
+}
+
+func TestPruneAnalyzerCacheDirEnforcesByteCap(t *testing.T) {
+	cacheDir := t.TempDir()
+	names := writeAgedCacheFiles(t, cacheDir, 10, 100)
+
+	// The count cap is set out of the way so only the byte cap can evict:
+	// room for exactly three of the 100-byte entries.
+	if err := pruneAnalyzerCacheDirWithLimits(cacheDir, time.Now(), len(names), 300); err != nil {
+		t.Fatalf("pruneAnalyzerCacheDirWithLimits: %v", err)
+	}
+
+	for i, name := range names {
+		_, err := os.Stat(name)
+		if i < 7 && !os.IsNotExist(err) {
+			t.Fatalf("expected oldest entry %s to be evicted, stat err: %v", name, err)
+		}
+		if i >= 7 && err != nil {
+			t.Fatalf("expected newest entry %s to be retained: %v", name, err)
+		}
+	}
+}
+
+// The legacy flat store shares `~/.cache/mole` with shell-side state, so the
+// sweep is scoped to the two names the analyzer ever wrote there.
+func TestSweepLegacyAnalyzerCacheRemovesOnlyAnalyzerFiles(t *testing.T) {
+	root := t.TempDir()
+
+	legacyEntry := filepath.Join(root, "deadbeef.cache")
+	legacyOverview := filepath.Join(root, overviewCacheFile)
+	shellState := filepath.Join(root, "installed_apps_cache")
+	permissionFlag := filepath.Join(root, "permissions_granted")
+	for _, path := range []string{legacyEntry, legacyOverview, shellState, permissionFlag} {
+		if err := os.WriteFile(path, []byte("state"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	analyzerDir := filepath.Join(root, analyzerCacheDirName)
+	if err := os.Mkdir(analyzerDir, 0o755); err != nil {
+		t.Fatalf("mkdir analyzer dir: %v", err)
+	}
+	currentEntry := filepath.Join(analyzerDir, "deadbeef.cache")
+	if err := os.WriteFile(currentEntry, []byte("current"), 0o644); err != nil {
+		t.Fatalf("write current entry: %v", err)
+	}
+
+	if err := sweepLegacyAnalyzerCache(root); err != nil {
+		t.Fatalf("sweepLegacyAnalyzerCache: %v", err)
+	}
+
+	for _, path := range []string{legacyEntry, legacyOverview} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected legacy file %s to be swept, stat err: %v", path, err)
+		}
+	}
+	for _, path := range []string{shellState, permissionFlag, currentEntry, analyzerDir} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("expected %s to be preserved: %v", path, err)
+		}
+	}
+}
+
+func TestSweepLegacyAnalyzerCacheMissingRoot(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	if err := sweepLegacyAnalyzerCache(missing); err != nil {
+		t.Fatalf("expected missing root to be ignored, got: %v", err)
+	}
+}
+
+// Rejecting an expired entry without deleting it leaves the file on disk for a
+// whole TTL, waiting on a prune pass that may never reach it.
+func TestLoadCacheFromDiskRemovesExpiredEntry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := saveCacheToDisk(target, scanResult{TotalSize: 1024, TotalFiles: 4}); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+
+	expired := time.Now().Add(-analyzerCacheTTL - time.Hour)
+	if err := os.Chtimes(cachePath, expired, expired); err != nil {
+		t.Fatalf("chtimes cache: %v", err)
+	}
+	// ScanTime lives inside the payload, so age it there too.
+	entry, err := loadRawCacheFromDisk(target)
+	if err != nil {
+		t.Fatalf("loadRawCacheFromDisk: %v", err)
+	}
+	entry.ScanTime = expired
+	file, err := os.Create(cachePath)
+	if err != nil {
+		t.Fatalf("rewrite cache: %v", err)
+	}
+	if err := gob.NewEncoder(file).Encode(*entry); err != nil {
+		file.Close() //nolint:errcheck
+		t.Fatalf("encode cache: %v", err)
+	}
+	file.Close() //nolint:errcheck
+
+	if _, err := loadCacheFromDisk(target); err == nil {
+		t.Fatalf("expected expired cache to be rejected")
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("expected expired cache file to be deleted, stat err: %v", err)
+	}
+}
+
+func TestLoadCacheFromDiskRemovesEntryForMissingDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := saveCacheToDisk(target, scanResult{TotalSize: 1024, TotalFiles: 4}); err != nil {
+		t.Fatalf("saveCacheToDisk: %v", err)
+	}
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+	if err := os.RemoveAll(target); err != nil {
+		t.Fatalf("remove target: %v", err)
+	}
+
+	if _, err := loadCacheFromDisk(target); err == nil {
+		t.Fatalf("expected missing directory to fail the load")
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("expected orphaned cache file to be deleted, stat err: %v", err)
+	}
+}
+
+func TestLoadRawCacheFromDiskRemovesUndecodableEntry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte("not gob"), 0o644); err != nil {
+		t.Fatalf("write corrupt cache: %v", err)
+	}
+
+	if _, err := loadRawCacheFromDisk(target); err == nil {
+		t.Fatalf("expected corrupt cache to fail decoding")
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("expected corrupt cache file to be deleted, stat err: %v", err)
+	}
+}
+
+// The analyzer store must not sit in the directory the shell side uses for its
+// own state: the legacy sweep and the entry caps both assume they own it.
+func TestGetCacheDirIsAnalyzerScoped(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root, err := getMoleCacheRoot()
+	if err != nil {
+		t.Fatalf("getMoleCacheRoot: %v", err)
+	}
+	cacheDir, err := getCacheDir()
+	if err != nil {
+		t.Fatalf("getCacheDir: %v", err)
+	}
+	if want := filepath.Join(root, analyzerCacheDirName); cacheDir != want {
+		t.Fatalf("cache dir = %q, want %q", cacheDir, want)
+	}
+	if _, err := os.Stat(cacheDir); err != nil {
+		t.Fatalf("expected cache dir to be created: %v", err)
+	}
+}
+
 func TestScanPathConcurrentWarmsChildDirectoryCache(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -699,8 +926,13 @@ func TestScanPathConcurrentWarmsChildDirectoryCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "root.txt"), []byte("root-data"), 0o644); err != nil {
 		t.Fatalf("write root data: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(child, "data.bin"), []byte(strings.Repeat("x", 4096)), 0o644); err != nil {
-		t.Fatalf("write child data: %v", err)
+	// Only subtrees expensive enough to rescan are persisted, so the child has
+	// to clear subdirCacheMinFiles to be warmed at all.
+	for i := range subdirCacheMinFiles {
+		name := filepath.Join(child, fmt.Sprintf("data-%d.bin", i))
+		if err := os.WriteFile(name, []byte(strings.Repeat("x", 64)), 0o644); err != nil {
+			t.Fatalf("write child data: %v", err)
+		}
 	}
 
 	var filesScanned, dirsScanned, bytesScanned int64
@@ -721,11 +953,82 @@ func TestScanPathConcurrentWarmsChildDirectoryCache(t *testing.T) {
 	if len(cached.Entries) == 0 {
 		t.Fatalf("expected cached child entries to be populated")
 	}
-	if cached.TotalFiles != 1 {
-		t.Fatalf("expected warmed child cache to track local file count 1, got %d", cached.TotalFiles)
+	if cached.TotalFiles != subdirCacheMinFiles {
+		t.Fatalf("expected warmed child cache to track local file count %d, got %d", subdirCacheMinFiles, cached.TotalFiles)
 	}
 	if !cached.NeedsRefresh {
 		t.Fatalf("expected warmed child cache to be marked for refresh")
+	}
+}
+
+// A cache file costs a 4KB block plus an inode to memoize what one readdir
+// returns, so cheap subtrees must not get one. Unbounded admission is what grew
+// ~/.cache/mole to 1.88M files / 7.82GB on a user's Mac.
+func TestScanPathConcurrentSkipsCacheForCheapSubdir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root := filepath.Join(home, "root")
+	child := filepath.Join(root, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "root.txt"), []byte("root-data"), 0o644); err != nil {
+		t.Fatalf("write root data: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "data.bin"), []byte(strings.Repeat("x", 4096)), 0o644); err != nil {
+		t.Fatalf("write child data: %v", err)
+	}
+
+	var filesScanned, dirsScanned, bytesScanned int64
+	current := &atomic.Value{}
+	current.Store("")
+
+	result, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current)
+	if err != nil {
+		t.Fatalf("scanPathConcurrent(root): %v", err)
+	}
+
+	childPath, err := getCachePath(child)
+	if err != nil {
+		t.Fatalf("getCachePath: %v", err)
+	}
+	if _, err := os.Stat(childPath); !os.IsNotExist(err) {
+		t.Fatalf("expected cheap subtree to be left uncached, stat err: %v", err)
+	}
+
+	// The size still has to be reported; only the persistence is skipped.
+	found := false
+	for _, entry := range result.Entries {
+		if entry.Path == child {
+			found = true
+			if entry.Size <= 0 {
+				t.Fatalf("expected uncached child to still report a size, got %d", entry.Size)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected child entry in scan result")
+	}
+}
+
+func TestShouldPersistSubdirCacheThresholds(t *testing.T) {
+	cases := []struct {
+		name   string
+		result scanResult
+		want   bool
+	}{
+		{"tiny subtree", scanResult{TotalFiles: 1, TotalSize: 4096}, false},
+		{"just below file threshold", scanResult{TotalFiles: subdirCacheMinFiles - 1, TotalSize: 1024}, false},
+		{"file threshold", scanResult{TotalFiles: subdirCacheMinFiles, TotalSize: 1024}, true},
+		{"size threshold", scanResult{TotalFiles: 1, TotalSize: subdirCacheMinSize}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldPersistSubdirCache(tc.result); got != tc.want {
+				t.Fatalf("shouldPersistSubdirCache(%+v) = %v, want %v", tc.result, got, tc.want)
+			}
+		})
 	}
 }
 

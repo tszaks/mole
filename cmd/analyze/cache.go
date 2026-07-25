@@ -3,10 +3,13 @@
 package main
 
 import (
+	"container/heap"
 	"context"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -189,12 +192,25 @@ func loadOverviewCachedSize(path string) (int64, error) {
 	return cacheEntry.TotalSize, nil
 }
 
-func getCacheDir() (string, error) {
+// getMoleCacheRoot is the shared `~/.cache/mole` directory. The shell side
+// keeps its own state files there, so nothing may be swept from it wholesale.
+func getMoleCacheRoot() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	cacheDir := filepath.Join(home, ".cache", "mole")
+	return filepath.Join(home, ".cache", "mole"), nil
+}
+
+// getCacheDir is the analyzer-owned subdirectory. Keeping analyzer entries out
+// of the shared root is what lets the legacy sweep and the entry caps operate
+// on a directory whose every file the analyzer owns.
+func getCacheDir() (string, error) {
+	root, err := getMoleCacheRoot()
+	if err != nil {
+		return "", err
+	}
+	cacheDir := filepath.Join(root, analyzerCacheDirName)
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return "", err
 	}
@@ -211,43 +227,210 @@ func getCachePath(path string) (string, error) {
 	return filepath.Join(cacheDir, filename), nil
 }
 
+// shouldPersistSubdirCache decides whether a scanned subtree earns a cache
+// file. Memoizing a directory that holds a handful of files costs more than it
+// saves: the entry occupies a whole 4KB block plus an inode, and reading it
+// back is slower than the single readdir it replaces. Only subtrees expensive
+// enough to rescan are persisted; see the budget comment in constants.go.
+func shouldPersistSubdirCache(result scanResult) bool {
+	return result.TotalFiles >= subdirCacheMinFiles || result.TotalSize >= subdirCacheMinSize
+}
+
+// removeCacheEntry drops a cache file that can never be useful again (its
+// schema is gone, it failed to decode, its directory no longer exists, or it
+// outlived the TTL). Expiring an entry only at load time used to leave the file
+// on disk until a prune pass happened to reach it, which is how a store grows
+// far past what any scan still reads.
+//
+// Deliberately not invalidateCache: that also drops the overview snapshot,
+// which rewrites the whole JSON store under a lock. This runs per entry inside
+// a scan, so it stays a single unlink.
+func removeCacheEntry(path string) {
+	if cachePath, err := getCachePath(path); err == nil {
+		_ = os.Remove(cachePath)
+	}
+}
+
+// cacheFileStat is the eviction record for one analyzer cache file.
+type cacheFileStat struct {
+	name    string
+	modTime time.Time
+	size    int64
+}
+
+// oldestFirstHeap is a min-heap by mod time, so the root is always the next
+// entry to evict. Retaining the newest N through a bounded heap keeps prune's
+// memory tied to the cap instead of to the directory it is pruning.
+type oldestFirstHeap []cacheFileStat
+
+func (h oldestFirstHeap) Len() int           { return len(h) }
+func (h oldestFirstHeap) Less(i, j int) bool { return h[i].modTime.Before(h[j].modTime) }
+func (h oldestFirstHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *oldestFirstHeap) Push(x any)        { *h = append(*h, x.(cacheFileStat)) }
+func (h *oldestFirstHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
 func pruneAnalyzerCache() {
+	// Best-effort throughout; errors are ignored so startup never blocks on
+	// cache housekeeping.
+	if root, err := getMoleCacheRoot(); err == nil {
+		_ = sweepLegacyAnalyzerCache(root)
+	}
 	cacheDir, err := getCacheDir()
 	if err != nil {
 		return
 	}
-	// Pruning is best-effort; errors are intentionally ignored to avoid blocking startup.
 	_ = pruneAnalyzerCacheDir(cacheDir, time.Now())
 }
 
+// pruneAnalyzerCacheDir removes expired entries and then enforces the count and
+// byte caps, evicting oldest first. The directory is streamed in batches rather
+// than read whole: os.ReadDir buffers and sorts every name, which is exactly
+// what an oversized store cannot afford.
 func pruneAnalyzerCacheDir(cacheDir string, now time.Time) error {
+	return pruneAnalyzerCacheDirWithLimits(cacheDir, now, analyzerCacheMaxEntries, analyzerCacheMaxBytes)
+}
+
+// maxEntries must stay positive: it is what bounds the retained heap, and with
+// it the memory this pass needs. A non-positive maxBytes just disables the byte
+// cap.
+func pruneAnalyzerCacheDirWithLimits(cacheDir string, now time.Time, maxEntries int, maxBytes int64) error {
 	if cacheDir == "" || analyzerCacheTTL <= 0 {
 		return nil
 	}
 
-	entries, err := os.ReadDir(cacheDir)
+	dir, err := os.Open(cacheDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
+	defer dir.Close() //nolint:errcheck
 
 	cutoff := now.Add(-analyzerCacheTTL)
-	for _, entry := range entries {
-		if entry.Type()&os.ModeSymlink != 0 || filepath.Ext(entry.Name()) != ".cache" {
-			continue
-		}
+	retained := &oldestFirstHeap{}
+	var retainedBytes int64
 
-		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() || info.ModTime().After(cutoff) {
-			continue
+	evictOldest := func() {
+		if retained.Len() == 0 {
+			return
 		}
+		oldest := heap.Pop(retained).(cacheFileStat)
+		retainedBytes -= oldest.size
+		_ = os.Remove(filepath.Join(cacheDir, oldest.name))
+	}
 
-		_ = os.Remove(filepath.Join(cacheDir, entry.Name()))
+	for {
+		entries, readErr := dir.ReadDir(cacheDirReadBatch)
+		for _, entry := range entries {
+			if entry.Type()&os.ModeSymlink != 0 || filepath.Ext(entry.Name()) != ".cache" {
+				continue
+			}
+
+			info, infoErr := entry.Info()
+			if infoErr != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			if !info.ModTime().After(cutoff) {
+				_ = os.Remove(filepath.Join(cacheDir, entry.Name()))
+				continue
+			}
+
+			heap.Push(retained, cacheFileStat{
+				name:    entry.Name(),
+				modTime: info.ModTime(),
+				size:    info.Size(),
+			})
+			retainedBytes += info.Size()
+			if maxEntries > 0 && retained.Len() > maxEntries {
+				evictOldest()
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return readErr
+		}
+		if len(entries) == 0 {
+			break
+		}
+	}
+
+	for maxBytes > 0 && retained.Len() > 0 && retainedBytes > maxBytes {
+		evictOldest()
 	}
 
 	return nil
+}
+
+// sweepLegacyAnalyzerCache removes the flat `<hash>.cache` entries the analyzer
+// used to write directly into `~/.cache/mole`, plus the overview snapshot that
+// sat beside them. Everything else in that directory belongs to the shell side
+// and is left alone.
+//
+// The sweep streams the directory rather than reading it whole, so a legacy
+// store with millions of entries is never held in memory, and it is resumable:
+// whatever a short-lived process does not reach is picked up by the next run.
+// Unlinks are spread over a few workers because a single one clears roughly
+// 7k files/s on APFS, which is a long tail on the largest stores seen in the
+// wild (1.88M files); the small pool roughly doubles that without turning
+// housekeeping into a competitor for the scan itself.
+func sweepLegacyAnalyzerCache(root string) error {
+	if root == "" {
+		return nil
+	}
+
+	dir, err := os.Open(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer dir.Close() //nolint:errcheck
+
+	names := make(chan string, cacheDirReadBatch)
+	var workers sync.WaitGroup
+	for range legacySweepWorkers {
+		workers.Go(func() {
+			for name := range names {
+				_ = os.Remove(filepath.Join(root, name))
+			}
+		})
+	}
+	defer func() {
+		close(names)
+		workers.Wait()
+	}()
+
+	for {
+		entries, readErr := dir.ReadDir(cacheDirReadBatch)
+		for _, entry := range entries {
+			if !entry.Type().IsRegular() {
+				continue
+			}
+			if filepath.Ext(entry.Name()) != ".cache" && entry.Name() != overviewCacheFile {
+				continue
+			}
+			names <- entry.Name()
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return nil
+			}
+			return readErr
+		}
+		if len(entries) == 0 {
+			return nil
+		}
+	}
 }
 
 func loadRawCacheFromDisk(path string) (*cacheEntry, error) {
@@ -265,10 +448,14 @@ func loadRawCacheFromDisk(path string) (*cacheEntry, error) {
 	var entry cacheEntry
 	decoder := gob.NewDecoder(file)
 	if err := decoder.Decode(&entry); err != nil {
+		// A truncated or foreign payload will never decode; keeping it only
+		// costs a block until some prune pass reaches it.
+		_ = os.Remove(cachePath)
 		return nil, err
 	}
 
 	if entry.SchemaVersion != cacheSchemaVersion {
+		_ = os.Remove(cachePath)
 		return nil, fmt.Errorf("cache schema mismatch: got %d, want %d", entry.SchemaVersion, cacheSchemaVersion)
 	}
 
@@ -283,11 +470,18 @@ func loadCacheFromDisk(path string) (*cacheEntry, error) {
 
 	info, err := os.Stat(path)
 	if err != nil {
+		// The directory is gone, so nothing will ever refresh or reuse this
+		// entry. Churn-heavy trees (node_modules, simulator data) otherwise
+		// leave one orphan per directory behind for a full TTL.
+		if os.IsNotExist(err) {
+			removeCacheEntry(path)
+		}
 		return nil, err
 	}
 
 	scanAge := time.Since(entry.ScanTime)
 	if scanAge > analyzerCacheTTL {
+		removeCacheEntry(path)
 		return nil, fmt.Errorf("cache expired: too old")
 	}
 
@@ -314,9 +508,14 @@ func loadStaleCacheFromDisk(path string) (*cacheEntry, error) {
 	}
 
 	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			removeCacheEntry(path)
+		}
 		return nil, err
 	}
 
+	// Only the authoritative TTL deletes: staleCacheTTL is the shorter
+	// first-paint window, and an entry past it is still valid for a full scan.
 	if time.Since(entry.ScanTime) > staleCacheTTL {
 		return nil, fmt.Errorf("stale cache expired")
 	}

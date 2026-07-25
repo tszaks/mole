@@ -470,8 +470,9 @@ func scanSubdirWithCache(root string, largeFileChan chan<- fileEntry, largeFileM
 	if err == nil {
 		publishLargeFiles(result.LargeFiles, largeFileChan)
 		// A subtree whose size depended on hardlink dedup is scan-order
-		// dependent; caching it would poison standalone re-scans.
-		if !result.dedupedHardlink {
+		// dependent; caching it would poison standalone re-scans. Cheap
+		// subtrees are not persisted at all: see shouldPersistSubdirCache.
+		if !result.dedupedHardlink && shouldPersistSubdirCache(result) {
 			_ = saveCacheToDiskWithOptions(root, result, true)
 		}
 		return result
