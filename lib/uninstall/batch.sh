@@ -488,10 +488,11 @@ remove_file_list() {
             continue
         fi
 
-        # Symlinks and sudo-required paths stay on the per-file mole_delete
-        # path: safe_remove_symlink semantics differ from Trash, and AppleScript
-        # cannot run reliably as root for the batch fallback.
+        # Symlinks, sudo-required paths, app bundles, and TCC-managed app data
+        # stay on the per-file mole_delete path. The latter targets bypass
+        # third-party Trash tools and Finder inside _mole_move_to_trash.
         if [[ "$mode" == "trash" && "$use_sudo" != "true" && ! -L "$file" ]] &&
+            ! _mole_path_requires_direct_trash "$file" &&
             ! is_uninstall_dry_run; then
             trash_batch+=("$file")
         else

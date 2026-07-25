@@ -455,6 +455,7 @@ func renderDiskCard(disks []DiskStatus, io DiskIOStatus, _ uint64, _ bool) cardD
 		} else if len(disks) == 1 {
 			lines = append(lines, formatDiskMetaLine(disks[0]))
 		}
+		lines = append(lines, formatDiskSMARTLine(disks))
 	}
 	lines = append(lines, formatDiskIOLine(io))
 	return cardData{icon: iconDisk, title: "Disk", lines: lines}
@@ -497,6 +498,58 @@ func formatDiskMetaLine(d DiskStatus) string {
 		parts = append(parts, strings.ToUpper(d.Fstype))
 	}
 	return fmt.Sprintf("Total  %s", strings.Join(parts, " · "))
+}
+
+func formatDiskSMARTLine(disks []DiskStatus) string {
+	if len(disks) == 1 {
+		status, failing := formatSMARTStatus(disks[0].SmartStatus, false)
+		if failing {
+			status += " · " + dangerStyle.Render("Back up now")
+		}
+		return fmt.Sprintf("%-*s %s", metricLabelWidth, "SMART", status)
+	}
+
+	internal, external := splitDisks(disks)
+	parts := make([]string, 0, len(disks)+1)
+	hasFailing := false
+	addGroup := func(prefix string, list []DiskStatus) {
+		for index, disk := range list {
+			status, failing := formatSMARTStatus(disk.SmartStatus, true)
+			parts = append(parts, diskLabel(prefix, index, len(list))+" "+status)
+			hasFailing = hasFailing || failing
+		}
+	}
+	addGroup("INTR", internal)
+	addGroup("EXTR", external)
+	if hasFailing {
+		parts = append([]string{dangerStyle.Render("Back up now")}, parts...)
+	}
+	return fmt.Sprintf("%-*s %s", metricLabelWidth, "SMART", strings.Join(parts, " · "))
+}
+
+func formatSMARTStatus(status string, compact bool) (string, bool) {
+	switch status {
+	case smartStatusVerified:
+		if compact {
+			return okStyle.Render("OK"), false
+		}
+		return okStyle.Render("Verified"), false
+	case smartStatusFailing:
+		if compact {
+			return dangerStyle.Render("FAIL"), true
+		}
+		return dangerStyle.Render("Failing"), true
+	case smartStatusUnsupported:
+		if compact {
+			return subtleStyle.Render("N/A"), false
+		}
+		return subtleStyle.Render("Unsupported"), false
+	default:
+		if compact {
+			return subtleStyle.Render("?"), false
+		}
+		return subtleStyle.Render("Unknown"), false
+	}
 }
 
 func formatDiskIOLine(io DiskIOStatus) string {

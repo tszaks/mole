@@ -95,6 +95,8 @@ VS Code system cache (Cursor, VSCodium)|$HOME/Library/Caches/com.microsoft.VSCod
 Cursor editor cache|$HOME/Library/Caches/com.todesktop.230313mzl4w4u92/*|ide_cache
 LM Studio app cache|$HOME/Library/Caches/com.lmstudio.lmstudio/*|ai_ml_cache
 Codex Desktop update staging|$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation|ai_ml_cache
+Chrome on-device AI models|$HOME/Library/Application Support/Google/Chrome/OptGuideOnDevice*/*|ai_ml_cache
+Chrome optimization guide models|$HOME/Library/Application Support/Google/Chrome/optimization_guide_model_store/*|ai_ml_cache
 Bazel build cache|$HOME/.cache/bazel/*|compiler_cache
 Go build cache|$HOME/Library/Caches/go-build/*|compiler_cache
 Go module cache|$HOME/go/pkg/mod/*|compiler_cache

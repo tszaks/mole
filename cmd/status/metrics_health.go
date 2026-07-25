@@ -120,6 +120,15 @@ func calculateHealthScore(cpu CPUStatus, mem MemoryStatus, disks []DiskStatus, d
 			issues = append(issues, "Disk Almost Full")
 		}
 	}
+	for _, disk := range disks {
+		if disk.SmartStatus == smartStatusFailing {
+			if score > 44 {
+				score = 44
+			}
+			issues = append(issues, "Disk SMART Failing")
+			break
+		}
+	}
 
 	// Thermal penalty.
 	thermalPenalty := 0.0

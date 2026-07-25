@@ -932,6 +932,54 @@ EOF
     [[ "$output" == *"Puppeteer browser cache"* ]]
 }
 
+@test "clean_browsers keeps all Chrome AI model stores when whitelisted" {
+    local chrome_support="$HOME/Library/Application Support/Google/Chrome"
+    mkdir -p "$chrome_support/OptGuideOnDeviceModel/2026"
+    mkdir -p "$chrome_support/OptGuideOnDeviceClassifierModel/2026"
+    mkdir -p "$chrome_support/optimization_guide_model_store/2026"
+    mkdir -p "$chrome_support/Default/Code Cache/js"
+    touch "$chrome_support/OptGuideOnDeviceModel/2026/model.bin"
+    touch "$chrome_support/OptGuideOnDeviceClassifierModel/2026/classifier.bin"
+    touch "$chrome_support/optimization_guide_model_store/2026/model.bin"
+    touch "$chrome_support/Default/Code Cache/js/cache.bin"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+WHITELIST_PATTERNS=(
+    "$HOME/Library/Application Support/Google/Chrome/OptGuideOnDevice*/*"
+    "$HOME/Library/Application Support/Google/Chrome/optimization_guide_model_store/*"
+)
+pgrep() { return 1; }
+clean_service_worker_cache() { :; }
+note_activity() { :; }
+safe_clean() {
+    local count=$#
+    local label="${!count}"
+    local index item
+    for ((index = 1; index < count; index++)); do
+        item="${!index}"
+        if is_path_whitelisted "$item"; then
+            printf 'KEEP:%s:%s\n' "$label" "$item"
+        else
+            safe_remove "$item" true
+        fi
+    done
+}
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ -f "$chrome_support/OptGuideOnDeviceModel/2026/model.bin" ]] || return 1
+    [[ -f "$chrome_support/OptGuideOnDeviceClassifierModel/2026/classifier.bin" ]] || return 1
+    [[ -f "$chrome_support/optimization_guide_model_store/2026/model.bin" ]] || return 1
+    [[ ! -e "$chrome_support/Default/Code Cache/js/cache.bin" ]] || return 1
+    [[ "$output" == *"KEEP:Chrome on-device model cache"* ]] || return 1
+    [[ "$output" == *"KEEP:Chrome on-device classifier cache"* ]] || return 1
+    [[ "$output" == *"KEEP:Chrome optimization guide models"* ]] || return 1
+}
+
 @test "clean_browsers preserves Brave Service Worker ScriptCache" {
     mkdir -p "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/Default/Service Worker/ScriptCache"
 

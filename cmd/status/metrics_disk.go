@@ -49,6 +49,13 @@ var (
 	diskUsageFunc      = disk.Usage
 )
 
+const (
+	smartStatusVerified    = "verified"
+	smartStatusFailing     = "failing"
+	smartStatusUnsupported = "unsupported"
+	smartStatusUnknown     = "unknown"
+)
+
 func collectDisks() ([]DiskStatus, error) {
 	return collectDisksWithCorrections(true)
 }
@@ -110,13 +117,14 @@ func collectDisksWithCorrections(useCorrections bool) ([]DiskStatus, error) {
 			UsedPercent: usedPercent,
 			Fstype:      part.Fstype,
 			External:    !useCorrections && strings.HasPrefix(part.Mountpoint, "/Volumes/"),
+			SmartStatus: smartStatusUnknown,
 		})
 		seenDevice[baseDevice] = true
 		seenVolume[volKey] = true
 	}
 
 	if useCorrections {
-		annotateDiskTypes(disks)
+		annotateDiskMetadata(disks)
 	}
 
 	sort.Slice(disks, func(i, j int) bool {
@@ -163,11 +171,16 @@ func shouldSkipDiskPartition(part disk.PartitionStat) bool {
 	return false
 }
 
+type diskMetadata struct {
+	External    bool
+	SmartStatus string
+}
+
 var (
-	// External disk cache.
-	lastDiskCacheAt time.Time
-	diskTypeCache   = make(map[string]bool)
-	diskCacheTTL    = 2 * time.Minute
+	// Slow disk metadata cache.
+	lastDiskCacheAt   time.Time
+	diskMetadataCache = make(map[string]diskMetadata)
+	diskCacheTTL      = 2 * time.Minute
 
 	// Finder startup disk usage cache (macOS APFS purgeable-aware).
 	finderDiskCacheMu  sync.Mutex
@@ -185,7 +198,7 @@ var (
 	trashSizeCacheTTL     = 5 * time.Second
 )
 
-func annotateDiskTypes(disks []DiskStatus) {
+func annotateDiskMetadata(disks []DiskStatus) {
 	if len(disks) == 0 || runtime.GOOS != "darwin" || !commandExists("diskutil") {
 		return
 	}
@@ -193,7 +206,7 @@ func annotateDiskTypes(disks []DiskStatus) {
 	now := time.Now()
 	// Clear stale cache.
 	if now.Sub(lastDiskCacheAt) > diskCacheTTL {
-		diskTypeCache = make(map[string]bool)
+		diskMetadataCache = make(map[string]diskMetadata)
 		lastDiskCacheAt = now
 	}
 
@@ -203,17 +216,19 @@ func annotateDiskTypes(disks []DiskStatus) {
 			base = disks[i].Device
 		}
 
-		if val, ok := diskTypeCache[base]; ok {
-			disks[i].External = val
+		if metadata, ok := diskMetadataCache[base]; ok {
+			disks[i].External = metadata.External
+			disks[i].SmartStatus = metadata.SmartStatus
 			continue
 		}
 
-		external, err := isExternalDisk(base)
+		metadata, err := readDiskMetadata(base)
 		if err != nil {
-			external = strings.HasPrefix(disks[i].Mount, "/Volumes/")
+			metadata.External = strings.HasPrefix(disks[i].Mount, "/Volumes/")
 		}
-		disks[i].External = external
-		diskTypeCache[base] = external
+		disks[i].External = metadata.External
+		disks[i].SmartStatus = metadata.SmartStatus
+		diskMetadataCache[base] = metadata
 	}
 }
 
@@ -230,34 +245,56 @@ func baseDeviceName(device string) string {
 	return device
 }
 
-func isExternalDisk(device string) (bool, error) {
+func readDiskMetadata(device string) (diskMetadata, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	out, err := runCmd(ctx, "diskutil", "info", device)
 	if err != nil {
-		return false, err
+		return diskMetadata{SmartStatus: smartStatusUnknown}, err
 	}
+	return parseDiskMetadata(out)
+}
+
+func parseDiskMetadata(out string) (diskMetadata, error) {
+	metadata := diskMetadata{SmartStatus: smartStatusUnknown}
 	var (
-		found    bool
-		external bool
+		externalFound bool
+		locationFound bool
+		locationValue bool
 	)
 	for line := range strings.Lines(out) {
 		trim := strings.TrimSpace(line)
 		if strings.HasPrefix(trim, "Internal:") {
-			found = true
-			external = strings.Contains(trim, "No")
-			break
+			externalFound = true
+			metadata.External = strings.Contains(trim, "No")
 		}
-		if strings.HasPrefix(trim, "Device Location:") {
-			found = true
-			external = strings.Contains(trim, "External")
+		if !externalFound && strings.HasPrefix(trim, "Device Location:") {
+			locationFound = true
+			locationValue = strings.Contains(trim, "External")
+		}
+		if strings.HasPrefix(trim, "SMART Status:") {
+			value := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trim, "SMART Status:")))
+			switch value {
+			case "verified":
+				metadata.SmartStatus = smartStatusVerified
+			case "failing", "failed":
+				metadata.SmartStatus = smartStatusFailing
+			case "not supported", "unsupported":
+				metadata.SmartStatus = smartStatusUnsupported
+			default:
+				metadata.SmartStatus = smartStatusUnknown
+			}
 		}
 	}
-	if !found {
-		return false, errors.New("diskutil info missing Internal field")
+	if !externalFound && locationFound {
+		externalFound = true
+		metadata.External = locationValue
 	}
-	return external, nil
+	if !externalFound {
+		return metadata, errors.New("diskutil info missing Internal field")
+	}
+	return metadata, nil
 }
 
 // correctDiskTotalBytes uses diskutil's plist output when macOS reports a

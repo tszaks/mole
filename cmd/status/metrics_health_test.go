@@ -47,6 +47,43 @@ func TestCalculateHealthScoreDetectsIssues(t *testing.T) {
 	}
 }
 
+func TestCalculateHealthScoreCapsFailingSMARTAt44(t *testing.T) {
+	score, msg := calculateHealthScore(
+		CPUStatus{Usage: 10},
+		MemoryStatus{UsedPercent: 20, Pressure: "normal"},
+		[]DiskStatus{
+			{UsedPercent: 30, SmartStatus: smartStatusVerified},
+			{UsedPercent: 20, SmartStatus: smartStatusFailing},
+		},
+		DiskIOStatus{ReadRate: 5, WriteRate: 5},
+		ThermalStatus{CPUTemp: 40},
+		nil, 0,
+	)
+
+	if score != 44 {
+		t.Fatalf("failing SMART score = %d, want 44", score)
+	}
+	if !strings.Contains(msg, "Disk SMART Failing") {
+		t.Fatalf("failing SMART message = %q", msg)
+	}
+}
+
+func TestCalculateHealthScoreDoesNotPenalizeUnavailableSMART(t *testing.T) {
+	for _, status := range []string{smartStatusUnsupported, smartStatusUnknown} {
+		score, msg := calculateHealthScore(
+			CPUStatus{Usage: 10},
+			MemoryStatus{UsedPercent: 20, Pressure: "normal"},
+			[]DiskStatus{{UsedPercent: 30, SmartStatus: status}},
+			DiskIOStatus{ReadRate: 5, WriteRate: 5},
+			ThermalStatus{CPUTemp: 40},
+			nil, 0,
+		)
+		if score != 100 || msg != "Excellent" {
+			t.Fatalf("SMART %q changed health to %d %q", status, score, msg)
+		}
+	}
+}
+
 func TestCalculateHealthScoreMonotonicInCPU(t *testing.T) {
 	// Rising CPU usage must never improve (raise) the health score, including
 	// across the high-usage threshold at 85%.

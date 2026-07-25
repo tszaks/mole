@@ -94,6 +94,8 @@ MOLE_RETENTION_DAYS=14 mo clean
 
 When it is not set, each cleanup keeps its existing default.
 
+Selections made with `mo clean --whitelist` persist in `~/.config/mole/whitelist`.
+
 ## Security & Safety Design
 
 Mole is a local system maintenance tool, and some commands can perform destructive local operations.

@@ -190,3 +190,51 @@ EOF
     n=$(wc -l < "$fallback_count" | tr -d ' ')
     [ "$n" -eq 2 ]
 }
+
+@test "remove_file_list routes Microsoft Word app data per-file and batches ordinary leftovers" {
+    local container="$HOME/Library/Containers/com.microsoft.Word"
+    local group_container="$HOME/Library/Group Containers/UBF8T346G9.Office"
+    local app_scripts="$HOME/Library/Application Scripts/com.microsoft.Word"
+    local ordinary="$HOME/Library/Preferences/com.microsoft.Word.plist"
+    mkdir -p "$container" "$group_container" "$app_scripts" "$(dirname "$ordinary")"
+    : > "$ordinary"
+    local list
+    printf -v list '%s\n%s\n%s\n%s' "$container" "$group_container" "$app_scripts" "$ordinary"
+
+    local direct_trace="$SANDBOX/direct.log"
+    local batch_trace="$SANDBOX/batch.log"
+    : > "$direct_trace"
+    : > "$batch_trace"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+export MOLE_UNINSTALL_MODE=1
+_mole_move_to_trash_batch() {
+    printf '%s\n' "\$@" >> "$batch_trace"
+    return 0
+}
+mole_delete() {
+    printf '%s|%s\n' "\$1" "\${2:-false}" >> "$direct_trace"
+    return 0
+}
+trash() {
+    echo "trash CLI must not be called" >&2
+    return 99
+}
+osascript() {
+    echo "Finder must not be called" >&2
+    return 98
+}
+remove_file_list "$list" "false"
+EOF
+
+    [ "$status" -eq 0 ]
+    [ "$(wc -l < "$direct_trace" | tr -d ' ')" -eq 3 ]
+    grep -qF "$container|false" "$direct_trace"
+    grep -qF "$group_container|false" "$direct_trace"
+    grep -qF "$app_scripts|false" "$direct_trace"
+    [ "$(wc -l < "$batch_trace" | tr -d ' ')" -eq 1 ]
+    grep -qxF "$ordinary" "$batch_trace"
+    [[ "$output" != *"trash CLI must not be called"* ]]
+    [[ "$output" != *"Finder must not be called"* ]]
+}

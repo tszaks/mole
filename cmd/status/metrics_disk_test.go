@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/disk"
 )
@@ -98,6 +103,149 @@ func TestExtractPlistUint(t *testing.T) {
 	})
 }
 
+func TestParseDiskMetadataSMARTStatuses(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "verified", raw: "Verified", want: smartStatusVerified},
+		{name: "failing", raw: "Failing", want: smartStatusFailing},
+		{name: "unsupported", raw: "Not Supported", want: smartStatusUnsupported},
+		{name: "unknown value", raw: "Unavailable", want: smartStatusUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metadata, err := parseDiskMetadata("Internal: Yes\nSMART Status: " + tt.raw + "\n")
+			if err != nil {
+				t.Fatalf("parseDiskMetadata() error = %v", err)
+			}
+			if metadata.SmartStatus != tt.want {
+				t.Fatalf("parseDiskMetadata() smart status = %q, want %q", metadata.SmartStatus, tt.want)
+			}
+			if metadata.External {
+				t.Fatal("parseDiskMetadata() internal disk marked external")
+			}
+		})
+	}
+}
+
+func TestParseDiskMetadataUsesDeviceLocationAndUnknownForMissingSMART(t *testing.T) {
+	metadata, err := parseDiskMetadata("Device Location: External\n")
+	if err != nil {
+		t.Fatalf("parseDiskMetadata() error = %v", err)
+	}
+	if !metadata.External {
+		t.Fatal("parseDiskMetadata() external location was not detected")
+	}
+	if metadata.SmartStatus != smartStatusUnknown {
+		t.Fatalf("parseDiskMetadata() missing SMART = %q, want unknown", metadata.SmartStatus)
+	}
+}
+
+func TestAnnotateDiskMetadataCachesDiskutilResult(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("diskutil metadata is macOS-only")
+	}
+
+	origRunCmd := runCmd
+	origCommandExists := commandExists
+	origCache := diskMetadataCache
+	origCacheAt := lastDiskCacheAt
+	t.Cleanup(func() {
+		runCmd = origRunCmd
+		commandExists = origCommandExists
+		diskMetadataCache = origCache
+		lastDiskCacheAt = origCacheAt
+	})
+
+	diskMetadataCache = make(map[string]diskMetadata)
+	lastDiskCacheAt = time.Time{}
+	commandExists = func(name string) bool { return name == "diskutil" }
+	calls := 0
+	runCmd = func(ctx context.Context, name string, args ...string) (string, error) {
+		calls++
+		return "Internal: No\nSMART Status: Verified\n", nil
+	}
+
+	first := []DiskStatus{{Device: "/dev/disk9s2", Mount: "/Volumes/Fast", SmartStatus: smartStatusUnknown}}
+	second := []DiskStatus{{Device: "/dev/disk9s3", Mount: "/Volumes/Fast", SmartStatus: smartStatusUnknown}}
+	annotateDiskMetadata(first)
+	annotateDiskMetadata(second)
+
+	if calls != 1 {
+		t.Fatalf("diskutil calls = %d, want 1 cache miss", calls)
+	}
+	for _, disks := range [][]DiskStatus{first, second} {
+		if !disks[0].External || disks[0].SmartStatus != smartStatusVerified {
+			t.Fatalf("cached disk metadata = %#v", disks[0])
+		}
+	}
+}
+
+func TestAnnotateDiskMetadataKeepsUnknownWhenDiskutilFails(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("diskutil metadata is macOS-only")
+	}
+
+	origRunCmd := runCmd
+	origCommandExists := commandExists
+	origCache := diskMetadataCache
+	origCacheAt := lastDiskCacheAt
+	t.Cleanup(func() {
+		runCmd = origRunCmd
+		commandExists = origCommandExists
+		diskMetadataCache = origCache
+		lastDiskCacheAt = origCacheAt
+	})
+
+	diskMetadataCache = make(map[string]diskMetadata)
+	lastDiskCacheAt = time.Time{}
+	commandExists = func(name string) bool { return name == "diskutil" }
+	runCmd = func(ctx context.Context, name string, args ...string) (string, error) {
+		return "", errors.New("diskutil failed")
+	}
+
+	disks := []DiskStatus{{Device: "/dev/disk8s1", Mount: "/Volumes/Backup", SmartStatus: smartStatusUnknown}}
+	annotateDiskMetadata(disks)
+	if !disks[0].External {
+		t.Fatal("failed diskutil query should keep the mount-based external fallback")
+	}
+	if disks[0].SmartStatus != smartStatusUnknown {
+		t.Fatalf("failed diskutil query smart status = %q, want unknown", disks[0].SmartStatus)
+	}
+}
+
+func TestDiskStatusJSONAndNDJSONAlwaysIncludeSMARTStatus(t *testing.T) {
+	snapshot := MetricsSnapshot{
+		Disks: []DiskStatus{{Mount: "/", SmartStatus: smartStatusUnsupported}},
+	}
+
+	oneShot, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(oneShot), `"smart_status":"unsupported"`) {
+		t.Fatalf("JSON missing smart_status: %s", oneShot)
+	}
+
+	var stream bytes.Buffer
+	encoder := json.NewEncoder(&stream)
+	if err := encoder.Encode(snapshot); err != nil {
+		t.Fatalf("first NDJSON encode error = %v", err)
+	}
+	snapshot.Disks[0].SmartStatus = smartStatusUnknown
+	if err := encoder.Encode(snapshot); err != nil {
+		t.Fatalf("second NDJSON encode error = %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(stream.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"smart_status":"unsupported"`) ||
+		!strings.Contains(lines[1], `"smart_status":"unknown"`) {
+		t.Fatalf("NDJSON smart_status lines = %q", lines)
+	}
+}
+
 func TestCollectDisksFastSkipsSlowCorrections(t *testing.T) {
 	origPartitions := diskPartitionsFunc
 	origUsage := diskUsageFunc
@@ -150,6 +298,9 @@ func TestCollectDisksFastSkipsSlowCorrections(t *testing.T) {
 	}
 	if got[0].Total != rawTotal || got[0].Used != rawUsed || got[0].UsedPercent != 50 {
 		t.Fatalf("collectDisksFast() should keep raw usage, got %#v", got[0])
+	}
+	if got[0].SmartStatus != smartStatusUnknown {
+		t.Fatalf("collectDisksFast() smart status = %q, want unknown", got[0].SmartStatus)
 	}
 }
 

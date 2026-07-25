@@ -154,6 +154,7 @@ type DiskStatus struct {
 	UsedPercent float64 `json:"used_percent"`
 	Fstype      string  `json:"fstype"`
 	External    bool    `json:"external"`
+	SmartStatus string  `json:"smart_status"`
 }
 
 type NetworkStatus struct {

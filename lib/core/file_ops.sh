@@ -15,6 +15,7 @@ readonly MOLE_ERR_SIP_PROTECTED=10
 readonly MOLE_ERR_AUTH_FAILED=11
 readonly MOLE_ERR_READONLY_FS=12
 readonly MOLE_ERR_PROTECTED_PATH=13
+readonly MOLE_ERR_PRIVACY_DENIED=14
 
 # Ensure dependencies are loaded
 _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -746,10 +747,23 @@ mole_delete() {
     # Trash mode is a recoverable-delete contract. If Trash is unavailable,
     # fail closed instead of silently switching to permanent removal.
     if [[ "$mode" == "trash" ]]; then
-        if _mole_move_to_trash "$path" "$needs_sudo"; then
+        local trash_rc=0
+        _mole_move_to_trash "$path" "$needs_sudo" || trash_rc=$?
+        if [[ $trash_rc -eq 0 ]]; then
             _mole_delete_log "trash" "$size_kb" "ok" "$path"
             log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "TRASHED" "$path" "${size_kb}KB"
             return 0
+        fi
+        if [[ $trash_rc -eq $MOLE_ERR_PRIVACY_DENIED ]]; then
+            _mole_delete_log "trash" "$size_kb" "privacy-denied" "$path"
+            log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "privacy permission denied"
+            if [[ -z "${_MOLE_PRIVACY_DENIED_WARNED:-}" ]]; then
+                _MOLE_PRIVACY_DENIED_WARNED=1
+                export _MOLE_PRIVACY_DENIED_WARNED
+                printf 'Error: macOS denied Trash access. Grant App Data or Full Disk Access to your terminal in System Settings, then retry.\n' >&2
+            fi
+            debug_log "macOS privacy permission denied while moving to Trash: $path"
+            return "$MOLE_ERR_PRIVACY_DENIED"
         fi
         _mole_delete_log "trash" "$size_kb" "trash-failed" "$path"
         log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "trash-failed"
@@ -780,6 +794,49 @@ mole_delete() {
     return "$rc"
 }
 
+_mole_valid_invoking_home() {
+    local user_home=""
+    if declare -f get_invoking_home > /dev/null 2>&1; then
+        user_home=$(get_invoking_home)
+    else
+        user_home="${MOLE_USER_HOME:-${HOME:-}}"
+    fi
+
+    if [[ -z "$user_home" || "$user_home" != /* || "$user_home" == "/" || "$user_home" == "/var/root" ]]; then
+        debug_log "Refusing direct Trash move: invalid invoking user home: ${user_home:-<empty>}"
+        return 1
+    fi
+
+    printf '%s\n' "${user_home%/}"
+}
+
+_mole_path_is_immediate_child_of() {
+    local path="${1%/}"
+    local parent="${2%/}"
+    [[ "$path" == "$parent/"* ]] || return 1
+
+    local child="${path#"$parent"/}"
+    [[ -n "$child" && "$child" != */* ]]
+}
+
+# Finder and third-party Trash helpers can fail on app bundles and TCC-managed
+# app data even after authentication. Route only these exact one-level targets
+# through the direct, recoverable Trash mover.
+_mole_path_requires_direct_trash() {
+    local path="${1%/}"
+    if _mole_path_is_immediate_child_of "$path" "/Applications" &&
+        [[ "${path##*/}" == *.app ]]; then
+        return 0
+    fi
+
+    local user_home
+    user_home=$(_mole_valid_invoking_home) || return 1
+    _mole_path_is_immediate_child_of "$path" "$user_home/Library/Containers" && return 0
+    _mole_path_is_immediate_child_of "$path" "$user_home/Library/Group Containers" && return 0
+    _mole_path_is_immediate_child_of "$path" "$user_home/Library/Application Scripts" && return 0
+    return 1
+}
+
 # Move a path to the macOS Trash. Test harnesses set MOLE_TEST_TRASH_DIR to
 # redirect the move to a tmpdir, avoiding any Finder/osascript interaction.
 _mole_move_to_trash() {
@@ -798,8 +855,8 @@ _mole_move_to_trash() {
         return 1
     fi
 
-    if [[ "$needs_sudo" == "true" ]]; then
-        _mole_move_sudo_path_to_user_trash "$path"
+    if [[ "$needs_sudo" == "true" ]] || _mole_path_requires_direct_trash "$path"; then
+        _mole_move_path_to_user_trash "$path" "$needs_sudo"
         return $?
     fi
 
@@ -820,27 +877,19 @@ end run
 APPLESCRIPT
 }
 
-_mole_move_sudo_path_to_user_trash() {
+_mole_move_path_to_user_trash() {
     local path="$1"
-    local user_home=""
+    local needs_sudo="${2:-false}"
 
     if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
         return 1
     fi
 
-    if declare -f get_invoking_home > /dev/null 2>&1; then
-        user_home=$(get_invoking_home)
-    else
-        user_home="${HOME:-}"
-    fi
-
-    if [[ -z "$user_home" || "$user_home" != /* || "$user_home" == "/" || "$user_home" == "/var/root" ]]; then
-        debug_log "Refusing sudo Trash move: invalid invoking user home: ${user_home:-<empty>}"
-        return 1
-    fi
+    local user_home
+    user_home=$(_mole_valid_invoking_home) || return 1
 
     if [[ -z "$path" ]] || [[ ! -e "$path" && ! -L "$path" ]]; then
-        debug_log "Refusing sudo Trash move: path does not exist: ${path:-<empty>}"
+        debug_log "Refusing direct Trash move: path does not exist: ${path:-<empty>}"
         return 1
     fi
 
@@ -849,17 +898,17 @@ _mole_move_sudo_path_to_user_trash() {
     # The destination must be the invoking user's Trash, even though sudo is
     # needed to unlink the original protected path.
     if [[ -L "$trash_dir" ]]; then
-        debug_log "Refusing sudo Trash move: invoking user Trash is a symlink: $trash_dir"
+        debug_log "Refusing direct Trash move: invoking user Trash is a symlink: $trash_dir"
         return 1
     fi
     if ! mkdir -p "$trash_dir" 2> /dev/null; then
-        if ! sudo -n mkdir -p "$trash_dir" 2> /dev/null; then
+        if [[ "$needs_sudo" != "true" ]] || ! sudo -n mkdir -p "$trash_dir" 2> /dev/null; then
             debug_log "Failed to create invoking user Trash: $trash_dir"
             return 1
         fi
     fi
     if [[ ! -d "$trash_dir" || -L "$trash_dir" ]]; then
-        debug_log "Refusing sudo Trash move: invoking user Trash is not a normal directory: $trash_dir"
+        debug_log "Refusing direct Trash move: invoking user Trash is not a normal directory: $trash_dir"
         return 1
     fi
 
@@ -870,11 +919,14 @@ _mole_move_sudo_path_to_user_trash() {
     if declare -f get_invoking_gid > /dev/null 2>&1; then
         owner_gid=$(get_invoking_gid)
     fi
-    if [[ "$owner_uid" =~ ^[0-9]+$ && "$owner_gid" =~ ^[0-9]+$ ]]; then
+    if [[ "$needs_sudo" == "true" && "$owner_uid" =~ ^[0-9]+$ && "$owner_gid" =~ ^[0-9]+$ ]]; then
         sudo -n chown "$owner_uid:$owner_gid" "$trash_dir" 2> /dev/null || true
     fi
     if ! chmod 700 "$trash_dir" 2> /dev/null; then
-        sudo -n chmod 700 "$trash_dir" 2> /dev/null || true
+        if [[ "$needs_sudo" != "true" ]] || ! sudo -n chmod 700 "$trash_dir" 2> /dev/null; then
+            debug_log "Failed to set invoking user Trash permissions: $trash_dir"
+            return 1
+        fi
     fi
 
     # Avoid Finder-style ':' path weirdness and keep generated names filesystem-safe.
@@ -898,21 +950,34 @@ _mole_move_sudo_path_to_user_trash() {
         dest="$trash_dir/$base.$ts.$$.$suffix"
     done
 
-    if ! sudo -n mv -n "$path" "$dest" > /dev/null 2>&1; then
-        debug_log "Failed to move sudo-required path to invoking user Trash: $path -> $dest"
+    local move_output=""
+    local move_rc=0
+    if [[ "$needs_sudo" == "true" ]]; then
+        move_output=$(sudo -n mv -n "$path" "$dest" 2>&1) || move_rc=$?
+    else
+        move_output=$(mv -n "$path" "$dest" 2>&1) || move_rc=$?
+    fi
+    if [[ $move_rc -ne 0 ]]; then
+        debug_log "Failed to move path directly to invoking user Trash: $path -> $dest: $move_output"
+        case "$move_output" in
+            *"Operation not permitted"* | *"operation not permitted"* | \
+                *"Permission denied"* | *"permission denied"*)
+                return "$MOLE_ERR_PRIVACY_DENIED"
+                ;;
+        esac
         return 1
     fi
     if [[ -e "$path" || -L "$path" ]] || [[ ! -e "$dest" && ! -L "$dest" ]]; then
-        debug_log "Failed to move sudo-required path without overwriting destination: $path -> $dest"
+        debug_log "Failed to move path directly without overwriting destination: $path -> $dest"
         return 1
     fi
 
     # Best-effort ownership repair makes restored Trash items behave like user files.
-    if [[ "$owner_uid" =~ ^[0-9]+$ && "$owner_gid" =~ ^[0-9]+$ ]]; then
+    if [[ "$needs_sudo" == "true" && "$owner_uid" =~ ^[0-9]+$ && "$owner_gid" =~ ^[0-9]+$ ]]; then
         sudo -n chown -R "$owner_uid:$owner_gid" "$dest" 2> /dev/null || true
     fi
 
-    debug_log "Moved sudo-required path to invoking user Trash: $path -> $dest"
+    debug_log "Moved path directly to invoking user Trash: $path -> $dest"
     return 0
 }
 
@@ -1329,6 +1394,10 @@ diagnose_removal_failure() {
             ;;
         "$MOLE_ERR_PROTECTED_PATH")
             reason="protected by Mole safety rules"
+            ;;
+        "$MOLE_ERR_PRIVACY_DENIED")
+            reason="macOS privacy permission denied"
+            suggestion="Grant App Data or Full Disk Access to your terminal in System Settings"
             ;;
         *)
             reason="permission denied"

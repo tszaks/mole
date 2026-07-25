@@ -773,8 +773,8 @@ func TestRenderDiskCardAddsMetaLineForSingleDisk(t *testing.T) {
 		Fstype:      "apfs",
 	}}, DiskIOStatus{ReadRate: 0, WriteRate: 0.1}, 0, false)
 
-	if len(card.lines) != 3 {
-		t.Fatalf("renderDiskCard() single disk expected 3 lines, got %d", len(card.lines))
+	if len(card.lines) != 4 {
+		t.Fatalf("renderDiskCard() single disk expected 4 lines, got %d", len(card.lines))
 	}
 
 	meta := stripANSI(card.lines[1])
@@ -789,8 +789,8 @@ func TestRenderDiskCardDoesNotAddMetaLineForMultipleDisks(t *testing.T) {
 		{UsedPercent: 50.0, Used: 500 << 30, Total: 1000 << 30, Fstype: "apfs"},
 	}, DiskIOStatus{}, 0, false)
 
-	if len(card.lines) != 3 {
-		t.Fatalf("renderDiskCard() multiple disks expected 3 lines, got %d", len(card.lines))
+	if len(card.lines) != 4 {
+		t.Fatalf("renderDiskCard() multiple disks expected 4 lines, got %d", len(card.lines))
 	}
 
 	for _, line := range card.lines {
@@ -842,11 +842,57 @@ func TestRenderDiskCardUsesGraphicIOLine(t *testing.T) {
 		{UsedPercent: 95.0, Used: 16 << 30, Total: 16<<30 + 444<<20, External: true},
 	}, DiskIOStatus{ReadRate: 0, WriteRate: 24.6}, 101<<20, false)
 
-	if len(card.lines) != 4 {
-		t.Fatalf("renderDiskCard() expected 4 lines without trash, got %d", len(card.lines))
+	if len(card.lines) != 5 {
+		t.Fatalf("renderDiskCard() expected 5 lines without trash, got %d", len(card.lines))
 	}
-	if got := stripANSI(card.lines[3]); got != "I/O    ▯▯▯▯▯ R 0 · ▮▮▯▯▯ W 25 MB/s" {
+	if got := stripANSI(card.lines[4]); got != "I/O    ▯▯▯▯▯ R 0 · ▮▮▯▯▯ W 25 MB/s" {
 		t.Fatalf("I/O line = %q", got)
+	}
+}
+
+func TestRenderDiskCardFormatsSingleAndMultipleSMARTSummaries(t *testing.T) {
+	single := renderDiskCard([]DiskStatus{{
+		UsedPercent: 30,
+		Used:        30 << 30,
+		Total:       100 << 30,
+		SmartStatus: smartStatusVerified,
+	}}, DiskIOStatus{}, 0, false)
+	if got := stripANSI(single.lines[2]); got != "SMART  Verified" {
+		t.Fatalf("single SMART line = %q", got)
+	}
+
+	multiple := renderDiskCard([]DiskStatus{
+		{UsedPercent: 30, Used: 30 << 30, Total: 100 << 30, SmartStatus: smartStatusVerified},
+		{UsedPercent: 20, Used: 20 << 30, Total: 100 << 30, External: true, SmartStatus: smartStatusUnsupported},
+	}, DiskIOStatus{}, 0, false)
+	if got := stripANSI(multiple.lines[2]); got != "SMART  INTR OK · EXTR N/A" {
+		t.Fatalf("multiple SMART line = %q", got)
+	}
+}
+
+func TestRenderDiskCardHighlightsFailingSMARTAndFitsNarrowWidth(t *testing.T) {
+	card := renderDiskCard([]DiskStatus{
+		{UsedPercent: 30, Used: 30 << 30, Total: 100 << 30, SmartStatus: smartStatusFailing},
+		{UsedPercent: 20, Used: 20 << 30, Total: 100 << 30, External: true, SmartStatus: smartStatusUnknown},
+	}, DiskIOStatus{}, 0, false)
+
+	smartLine := card.lines[2]
+	if !strings.Contains(smartLine, dangerStyle.Render("FAIL")) ||
+		!strings.Contains(smartLine, dangerStyle.Render("Back up now")) {
+		t.Fatalf("failing SMART line lacks danger styling or backup hint: %q", smartLine)
+	}
+
+	const narrowWidth = 38
+	rendered := renderCard(card, narrowWidth, 0)
+	for line := range strings.Lines(rendered) {
+		if lipgloss.Width(stripANSI(line)) > narrowWidth {
+			t.Fatalf("narrow disk card line exceeds %d columns: %q", narrowWidth, line)
+		}
+	}
+	if plain := stripANSI(rendered); !strings.Contains(plain, "Back up now") {
+		t.Fatalf("narrow disk card lost backup hint: %q", plain)
+	} else if !strings.Contains(plain, "FAIL") {
+		t.Fatalf("narrow disk card lost failing status: %q", plain)
 	}
 }
 
@@ -990,6 +1036,17 @@ func TestRenderHeaderErrorReturnsMoleOnce(t *testing.T) {
 	}
 	if strings.Count(header, "/\\_/\\") != 1 {
 		t.Fatalf("renderHeader() should contain one mole frame in error state, got %d", strings.Count(header, "/\\_/\\"))
+	}
+}
+
+func TestStatusDiagnosisLinePrioritizesFailingSMART(t *testing.T) {
+	m := MetricsSnapshot{
+		CPU:   CPUStatus{Usage: 95},
+		Disks: []DiskStatus{{SmartStatus: smartStatusFailing}},
+	}
+
+	if got := statusDiagnosisLine(m); got != "SMART failing, back up now" {
+		t.Fatalf("statusDiagnosisLine() = %q", got)
 	}
 }
 

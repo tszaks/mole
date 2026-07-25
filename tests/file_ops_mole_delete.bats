@@ -204,6 +204,227 @@ EOF
     [ "$status_col" = "ok" ]
 }
 
+@test "Microsoft Word app path uses the direct Trash mover without trash or Finder" {
+    local fake_home="$SANDBOX/home"
+    local trace="$SANDBOX/direct-route.log"
+    mkdir -p "$fake_home"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export HOME="$fake_home"
+export MOLE_DELETE_MODE=trash
+_mole_move_path_to_user_trash() {
+    printf 'direct:%s:%s\n' "\$1" "\$2" >> "$trace"
+    return 0
+}
+trash() {
+    printf 'trash:%s\n' "\$*" >> "$trace"
+    return 99
+}
+osascript() {
+    printf 'osascript:%s\n' "\$*" >> "$trace"
+    return 98
+}
+_mole_path_requires_direct_trash "/Applications/Microsoft Word.app"
+! _mole_path_requires_direct_trash "/Applications/Utilities/Microsoft Word.app"
+! _mole_path_requires_direct_trash "/Applications/Microsoft Word.app/Contents"
+_mole_move_to_trash "/Applications/Microsoft Word.app" false
+EOF
+
+    [ "$status" -eq 0 ]
+    grep -qF "direct:/Applications/Microsoft Word.app:false" "$trace"
+    [[ "$(grep -c '^trash:' "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ "$(grep -c '^osascript:' "$trace" 2> /dev/null || true)" -eq 0 ]]
+}
+
+@test "normal app data uses direct Trash with a unique name and mode 0700" {
+    local fake_home="$SANDBOX/home"
+    local victim="$fake_home/Library/Containers/com.microsoft.Word"
+    local existing="$fake_home/.Trash/com.microsoft.Word"
+    local trace="$SANDBOX/direct-user.log"
+    mkdir -p "$victim" "$existing"
+    printf 'document state' > "$victim/state.db"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export HOME="$fake_home"
+export MOLE_DELETE_MODE=trash
+export MOLE_UNINSTALL_MODE=1
+trash() {
+    printf 'trash:%s\n' "\$*" >> "$trace"
+    return 99
+}
+osascript() {
+    printf 'osascript:%s\n' "\$*" >> "$trace"
+    return 98
+}
+mole_delete "$victim" false
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ ! -e "$victim" ]]
+    [[ -d "$existing" ]]
+    [[ -n "$(find "$fake_home/.Trash" -mindepth 1 -maxdepth 1 -name 'com.microsoft.Word.*' -print -quit)" ]]
+    [ "$(stat -f '%Lp' "$fake_home/.Trash")" = "700" ]
+    [[ "$(grep -c '^trash:' "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ "$(grep -c '^osascript:' "$trace" 2> /dev/null || true)" -eq 0 ]]
+}
+
+@test "normal direct Trash refuses a symlinked invoking user Trash" {
+    local fake_home="$SANDBOX/home"
+    local victim="$fake_home/Library/Application Scripts/com.microsoft.Word"
+    local redirected="$SANDBOX/redirected"
+    mkdir -p "$victim" "$redirected"
+    ln -s "$redirected" "$fake_home/.Trash"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export HOME="$fake_home"
+export MOLE_DELETE_MODE=trash
+export MOLE_UNINSTALL_MODE=1
+mole_delete "$victim" false
+EOF
+
+    [ "$status" -ne 0 ]
+    [[ -d "$victim" ]]
+    [[ -z "$(ls -A "$redirected" 2> /dev/null || true)" ]]
+}
+
+@test "direct Trash reports TCC denial and never falls back to permanent delete" {
+    local fake_home="$SANDBOX/home"
+    local victim="$fake_home/Library/Containers/com.microsoft.Word"
+    local trace="$SANDBOX/privacy-denied.log"
+    mkdir -p "$victim"
+    printf 'document state' > "$victim/state.db"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export HOME="$fake_home"
+export MOLE_DELETE_MODE=trash
+export MOLE_UNINSTALL_MODE=1
+mv() {
+    printf 'mv: %s: Operation not permitted\n' "\$2" >&2
+    return 1
+}
+trash() {
+    printf 'trash\n' >> "$trace"
+    return 99
+}
+osascript() {
+    printf 'osascript\n' >> "$trace"
+    return 98
+}
+safe_remove() {
+    printf 'safe_remove\n' >> "$trace"
+    return 97
+}
+set +e
+mole_delete "$victim" false
+rc=\$?
+set -e
+printf 'RC=%s\n' "\$rc"
+[[ \$rc -eq \$MOLE_ERR_PRIVACY_DENIED ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ -d "$victim" ]]
+    [[ "$output" == *"App Data or Full Disk Access"* ]]
+    [[ "$output" != *"Touch ID"* ]]
+    [[ "$output" == *"RC=14"* ]]
+    [[ ! -s "$trace" ]]
+    [ "$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")" = "privacy-denied" ]
+}
+
+@test "direct Trash recognizes lowercase permission denied" {
+    local fake_home="$SANDBOX/home"
+    local victim="$fake_home/Library/Group Containers/UBF8T346G9.Office"
+    mkdir -p "$victim"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export HOME="$fake_home"
+mv() {
+    printf 'mv: permission denied\n' >&2
+    return 1
+}
+set +e
+_mole_move_path_to_user_trash "$victim" false
+rc=\$?
+set -e
+printf 'RC=%s\n' "\$rc"
+[[ \$rc -eq \$MOLE_ERR_PRIVACY_DENIED ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ -d "$victim" ]]
+    [[ "$output" == *"RC=14"* ]]
+}
+
+@test "direct Trash generic failure stays closed" {
+    local fake_home="$SANDBOX/home"
+    local victim="$fake_home/Library/Application Scripts/com.microsoft.Word"
+    local trace="$SANDBOX/generic-failure.log"
+    mkdir -p "$victim"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export HOME="$fake_home"
+export MOLE_DELETE_MODE=trash
+export MOLE_UNINSTALL_MODE=1
+mv() {
+    printf 'mv: input/output error\n' >&2
+    return 1
+}
+trash() {
+    printf 'trash\n' >> "$trace"
+    return 99
+}
+osascript() {
+    printf 'osascript\n' >> "$trace"
+    return 98
+}
+safe_remove() {
+    printf 'safe_remove\n' >> "$trace"
+    return 97
+}
+set +e
+mole_delete "$victim" false
+rc=\$?
+set -e
+[[ \$rc -eq 1 ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ -d "$victim" ]]
+    [[ ! -s "$trace" ]]
+    [[ "$output" == *"refusing permanent delete"* ]]
+}
+
+@test "privacy denial diagnosis recommends terminal privacy access, not Touch ID" {
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+diagnose_removal_failure "\$MOLE_ERR_PRIVACY_DENIED" "Microsoft Word"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"macOS privacy permission denied"* ]]
+    [[ "$output" == *"App Data or Full Disk Access"* ]]
+    [[ "$output" != *"touchid"* ]]
+    [[ "$output" != *"Touch ID"* ]]
+}
+
 @test "mole_delete writes a tab-separated log line per call" {
     local victim="$SANDBOX/logged"
     : > "$victim"
