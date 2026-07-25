@@ -726,6 +726,29 @@ EOF
     [[ "$output" != *"Nothing to clean"* ]] || return 1
 }
 
+@test "safe_clean skips caches that hold a compiled model cache" {
+    export_file="$HOME/e5rt-list.txt"
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            DRY_RUN=true
+            # Set after sourcing: clean.sh assigns EXPORT_LIST_FILE at load time.
+            EXPORT_LIST_FILE="$HOME/e5rt-list.txt"
+            : > "$EXPORT_LIST_FILE"
+            e5rt_cache="$HOME/Library/Caches/com.example.ocr/com.apple.e5rt.e5bundlecache"
+            mkdir -p "$e5rt_cache" "$HOME/Library/Caches/com.example.plain"
+            # Both need real bytes: zero-sized entries never reach the export list.
+            dd if=/dev/zero of="$e5rt_cache/model.e5" bs=1024 count=200 2> /dev/null
+            dd if=/dev/zero of="$HOME/Library/Caches/com.example.plain/junk" bs=1024 count=300 2> /dev/null
+            safe_clean "$HOME"/Library/Caches/* "User app cache"
+        '
+    [ "$status" -eq 0 ] || return 1
+    list_content="$(cat "$export_file")"
+    [[ "$list_content" == *"com.example.plain"* ]] || return 1
+    [[ "$list_content" != *"com.example.ocr"* ]] || return 1
+}
+
 @test "log rows do not trigger purge's export-only note_activity override" {
     export_file="$HOME/purge-log-activity.txt"
     # shellcheck disable=SC2016  # inner bash expands these from its environment

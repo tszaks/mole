@@ -784,7 +784,9 @@ clean_app_caches() {
     safe_clean ~/Library/Caches/com.apple.duetexpertd/* "Duet Expert cache"
     safe_clean ~/Library/Caches/com.apple.parsecd/* "Parsecd cache"
     safe_clean ~/Library/Caches/com.apple.python/* "Apple Python cache"
-    safe_clean ~/Library/Caches/com.apple.e5rt.e5bundlecache/* "Apple Intelligence runtime cache"
+    # The E5RT bundle cache used to be cleaned here. It is now protected by
+    # holds_compiled_model_cache(): wiping it under a running daemon breaks
+    # recognition until that daemon restarts, for a few MB.
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
     start_section_spinner "Scanning sandboxed apps..."
@@ -932,6 +934,9 @@ process_container_cache() {
         for item in "$cache_dir"/*; do
             [[ -e "$item" ]] || continue
             [[ -L "$item" ]] && continue
+            if holds_compiled_model_cache "$item"; then
+                continue
+            fi
             # Re-check each item, not just the parent bundle: a user may have
             # whitelisted a specific cache path, and should_protect_path may
             # cover a nested entry. Mirrors clean_group_container_caches.

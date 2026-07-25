@@ -245,6 +245,28 @@ is_endpoint_security_cache_path() {
     return 1
 }
 
+# E5RT (Apple's Espresso runtime, behind Vision/TextRecognition) keeps compiled
+# model bundles in a com.apple.e5rt.e5bundlecache directory, usually one level
+# below the owning app's or daemon's cache directory. A process that already
+# resolved that cache does not rebuild it: deleting it under a running app makes
+# every later recognition call fail with E5RT Code 13 until the app restarts.
+# Reclaims little, breaks visibly, so treat the directory and its immediate
+# parent as off limits. Shared by safe_clean() and process_container_cache().
+#
+# Args: $1 - path to check
+# Returns: 0 if the path is or directly holds a compiled model cache
+holds_compiled_model_cache() {
+    local path="$1"
+    [[ -z "$path" ]] && return 1
+    if [[ "${path%/}" == *"/com.apple.e5rt.e5bundlecache" ]]; then
+        return 0
+    fi
+    if [[ -d "$path/com.apple.e5rt.e5bundlecache" ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # Check if a path is protected from deletion
 # Centralized logic to protect system settings, control center, and critical apps
 #

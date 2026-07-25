@@ -174,12 +174,15 @@ total_items=0
 clean_app_caches
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Apple Media Services cache"* ]]
-    [[ "$output" == *"Duet Expert cache"* ]]
-    [[ "$output" == *"Parsecd cache"* ]]
-    [[ "$output" == *"Apple Python cache"* ]]
-    [[ "$output" == *"Apple Intelligence runtime cache"* ]]
+    [ "$status" -eq 0 ] || return 1
+    # The E5RT bundle cache is deliberately no longer a cleanup target: see
+    # holds_compiled_model_cache(). Assert it first so the check cannot pass
+    # vacuously on empty output.
+    [[ "$output" != *"Apple Intelligence runtime cache"* ]] || return 1
+    [[ "$output" == *"Apple Media Services cache"* ]] || return 1
+    [[ "$output" == *"Duet Expert cache"* ]] || return 1
+    [[ "$output" == *"Parsecd cache"* ]] || return 1
+    [[ "$output" == *"Apple Python cache"* ]] || return 1
 }
 
 @test "clean_app_caches shows spinner during initial app cache scan" {
@@ -272,6 +275,46 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"App caches"* ]] || [[ "$output" == *"already clean"* ]]
+}
+
+@test "clean_app_caches preserves nested E5RT caches in sandboxed apps" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+DRY_RUN=false
+should_protect_data() { return 1; }
+is_critical_system_component() { return 1; }
+should_protect_path() { return 1; }
+is_path_whitelisted() { return 1; }
+safe_remove() {
+    /bin/rm -rf "$1"
+}
+
+container="$HOME/Library/Containers/com.example.ocr"
+cache_dir="$container/Data/Library/Caches"
+e5rt_parent="$cache_dir/com.example.ocr"
+mkdir -p "$e5rt_parent/com.apple.e5rt.e5bundlecache" "$cache_dir/disposable"
+touch "$e5rt_parent/com.apple.e5rt.e5bundlecache/model.e5" "$cache_dir/disposable/data.tmp"
+
+total_size=0
+total_size_partial=false
+cleaned_count=0
+found_any=false
+precise_size_limit=64
+precise_size_used=0
+process_container_cache "$container"
+
+# Report state instead of asserting here: this script is fed to bash on stdin,
+# and a child that drains the heredoc truncates whatever follows, so trailing
+# in-script assertions can silently never run. Assert on $output below.
+printf 'E5RT_KEPT=%s\n' "$([[ -f "$e5rt_parent/com.apple.e5rt.e5bundlecache/model.e5" ]] && echo yes || echo no)"
+printf 'SIBLING_REMOVED=%s\n' "$([[ -e "$cache_dir/disposable" ]] && echo no || echo yes)"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"E5RT_KEPT=yes"* ]] || return 1
+    [[ "$output" == *"SIBLING_REMOVED=yes"* ]] || return 1
 }
 
 @test "clean_app_caches skips expensive size scans for large sandboxed caches" {
