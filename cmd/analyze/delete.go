@@ -19,6 +19,19 @@ import (
 
 const trashTimeout = 30 * time.Second
 
+// trashBinary is Apple's own trash(8). It moves paths to the user Trash without
+// involving Finder, which is what makes deletion work over SSH: the Finder
+// AppleScript path raises a dialog on the physical machine that a remote user
+// cannot answer, so the delete only ever times out (discussion #474).
+//
+// Invoked by absolute path rather than a PATH lookup so a "trash" shadowed
+// earlier in the user's PATH can never receive a delete request. Arguments are
+// always absolute paths, so no "--" separator is needed; passing one would make
+// trash(8) report a missing file named "--" and exit non-zero even though it
+// still trashed the real target, which would trigger a duplicate delete via the
+// Finder fallback.
+const trashBinary = "/usr/bin/trash"
+
 func deletePathCmd(path string, counter *int64) tea.Cmd {
 	return func() tea.Msg {
 		count, err := trashPathWithProgress(path, counter)
@@ -119,8 +132,9 @@ func trashPathWithProgress(root string, counter *int64) (int64, error) {
 	return count, nil
 }
 
-// moveToTrash uses macOS Finder to move a file/directory to Trash.
-// This is the safest method as it uses the system's native trash mechanism.
+// moveToTrash moves a file/directory to the user Trash, preferring trash(8) and
+// falling back to Finder AppleScript when it is unavailable. This mirrors the
+// shell side in lib/core/file_ops.sh, which has always tried a trash CLI first.
 func moveToTrash(path string) error {
 	// Validate raw input before Abs resolves ".." components away.
 	if err := validateTrashTarget(path); err != nil {
@@ -137,6 +151,38 @@ func moveToTrash(path string) error {
 		return err
 	}
 
+	if trashErr := moveToTrashViaBinary(absPath); trashErr == nil {
+		return nil
+	}
+
+	return moveToTrashViaFinder(absPath)
+}
+
+// moveToTrashViaBinary moves absPath to Trash using trash(8). Returns an error
+// when the binary is missing so callers fall back to Finder.
+func moveToTrashViaBinary(absPath string) error {
+	if _, err := os.Stat(trashBinary); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), trashTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, trashBinary, absPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("timeout moving to Trash")
+		}
+		return fmt.Errorf("failed to move to Trash: %s", strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
+// moveToTrashViaFinder is the pre-trash(8) path, kept for macOS versions that
+// do not ship the binary. It cannot succeed in a headless or SSH session.
+func moveToTrashViaFinder(absPath string) error {
 	// Escape path for AppleScript (handle quotes and backslashes).
 	escapedPath := strings.ReplaceAll(absPath, "\\", "\\\\")
 	escapedPath = strings.ReplaceAll(escapedPath, "\"", "\\\"")
