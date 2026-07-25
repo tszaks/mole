@@ -26,6 +26,25 @@ teardown_file() {
     fi
 }
 
+# clean_deep_system reaches its two /private/var/folders sweeps through
+# `command find`, which a shell-function `find` mock cannot intercept, and a
+# plain "drop the timeout and run it" wrapper mock removes the production
+# bound as well. Each test then walked the host's real temp tree twice,
+# unbounded, for seconds. Intercept at the wrapper instead and hand back an
+# empty result, the same seam the code_sign_clone and GPU-cache tests below
+# already use to inject their fixtures.
+mock_run_with_timeout_skipping_var_folders() {
+    # shellcheck disable=SC2329  # Invoked by lib/clean/system.sh once defined.
+    run_with_timeout() {
+        shift
+        if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+            return 0
+        fi
+        "$@"
+    }
+}
+export -f mock_run_with_timeout_skipping_var_folders
+
 @test "clean_deep_system issues safe sudo deletions" {
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -66,7 +85,7 @@ stop_section_spinner() { :; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -96,7 +115,7 @@ log_success() { :; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -147,7 +166,7 @@ stop_section_spinner() { :; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -203,7 +222,7 @@ stop_section_spinner() { :; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -255,7 +274,7 @@ stop_section_spinner() { :; }
 get_file_mtime() { echo 0; }
 get_path_size_kb() { echo 0; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -1052,7 +1071,7 @@ safe_sudo_find_delete() {
 safe_sudo_remove() { return 0; }
 log_success() { :; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -1097,7 +1116,7 @@ safe_sudo_remove() { return 0; }
 log_success() { :; }
 log_info() { echo "$*"; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -1137,7 +1156,7 @@ safe_sudo_find_delete() {
 safe_sudo_remove() { return 0; }
 log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -1182,7 +1201,7 @@ log_success() { :; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"
@@ -1364,7 +1383,7 @@ log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
 find() { return 0; }
-run_with_timeout() { shift; "$@"; }
+mock_run_with_timeout_skipping_var_folders
 
 clean_deep_system
 cat "$CALL_LOG"

@@ -110,6 +110,10 @@ stop_line_spinner() { :; }
 log_success() { echo "SUCCESS:$*"; }
 log_warning() { echo "WARNING:$*"; }
 log_error() { echo "ERROR:$*"; }
+# Keep the checksum path deterministic and offline: an authenticated gh on the
+# host would run `attestation verify` against the fake fixture over the network.
+# Attestation policy has its own test below.
+verify_release_attestation() { return 2; }
 # A tampered asset must NEVER reroute onto an unverified source build.
 build_binary_from_source() {
 	echo "SOURCE_BUILD_INVOKED"
@@ -229,6 +233,10 @@ stop_line_spinner() { :; }
 log_success() { echo "SUCCESS:$*"; }
 log_warning() { echo "WARNING:$*"; }
 log_error() { echo "ERROR:$*"; }
+# Keep the checksum path deterministic and offline: an authenticated gh on the
+# host would run `attestation verify` against the fake fixture over the network.
+# Attestation policy has its own test below.
+verify_release_attestation() { return 2; }
 build_binary_from_source() {
 	echo "SOURCE_BUILD_INVOKED"
 	printf 'rebuilt-after-missing-checksum' > "$2"

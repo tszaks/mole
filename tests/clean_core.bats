@@ -14,6 +14,20 @@ setup_file() {
     MOLE_TEST_MODE=1
     export MOLE_TEST_MODE
 
+    # Two tests below run the real pipeline (MOLE_TEST_MODE=0), which otherwise
+    # scans the host: du -sk over every mounted CoreSimulator runtime volume
+    # plus a full lsregister -dump. That cost ~32s per test and scaled with
+    # whatever Xcode and LaunchServices happened to hold, which made this file
+    # the critical path of the whole CI suite. Neither scan feeds an assertion
+    # here, so point both at nothing. The paths stay absent: setup() wipes
+    # $HOME between tests.
+    MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT="$HOME/absent-sim-runtime-volumes"
+    MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT="$HOME/absent-sim-runtime-cryptex"
+    MOLE_LSREGISTER_PATH=""
+    export MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT
+    export MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT
+    export MOLE_LSREGISTER_PATH
+
     mkdir -p "$HOME"
 }
 

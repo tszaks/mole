@@ -35,6 +35,10 @@ jobs:
           MOLE_PERF_GET_FILE_SIZE_LIMIT_MS: "3000"
           MOLE_PERF_NORMALIZE_PATHS_LIMIT_MS: "10000"
           MOLE_TEST_JOBS: "6"
+          # Emits a "Slowest test files" table at the end of the run. Parallel
+          # TAP output cannot be attributed to a file, so without this a single
+          # slow file that sets the whole job's wall clock stays invisible.
+          MOLE_TEST_REPORT_DIR: ${{ runner.temp }}/bats-report
           BATS_FORMATTER: tap
           LANG: en_US.UTF-8
           LC_ALL: en_US.UTF-8

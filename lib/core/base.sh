@@ -62,7 +62,16 @@ readonly ICON_INFO="ℹ"
 # ============================================================================
 
 # Locate the lsregister binary (path varies across macOS versions).
+# MOLE_LSREGISTER_PATH overrides the lookup when it is set, including when it
+# is set empty, which disables every lsregister-backed scan. Tests use the
+# empty form to keep a multi-second LaunchServices dump out of assertions that
+# have nothing to do with launch services.
 get_lsregister_path() {
+    if [[ -n "${MOLE_LSREGISTER_PATH+x}" ]]; then
+        echo "$MOLE_LSREGISTER_PATH"
+        return 0
+    fi
+
     local -a candidates=(
         "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
         "/System/Library/CoreServices/Frameworks/LaunchServices.framework/Support/lsregister"

@@ -91,6 +91,22 @@ enforce_timeout_dependency_in_ci() {
     exit 1
 }
 
+# Print the slowest test files from the JUnit report written during the run.
+# Attribution is per file, which is what a parallel run hides: wall clock is
+# set by the single slowest file, not by the total.
+report_slowest_test_files() {
+    local report="${MOLE_TEST_REPORT_DIR:-}/report.xml"
+    [[ -n "${MOLE_TEST_REPORT_DIR:-}" && -f "$report" ]] || return 0
+
+    local top="${MOLE_TEST_REPORT_TOP:-10}"
+    [[ "$top" =~ ^[0-9]+$ ]] || top=10
+
+    printf "\n%s\n" "Slowest test files (seconds):"
+    sed -n 's/.*<testsuite name="\([^"]*\)".*time="\([0-9.]*\)".*/\2 \1/p' "$report" |
+        sort -rn | head -n "$top" |
+        awk '{ printf "  %8.1f  %s\n", $1, $2 }'
+}
+
 report_unit_result() {
     if [[ $1 -eq 0 ]]; then
         printf "${GREEN}${ICON_SUCCESS} Unit tests passed${NC}\n"
@@ -236,6 +252,15 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
         bats_opts+=("--timing")
     fi
 
+    # Per-file timings. Parallel TAP output cannot be attributed back to a file,
+    # so one slow file is invisible until it dominates the whole run. The JUnit
+    # report carries one <testsuite name= time=> per file; CI sets this and the
+    # slowest files are printed after the run.
+    if [[ -n "${MOLE_TEST_REPORT_DIR:-}" ]] && $bats_has_formatter; then
+        mkdir -p "$MOLE_TEST_REPORT_DIR"
+        bats_opts+=("--report-formatter" "junit" "--output" "$MOLE_TEST_REPORT_DIR")
+    fi
+
     # Some test files include wall-clock timing assertions that are skewed by
     # CPU contention from parallel test workers. When parallel mode is active,
     # split them out to run sequentially after the parallel batch completes.
@@ -309,6 +334,7 @@ if command -v bats > /dev/null 2>&1 && [ -d "tests" ]; then
     done
     unset _sequential_files _pf
 
+    report_slowest_test_files
     report_unit_result "$_unit_rc"
 else
     printf "${YELLOW}${ICON_WARNING} bats not installed or no tests found, skipping${NC}\n"
