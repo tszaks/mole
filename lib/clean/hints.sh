@@ -154,31 +154,11 @@ hint_launch_agent_bundle_exists() {
     bundle_has_installed_app "$bundle_id"
 }
 
-# shellcheck disable=SC2329
-hint_normalize_app_match_text() {
-    printf '%s' "${1:-}" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -cd '[:alnum:]'
-}
-
-# shellcheck disable=SC2329
-hint_dotdir_candidate_matches_text() {
-    local text="$1"
-    shift || true
-    [[ $# -gt 0 ]] || return 1
-
-    local normalized_text
-    normalized_text=$(hint_normalize_app_match_text "$text")
-    [[ -n "$normalized_text" ]] || return 1
-
-    local candidate normalized_candidate
-    for candidate in "$@"; do
-        normalized_candidate=$(hint_normalize_app_match_text "$candidate")
-        [[ ${#normalized_candidate} -ge 4 ]] || continue
-        if [[ "$normalized_text" == "$normalized_candidate" || "$normalized_text" == *"$normalized_candidate"* ]]; then
-            return 0
-        fi
-    done
-
-    return 1
+# Lowercase and strip to alnum, one line in, one line out. Under LC_ALL=C
+# `[:alnum:]` is ASCII, so dropping everything outside a-z0-9 after the
+# lowercase pass is the same transform applied line by line.
+hint_normalize_app_match_lines() {
+    LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -cd 'a-z0-9\n'
 }
 
 # shellcheck disable=SC2329
@@ -236,13 +216,27 @@ hint_dotdir_owned_by_installed_gui_app() {
     shift || true
     [[ -n "$installed_app_texts" && $# -gt 0 ]] || return 1
 
+    # Normalize each side once. This used to normalize inside the comparison
+    # loop, two tr processes per (app text, candidate) pair, so a machine with
+    # ~30 apps spent several hundred processes on a single orphan dotdir.
+    # Candidates shorter than 4 chars are dropped, as before, to keep matches
+    # like `.ai-old` against `AI.app` from firing (#872).
+    local -a needles=()
+    local candidate
+    while IFS= read -r candidate; do
+        [[ ${#candidate} -ge 4 ]] && needles+=("$candidate")
+    done < <(printf '%s\n' "$@" | hint_normalize_app_match_lines)
+    [[ ${#needles[@]} -gt 0 ]] || return 1
+
     local value
     while IFS= read -r value; do
         [[ -n "$value" ]] || continue
-        if hint_dotdir_candidate_matches_text "$value" "$@"; then
-            return 0
-        fi
-    done <<< "$installed_app_texts"
+        for candidate in "${needles[@]}"; do
+            if [[ "$value" == *"$candidate"* ]]; then
+                return 0
+            fi
+        done
+    done < <(printf '%s\n' "$installed_app_texts" | hint_normalize_app_match_lines)
 
     return 1
 }
@@ -734,14 +728,17 @@ _MOLE_DOTDIR_OWNER_APP_ROOTS=(
 # lowercased, one per line. Caller filters/dedups.
 # shellcheck disable=SC2329
 _dotdir_owner_collect_tokens() {
+    # Collect every name first, then tokenize in one pass. Doing it per name cost
+    # a basename plus two tr processes each, so a machine with 30 apps spawned
+    # ~90 processes on a path that runs during every clean.
     local root entry name
+    local -a names=()
     for root in "${_MOLE_DOTDIR_OWNER_APP_ROOTS[@]}"; do
         [[ -d "$root" ]] || continue
         for entry in "$root"/*.app; do
             [[ -e "$entry" ]] || continue
-            name=$(basename "$entry")
-            name="${name%.app}"
-            printf '%s\n' "$name" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -cs 'a-z0-9' '\n'
+            name="${entry##*/}"
+            names+=("${name%.app}")
         done
     done
 
@@ -749,9 +746,19 @@ _dotdir_owner_collect_tokens() {
         local cask_list=""
         cask_list=$(HOMEBREW_NO_ENV_HINTS=1 run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" brew list --cask 2> /dev/null) || true
         if [[ -n "$cask_list" ]]; then
-            printf '%s\n' "$cask_list" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -cs 'a-z0-9' '\n'
+            local cask
+            while IFS= read -r cask; do
+                [[ -n "$cask" ]] && names+=("$cask")
+            done <<< "$cask_list"
         fi
     fi
+
+    # bash 3.2 under nounset rejects "${names[@]}" when the array is empty.
+    [[ ${#names[@]} -gt 0 ]] || return 0
+
+    printf '%s\n' "${names[@]}" |
+        LC_ALL=C tr '[:upper:]' '[:lower:]' |
+        LC_ALL=C tr -cs 'a-z0-9' '\n'
 }
 
 # Return 0 if any ≥4-char token from `name` matches a token harvested from
