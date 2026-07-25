@@ -94,40 +94,24 @@ func (e *multiDeleteError) Error() string {
 	return strings.Join(e.errors[:min(3, len(e.errors))], "; ")
 }
 
-// trashPathWithProgress moves a path to Trash using Finder.
-// This allows users to recover accidentally deleted files.
+// trashPathWithProgress moves one selected path to Trash and reports completion.
 func trashPathWithProgress(root string, counter *int64) (int64, error) {
 	// Verify path exists (use Lstat to handle broken symlinks).
-	info, err := os.Lstat(root)
+	_, err := os.Lstat(root)
 	if err != nil {
 		return 0, err
 	}
 
-	// Count items for progress reporting.
-	var count int64
-	if info.IsDir() {
-		_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if !d.IsDir() {
-				count++
-				if counter != nil {
-					atomic.StoreInt64(counter, count)
-				}
-			}
-			return nil
-		})
-	} else {
-		count = 1
-		if counter != nil {
-			atomic.StoreInt64(counter, 1)
-		}
-	}
+	// Trash moves one selected path as a unit. Recursively counting every file
+	// first made large directory deletes appear hung before the move began.
+	const count int64 = 1
 
-	// Move to Trash using Finder AppleScript.
+	// Move through the native Trash route, with Finder as the compatibility fallback.
 	if err := moveToTrash(root); err != nil {
 		return 0, err
+	}
+	if counter != nil {
+		atomic.AddInt64(counter, count)
 	}
 
 	return count, nil
@@ -231,6 +215,9 @@ func isProtectedAnalyzeDeletePath(path string) bool {
 	if isEndpointSecurityCachePath(cleanPath) {
 		return true
 	}
+	if isCriticalAnalyzeDeletePath(cleanPath) {
+		return true
+	}
 
 	homeRoots := protectedAnalyzeHomeRoots()
 	if len(homeRoots) == 0 {
@@ -238,6 +225,10 @@ func isProtectedAnalyzeDeletePath(path string) bool {
 	}
 
 	for _, homeRoot := range homeRoots {
+		if cleanPath == homeRoot || isSameExistingPath(cleanPath, homeRoot) {
+			return true
+		}
+
 		dockerDesktopState := filepath.Join(homeRoot, "Library", "Containers", "com.docker.docker")
 		if cleanPath == dockerDesktopState || strings.HasPrefix(cleanPath, dockerDesktopState+string(filepath.Separator)) {
 			return true
@@ -257,7 +248,7 @@ func isProtectedAnalyzeDeletePath(path string) bool {
 		groupContainers := filepath.Join(homeRoot, "Library", "Group Containers")
 		if entries, err := os.ReadDir(groupContainers); err == nil {
 			for _, entry := range entries {
-				if !strings.HasSuffix(entry.Name(), "dev.orbstack") {
+				if !strings.HasSuffix(strings.ToLower(entry.Name()), "dev.orbstack") {
 					continue
 				}
 				if isPathWithinExistingRoot(cleanPath, filepath.Join(groupContainers, entry.Name())) {
@@ -266,7 +257,7 @@ func isProtectedAnalyzeDeletePath(path string) bool {
 			}
 		}
 
-		rel, err := filepath.Rel(groupContainers, cleanPath)
+		rel, err := filepath.Rel(strings.ToLower(groupContainers), strings.ToLower(cleanPath))
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
 		}
@@ -275,7 +266,84 @@ func isProtectedAnalyzeDeletePath(path string) bool {
 		if idx := strings.Index(containerName, string(filepath.Separator)); idx >= 0 {
 			containerName = containerName[:idx]
 		}
-		if strings.HasSuffix(containerName, "dev.orbstack") {
+		if strings.HasSuffix(strings.ToLower(containerName), "dev.orbstack") {
+			return true
+		}
+	}
+	return false
+}
+
+func isCriticalAnalyzeDeletePath(path string) bool {
+	criticalRoots := []string{
+		"/",
+		"/Applications",
+		"/Applications/Finder.app",
+		"/Applications/Safari.app",
+		"/Library",
+		"/Library/Apple",
+		"/Library/Application Support",
+		"/Library/Extensions",
+		"/Library/Keychains",
+		"/System",
+		"/Users",
+		"/Volumes",
+		"/Network",
+		"/cores",
+		"/dev",
+		"/etc",
+		"/home",
+		"/net",
+		"/tmp",
+		"/var",
+		"/private",
+		"/private/etc",
+		"/private/tmp",
+		"/private/var",
+		"/private/var/audit",
+		"/private/var/db",
+		"/private/var/root",
+		"/private/var/tmp",
+		"/private/var/folders",
+		"/bin",
+		"/sbin",
+		"/usr",
+		"/opt",
+		"/opt/homebrew",
+	}
+	for _, root := range criticalRoots {
+		if path == root || isSameExistingPath(path, root) {
+			return true
+		}
+	}
+
+	// A child directly under /Users is another account's home root, not an
+	// ordinary directory. Protect every account root while keeping its
+	// descendants available to the owning user.
+	if isDirectChildOfExistingRoot(path, "/Users") {
+		return true
+	}
+
+	// These system-owned trees are never an Analyze cleanup surface, even when
+	// a caller starts inside one instead of selecting its top-level row.
+	protectedTrees := []string{
+		"/System",
+		"/bin",
+		"/sbin",
+		"/usr",
+		"/private/etc",
+		"/private/var/audit",
+		"/private/var/db",
+		"/private/var/root",
+		"/Library/Apple",
+		"/Library/Extensions",
+		"/Library/Keychains",
+		"/Applications/Finder.app",
+		"/Applications/Safari.app",
+		"/dev",
+	}
+	for _, root := range protectedTrees {
+		if strings.HasPrefix(path, root+string(filepath.Separator)) ||
+			isPathWithinExistingRoot(path, root) {
 			return true
 		}
 	}
@@ -324,6 +392,19 @@ func isPathWithinExistingRoot(path, protectedRoot string) bool {
 	}
 }
 
+func isSameExistingPath(path, protectedPath string) bool {
+	pathInfo, pathErr := os.Stat(path)
+	protectedInfo, protectedErr := os.Stat(protectedPath)
+	return pathErr == nil && protectedErr == nil && os.SameFile(pathInfo, protectedInfo)
+}
+
+func isDirectChildOfExistingRoot(path, protectedRoot string) bool {
+	cleanPath := filepath.Clean(path)
+	return cleanPath != filepath.Clean(protectedRoot) &&
+		filepath.Dir(cleanPath) != cleanPath &&
+		isSameExistingPath(filepath.Dir(cleanPath), protectedRoot)
+}
+
 // endpointSecurityBundlePrefixes mirrors ENDPOINT_SECURITY_BUNDLE_PREFIXES in
 // lib/core/app_protection_data.sh. Deleting anything inside one of these EDR/MDM
 // agents' per-user Darwin caches trips sensor tamper detection (e.g. CrowdStrike
@@ -345,11 +426,12 @@ var endpointSecurityBundlePrefixes = []string{
 // /var/folders symlink form). Mirror of is_endpoint_security_cache_path() in
 // lib/core/app_protection.sh.
 func isEndpointSecurityCachePath(path string) bool {
-	if !strings.HasPrefix(path, "/private/var/folders/") && !strings.HasPrefix(path, "/var/folders/") {
+	lowerPath := strings.ToLower(path)
+	if !strings.HasPrefix(lowerPath, "/private/var/folders/") && !strings.HasPrefix(lowerPath, "/var/folders/") {
 		return false
 	}
 	for _, prefix := range endpointSecurityBundlePrefixes {
-		if strings.Contains(path, prefix) {
+		if strings.Contains(lowerPath, prefix) {
 			return true
 		}
 	}

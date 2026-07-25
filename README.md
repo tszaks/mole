@@ -81,6 +81,7 @@ mo optimize --whitelist      # Manage protected optimization rules
 mo clean --whitelist         # Manage protected caches
 mo purge --paths             # Configure project scan directories
 mo analyze /Volumes          # Analyze external drives only
+mo analyze /private/tmp      # Review user-owned temporary directories
 ```
 
 **Retention override**
@@ -183,6 +184,8 @@ Use `mo optimize --whitelist` to exclude specific optimizations. Path patterns w
 ### Disk Space Analyzer
 
 > Note: By default, Mole skips external drives under `/Volumes` for faster startup. To inspect them, run `mo analyze /Volumes` or a specific mount path.
+
+Developer tools may leave large temporary directories under `/private/tmp`. Review user-owned entries with `mo analyze /private/tmp`; selected entries move to Trash only after confirmation. Mole does not automatically delete third-party temporary directories because build markers and age alone cannot prove that a checkout or worktree is disposable.
 
 ```bash
 $ mo analyze

@@ -234,15 +234,46 @@ is_endpoint_security_cache_path() {
     # absolute root so an unrelated ".../var/folders/..." path cannot match.
     case "$path" in
         /private/var/folders/* | /var/folders/*) ;;
-        *) return 1 ;;
+        *)
+            if ! declare -f _mole_path_is_within_existing_root > /dev/null 2>&1 ||
+                ! _mole_path_is_within_existing_root "$path" "/private/var/folders"; then
+                return 1
+            fi
+            ;;
     esac
+    local restore_nocasematch=false
+    if ! shopt -q nocasematch; then
+        shopt -s nocasematch
+        restore_nocasematch=true
+    fi
     local prefix
     for prefix in "${ENDPOINT_SECURITY_BUNDLE_PREFIXES[@]}"; do
-        case "$path" in
-            *"$prefix"*) return 0 ;;
-        esac
+        if [[ "$path" == *"$prefix"* ]]; then
+            [[ "$restore_nocasematch" == "true" ]] && shopt -u nocasematch
+            return 0
+        fi
     done
+    [[ "$restore_nocasematch" == "true" ]] && shopt -u nocasematch
     return 1
+}
+
+is_orbstack_runtime_path() {
+    local path="$1"
+    local restore_nocasematch=false
+    if ! shopt -q nocasematch; then
+        shopt -s nocasematch
+        restore_nocasematch=true
+    fi
+
+    local matched=false
+    case "$path" in
+        */Library/Group\ Containers/*dev.orbstack | */Library/Group\ Containers/*dev.orbstack/* | */.orbstack | */.orbstack/*)
+            matched=true
+            ;;
+    esac
+
+    [[ "$restore_nocasematch" == "true" ]] && shopt -u nocasematch
+    [[ "$matched" == "true" ]]
 }
 
 # E5RT (Apple's Espresso runtime, behind Vision/TextRecognition) keeps compiled
@@ -280,6 +311,10 @@ should_protect_path() {
     [[ -z "$path" ]] && return 1
 
     local _container_cache_path=false
+
+    if is_orbstack_runtime_path "$path"; then
+        return 0
+    fi
 
     # 1. Keyword-based matching for system components (case-insensitive via character classes)
     case "$path" in

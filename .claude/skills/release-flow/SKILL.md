@@ -5,7 +5,7 @@ description: "Mole CLI release runbook: distribution channels, pre-flight checkl
 
 # Mole CLI Release Flow
 
-Tag-driven flow. The `release.yml` workflow watches `'V*'` tag pushes (capital `V`), builds amd64 and arm64 binaries on macOS, generates `SHA256SUMS`, attaches build provenance, creates the GitHub Release without notes, then bumps the personal Homebrew tap and opens a Homebrew core PR.
+Tag-driven flow. The `release.yml` workflow watches `'V*'` tag pushes (capital `V`), builds amd64 and arm64 binaries on macOS, generates `SHA256SUMS`, attaches build provenance, creates the GitHub Release without notes, then opens a Homebrew core PR.
 
 ## Distribution channels
 
@@ -13,7 +13,6 @@ Tag-driven flow. The `release.yml` workflow watches `'V*'` tag pushes (capital `
 |---|---|---|---|
 | Nightly (`mo update --nightly`) | `main` HEAD via `install.sh` | Any commit pushed to `main` | Automatic; no tag or release involved |
 | GitHub stable release | amd64/arm64 binaries + `SHA256SUMS` | Push a capital-`V` tag | `release.yml` builds and creates the release; curated notes are a manual follow-up |
-| Homebrew personal tap (`tw93/homebrew-tap`) | Formula bump | Same `V*` tag workflow | Automatic; do not re-run manually unless the workflow log shows a failure |
 | Homebrew core | Version-bump PR to `Homebrew/homebrew-core` | Same `V*` tag workflow | Automatic PR; merge timing is upstream's |
 
 At the start of any release-flavored task, restate which channels this run will touch and which it will not, and confirm with the maintainer before acting. Channel scope is specified by the maintainer, never inferred.
@@ -39,7 +38,7 @@ Wait for the workflow to finish. The workflow creates the release with assets bu
 
 After the workflow finishes, verify the release assets before announcing anything: `gh release view V<version> --json assets --jq '.assets[].name'` must list both architecture binaries AND `SHA256SUMS`. Install verification is fail-closed, so a release without a readable `SHA256SUMS` asset makes every install and `mo update` abort by design; a missing checksums file is a release blocker, not a cosmetic gap.
 
-Then run a **script self-update smoke** before publishing notes or announcing: install the previous stable release through the script channel, run `mo update`, and confirm `mo --version` prints the candidate version. Script-installed clients execute the new tag's `install.sh`, so this is the only gate that exercises their real upgrade path; the pre-flight suite cannot cover it before the release exists. Homebrew is a separate downstream gate: verify it only after the personal tap or core formula has updated, and never treat a script-channel smoke as proof that Homebrew is ready. If the script smoke fails, pull the release (see the pulling-and-re-releasing pitfall) before anyone is told to update.
+Then run a **script self-update smoke** before publishing notes or announcing: install the previous stable release through the script channel, run `mo update`, and confirm `mo --version` prints the candidate version. Script-installed clients execute the new tag's `install.sh`, so this is the only gate that exercises their real upgrade path; the pre-flight suite cannot cover it before the release exists. Homebrew is a separate downstream gate: verify it only after the core formula has updated, and never treat a script-channel smoke as proof that Homebrew is ready. If the script smoke fails, pull the release (see the pulling-and-re-releasing pitfall) before anyone is told to update.
 
 ## Apply curated release notes
 
@@ -56,6 +55,6 @@ Format rules (impact ordering, command existence checks, icon semantics, no em d
 - **`gh release create` conflicts with the workflow-created release**: the workflow already creates the release on tag push, so post-tag note publishing must use `gh release edit`, never `create`.
 - **Tag prefix is case-sensitive**: `release.yml` filters on `'V*'`. A lowercase `v1.38.0` tag will not trigger the workflow.
 - **Old clients fetch `install.sh` from the release tag, not from main**: a self-updating Mole downloads `raw.githubusercontent.com/tw93/mole/V<tag>/install.sh`, and tag content is immutable. An installer/updater bug therefore reaches existing stable users only through a new tag; fixing main changes Nightly but does not repair an already published stable updater.
-- **Pulling and re-releasing a version**: `gh release delete V<old> --cleanup-tag` removes the release and remote tag. Delete the local tag, close the superseded Homebrew core PR with a one-line supersede comment before pushing the replacement tag (an open PR for the same formula can block `brew bump-formula-pr`), then bump `VERSION` and `SECURITY_AUDIT.md`, commit `release: V<new>`, tag, and run the normal publish flow. The personal tap and Homebrew core PR regenerate on the new tag; the interim tap state needs no manual repair.
+- **Pulling and re-releasing a version**: `gh release delete V<old> --cleanup-tag` removes the release and remote tag. Delete the local tag, close the superseded Homebrew core PR with a one-line supersede comment before pushing the replacement tag (an open PR for the same formula can block `brew bump-formula-pr`), then bump `VERSION` and `SECURITY_AUDIT.md`, commit `release: V<new>`, tag, and run the normal publish flow. The Homebrew core PR regenerates on the new tag.
 
 Shell and bats pitfalls (bash 3.2 arrays, heredoc `read -n1`, mock bypasses, CI runner quirks) stay in `AGENTS.md` under "Shell and Test Pitfalls"; re-read that section when release work touches shell code or tests.

@@ -77,6 +77,29 @@ _mole_normalize_deletion_policy_path() {
     [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed" || printf '%s\n' "$path"
 }
 
+_mole_path_is_same_existing_file() {
+    local path="$1"
+    local protected_path="$2"
+    [[ -e "$path" && -e "$protected_path" && "$path" -ef "$protected_path" ]]
+}
+
+_mole_path_is_within_existing_root() {
+    local path="$1"
+    local protected_root="$2"
+    [[ -e "$protected_root" ]] || return 1
+
+    local probe="$path"
+    while [[ "$probe" == /* ]]; do
+        if _mole_path_is_same_existing_file "$probe" "$protected_root"; then
+            return 0
+        fi
+        [[ "$probe" == "/" ]] && break
+        probe="${probe%/*}"
+        [[ -n "$probe" ]] || probe="/"
+    done
+    return 1
+}
+
 # Deletion policy only. App/data protection stays in app_protection.sh.
 _mole_is_critical_deletion_path() {
     local path="$1"
@@ -90,6 +113,7 @@ _mole_is_critical_deletion_path() {
             ;;
         / | \
             /bin | /bin/* | \
+            /dev | /dev/* | \
             /sbin | /sbin/* | \
             /usr | /usr/* | \
             /System | /System/* | \
@@ -105,14 +129,15 @@ _mole_is_critical_deletion_path() {
             /Users | /Users/Shared | /Users/Guest | /Users/Guest/*)
             return 0
             ;;
-        /private)
+        /private | /private/tmp)
             return 0
             ;;
         /etc | /etc/* | /private/etc | /private/etc/*)
             return 0
             ;;
         /var | /var/db | /var/db/* | /var/audit | /var/audit/* | /var/root | \
-            /private/var | /private/var/db | /private/var/db/* | /private/var/audit | /private/var/audit/* | /private/var/root)
+            /private/var | /private/var/tmp | /private/var/folders | \
+            /private/var/db | /private/var/db/* | /private/var/audit | /private/var/audit/* | /private/var/root)
             return 0
             ;;
     esac
@@ -123,6 +148,40 @@ _mole_is_critical_deletion_path() {
     # collapse "/Users/$user/$leaf" -> "/Users/<name>" that would otherwise
     # hand rm -rf an entire home directory.
     if [[ "$path" == /Users/* && "$path" != /Users/*/* ]]; then
+        return 0
+    fi
+
+    # APFS is normally case-insensitive but case-preserving. Uppercase aliases
+    # such as /SYSTEM and /OPT/HOMEBREW are not symlinks, so string policy
+    # checks alone can miss that they are the same inode as protected roots.
+    local protected_root
+    local -a exact_roots=(
+        / /Applications /Library /Volumes /Network /cores /etc /home /net
+        /tmp /var /private /private/tmp /private/var /private/var/tmp
+        /private/var/folders /Users /opt /opt/homebrew
+    )
+    for protected_root in "${exact_roots[@]}"; do
+        if _mole_path_is_same_existing_file "$path" "$protected_root"; then
+            return 0
+        fi
+    done
+
+    local -a protected_trees=(
+        /bin /dev /sbin /usr /System /private/etc /private/var/audit
+        /private/var/db /private/var/root /Library/Apple /Library/Extensions
+        /Library/Keychains /Applications/Finder.app /Applications/Safari.app
+    )
+    for protected_root in "${protected_trees[@]}"; do
+        if _mole_path_is_within_existing_root "$path" "$protected_root"; then
+            return 0
+        fi
+    done
+
+    # Protect every account root even when a caller changes only component
+    # casing (for example /USERS/SHARED on a case-insensitive volume).
+    local parent_path="${path%/*}"
+    [[ -n "$parent_path" ]] || parent_path="/"
+    if _mole_path_is_same_existing_file "$parent_path" "/Users"; then
         return 0
     fi
 
@@ -257,10 +316,10 @@ validate_path_for_deletion() {
 
     # Allow known safe paths under /private
     case "$policy_path" in
-        /private/tmp | /private/tmp/* | \
-            /private/var/tmp | /private/var/tmp/* | \
+        /private/tmp/* | \
+            /private/var/tmp/* | \
             /private/var/log | /private/var/log/* | \
-            /private/var/folders | /private/var/folders/* | \
+            /private/var/folders/* | \
             /private/var/db/diagnostics | /private/var/db/diagnostics/* | \
             /private/var/db/DiagnosticPipeline | /private/var/db/DiagnosticPipeline/* | \
             /private/var/db/powerlog | /private/var/db/powerlog/* | \

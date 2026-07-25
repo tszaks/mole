@@ -773,17 +773,113 @@ EOF
 	[[ "$result" == "RECENT" ]]
 }
 
+@test "is_recently_modified: detects recent contained files under an old artifact directory" {
+	mkdir -p "$HOME/www/active-project/node_modules"
+	touch "$HOME/www/active-project/node_modules/active.js"
+	touch -t 202001010000 "$HOME/www/active-project/node_modules"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+is_recently_modified "$HOME/www/active-project/node_modules"
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "is_recently_modified: marks old projects correctly" {
 	mkdir -p "$HOME/www/old-project/node_modules"
-	mkdir -p "$HOME/www/old-project"
+	touch "$HOME/www/old-project/node_modules/old.js"
+	touch -t 202001010000 \
+		"$HOME/www/old-project/node_modules/old.js" \
+		"$HOME/www/old-project/node_modules"
 
-	/bin/bash -c "
-        source '$PROJECT_ROOT/lib/core/common.sh'
-        source '$PROJECT_ROOT/lib/clean/project.sh'
-        is_recently_modified '$HOME/www/old-project/node_modules' || true
-    "
-	local exit_code=$?
-	[ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 1 ]
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+if is_recently_modified "$HOME/www/old-project/node_modules"; then
+	exit 99
+fi
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "is_recently_modified: treats activity probe timeout as uncertain and protected" {
+	mkdir -p "$HOME/www/uncertain-project/node_modules"
+	touch -t 202001010000 "$HOME/www/uncertain-project/node_modules"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+run_with_timeout() { return 124; }
+is_recently_modified "$HOME/www/uncertain-project/node_modules"
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "is_recently_modified: treats activity probe failure as uncertain and protected" {
+	mkdir -p "$HOME/www/unreadable-project/node_modules"
+	touch -t 202001010000 "$HOME/www/unreadable-project/node_modules"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+run_with_timeout() { return 2; }
+is_recently_modified "$HOME/www/unreadable-project/node_modules"
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "is_recently_modified: treats exhausted total activity budget as uncertain and protected" {
+	mkdir -p "$HOME/www/budget-project/node_modules"
+	touch -t 202001010000 "$HOME/www/budget-project/node_modules"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+_PURGE_ACTIVITY_DEADLINE_EPOCH=1
+is_recently_modified "$HOME/www/budget-project/node_modules"
+[[ "$_PURGE_ACTIVITY_STATE" == "uncertain" ]]
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "purge_target_activity_still_safe catches activity after menu review" {
+    mkdir -p "$HOME/www/changed-project/node_modules"
+    touch "$HOME/www/changed-project/node_modules/active.js"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+if purge_target_activity_still_safe "$HOME/www/changed-project/node_modules" false; then
+    exit 90
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "purge_target_activity_still_safe honors an explicit recent selection" {
+    mkdir -p "$HOME/www/recent-project/node_modules"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+purge_target_activity_still_safe "$HOME/www/recent-project/node_modules" true
+EOF
+
+    [ "$status" -eq 0 ]
 }
 
 @test "purge targets are configured correctly" {

@@ -597,28 +597,104 @@ filter_protected_artifacts() {
         fi
     done
 }
-# Args: $1 - path
-# Check if a path was modified recently (safety check).
-is_recently_modified() {
+# Args: $1 - path, $2 - optional current epoch
+# Classify artifact activity as recent, old, or uncertain. Only a complete
+# bounded scan may return old; timeouts and read failures fail closed.
+classify_purge_activity() {
     local path="$1"
     local current_time="${2:-}"
     local age_days=$MIN_AGE_DAYS
+    _PURGE_ACTIVITY_STATE="uncertain"
+
     if [[ ! -e "$path" ]]; then
-        return 1
+        _PURGE_ACTIVITY_STATE="old"
+        return 0
     fi
+
     local mod_time
-    mod_time=$(get_file_mtime "$path")
+    mod_time=$(get_file_mtime "$path" 2> /dev/null || true)
+    if [[ ! "$mod_time" =~ ^[0-9]+$ ]]; then
+        debug_log "Unable to read purge activity timestamp: $path"
+        return 0
+    fi
     if [[ -z "$current_time" || ! "$current_time" =~ ^[0-9]+$ ]]; then
         current_time=$(get_epoch_seconds)
     fi
+
     local age_seconds=$((current_time - mod_time))
     local age_in_days=$((age_seconds / 86400))
     if [[ $age_in_days -lt $age_days ]]; then
-        return 0 # Recently modified
+        _PURGE_ACTIVITY_STATE="recent"
+        return 0
+    fi
+
+    if [[ ! -d "$path" ]]; then
+        _PURGE_ACTIVITY_STATE="old"
+        return 0
+    fi
+
+    local probe_timeout="${MO_PURGE_ACTIVITY_TIMEOUT_SEC:-$MOLE_TIMEOUT_MEDIUM_PROBE_SEC}"
+    if [[ ! "$probe_timeout" =~ ^[1-9][0-9]*$ ]]; then
+        probe_timeout="$MOLE_TIMEOUT_MEDIUM_PROBE_SEC"
+    fi
+
+    # clean_project_artifacts sets one deadline for the whole classification
+    # pass. A standalone caller still gets the per-item ceiling above.
+    if [[ "${_PURGE_ACTIVITY_DEADLINE_EPOCH:-}" =~ ^[0-9]+$ ]]; then
+        local now_epoch remaining
+        now_epoch=$(get_epoch_seconds)
+        remaining=$((_PURGE_ACTIVITY_DEADLINE_EPOCH - now_epoch))
+        if [[ $remaining -le 0 ]]; then
+            debug_log "Purge activity scan budget exhausted before: $path"
+            return 0
+        fi
+        if [[ $probe_timeout -gt $remaining ]]; then
+            probe_timeout=$remaining
+        fi
+    fi
+
+    local recent_file=""
+    local probe_status=0
+    recent_file=$(run_with_timeout "$probe_timeout" \
+        find "$path" -type f -mtime "-$age_days" -print -quit 2> /dev/null) || probe_status=$?
+
+    if [[ $probe_status -ne 0 ]]; then
+        debug_log "Purge activity scan failed closed (exit $probe_status): $path"
+        return 0
+    fi
+    if [[ -n "$recent_file" ]]; then
+        _PURGE_ACTIVITY_STATE="recent"
     else
-        return 1 # Old enough to clean
+        _PURGE_ACTIVITY_STATE="old"
     fi
 }
+
+# Args: $1 - path, $2 - optional current epoch
+# Check whether a path must be protected from default purge selection.
+is_recently_modified() {
+    classify_purge_activity "$@"
+    [[ "$_PURGE_ACTIVITY_STATE" != "old" ]]
+}
+
+# An artifact that was old when the menu opened can become active before the
+# user confirms deletion. Recheck only those default-safe rows; a user who
+# explicitly selected an already-recent row has already overridden that hint.
+purge_target_activity_still_safe() {
+    local path="$1"
+    local was_recent="${2:-true}"
+    [[ "$was_recent" == "true" ]] && return 0
+
+    # Do not inherit the menu pass's expired shared deadline.
+    local _PURGE_ACTIVITY_DEADLINE_EPOCH=""
+    local _PURGE_ACTIVITY_STATE="uncertain"
+    if is_recently_modified "$path" "$(get_epoch_seconds)"; then
+        return 1
+    fi
+    # Preserve the established test/caller seam where an override returning 1
+    # means old without setting the newer classification detail.
+    [[ "$_PURGE_ACTIVITY_STATE" == "old" || "$_PURGE_ACTIVITY_STATE" == "uncertain" ]]
+}
+
 # Args: $1 - path
 # Get directory size in KB.
 get_dir_size_kb() {
@@ -1038,6 +1114,7 @@ clean_project_artifacts() {
     local -a all_found_items=()
     local -a safe_to_clean=()
     local -a safe_recent_flags=()
+    local -a safe_activity_states=()
     local previous_int_trap=""
     local previous_term_trap=""
     local trap_installed_by_this_call=false
@@ -1126,17 +1203,38 @@ clean_project_artifacts() {
         return 2 # Special code: nothing to clean
     fi
     # Mark recently modified items (for default selection state)
+    if [[ -t 1 ]]; then
+        start_inline_spinner "Checking recent activity..."
+    fi
     local _now_epoch
     _now_epoch=$(get_epoch_seconds)
+    local _activity_total_timeout="${MO_PURGE_ACTIVITY_TOTAL_TIMEOUT_SEC:-$MOLE_TIMEOUT_HINT_SCAN_SEC}"
+    if [[ ! "$_activity_total_timeout" =~ ^[1-9][0-9]*$ ]]; then
+        _activity_total_timeout="$MOLE_TIMEOUT_HINT_SCAN_SEC"
+    fi
+    local _PURGE_ACTIVITY_DEADLINE_EPOCH=$((_now_epoch + _activity_total_timeout))
     for item in "${all_found_items[@]}"; do
         local is_recent=false
+        _PURGE_ACTIVITY_STATE="uncertain"
         if is_recently_modified "$item" "$_now_epoch"; then
             is_recent=true
+        fi
+        local activity_state="${_PURGE_ACTIVITY_STATE:-uncertain}"
+        if [[ "$activity_state" != "recent" && "$activity_state" != "old" && "$activity_state" != "uncertain" ]]; then
+            activity_state="uncertain"
+        elif [[ "$activity_state" == "uncertain" && "$is_recent" == "false" ]]; then
+            # Preserve the long-standing is_recently_modified test/mocking seam:
+            # a legacy override returning 1 means definitely old.
+            activity_state="old"
         fi
         # Add all items to safe_to_clean, let user choose
         safe_to_clean+=("$item")
         safe_recent_flags+=("$is_recent")
+        safe_activity_states+=("$activity_state")
     done
+    if [[ -t 1 ]]; then
+        stop_inline_spinner
+    fi
     # Build menu options - one per artifact
     if [[ -t 1 ]]; then
         start_inline_spinner "Calculating sizes..."
@@ -1454,7 +1552,8 @@ clean_project_artifacts() {
             continue
         fi
 
-        local is_recent="${safe_recent_flags[$item_index]:-false}"
+        local is_recent="${safe_recent_flags[$item_index]:-true}"
+        local activity_state="${safe_activity_states[$item_index]:-uncertain}"
         raw_project_paths+=("$project_path")
         raw_artifact_types+=("$artifact_type")
         item_paths+=("$item")
@@ -1467,7 +1566,11 @@ clean_project_artifacts() {
         _mod_time=$(get_file_mtime "$item" 2> /dev/null || echo "0")
         _age_secs=$((_now_epoch - _mod_time))
         _age_d=$((_age_secs / 86400))
-        if [[ $_age_d -lt 1 ]]; then
+        if [[ "$activity_state" == "uncertain" ]]; then
+            item_age_labels+=("unknown")
+        elif [[ "$activity_state" == "recent" && $_age_d -ge $MIN_AGE_DAYS ]]; then
+            item_age_labels+=("<${MIN_AGE_DAYS}d")
+        elif [[ $_age_d -lt 1 ]]; then
             item_age_labels+=("<1d")
         elif [[ $_age_d -lt 30 ]]; then
             item_age_labels+=("${_age_d}d")
@@ -1669,6 +1772,10 @@ clean_project_artifacts() {
         # Safety checks
         if ! is_safe_configured_purge_artifact "$item_path"; then
             debug_log "Skipping purge target outside configured safe roots: ${item_path:-<empty>}"
+            continue
+        fi
+        if ! purge_target_activity_still_safe "$item_path" "${item_recent_flags[idx]:-true}"; then
+            echo -e "${YELLOW}${ICON_WARNING}${NC} Skipped $display_item_path (activity changed after review)"
             continue
         fi
         if [[ -t 1 ]]; then

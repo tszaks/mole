@@ -144,6 +144,51 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
+@test "validate_path_for_deletion rejects temp roots while allowing their children" {
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/tmp'"
+    [ "$status" -eq 1 ]
+
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/tmp'"
+    [ "$status" -eq 1 ]
+
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders'"
+    [ "$status" -eq 1 ]
+
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/dev'"
+    [ "$status" -eq 1 ]
+
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/tmp/mole-old-artifact'"
+    [ "$status" -eq 0 ]
+
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/tmp/mole-old-artifact'"
+    [ "$status" -eq 0 ]
+
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/test/a/C/com.example.App/cache'"
+    [ "$status" -eq 0 ]
+}
+
+@test "validate_path_for_deletion rejects case aliases of critical roots" {
+    run /bin/bash -c "
+        source '$PROJECT_ROOT/lib/core/common.sh'
+        checked=0
+        for pair in \
+            '/SYSTEM|/System' \
+            '/DEV|/dev' \
+            '/PRIVATE/TMP|/private/tmp' \
+            '/PRIVATE/VAR/FOLDERS|/private/var/folders' \
+            '/USERS|/Users'; do
+            alias_path=\${pair%%|*}
+            canonical_path=\${pair#*|}
+            if [[ -e \"\$alias_path\" && \"\$alias_path\" -ef \"\$canonical_path\" ]]; then
+                checked=\$((checked + 1))
+                validate_path_for_deletion \"\$alias_path\" && exit 90
+            fi
+        done
+        [[ \$checked -gt 0 ]]
+    "
+    [ "$status" -eq 0 ]
+}
+
 @test "validate_path_for_deletion accepts CoreSimulator system cache children" {
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/Library/Developer/CoreSimulator/Caches/dyld'"
     [ "$status" -eq 0 ]
@@ -162,6 +207,9 @@ teardown() {
     # Central chokepoint: every safe_remove / safe_sudo_remove caller is covered,
     # not only the cleanup sweeps that pre-check the predicate.
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/folders/9d/abc/C/com.crowdstrike.falcon.App/com.apple.metalfe'"
+    [ "$status" -eq 1 ]
+
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/PRIVATE/VAR/FOLDERS/9D/ABC/C/COM.CROWDSTRIKE.FALCON.APP/com.apple.metalfe'"
     [ "$status" -eq 1 ]
 
     # A normal app's Darwin cache shard stays deletable.

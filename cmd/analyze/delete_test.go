@@ -34,8 +34,11 @@ func TestTrashPathWithProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("trashPathWithProgress returned error: %v", err)
 	}
-	if count != int64(len(files)) {
-		t.Fatalf("expected %d files trashed, got %d", len(files), count)
+	if count != 1 {
+		t.Fatalf("expected one path-level Trash operation, got %d", count)
+	}
+	if counter != 1 {
+		t.Fatalf("expected one completed Trash operation, got %d", counter)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatalf("expected target to be moved to Trash, stat err=%v", err)
@@ -70,7 +73,10 @@ func TestDeleteMultiplePathsCmdHandlesParentChild(t *testing.T) {
 		t.Fatalf("unexpected error: %v", progress.err)
 	}
 	if progress.count != 2 {
-		t.Fatalf("expected 2 files trashed, got %d", progress.count)
+		t.Fatalf("expected 2 paths trashed, got %d", progress.count)
+	}
+	if counter != 2 {
+		t.Fatalf("expected two completed Trash operations, got %d", counter)
 	}
 	if _, err := os.Stat(parent); !os.IsNotExist(err) {
 		t.Fatalf("expected parent to be moved to Trash, err=%v", err)
@@ -221,6 +227,139 @@ func TestValidateTrashTargetRejectsOrbStackGroupContainerWithoutHOME(t *testing.
 	path := filepath.Join(currentUser.HomeDir, "Library", "Group Containers", "HUAQ24HBR6.dev.orbstack", "data")
 	if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
 		t.Fatalf("validateTrashTarget(%q) with empty HOME error = %v, want protected path error", path, err)
+	}
+}
+
+func TestValidateTrashTargetRejectsCriticalRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []string{
+		"/",
+		"/Applications",
+		"/Library",
+		"/System",
+		"/Users",
+		"/Volumes",
+		"/dev",
+		"/etc",
+		"/tmp",
+		"/var",
+		"/private",
+		"/private/etc",
+		"/private/tmp",
+		"/private/var",
+		"/private/var/audit",
+		"/private/var/db",
+		"/private/var/root",
+		"/private/var/tmp",
+		"/private/var/folders",
+		"/Library/Apple",
+		"/Library/Extensions",
+		"/Library/Keychains",
+		"/Applications/Finder.app",
+		"/Applications/Safari.app",
+		"/usr",
+		"/opt",
+		"/opt/homebrew",
+		"/Users/another-account",
+		home,
+	}
+
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+				t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", path, err)
+			}
+		})
+	}
+}
+
+func TestValidateTrashTargetRejectsCriticalRootCaseAliases(t *testing.T) {
+	tests := []struct {
+		alias     string
+		canonical string
+	}{
+		{"/SYSTEM", "/System"},
+		{"/DEV", "/dev"},
+		{"/PRIVATE/TMP", "/private/tmp"},
+		{"/PRIVATE/VAR/FOLDERS", "/private/var/folders"},
+		{"/USERS", "/Users"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.alias, func(t *testing.T) {
+			if !isSameExistingPath(tt.alias, tt.canonical) {
+				t.Skip("filesystem does not expose this case-insensitive alias")
+			}
+			if err := validateTrashTarget(tt.alias); err == nil || !strings.Contains(err.Error(), "protected path") {
+				t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", tt.alias, err)
+			}
+		})
+	}
+}
+
+func TestEndpointSecurityCachePathIsCaseInsensitive(t *testing.T) {
+	path := "/PRIVATE/VAR/FOLDERS/9D/ABC/C/COM.CROWDSTRIKE.FALCON.APP/cache"
+	if !isEndpointSecurityCachePath(path) {
+		t.Fatalf("isEndpointSecurityCachePath(%q) = false, want true", path)
+	}
+}
+
+func TestValidateTrashTargetRejectsOrbStackCaseVariant(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path := filepath.Join(home, "LIBRARY", "GROUP CONTAINERS", "HUAQ24HBR6.DEV.ORBSTACK", "DATA")
+	if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", path, err)
+	}
+}
+
+func TestValidateTrashTargetAllowsChildrenOfOtherUserHomes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path := "/Users/another-account/Library/Caches/old-cache"
+	if err := validateTrashTarget(path); err != nil {
+		t.Fatalf("validateTrashTarget(%q) error = %v, want nil", path, err)
+	}
+}
+
+func TestValidateTrashTargetRejectsSymlinkToCriticalRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	parent := t.TempDir()
+	alias := filepath.Join(parent, "home-alias")
+	if err := os.Symlink(home, alias); err != nil {
+		t.Fatalf("create critical-root symlink: %v", err)
+	}
+
+	if err := validateTrashTarget(alias); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", alias, err)
+	}
+}
+
+func TestValidateTrashTargetAllowsChildrenOfCriticalRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []string{
+		filepath.Join(home, "Downloads", "old.zip"),
+		"/Applications/Example.app",
+		"/Library/Caches/com.example.app",
+		"/Volumes/External/old-artifact",
+		"/private/tmp/mole-user-artifact",
+		"/private/var/tmp/mole-user-artifact",
+	}
+
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			if err := validateTrashTarget(path); err != nil {
+				t.Fatalf("validateTrashTarget(%q) error = %v, want nil", path, err)
+			}
+		})
 	}
 }
 

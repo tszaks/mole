@@ -291,8 +291,8 @@ func TestDeletePathWithProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("trashPathWithProgress returned error: %v", err)
 	}
-	if count != int64(len(files)) {
-		t.Fatalf("expected %d files trashed, got %d", len(files), count)
+	if count != 1 {
+		t.Fatalf("expected one path-level Trash operation, got %d", count)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatalf("expected target to be moved to Trash, stat err=%v", err)
