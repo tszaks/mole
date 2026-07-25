@@ -283,7 +283,7 @@ PLIST
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/hints.sh"
-bundle_has_installed_app() { return 1; }
+bundle_has_installed_app() { return 0; }
 note_activity() { :; }
 
 live_output=$(show_user_launch_agent_hint_notice)
@@ -291,11 +291,49 @@ live_output=$(show_user_launch_agent_hint_notice)
 
 chmod -x "$UPDATER"
 show_user_launch_agent_hint_notice
+
+chmod +x "$UPDATER"
+command rm -f -- "$UPDATER"
+show_user_launch_agent_hint_notice
 EOT4A
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Stale login item · com.google.GoogleUpdater.wake.plist"* ]] || return 1
-    [[ "$output" == *"Associated app not found: com.google.GoogleUpdater"* ]] || return 1
+    [[ "$output" == *"Program target is not executable"* ]] || return 1
+    [[ "$output" == *"Missing app/helper target"* ]] || return 1
+}
+
+@test "show_user_launch_agent_hint_notice gives Program precedence over ProgramArguments.0" {
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$HOME/Library/LaunchAgents/com.example.program-precedence.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.program-precedence</string>
+    <key>Program</key>
+    <string>/Applications/Missing.app/Contents/MacOS/Missing</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>--version</string>
+    </array>
+</dict>
+</plist>
+PLIST
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOT4B'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+show_user_launch_agent_hint_notice
+EOT4B
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stale login item · com.example.program-precedence.plist"* ]] || return 1
+    [[ "$output" == *"Missing app/helper target"* ]] || return 1
 }
 
 @test "show_user_launch_agent_hint_notice skips custom shell wrappers" {

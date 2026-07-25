@@ -4,6 +4,7 @@ package main
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -115,6 +116,114 @@ func TestValidateTrashTargetRejectsOrbStackLiveData(t *testing.T) {
 	}
 }
 
+func TestValidateTrashTargetRejectsDockerDesktopLiveData(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []string{
+		filepath.Join(home, "Library", "Containers", "com.docker.docker"),
+		filepath.Join(home, "Library", "Containers", "com.docker.docker", "Data"),
+		filepath.Join(home, "Library", "Containers", "com.docker.docker", "Data", "vms", "0", "data", "Docker.raw"),
+	}
+
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+				t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", path, err)
+			}
+		})
+	}
+}
+
+func TestValidateTrashTargetRejectsDockerDesktopSymlinkAlias(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dockerData := filepath.Join(home, "Library", "Containers", "com.docker.docker", "Data")
+	if err := os.MkdirAll(dockerData, 0o755); err != nil {
+		t.Fatalf("create Docker data fixture: %v", err)
+	}
+	alias := filepath.Join(home, "docker-data")
+	if err := os.Symlink(filepath.Dir(dockerData), alias); err != nil {
+		t.Fatalf("create Docker data symlink: %v", err)
+	}
+
+	path := filepath.Join(alias, "Data")
+	if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", path, err)
+	}
+}
+
+func TestValidateTrashTargetRejectsDockerDesktopCaseVariant(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dockerData := filepath.Join(home, "Library", "Containers", "com.docker.docker", "Data")
+	if err := os.MkdirAll(dockerData, 0o755); err != nil {
+		t.Fatalf("create Docker data fixture: %v", err)
+	}
+
+	caseVariant := filepath.Join(home, "library", "containers", "COM.DOCKER.DOCKER", "Data")
+	if _, err := os.Stat(caseVariant); err != nil {
+		t.Skip("filesystem is case-sensitive")
+	}
+	if err := validateTrashTarget(caseVariant); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("validateTrashTarget(%q) error = %v, want protected path error", caseVariant, err)
+	}
+}
+
+func TestValidateTrashTargetRejectsDockerDesktopLiveDataWithoutHOME(t *testing.T) {
+	currentUser, err := user.Current()
+	if err != nil || currentUser.HomeDir == "" {
+		t.Skipf("current user home unavailable: %v", err)
+	}
+	t.Setenv("HOME", "")
+
+	path := filepath.Join(currentUser.HomeDir, "Library", "Containers", "com.docker.docker", "Data")
+	if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("validateTrashTarget(%q) with empty HOME error = %v, want protected path error", path, err)
+	}
+}
+
+func TestValidateTrashTargetRejectsOrbStackGroupContainerAliases(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	groupRoot := filepath.Join(home, "Library", "Group Containers", "HUAQ24HBR6.dev.orbstack")
+	groupData := filepath.Join(groupRoot, "data")
+	if err := os.MkdirAll(groupData, 0o755); err != nil {
+		t.Fatalf("create OrbStack group fixture: %v", err)
+	}
+
+	alias := filepath.Join(home, "orbstack-group")
+	if err := os.Symlink(groupRoot, alias); err != nil {
+		t.Fatalf("create OrbStack group symlink: %v", err)
+	}
+	if err := validateTrashTarget(filepath.Join(alias, "data")); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("OrbStack group symlink error = %v, want protected path error", err)
+	}
+
+	caseVariant := filepath.Join(home, "library", "group containers", "huaq24hbr6.DEV.ORBSTACK", "data")
+	if _, err := os.Stat(caseVariant); err == nil {
+		if err := validateTrashTarget(caseVariant); err == nil || !strings.Contains(err.Error(), "protected path") {
+			t.Fatalf("OrbStack group case variant error = %v, want protected path error", err)
+		}
+	}
+}
+
+func TestValidateTrashTargetRejectsOrbStackGroupContainerWithoutHOME(t *testing.T) {
+	currentUser, err := user.Current()
+	if err != nil || currentUser.HomeDir == "" {
+		t.Skipf("current user home unavailable: %v", err)
+	}
+	t.Setenv("HOME", "")
+
+	path := filepath.Join(currentUser.HomeDir, "Library", "Group Containers", "HUAQ24HBR6.dev.orbstack", "data")
+	if err := validateTrashTarget(path); err == nil || !strings.Contains(err.Error(), "protected path") {
+		t.Fatalf("validateTrashTarget(%q) with empty HOME error = %v, want protected path error", path, err)
+	}
+}
+
 func TestValidateTrashTargetRejectsEndpointSecurityCaches(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -216,6 +325,7 @@ func TestValidateTrashTargetAllowsRegularUserPaths(t *testing.T) {
 	tests := []string{
 		filepath.Join(home, "Downloads", "old.zip"),
 		filepath.Join(home, "Library", "Caches", "example.cache"),
+		filepath.Join(home, "Library", "Containers", "com.docker.docker-helper", "Data"),
 		filepath.Join(home, "Library", "Group Containers", "group.com.example.tool", "Library", "Caches", "item"),
 	}
 

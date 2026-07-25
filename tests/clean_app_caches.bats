@@ -59,6 +59,13 @@ EOF
     [[ "$output" == *"Xcode documentation index"* ]]
 }
 
+@test "clean_xcode_tools does not duplicate unavailable simulator cleanup" {
+    run grep -n "simctl" "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+}
+
 @test "clean_media_players protects spotify offline cache when bnk has content" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

@@ -1031,11 +1031,22 @@ _resolve_simctl_developer_dir() {
     if command -v xcode-select > /dev/null 2>&1; then
         selected_developer_dir=$(xcode-select -p 2> /dev/null || true)
     fi
-    if [[ -n "$selected_developer_dir" ]] && _simctl_developer_dir_is_usable "$selected_developer_dir"; then
-        _MOLE_SIMCTL_DEVELOPER_DIR="$selected_developer_dir"
-        _MOLE_SIMCTL_RESOLUTION_STATUS="ready"
-        return 0
-    fi
+    case "$selected_developer_dir" in
+        /Library/Developer/CommandLineTools | /Library/Developer/CommandLineTools/)
+            ;;
+        "")
+            return 1
+            ;;
+        *)
+            if _simctl_developer_dir_is_usable "$selected_developer_dir"; then
+                _MOLE_SIMCTL_DEVELOPER_DIR="$selected_developer_dir"
+                _MOLE_SIMCTL_RESOLUTION_STATUS="ready"
+                return 0
+            fi
+            debug_log "Selected Xcode does not provide simctl: $selected_developer_dir"
+            return 1
+            ;;
+    esac
 
     local -a candidates=()
     local app_root candidate_app candidate_developer_dir
@@ -1115,7 +1126,6 @@ clean_dev_mobile() {
             if _run_simctl "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" list devices > /dev/null 2>&1; then
                 simctl_probe_ok=true
             else
-                sleep 1
                 if _run_simctl 8 list devices > /dev/null 2>&1; then # 8s: simctl retry after warmup, see lib/core/timeouts.sh
                     simctl_probe_ok=true
                     debug_log "simctl probe succeeded on retry (CoreSimulatorService warmup)"
@@ -1132,7 +1142,17 @@ clean_dev_mobile() {
 
             if [[ "$simctl_available" == "true" ]]; then
                 local unavailable_devices_output=""
-                unavailable_devices_output=$(_run_simctl "$MOLE_TIMEOUT_PKG_LIST_SEC" list devices unavailable 2> /dev/null || true)
+                local unavailable_list_exit_code=0
+                unavailable_devices_output=$(_run_simctl "$MOLE_TIMEOUT_PKG_LIST_SEC" list devices unavailable 2> /dev/null) || unavailable_list_exit_code=$?
+                if [[ $unavailable_list_exit_code -ne 0 ]]; then
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl list failed (exit=${unavailable_list_exit_code})"
+                    debug_log "simctl list devices unavailable returned $unavailable_list_exit_code"
+                    note_activity
+                    simctl_available=false
+                fi
+            fi
+
+            if [[ "$simctl_available" == "true" ]]; then
                 unavailable_before=$(printf '%s\n' "$unavailable_devices_output" | command awk '/\(unavailable/ { count++ } END { print count+0 }')
                 [[ "$unavailable_before" =~ ^[0-9]+$ ]] || unavailable_before=0
                 while IFS= read -r unavailable_udid; do
@@ -1174,21 +1194,27 @@ clean_dev_mobile() {
 
                         if [[ $delete_exit_code -eq 0 ]]; then
                             stop_section_spinner
-                            unavailable_devices_output=$(_run_simctl "$MOLE_TIMEOUT_PKG_LIST_SEC" list devices unavailable 2> /dev/null || true)
-                            unavailable_after=$(printf '%s\n' "$unavailable_devices_output" | command awk '/\(unavailable/ { count++ } END { print count+0 }')
-                            [[ "$unavailable_after" =~ ^[0-9]+$ ]] || unavailable_after=0
-
-                            removed_unavailable=$((unavailable_before - unavailable_after))
-                            if ((removed_unavailable < 0)); then
-                                removed_unavailable=0
-                            fi
-
-                            local line_color
-                            line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
-                            if ((removed_unavailable > 0)); then
-                                echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${removed_unavailable}, ${line_color}${unavailable_size_human}${NC}"
+                            local recount_exit_code=0
+                            unavailable_devices_output=$(_run_simctl "$MOLE_TIMEOUT_PKG_LIST_SEC" list devices unavailable 2> /dev/null) || recount_exit_code=$?
+                            if [[ $recount_exit_code -ne 0 ]]; then
+                                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode unavailable simulators · cleanup completed, unable to verify remaining devices"
+                                debug_log "simctl recount returned $recount_exit_code"
                             else
-                                echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · cleanup completed, ${line_color}${unavailable_size_human}${NC}"
+                                unavailable_after=$(printf '%s\n' "$unavailable_devices_output" | command awk '/\(unavailable/ { count++ } END { print count+0 }')
+                                [[ "$unavailable_after" =~ ^[0-9]+$ ]] || unavailable_after=0
+
+                                removed_unavailable=$((unavailable_before - unavailable_after))
+                                if ((removed_unavailable < 0)); then
+                                    removed_unavailable=0
+                                fi
+
+                                local line_color
+                                line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
+                                if ((removed_unavailable > 0)); then
+                                    echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${removed_unavailable}, ${line_color}${unavailable_size_human}${NC}"
+                                else
+                                    echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · cleanup completed, ${line_color}${unavailable_size_human}${NC}"
+                                fi
                             fi
                         else
                             stop_section_spinner
@@ -1205,50 +1231,12 @@ clean_dev_mobile() {
                                 error_hint=" (CoreSimulator service issue)"
                             fi
 
-                            # A timeout does not prove simctl stopped working on the
-                            # device set. Avoid racing it with manual directory removal.
+                            # Native simctl owns simulator state. A nonzero result can
+                            # mean the device became active after the list, so never
+                            # bypass it with direct directory removal.
                             if [[ $delete_exit_code -eq 124 ]]; then
-                                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · cleanup timed out; manual fallback skipped"
+                                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · cleanup timed out"
                                 debug_log "simctl delete unavailable timed out"
-                            # Try fallback for completed, non-timeout failures only.
-                            elif [[ ${#unavailable_udids[@]} -gt 0 ]]; then
-                                debug_log "Attempting fallback: manual deletion of unavailable simulators"
-                                local manually_removed=0
-                                local manual_failed=0
-
-                                for udid in "${unavailable_udids[@]}"; do
-                                    # Validate UUID format (36 chars: 8-4-4-4-12 hex pattern)
-                                    if [[ ! "$udid" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
-                                        debug_log "Invalid UUID format, skipping: $udid"
-                                        ((manual_failed++)) || true
-                                        continue
-                                    fi
-
-                                    local device_path="$HOME/Library/Developer/CoreSimulator/Devices/$udid"
-                                    if [[ -d "$device_path" ]]; then
-                                        # Use safe_remove for validated simulator device directory
-                                        if safe_remove "$device_path" true; then
-                                            ((manually_removed++)) || true
-                                            debug_log "Manually removed simulator: $udid"
-                                        else
-                                            ((manual_failed++)) || true
-                                            debug_log "Failed to manually remove simulator: $udid"
-                                        fi
-                                    fi
-                                done
-
-                                if ((manually_removed > 0)); then
-                                    if ((manual_failed == 0)); then
-                                        local line_color
-                                        line_color=$(cleanup_result_color_kb "$unavailable_size_kb")
-                                        echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode unavailable simulators · removed ${manually_removed} (fallback), ${line_color}${unavailable_size_human}${NC}"
-                                    else
-                                        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode unavailable simulators · partially cleaned ${manually_removed}/${#unavailable_udids[@]}, ${unavailable_size_human}"
-                                    fi
-                                else
-                                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators cleanup failed${error_hint}"
-                                    debug_log "simctl delete error: $delete_output"
-                                fi
                             else
                                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators cleanup failed${error_hint}"
                                 debug_log "simctl delete error: $delete_output"

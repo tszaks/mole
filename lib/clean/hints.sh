@@ -74,11 +74,11 @@ hint_extract_launch_agent_program_path() {
     local plist="$1"
     local program=""
 
-    if ! program=$(plutil -extract ProgramArguments.0 raw "$plist" 2> /dev/null); then
+    if ! program=$(plutil -extract Program raw "$plist" 2> /dev/null); then
         program=""
     fi
     if [[ -z "$program" ]]; then
-        if ! program=$(plutil -extract Program raw "$plist" 2> /dev/null); then
+        if ! program=$(plutil -extract ProgramArguments.0 raw "$plist" 2> /dev/null); then
             program=""
         fi
     fi
@@ -120,6 +120,7 @@ hint_is_app_scoped_launch_target() {
         /Applications/Setapp/*.app/* | \
             /Applications/*.app/* | \
             "$HOME"/Applications/*.app/* | \
+            "$HOME"/Library/Application\ Support/*.app/* | \
             /Library/Input\ Methods/*.app/* | \
             /Library/PrivilegedHelperTools/*)
             return 0
@@ -638,9 +639,14 @@ show_user_launch_agent_hint_notice() {
         fi
         if [[ "$program" == /* && -f "$program" && -x "$program" ]]; then
             continue
-        elif [[ -n "$program" ]] && hint_is_app_scoped_launch_target "$program" && [[ ! -e "$program" ]]; then
-            reason="Missing app/helper target"
-            target="${program/#$HOME/~}"
+        elif [[ -n "$program" ]] && hint_is_app_scoped_launch_target "$program"; then
+            if [[ ! -e "$program" ]]; then
+                reason="Missing app/helper target"
+                target="${program/#$HOME/~}"
+            elif [[ ! -f "$program" || ! -x "$program" ]]; then
+                reason="Program target is not executable"
+                target="${program/#$HOME/~}"
+            fi
         else
             associated=$(hint_extract_launch_agent_associated_bundle "$plist")
             if [[ -n "$associated" ]] && ! hint_launch_agent_bundle_exists "$associated"; then

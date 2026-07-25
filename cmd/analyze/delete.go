@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -211,6 +212,9 @@ func validateTrashTarget(path string) error {
 	if isProtectedAnalyzeDeletePath(path) {
 		return fmt.Errorf("protected path cannot be deleted: %s", path)
 	}
+	if resolvedPath, err := filepath.EvalSymlinks(path); err == nil && isProtectedAnalyzeDeletePath(resolvedPath) {
+		return fmt.Errorf("protected path cannot be deleted: %s", path)
+	}
 	return nil
 }
 
@@ -228,27 +232,96 @@ func isProtectedAnalyzeDeletePath(path string) bool {
 		return true
 	}
 
-	home := os.Getenv("HOME")
-	if home == "" {
+	homeRoots := protectedAnalyzeHomeRoots()
+	if len(homeRoots) == 0 {
 		return false
 	}
 
-	orbstackState := filepath.Join(home, ".orbstack")
-	if cleanPath == orbstackState || strings.HasPrefix(cleanPath, orbstackState+string(filepath.Separator)) {
-		return true
+	for _, homeRoot := range homeRoots {
+		dockerDesktopState := filepath.Join(homeRoot, "Library", "Containers", "com.docker.docker")
+		if cleanPath == dockerDesktopState || strings.HasPrefix(cleanPath, dockerDesktopState+string(filepath.Separator)) {
+			return true
+		}
+		if isPathWithinExistingRoot(cleanPath, dockerDesktopState) {
+			return true
+		}
+
+		orbstackState := filepath.Join(homeRoot, ".orbstack")
+		if cleanPath == orbstackState || strings.HasPrefix(cleanPath, orbstackState+string(filepath.Separator)) {
+			return true
+		}
+		if isPathWithinExistingRoot(cleanPath, orbstackState) {
+			return true
+		}
+
+		groupContainers := filepath.Join(homeRoot, "Library", "Group Containers")
+		if entries, err := os.ReadDir(groupContainers); err == nil {
+			for _, entry := range entries {
+				if !strings.HasSuffix(entry.Name(), "dev.orbstack") {
+					continue
+				}
+				if isPathWithinExistingRoot(cleanPath, filepath.Join(groupContainers, entry.Name())) {
+					return true
+				}
+			}
+		}
+
+		rel, err := filepath.Rel(groupContainers, cleanPath)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+
+		containerName := rel
+		if idx := strings.Index(containerName, string(filepath.Separator)); idx >= 0 {
+			containerName = containerName[:idx]
+		}
+		if strings.HasSuffix(containerName, "dev.orbstack") {
+			return true
+		}
+	}
+	return false
+}
+
+func protectedAnalyzeHomeRoots() []string {
+	var homeRoots []string
+	seenHomeRoots := make(map[string]bool)
+	addHomeRoot := func(home string) {
+		if home == "" {
+			return
+		}
+		cleanHome := filepath.Clean(home)
+		if !seenHomeRoots[cleanHome] {
+			homeRoots = append(homeRoots, cleanHome)
+			seenHomeRoots[cleanHome] = true
+		}
+		if resolvedHome, err := filepath.EvalSymlinks(cleanHome); err == nil && !seenHomeRoots[resolvedHome] {
+			homeRoots = append(homeRoots, resolvedHome)
+			seenHomeRoots[resolvedHome] = true
+		}
 	}
 
-	groupContainers := filepath.Join(home, "Library", "Group Containers")
-	rel, err := filepath.Rel(groupContainers, cleanPath)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	addHomeRoot(os.Getenv("HOME"))
+	if currentUser, err := user.Current(); err == nil {
+		addHomeRoot(currentUser.HomeDir)
+	}
+	return homeRoots
+}
+
+func isPathWithinExistingRoot(path, protectedRoot string) bool {
+	protectedInfo, err := os.Stat(protectedRoot)
+	if err != nil {
 		return false
 	}
 
-	containerName := rel
-	if idx := strings.Index(containerName, string(filepath.Separator)); idx >= 0 {
-		containerName = containerName[:idx]
+	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
+		if currentInfo, err := os.Stat(current); err == nil && os.SameFile(currentInfo, protectedInfo) {
+			return true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false
+		}
 	}
-	return strings.HasSuffix(containerName, "dev.orbstack")
 }
 
 // endpointSecurityBundlePrefixes mirrors ENDPOINT_SECURITY_BUNDLE_PREFIXES in
