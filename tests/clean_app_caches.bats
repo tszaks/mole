@@ -172,6 +172,143 @@ EOF
     [[ "$output" != *"unexpected safe_clean"* ]]
 }
 
+@test "clean_jianying_pro_generated_caches targets only whitelisted regenerable subdirs" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+cache_root="$HOME/Movies/JianyingPro/User Data/Cache"
+# Regenerable (should be cleaned)
+mkdir -p "$cache_root/recognize"
+mkdir -p "$cache_root/frameThumbnail"
+mkdir -p "$cache_root/audioWave"
+mkdir -p "$cache_root/AlgorithmCache"
+# Draft-referenced / downloaded assets (must be preserved)
+mkdir -p "$cache_root/effect"
+mkdir -p "$cache_root/music"
+mkdir -p "$cache_root/AigcMaterailCache"
+mkdir -p "$cache_root/agencycache"
+# Copies of user-imported material (must be preserved, see the exclusion note)
+mkdir -p "$cache_root/image"
+mkdir -p "$cache_root/importcache3"
+# The user's editable drafts (must never be touched)
+mkdir -p "$HOME/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/my-project"
+
+pgrep() { return 1; }
+safe_clean() {
+    local arg
+    for arg in "$@"; do
+        printf 'CLEAN:%s\n' "$arg"
+    done
+}
+
+clean_jianying_pro_generated_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CLEAN:$HOME/Movies/JianyingPro/User Data/Cache/recognize"* ]] || return 1
+    [[ "$output" == *"CLEAN:$HOME/Movies/JianyingPro/User Data/Cache/frameThumbnail"* ]] || return 1
+    [[ "$output" == *"CLEAN:$HOME/Movies/JianyingPro/User Data/Cache/audioWave"* ]] || return 1
+    [[ "$output" == *"CLEAN:$HOME/Movies/JianyingPro/User Data/Cache/AlgorithmCache"* ]] || return 1
+    [[ "$output" == *"CLEAN:JianyingPro generated cache"* ]] || return 1
+    [[ "$output" != *"Cache/effect"* ]] || return 1
+    [[ "$output" != *"Cache/music"* ]] || return 1
+    [[ "$output" != *"Cache/image"* ]] || return 1
+    [[ "$output" != *"importcache3"* ]] || return 1
+    [[ "$output" != *"AigcMaterailCache"* ]] || return 1
+    [[ "$output" != *"agencycache"* ]] || return 1
+    [[ "$output" != *"Projects"* ]] || return 1
+}
+
+@test "jianying_pro_is_running ignores the resident menu-bar tray helper" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+# Faithful pgrep mock for a process table that contains ONLY the always-on
+# tray helper: -x compares the pattern against the process name exactly,
+# and -f substring-matches the pattern against the command line, like real
+# pgrep does.
+helper_name="VideoFusion-macOSTrayHelper"
+helper_cmdline="/Applications/VideoFusion-macOS.app/Contents/Frameworks/VideoFusion-macOSTrayHelper.app/Contents/MacOS/VideoFusion-macOSTrayHelper"
+pgrep() {
+    local mode="$1"
+    local pattern="${!#}"
+    if [[ "$mode" == "-x" ]]; then
+        [[ "$helper_name" == "$pattern" ]] && return 0
+        return 1
+    fi
+    case "$helper_cmdline" in
+        *"$pattern"*) return 0 ;;
+    esac
+    return 1
+}
+
+# Mock fidelity check: the historical broad probe DOES match the helper's
+# command line. Without this, a lazy mock would pass even if the production
+# probe were widened back to "/VideoFusion-macOS.app/".
+if pgrep -f "/VideoFusion-macOS.app/" > /dev/null 2>&1; then
+    echo "MOCK-FAITHFUL: broad pattern matches helper"
+fi
+
+if jianying_pro_is_running; then
+    echo "WRONG: reported running"
+else
+    echo "OK: not running"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"MOCK-FAITHFUL: broad pattern matches helper"* ]] || return 1
+    [[ "$output" == *"OK: not running"* ]] || return 1
+    [[ "$output" != *"WRONG"* ]] || return 1
+}
+
+@test "clean_jianying_pro_generated_caches skips while JianyingPro is running" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+mkdir -p "$HOME/Movies/JianyingPro/User Data/Cache/recognize"
+pgrep() { return 0; }
+safe_clean() {
+    echo "unexpected safe_clean"
+    return 1
+}
+
+clean_jianying_pro_generated_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"JianyingPro generated caches · skipped (JianyingPro running)"* ]] || return 1
+    [[ "$output" != *"unexpected safe_clean"* ]] || return 1
+}
+
+@test "clean_jianying_pro_generated_caches is a no-op when cache root is absent" {
+    local empty_home
+    empty_home="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-app-caches.XXXXXX")"
+    run env HOME="$empty_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+pgrep() { return 1; }
+safe_clean() {
+    echo "unexpected safe_clean"
+    return 1
+}
+
+clean_jianying_pro_generated_caches
+EOF
+    rm -rf "$empty_home"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"unexpected safe_clean"* ]] || return 1
+}
+
 @test "is_final_cut_pro_generated_cache_target rejects protected sibling paths" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc << 'EOF'
 set -euo pipefail

@@ -359,6 +359,82 @@ clean_final_cut_pro_generated_caches() {
     safe_clean "${fcp_cache_targets[@]}" "Final Cut Pro generated cache"
 }
 
+jianying_pro_is_running() {
+    command -v pgrep > /dev/null 2>&1 || return 1
+
+    # Match the main editor process only. Narrow the -f pattern to the primary
+    # executable path so the always-resident menu-bar agent
+    # (.../Frameworks/VideoFusion-macOSTrayHelper.app/.../VideoFusion-macOSTrayHelper)
+    # does not read as "editor running" and permanently skip cleanup.
+    pgrep -x "VideoFusion-macOS" > /dev/null 2>&1 && return 0
+    pgrep -f "/VideoFusion-macOS.app/Contents/MacOS/VideoFusion-macOS" > /dev/null 2>&1 && return 0
+    return 1
+}
+
+clean_jianying_pro_generated_caches() {
+    local cache_root="$HOME/Movies/JianyingPro/User Data/Cache"
+    [[ -d "$cache_root" && ! -L "$cache_root" ]] || return 0
+
+    if jianying_pro_is_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} JianyingPro generated caches · skipped (JianyingPro running)"
+        note_activity
+        return 0
+    fi
+
+    # JianyingPro (剪映专业版 / CapCut CN, com.lemon.lvpro) generated cache
+    # cleanup (issue #1277). Same shape as Final Cut Pro (#843): the editor
+    # keeps heavy generated caches under ~/Movies/JianyingPro/User Data/Cache/
+    # instead of ~/Library/Caches, so standard cleanup never reaches them.
+    #
+    # Safety scope for the first pass:
+    # - only the default cache root under ~/Movies; never User Data/Projects
+    #   (the user's editable drafts) or any sibling of Cache;
+    # - only remove an explicit whitelist of regenerable subdirectories:
+    #   subtitle-recognition PCM scratch, frame thumbnails, audio waveforms,
+    #   algorithm scratch, and prerender/remux temp;
+    # - never touch draft-referenced or downloaded assets (effect,
+    #   onlineMaterial, artistEffect, music, AITextTemplate, template,
+    #   local_models, AigcMaterailCache, agencycache); plaintext draft configs
+    #   reference effect 8000+ times, so anything not on this list is preserved.
+    #
+    # image/ and importcache3/ are deliberately excluded: both hold copies of
+    # material the user imported, draft_info.json is encrypted so no plaintext
+    # reference check can prove they are unreferenced, and mo clean deletes
+    # permanently. If the user has since moved or deleted the source file, the
+    # cached copy is the only remaining one. Revisit only with evidence that
+    # the editor re-imports from the original on demand.
+    #
+    # Verified on a real machine (macOS 15.7 Intel, JianyingPro 11.1.0):
+    # removing this set reclaimed ~70GB, 2025-era projects reopened cleanly, and
+    # the app recreated the scratch directories on next launch.
+    local -a regenerable_subdirs=(
+        recognize
+        frameThumbnail
+        audioWave
+        AlgorithmCache
+        ILASDKDB
+        RemuxCache
+        prerender
+        segmentPrerenderCache
+        MotionBlurCache
+        ttsTemp
+        tmp
+    )
+
+    local -a targets=()
+    local subdir path
+    for subdir in "${regenerable_subdirs[@]}"; do
+        path="$cache_root/$subdir"
+        if [[ -d "$path" && ! -L "$path" ]]; then
+            targets+=("$path")
+        fi
+    done
+
+    [[ ${#targets[@]} -gt 0 ]] || return 0
+
+    safe_clean "${targets[@]}" "JianyingPro generated cache"
+}
+
 clean_video_tools() {
     safe_clean ~/Library/Caches/net.telestream.screenflow10/* "ScreenFlow cache"
     safe_clean ~/Library/Caches/com.apple.FinalCut/* "Final Cut Pro cache"
@@ -366,6 +442,7 @@ clean_video_tools() {
     safe_clean ~/Library/Caches/com.blackmagic-design.DaVinciResolve/* "DaVinci Resolve cache"
     safe_clean ~/Movies/CacheClip/* "DaVinci Resolve CacheClip"
     safe_clean ~/Library/Caches/com.adobe.PremierePro.*/* "Premiere Pro cache"
+    clean_jianying_pro_generated_caches
 }
 # 3D and CAD tools.
 clean_3d_tools() {
