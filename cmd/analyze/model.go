@@ -186,14 +186,6 @@ func (m model) inOverviewMode() bool {
 	return m.isOverview && m.path == "/"
 }
 
-// inElevatedBreakdown reports whether the current view is a view-only, one-level
-// sudo breakdown of a root-owned system path (deep-mode drill-down). In this
-// state deletion is refused and no cache is written, because analyze never
-// deletes with sudo and the elevated listing must stay ephemeral.
-func (m model) inElevatedBreakdown() bool {
-	return deepScanUsesSudo() && !m.inOverviewMode() && isDeepSystemPath(m.path)
-}
-
 func (m *model) hydrateOverviewEntries() {
 	m.entries = createOverviewEntries()
 	if m.overviewSizeCache == nil {

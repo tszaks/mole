@@ -48,9 +48,6 @@ func (m model) View() string {
 		if !m.scanning || m.totalSize > 0 {
 			fmt.Fprintf(&b, "  |  Total: %s", humanizeBytes(m.totalSize))
 		}
-		if m.inElevatedBreakdown() {
-			fmt.Fprintf(&b, "  %sview only, run mo clean to reclaim%s", colorGray, colorReset)
-		}
 		fmt.Fprintf(&b, "\n\n")
 	}
 
@@ -339,11 +336,6 @@ func (m model) View() string {
 		} else {
 			fmt.Fprintf(&b, "%s↑↓→ | Enter | R Refresh | O Open | P Preview | F File | Esc/Q Quit%s\n", colorGray, colorReset)
 		}
-	} else if m.inElevatedBreakdown() {
-		// View-only breakdown of a root-owned system tree: no Del, no Select.
-		// Deletion is refused here (analyze never deletes with sudo); reclaim
-		// runs through `mo clean`. Enter still drills one level deeper.
-		fmt.Fprintf(&b, "%s↑↓←→ | Enter | R Refresh | O Open | Esc Back | Q/Ctrl+C Quit%s\n", colorGray, colorReset)
 	} else if m.showLargeFiles {
 		if m.largeFiltering {
 			fmt.Fprintf(&b, "%sType to filter  |  Enter Apply  |  Esc Clear  |  Ctrl+C Quit%s\n", colorGray, colorReset)

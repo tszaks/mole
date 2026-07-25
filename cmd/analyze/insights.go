@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -88,22 +89,6 @@ func createInsightEntries() []dirEntry {
 		}
 	}
 
-	// Deep mode only: root-owned system areas that macOS hides inside the
-	// "System Data" bucket. Sizing these requires sudo (primed before the TUI),
-	// so they are omitted from the default, unprivileged overview.
-	if deepScanEnabled() {
-		for _, d := range deepSystemInsightPaths() {
-			if info, err := os.Stat(d.path); err == nil && info.IsDir() {
-				entries = append(entries, dirEntry{
-					Name:  d.name,
-					Path:  d.path,
-					IsDir: true,
-					Size:  -1,
-				})
-			}
-		}
-	}
-
 	return entries
 }
 
@@ -161,7 +146,7 @@ func getDirSizeFast(path string) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := deepDuCommand(ctx, path, "-sk", path)
+	cmd := exec.CommandContext(ctx, "du", "-sk", path)
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, err
