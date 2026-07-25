@@ -81,8 +81,40 @@ get_lsregister_path() {
 # ============================================================================
 # Global Configuration Constants
 # ============================================================================
-readonly MOLE_TEMP_FILE_AGE_DAYS=7       # Temp file retention (days)
-readonly MOLE_ORPHAN_AGE_DAYS=30         # Orphaned data retention (days)
+_normalize_retention_days() {
+    local days="$1"
+    while [[ ${#days} -gt 1 && "$days" == 0* ]]; do
+        days="${days#0}"
+    done
+    printf '%s\n' "$days"
+}
+
+resolve_retention_days() {
+    local default_days="$1"
+    shift || true
+
+    if [[ "${MOLE_RETENTION_DAYS:-}" =~ ^[0-9]+$ ]]; then
+        _normalize_retention_days "$MOLE_RETENTION_DAYS"
+        return 0
+    fi
+
+    local legacy_days
+    for legacy_days in "$@"; do
+        if [[ "$legacy_days" =~ ^[0-9]+$ ]]; then
+            _normalize_retention_days "$legacy_days"
+            return 0
+        fi
+    done
+
+    printf '%s\n' "$default_days"
+}
+
+readonly MOLE_TEMP_FILE_AGE_DAYS=7 # Temp file retention (days)
+_mole_orphan_age_days="${MOLE_ORPHAN_AGE_DAYS:-30}"
+[[ "$_mole_orphan_age_days" =~ ^[0-9]+$ ]] || _mole_orphan_age_days=30
+_mole_orphan_age_days=$(_normalize_retention_days "$_mole_orphan_age_days")
+readonly MOLE_ORPHAN_AGE_DAYS="$_mole_orphan_age_days" # Orphaned data retention (days)
+unset _mole_orphan_age_days
 readonly MOLE_DOTDIR_ORPHAN_AGE_DAYS=60  # Orphan dotfile hint threshold (days)
 readonly MOLE_MAX_PARALLEL_JOBS=15       # Parallel job limit
 readonly MOLE_MAIL_DOWNLOADS_MIN_KB=5120 # Mail attachment size threshold

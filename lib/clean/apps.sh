@@ -2,8 +2,10 @@
 # Application Data Cleanup Module
 set -euo pipefail
 
-readonly ORPHAN_AGE_THRESHOLD=${ORPHAN_AGE_THRESHOLD:-${MOLE_ORPHAN_AGE_DAYS:-30}}
-readonly CLAUDE_VM_ORPHAN_AGE_THRESHOLD=${MOLE_CLAUDE_VM_ORPHAN_AGE_DAYS:-7}
+ORPHAN_AGE_THRESHOLD=$(resolve_retention_days 30 "${ORPHAN_AGE_THRESHOLD:-}" "${MOLE_ORPHAN_AGE_DAYS:-}")
+readonly ORPHAN_AGE_THRESHOLD
+CLAUDE_VM_ORPHAN_AGE_THRESHOLD=$(resolve_retention_days 7 "${MOLE_CLAUDE_VM_ORPHAN_AGE_DAYS:-}")
+readonly CLAUDE_VM_ORPHAN_AGE_THRESHOLD
 # Args: $1=target_dir, $2=label
 clean_ds_store_tree() {
     local target="$1"
@@ -66,7 +68,7 @@ clean_ds_store_tree() {
         note_activity
     fi
 }
-# Orphaned app data (30+ days inactive). Env: ORPHAN_AGE_THRESHOLD, DRY_RUN
+# Orphaned app data after the configured retention window.
 # Usage: scan_installed_apps "output_file"
 scan_installed_apps() {
     local installed_bundles="$1"
