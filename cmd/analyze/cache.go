@@ -13,7 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -108,6 +111,15 @@ func ensureOverviewSnapshotCacheLocked() error {
 		overviewSnapshotLoaded = true
 		return nil
 	}
+	// Drop what the loader would refuse anyway. Snapshots were only ever added,
+	// so without this every directory ever browsed stayed in the file forever,
+	// and each save re-serialized all of them.
+	now := time.Now()
+	for path, snapshot := range snapshots {
+		if snapshot.Size <= 0 || now.Sub(snapshot.Updated) >= overviewCacheTTL {
+			delete(snapshots, path)
+		}
+	}
 	overviewSnapshotCache = snapshots
 	overviewSnapshotLoaded = true
 	return nil
@@ -154,11 +166,42 @@ func storeOverviewSize(path string, size int64) error {
 	if overviewSnapshotCache == nil {
 		overviewSnapshotCache = make(map[string]overviewSizeSnapshot)
 	}
+	// Re-measuring a directory usually returns the size already on record, and
+	// every save re-serializes and rewrites the entire store. Skip the write
+	// while the recorded value still stands; the timestamp is only refreshed
+	// often enough to keep a live entry from aging out.
+	if existing, ok := overviewSnapshotCache[path]; ok && existing.Size == size &&
+		time.Since(existing.Updated) < overviewCacheTTL/overviewRefreshDivisor {
+		return nil
+	}
 	overviewSnapshotCache[path] = overviewSizeSnapshot{
 		Size:    size,
 		Updated: time.Now(),
 	}
+	evictOverviewSnapshotsLocked()
 	return persistOverviewSnapshotLocked()
+}
+
+// evictOverviewSnapshotsLocked keeps the store bounded by dropping the oldest
+// snapshots once it outgrows the cap, in one pass down to the low-water mark so
+// eviction does not run on every subsequent save.
+func evictOverviewSnapshotsLocked() {
+	if len(overviewSnapshotCache) <= overviewCacheMaxEntries ||
+		overviewCacheKeepEntries >= len(overviewSnapshotCache) {
+		return
+	}
+	type agedSnapshot struct {
+		path    string
+		updated time.Time
+	}
+	aged := make([]agedSnapshot, 0, len(overviewSnapshotCache))
+	for path, snapshot := range overviewSnapshotCache {
+		aged = append(aged, agedSnapshot{path: path, updated: snapshot.Updated})
+	}
+	slices.SortFunc(aged, func(a, b agedSnapshot) int { return a.updated.Compare(b.updated) })
+	for _, entry := range aged[:len(aged)-overviewCacheKeepEntries] {
+		delete(overviewSnapshotCache, entry.path)
+	}
 }
 
 func persistOverviewSnapshotLocked() error {
@@ -166,15 +209,40 @@ func persistOverviewSnapshotLocked() error {
 	if err != nil {
 		return err
 	}
-	tmpPath := storePath + ".tmp"
-	data, err := json.MarshalIndent(overviewSnapshotCache, "", "  ")
+	// No indentation: nothing reads this by eye, and the padding was a third of
+	// a file rewritten on every save.
+	data, err := json.Marshal(overviewSnapshotCache)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	// A uniquely named temp file, so two analyzers running at once cannot land
+	// in each other's half-written store.
+	tmp, err := os.CreateTemp(filepath.Dir(storePath), overviewCacheFile+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, storePath)
+	tmpPath := tmp.Name()
+	// Chmod through the handle, not the path: CreateTemp opens at 0600 and the
+	// store has always been world-readable.
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close() //nolint:errcheck
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close() //nolint:errcheck
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, storePath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 func loadOverviewCachedSize(path string) (int64, error) {
@@ -192,6 +260,12 @@ func loadOverviewCachedSize(path string) (int64, error) {
 	return cacheEntry.TotalSize, nil
 }
 
+// moleCacheRoot is the single definition of the shared cache location; both
+// accessors below build on it so the layout is stated once.
+func moleCacheRoot(home string) string {
+	return filepath.Join(home, ".cache", "mole")
+}
+
 // getMoleCacheRoot is the shared `~/.cache/mole` directory. The shell side
 // keeps its own state files there, so nothing may be swept from it wholesale.
 func getMoleCacheRoot() (string, error) {
@@ -199,22 +273,44 @@ func getMoleCacheRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".cache", "mole"), nil
+	return moleCacheRoot(home), nil
 }
+
+// resolvedCacheDir memoizes the analyzer cache directory together with the HOME
+// it was derived from, so a test that repoints HOME still gets a fresh answer.
+type resolvedCacheDir struct {
+	home string
+	dir  string
+	err  error
+}
+
+var cachedAnalyzerDir atomic.Pointer[resolvedCacheDir]
 
 // getCacheDir is the analyzer-owned subdirectory. Keeping analyzer entries out
 // of the shared root is what lets the legacy sweep and the entry caps operate
 // on a directory whose every file the analyzer owns.
+//
+// The MkdirAll result is memoized because this sits on the scan hot path: every
+// directory walked resolves a cache path at least once, so re-running the
+// syscall per directory cost a measured 1.5us and 688B each, roughly 470ms and
+// 200MB of garbage across a whole-disk scan, all to re-learn that a directory
+// created moments ago still exists.
 func getCacheDir() (string, error) {
-	root, err := getMoleCacheRoot()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	cacheDir := filepath.Join(root, analyzerCacheDirName)
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return "", err
+	if resolved := cachedAnalyzerDir.Load(); resolved != nil && resolved.home == home {
+		return resolved.dir, resolved.err
 	}
-	return cacheDir, nil
+
+	dir := filepath.Join(moleCacheRoot(home), analyzerCacheDirName)
+	resolved := &resolvedCacheDir{home: home, dir: dir}
+	if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
+		resolved.dir, resolved.err = "", mkErr
+	}
+	cachedAnalyzerDir.Store(resolved)
+	return resolved.dir, resolved.err
 }
 
 func getCachePath(path string) (string, error) {
@@ -222,9 +318,16 @@ func getCachePath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Built by concatenation rather than filepath.Join: cacheDir is already
+	// clean, and Join would re-Clean it on every directory scanned.
 	hash := xxhash.Sum64String(path)
-	filename := fmt.Sprintf("%x.cache", hash)
-	return filepath.Join(cacheDir, filename), nil
+	var name strings.Builder
+	name.Grow(len(cacheDir) + 23)
+	name.WriteString(cacheDir)
+	name.WriteByte(filepath.Separator)
+	name.WriteString(strconv.FormatUint(hash, 16))
+	name.WriteString(".cache")
+	return name.String(), nil
 }
 
 // shouldPersistSubdirCache decides whether a scanned subtree earns a cache
@@ -326,10 +429,24 @@ func pruneAnalyzerCacheDirWithLimits(cacheDir string, now time.Time, maxEntries 
 		_ = os.Remove(filepath.Join(cacheDir, oldest.name))
 	}
 
+	tempCutoff := now.Add(-staleTempFileTTL)
 	for {
 		entries, readErr := dir.ReadDir(cacheDirReadBatch)
 		for _, entry := range entries {
-			if entry.Type()&os.ModeSymlink != 0 || filepath.Ext(entry.Name()) != ".cache" {
+			if entry.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			// Atomic saves stage through temp files. One only outlives its
+			// write by milliseconds, so anything older is debris from a killed
+			// process, and nothing else in this pass would ever collect it.
+			if filepath.Ext(entry.Name()) == ".tmp" {
+				if info, infoErr := entry.Info(); infoErr == nil &&
+					info.Mode().IsRegular() && !info.ModTime().After(tempCutoff) {
+					_ = os.Remove(filepath.Join(cacheDir, entry.Name()))
+				}
+				continue
+			}
+			if filepath.Ext(entry.Name()) != ".cache" {
 				continue
 			}
 
@@ -549,65 +666,74 @@ func saveCacheToDiskWithOptions(path string, result scanResult, needsRefresh boo
 		SchemaVersion: cacheSchemaVersion,
 	}
 
-	file, err := os.Create(cachePath)
+	// Written through a temp file so a kill mid-encode cannot leave a truncated
+	// entry in place of a good one, and so two analyzers scanning the same tree
+	// never interleave into one file.
+	tmp, err := os.CreateTemp(filepath.Dir(cachePath), "entry-*.tmp")
 	if err != nil {
 		return err
 	}
-	defer file.Close() //nolint:errcheck
-
-	encoder := gob.NewEncoder(file)
-	return encoder.Encode(entry)
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close() //nolint:errcheck
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := gob.NewEncoder(tmp).Encode(entry); err != nil {
+		tmp.Close() //nolint:errcheck
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, cachePath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
-// peekCacheTotalFiles attempts to read the total file count from cache,
-// ignoring expiration. Used for initial scan progress estimates.
+// peekCacheTotalFiles reads the total file count from cache, ignoring
+// expiration, for initial scan progress estimates. It shares
+// loadRawCacheFromDisk so a schema-stale or corrupt entry is rejected and
+// cleaned up here too rather than feeding an estimate no scan would accept.
 func peekCacheTotalFiles(path string) (int64, error) {
-	cachePath, err := getCachePath(path)
+	entry, err := loadRawCacheFromDisk(path)
 	if err != nil {
 		return 0, err
 	}
-
-	file, err := os.Open(cachePath)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close() //nolint:errcheck
-
-	var entry cacheEntry
-	decoder := gob.NewDecoder(file)
-	if err := decoder.Decode(&entry); err != nil {
-		return 0, err
-	}
-
 	return entry.TotalFiles, nil
 }
 
 func invalidateCache(path string) {
-	cachePath, err := getCachePath(path)
-	if err == nil {
-		_ = os.Remove(cachePath)
-	}
-	removeOverviewSnapshot(path)
+	removeCacheEntry(path)
+	removeOverviewSnapshots(path)
 }
 
 // invalidateCacheTree invalidates the cache for path and all its direct
 // child directories so that a rescan does not reuse stale subdirectory
 // sizes. See #812.
 func invalidateCacheTree(path string) {
-	invalidateCache(path)
-	children, err := os.ReadDir(path)
-	if err != nil {
-		return
-	}
-	for _, child := range children {
-		if child.IsDir() {
-			invalidateCache(filepath.Join(path, child.Name()))
+	paths := []string{path}
+	if children, err := os.ReadDir(path); err == nil {
+		for _, child := range children {
+			if child.IsDir() {
+				paths = append(paths, filepath.Join(path, child.Name()))
+			}
 		}
 	}
+	for _, target := range paths {
+		removeCacheEntry(target)
+	}
+	// One snapshot save for the whole tree: dropping them one at a time
+	// rewrote the entire overview store once per child directory.
+	removeOverviewSnapshots(paths...)
 }
 
-func removeOverviewSnapshot(path string) {
-	if path == "" {
+func removeOverviewSnapshots(paths ...string) {
+	if len(paths) == 0 {
 		return
 	}
 	overviewSnapshotMu.Lock()
@@ -618,8 +744,17 @@ func removeOverviewSnapshot(path string) {
 	if overviewSnapshotCache == nil {
 		return
 	}
-	if _, ok := overviewSnapshotCache[path]; ok {
-		delete(overviewSnapshotCache, path)
+	removed := false
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if _, ok := overviewSnapshotCache[path]; ok {
+			delete(overviewSnapshotCache, path)
+			removed = true
+		}
+	}
+	if removed {
 		_ = persistOverviewSnapshotLocked()
 	}
 }

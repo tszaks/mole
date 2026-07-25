@@ -37,6 +37,16 @@ const (
 	analyzerCacheMaxBytes   = 50 << 20
 	cacheDirReadBatch       = 512
 	legacySweepWorkers      = 4
+	staleTempFileTTL        = time.Hour
+
+	// Overview snapshot store budget. The store is one JSON file rewritten in
+	// full on every save, so both its length and its save rate have to be held
+	// down: the cap bounds the file, and the refresh divisor turns repeat
+	// measurements of an unchanged directory into no-ops until the entry is
+	// within 1/8 of the TTL of aging out.
+	overviewCacheMaxEntries  = 1000
+	overviewCacheKeepEntries = 900
+	overviewRefreshDivisor   = 8
 
 	// Worker pool limits. Deliberately conservative: the User Library scan
 	// blocks many goroutines in syscalls on high-fan-out trees (Steam
