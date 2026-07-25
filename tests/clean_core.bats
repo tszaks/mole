@@ -50,7 +50,7 @@ setup() {
     rm -rf "${HOME:?}"/*
     rm -rf "$HOME/Library" "$HOME/.config"
     mkdir -p "$HOME/Library/Caches" "$HOME/.config/mole"
-    unset TEST_MOCK_BIN
+    unset TEST_MOCK_BIN MOCK_TOOLCHAIN_BIN
 }
 
 set_mock_sudo_cached() {
@@ -87,6 +87,36 @@ run_clean_dry_run() {
 
     run env HOME="$HOME" MOLE_TEST_MODE=1 PATH="$test_path" \
         "$PROJECT_ROOT/mole" clean --dry-run
+}
+
+# Stub the two host toolchains the real pipeline shells out to. brew is required
+# to be mocked by project policy: no verification run may reach a real package
+# manager. xcrun is here for cost, not policy: clean_dev_mobile probes
+# `simctl list devices` with a 5s budget and one 8s retry, and on a cold runner
+# with Xcode installed that probe plus brew's first-call startup is the bulk of
+# what these two full-pipeline tests spend. Neither tool feeds an assertion.
+set_mock_host_toolchains() {
+    local mock_home="${1:-$HOME}"
+    MOCK_TOOLCHAIN_BIN="$mock_home/toolchain-bin"
+    mkdir -p "$MOCK_TOOLCHAIN_BIN"
+
+    cat > "$MOCK_TOOLCHAIN_BIN/brew" << 'MOCK'
+#!/bin/bash
+# Shim: report an empty Homebrew so cleanup has nothing to preview or remove.
+case "${1:-}" in
+    --cache) echo "$HOME/Library/Caches/Homebrew" ;;
+    --prefix) echo "$HOME/homebrew" ;;
+esac
+exit 0
+MOCK
+
+    cat > "$MOCK_TOOLCHAIN_BIN/xcrun" << 'MOCK'
+#!/bin/bash
+# Shim: no simulator toolchain, which is the CLT-only shape clean handles.
+exit 1
+MOCK
+
+    chmod +x "$MOCK_TOOLCHAIN_BIN/brew" "$MOCK_TOOLCHAIN_BIN/xcrun"
 }
 
 @test "safe_clean item count reflects cleaned items, not raw target count" {
@@ -404,7 +434,9 @@ PLIST
     # MOLE_TEST_MODE=1 short-circuits clean into a stub that never reaches
     # the App leftovers section, so the report assertion needs the real
     # sections to run. Dry-run keeps this side-effect free.
-    run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 "$PROJECT_ROOT/mole" clean --dry-run
+    set_mock_host_toolchains
+    run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 \
+        PATH="$MOCK_TOOLCHAIN_BIN:$PATH" "$PROJECT_ROOT/mole" clean --dry-run
     [ "$status" -eq 0 ]
     [[ "$output" == *"Stale login item · com.example.stale.plist"* ]] || return 1
     [ -f "$HOME/Library/LaunchAgents/com.example.stale.plist" ]
@@ -414,7 +446,9 @@ PLIST
     mkdir -p "$HOME/Library/Application Support/Code/CachedData"
     echo "cache" > "$HOME/Library/Application Support/Code/CachedData/data.bin"
 
-    run env HOME="$HOME" MOLE_TEST_MODE=0 "$PROJECT_ROOT/mole" clean --dry-run
+    set_mock_host_toolchains
+    run env HOME="$HOME" MOLE_TEST_MODE=0 \
+        PATH="$MOCK_TOOLCHAIN_BIN:$PATH" "$PROJECT_ROOT/mole" clean --dry-run
     [ "$status" -eq 0 ]
 
     run grep -c "Application Support/Code/CachedData" "$HOME/.config/mole/clean-list.txt"
@@ -451,7 +485,9 @@ PLIST
         bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; bytes_to_human_kb "$EXPECTED_KB"')
 
     set_mock_sudo_uncached "$test_home"
-    run env HOME="$test_home" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 PATH="$TEST_MOCK_BIN:$PATH" \
+    set_mock_host_toolchains "$test_home"
+    run env HOME="$test_home" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 \
+        PATH="$TEST_MOCK_BIN:$MOCK_TOOLCHAIN_BIN:$PATH" \
         "$PROJECT_ROOT/mole" clean --dry-run
 
     [ "$status" -eq 0 ] || return 1
