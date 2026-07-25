@@ -273,8 +273,8 @@ func parseDiskMetadata(out string) (diskMetadata, error) {
 			locationFound = true
 			locationValue = strings.Contains(trim, "External")
 		}
-		if strings.HasPrefix(trim, "SMART Status:") {
-			value := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trim, "SMART Status:")))
+		if smartValue, ok := strings.CutPrefix(trim, "SMART Status:"); ok {
+			value := strings.ToLower(strings.TrimSpace(smartValue))
 			switch value {
 			case "verified":
 				metadata.SmartStatus = smartStatusVerified
