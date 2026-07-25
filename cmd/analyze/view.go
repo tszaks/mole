@@ -57,11 +57,22 @@ func (m model) View() string {
 			count = atomic.LoadInt64(m.deleteCount)
 		}
 
-		fmt.Fprintf(&b, "%s%s%s%s Deleting: %s%s items%s removed, please wait...\n",
-			colorCyan, colorBold,
-			spinnerFrames[m.spinner],
-			colorReset,
-			colorYellow, formatNumber(count), colorReset)
+		// The counter is path-level and only advances once a move completes, so a
+		// single large directory sits at zero for the whole operation. Printing
+		// "0 items removed" there reads as a stalled delete; say what is happening
+		// instead, and show the tally only once it means something.
+		if count > 0 {
+			fmt.Fprintf(&b, "%s%s%s%s Deleting: %s%s items%s removed, please wait...\n",
+				colorCyan, colorBold,
+				spinnerFrames[m.spinner],
+				colorReset,
+				colorYellow, formatNumber(count), colorReset)
+		} else {
+			fmt.Fprintf(&b, "%s%s%s%s Deleting: moving to Trash, please wait...\n",
+				colorCyan, colorBold,
+				spinnerFrames[m.spinner],
+				colorReset)
+		}
 
 		return b.String()
 	}

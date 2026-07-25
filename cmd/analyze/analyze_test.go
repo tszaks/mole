@@ -2886,3 +2886,25 @@ func TestSystemOverviewRootsEmptyOverrideDropsSystemRows(t *testing.T) {
 		t.Fatalf("expected no system roots for an empty override, got %d", len(roots))
 	}
 }
+
+func TestDeleteViewHidesZeroTally(t *testing.T) {
+	// The delete counter is path-level and only advances once a move finishes, so a
+	// single large directory sits at zero for the whole operation. Printing
+	// "0 items removed" there reads as a stalled delete.
+	var counter int64
+	m := model{deleting: true, deleteCount: &counter}
+
+	view := m.View()
+	if strings.Contains(view, "0 items") {
+		t.Fatalf("expected no zero tally while nothing has completed, got:\n%s", view)
+	}
+	if !strings.Contains(view, "moving to Trash") {
+		t.Fatalf("expected a progress line while deleting, got:\n%s", view)
+	}
+
+	atomic.StoreInt64(&counter, 2)
+	view = m.View()
+	if !strings.Contains(view, "2") || !strings.Contains(view, "items") {
+		t.Fatalf("expected the tally once paths completed, got:\n%s", view)
+	}
+}
