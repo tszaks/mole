@@ -1666,6 +1666,148 @@ func TestLiveScanChildUpdateUpdatesRowTotalAndCache(t *testing.T) {
 	}
 }
 
+func TestManualRefreshBypassesNestedSubdirCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root := filepath.Join(home, "root")
+	nested := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("create nested directory: %v", err)
+	}
+	for i := range subdirCacheMinFiles {
+		path := filepath.Join(nested, fmt.Sprintf("data-%d.bin", i))
+		if err := os.WriteFile(path, []byte(strings.Repeat("x", 64)), 0o644); err != nil {
+			t.Fatalf("write nested data: %v", err)
+		}
+	}
+	removedPath := filepath.Join(nested, "removed.bin")
+	if err := os.WriteFile(removedPath, []byte(strings.Repeat("x", 2*1024*1024)), 0o644); err != nil {
+		t.Fatalf("write removable data: %v", err)
+	}
+
+	m := newModel(root, false)
+	warmed := runScanResultCmd(t, m.scanFreshCmd(root))
+	if warmed.err != nil {
+		t.Fatalf("warm scan: %v", warmed.err)
+	}
+	if _, err := loadCacheFromDisk(nested); err != nil {
+		t.Fatalf("expected nested cache to be warmed: %v", err)
+	}
+
+	if err := os.Remove(removedPath); err != nil {
+		t.Fatalf("remove nested data: %v", err)
+	}
+
+	reused := runScanResultCmd(t, m.scanFreshCmd(root))
+	if reused.err != nil {
+		t.Fatalf("cached scan: %v", reused.err)
+	}
+	if reused.result.TotalSize != warmed.result.TotalSize {
+		t.Fatalf("expected ordinary scan to reuse nested cache size %d, got %d", warmed.result.TotalSize, reused.result.TotalSize)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	if cmd == nil {
+		t.Fatalf("expected manual refresh command")
+	}
+	if !updated.(model).scanning {
+		t.Fatalf("expected manual refresh to enter scanning state")
+	}
+	refreshed := runScanResultCmd(t, cmd)
+	if refreshed.err != nil {
+		t.Fatalf("manual refresh: %v", refreshed.err)
+	}
+	if refreshed.result.TotalSize >= warmed.result.TotalSize {
+		t.Fatalf("expected manual refresh to drop removed file size below %d, got %d", warmed.result.TotalSize, refreshed.result.TotalSize)
+	}
+
+	cached, err := loadCacheFromDisk(nested)
+	if err != nil {
+		t.Fatalf("load refreshed nested cache: %v", err)
+	}
+	for _, entry := range cached.Entries {
+		if entry.Path == removedPath {
+			t.Fatalf("manual refresh left removed file in nested cache")
+		}
+	}
+}
+
+func TestCacheBypassSkipsHomeLibraryOverviewSnapshot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	resetOverviewSnapshotForTest()
+	t.Cleanup(resetOverviewSnapshotForTest)
+
+	library := filepath.Join(home, "Library")
+	if err := os.MkdirAll(library, 0o755); err != nil {
+		t.Fatalf("create Library: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(library, "live.bin"), []byte(strings.Repeat("x", 8192)), 0o644); err != nil {
+		t.Fatalf("write Library data: %v", err)
+	}
+	if err := storeOverviewSize(library, 1); err != nil {
+		t.Fatalf("store stale overview size: %v", err)
+	}
+
+	scanTarget := func(policy scanCachePolicy) scanResult {
+		t.Helper()
+		var filesScanned, dirsScanned, bytesScanned int64
+		current := &atomic.Value{}
+		current.Store("")
+		limiter := newScanLimiter(1)
+		largeFileMinSize := int64(largeFileWarmupMinSize)
+		result, err := scanLiveTarget(
+			context.Background(),
+			liveScanTarget{name: "Library", path: library, kind: liveScanTargetHomeLibrary},
+			make(chan fileEntry, maxLargeFiles*2),
+			&largeFileMinSize,
+			limiter,
+			&filesScanned,
+			&dirsScanned,
+			&bytesScanned,
+			current,
+			policy,
+		)
+		if err != nil {
+			t.Fatalf("scan Home Library: %v", err)
+		}
+		return result
+	}
+
+	if got := scanTarget(scanCacheReuse).TotalSize; got != 1 {
+		t.Fatalf("expected reuse policy to return snapshot size 1, got %d", got)
+	}
+	if got := scanTarget(scanCacheBypass).TotalSize; got <= 1 {
+		t.Fatalf("expected bypass policy to scan live Library size, got %d", got)
+	}
+
+	scanHome := func(policy scanCachePolicy) int64 {
+		t.Helper()
+		var filesScanned, dirsScanned, bytesScanned int64
+		current := &atomic.Value{}
+		current.Store("")
+		result, err := scanPathConcurrentWithLimiter(home, &filesScanned, &dirsScanned, &bytesScanned, current, false, maxEntries, nil, policy)
+		if err != nil {
+			t.Fatalf("scan Home: %v", err)
+		}
+		for _, entry := range result.Entries {
+			if entry.Path == library {
+				return entry.Size
+			}
+		}
+		t.Fatalf("Library entry missing from Home scan")
+		return 0
+	}
+
+	if got := scanHome(scanCacheReuse); got != 1 {
+		t.Fatalf("expected concurrent reuse policy to return snapshot size 1, got %d", got)
+	}
+	if got := scanHome(scanCacheBypass); got <= 1 {
+		t.Fatalf("expected concurrent bypass policy to scan live Library size, got %d", got)
+	}
+}
+
 func TestLiveScanStartPreservesEntryFilterBackingList(t *testing.T) {
 	root := t.TempDir()
 	apps := filepath.Join(root, "apps")

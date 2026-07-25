@@ -107,6 +107,12 @@ func (m model) scanFreshCmd(path string) tea.Cmd {
 	}
 }
 
+func (m model) scanBypassingCacheCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		return startLiveScanCmdWithPolicy(path, m.filesScanned, m.dirsScanned, m.bytesScanned, m.currentPath, scanCacheBypass)()
+	}
+}
+
 func tickCmd() tea.Cmd {
 	return tea.Tick(uiTickInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -686,7 +692,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.currentPath != nil {
 			m.currentPath.Store("")
 		}
-		return m, tea.Batch(m.scanFreshCmd(m.path), tickCmd())
+		return m, tea.Batch(m.scanBypassingCacheCmd(m.path), tickCmd())
 	case "t", "T":
 		if m.scanning {
 			m.status = "Top files are available after the scan finishes"
