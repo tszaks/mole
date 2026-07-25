@@ -186,10 +186,10 @@ EOF
     local message="Informational message from test"
     local stdout_output
     stdout_output="$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; log_info '$message'")"
-    [[ "$stdout_output" == *"$message"* ]]
+    [[ "$stdout_output" == *"$message"* ]] || return 1
 
     local log_file="$HOME/Library/Logs/mole/mole.log"
-    [[ -f "$log_file" ]]
+    [[ -f "$log_file" ]] || return 1
     grep -q "INFO: $message" "$log_file"
 }
 
@@ -199,11 +199,11 @@ EOF
 
     HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; log_error '$message' 1>/dev/null 2>'$stderr_file'"
 
-    [[ -s "$stderr_file" ]]
+    [[ -s "$stderr_file" ]] || return 1
     grep -q "$message" "$stderr_file"
 
     local log_file="$HOME/Library/Logs/mole/mole.log"
-    [[ -f "$log_file" ]]
+    [[ -f "$log_file" ]] || return 1
     grep -q "ERROR: $message" "$log_file"
 }
 
@@ -217,7 +217,7 @@ EOF
     [ "$status" -eq 0 ]
 
     local oplog="$HOME/Library/Logs/mole/operations.log"
-    [[ -f "$oplog" ]]
+    [[ -f "$oplog" ]] || return 1
     grep -Fq "[clean] REMOVED /tmp/example (1KB)" "$oplog"
 }
 
@@ -238,8 +238,11 @@ EOF
         truncate -s 1100k "$log_file"
     fi
 
-    HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'"
-    [[ -f "${log_file}.old" ]]
+    # log.sh calls rotate_log_once at source time and exports MOLE_LOG_ROTATED.
+    # scripts/test.sh sources file_ops.sh, so the whole bats run already carries the
+    # marker and a child would skip rotation. Clear it to get a fresh session.
+    env -u MOLE_LOG_ROTATED HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'"
+    [[ -f "${log_file}.old" ]] || return 1
 
     result=$(HOME="$HOME" MOLE_LOG_ROTATED=1 /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; echo \$MOLE_LOG_ROTATED")
     [[ "$result" == "1" ]]
@@ -496,8 +499,8 @@ EOF
 
 @test "print_summary_block formats output correctly" {
     result=$(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; print_summary_block 'success' 'Test Summary' 'Detail 1' 'Detail 2'")
-    [[ "$result" == *"Test Summary"* ]]
-    [[ "$result" == *"Detail 1"* ]]
+    [[ "$result" == *"Test Summary"* ]] || return 1
+    [[ "$result" == *"Detail 1"* ]] || return 1
     [[ "$result" == *"Detail 2"* ]]
 }
 
@@ -673,7 +676,7 @@ echo "FLAG=$MOLE_SUDO_ESTABLISHED"
 SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"EXIT=1"* ]]
+    [[ "$output" == *"EXIT=1"* ]] || return 1
     [[ "$output" == *"FLAG=false"* ]]
 }
 
@@ -697,9 +700,9 @@ echo "ENSURE=$ensure_rc"
 SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"HAS=1"* ]]
-    [[ "$output" == *"REQUEST=1"* ]]
-    [[ "$output" == *"ENSURE=1"* ]]
+    [[ "$output" == *"HAS=1"* ]] || return 1
+    [[ "$output" == *"REQUEST=1"* ]] || return 1
+    [[ "$output" == *"ENSURE=1"* ]] || return 1
     [[ "$output" != *"SUDO_CALLED"* ]]
 }
 
@@ -741,8 +744,23 @@ echo "PID=$MOLE_SUDO_KEEPALIVE_PID"
 SCRIPT
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"SUDO:-n -v"* ]]
-    [[ "$output" == *"EXIT=0"* ]]
-    [[ "$output" == *"FLAG=true"* ]]
+    [[ "$output" == *"SUDO:-n -v"* ]] || return 1
+    [[ "$output" == *"EXIT=0"* ]] || return 1
+    [[ "$output" == *"FLAG=true"* ]] || return 1
     [[ "$output" == *"PID=keepalive-pid"* ]]
+}
+
+# A cleanup lib sourced without an entry point must not abort on an unset
+# DRY_RUN: the read sites are unguarded by convention, so the default lives in
+# base.sh. Reproduces the "DRY_RUN: unbound variable" abort from lib/clean/caches.sh.
+@test "cleanup libs run under set -u without an entry point assigning DRY_RUN" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+[[ "${DRY_RUN:-unset}" != "unset" ]] || { echo "DRY_RUN still unset after sourcing common.sh"; exit 1; }
+echo "DRY_RUN=$DRY_RUN"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DRY_RUN=false"* ]]
 }

@@ -10,6 +10,13 @@ if [[ -n "${MOLE_BASE_LOADED:-}" ]]; then
 fi
 readonly MOLE_BASE_LOADED=1
 
+# Cleanup libraries read "$DRY_RUN" in 70+ places without a default, and only the
+# command entry points (bin/clean.sh and friends) assign it. Anything that sources
+# a lib directly then calls into it therefore aborts on "unbound variable" under
+# set -u, in branches that are only reached with specific fixtures. Default it
+# once here rather than at each read site; entry points still assign over it.
+: "${DRY_RUN:=false}"
+
 # ============================================================================
 # Color Definitions
 # Honor https://no-color.org: any non-empty NO_COLOR disables ANSI escapes.
