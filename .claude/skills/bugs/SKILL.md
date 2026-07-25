@@ -158,11 +158,18 @@ The method: walk each section and ask whether every operation over roughly one s
 
 The meta-bug. Several regression tests passed against the pre-fix code, so the fix was never actually pinned.
 
-bats does not fail a test on a non-final `[[ ]]` that returns non-zero, so every bare assertion except the last one is dead. There are currently **1331** such lines across `tests/*.bats`:
+A non-final `[[ ]]` that returns non-zero does not fail the test; a non-final `[ ]` does. The bracket form decides it, which is why the same test can catch a crashed subshell through `[ "$status" -eq 0 ]` while every `[[ "$output" == ... ]]` above the last one is dead weight. Minimal repro, run it before trusting any assertion in this suite:
 
 ```bash
-command grep -rnE '^[[:space:]]+\[\[ ' tests/*.bats | command grep -vE '\|\||&&' | wc -l
+cat > tests/zz_min.bats <<'EOF'
+@test "non-final [[ ]] false" { [[ 1 -eq 2 ]]; [[ 1 -eq 1 ]]; }
+@test "non-final [ ] false"  { [ 1 -eq 2 ];  [ 1 -eq 1 ];  }
+EOF
+bats tests/zz_min.bats   # test 1 passes, test 2 fails
+rm tests/zz_min.bats
 ```
+
+There are currently **551** dead non-final `[[ ]]` assertions across 1119 tests, and **473** tests whose only bare gate is the final `[[ ]]`. Count them per test block, not per line: a line-level grep counts the final assertions too and overstates the problem.
 
 Four other ways a test here has passed vacuously:
 
