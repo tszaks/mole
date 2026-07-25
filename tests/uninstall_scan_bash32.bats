@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Regression for #863 — "Can't Open App List, Scanning forever."
+# Regression for #863: "Can't Open App List, Scanning forever."
 #
 # macOS ships /bin/bash 3.2 (Apple does not upgrade past it, GPLv3). The
 # bin/uninstall.sh shebang is `#!/bin/bash`, so the installed script runs
@@ -140,7 +140,7 @@ EOF
 	wait "$bgpid" 2> /dev/null || true
 
 	[[ -z "$status_msg" ]] || {
-		echo "scan_applications hung — Pass 2 guard regressed" >&2
+		echo "scan_applications hung, Pass 2 guard regressed" >&2
 		echo "stderr captured:" >&2
 		cat "$HOME/scan.err" >&2 2> /dev/null || true
 		false

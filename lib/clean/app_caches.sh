@@ -2,7 +2,7 @@
 # User GUI Applications Cleanup Module (desktop apps, media, utilities).
 set -euo pipefail
 # Xcode DerivedData cleanup with project count and size reporting.
-# Fully regenerated on next build — safe to remove.
+# Fully regenerated on next build, safe to remove.
 clean_xcode_derived_data() {
     local dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
 

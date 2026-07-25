@@ -1,4 +1,4 @@
-// Package main — status preferences store.
+// Package main: status preferences store.
 //
 // Persisted preferences live in a tiny `key=value` file (one pair per line) at
 // ~/.config/mole/status_prefs. This file replaces the previous single-value
@@ -47,7 +47,7 @@ func loadPrefs() map[string]string {
 		}
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
-			continue // no '=' on the line — skip it rather than guess
+			continue // no '=' on the line, skip it rather than guess
 		}
 		prefs[strings.TrimSpace(key)] = strings.TrimSpace(value)
 	}
@@ -89,7 +89,7 @@ func savePref(key, value string) {
 	_ = os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-// Typed accessors — the rest of the code speaks in bools/ints, not raw strings.
+// Typed accessors: the rest of the code speaks in bools/ints, not raw strings.
 
 // loadCatHidden reports whether the ASCII cat should be hidden.
 func loadCatHidden() bool {

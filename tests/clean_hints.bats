@@ -643,7 +643,7 @@ EOTD
 }
 
 @test "show_orphan_dotdir_hint_notice ignores short app-name tokens (<4 chars) to avoid false matches (#872)" {
-    # `.ai-old` — token `ai` is 2 chars; an `AI.app` should NOT exempt it.
+    # `.ai-old`: token `ai` is 2 chars; an `AI.app` should NOT exempt it.
     mkdir -p "$HOME/.ai-old"
     touch -t 202401010000 "$HOME/.ai-old"
 

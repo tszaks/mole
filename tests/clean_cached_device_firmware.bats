@@ -177,7 +177,7 @@ files_cleaned=0
 total_size_cleaned=0
 total_items=0
 
-# Do NOT mock safe_remove — real function must honor DRY_RUN
+# Do NOT mock safe_remove: real function must honor DRY_RUN
 clean_cached_device_firmware
 
 if [[ ! -f "$IPSW" ]]; then

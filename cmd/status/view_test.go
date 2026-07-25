@@ -18,17 +18,17 @@ func TestFormatRate(t *testing.T) {
 		{"tiny", 0.001, "0 MB/s"},
 		{"just under threshold", 0.009, "0 MB/s"},
 
-		// Small rates (0.01 to < 1) — 2 decimal places.
+		// Small rates (0.01 to < 1): 2 decimal places.
 		{"at threshold", 0.01, "0.01 MB/s"},
 		{"small rate", 0.5, "0.50 MB/s"},
 		{"just under 1", 0.99, "0.99 MB/s"},
 
-		// Medium rates (1 to < 10) — 1 decimal place.
+		// Medium rates (1 to < 10): 1 decimal place.
 		{"exactly 1", 1.0, "1.0 MB/s"},
 		{"medium rate", 5.5, "5.5 MB/s"},
 		{"just under 10", 9.9, "9.9 MB/s"},
 
-		// Large rates (>= 10) — no decimal places.
+		// Large rates (>= 10): no decimal places.
 		{"exactly 10", 10.0, "10 MB/s"},
 		{"large rate", 100.5, "100 MB/s"},
 		{"very large", 1000.0, "1000 MB/s"},
@@ -248,11 +248,11 @@ func TestDiskLabel(t *testing.T) {
 		total  int
 		want   string
 	}{
-		// Single disk — no numbering.
+		// Single disk: no numbering.
 		{"single disk", "INTR", 0, 1, "INTR"},
 		{"single external", "EXTR", 0, 1, "EXTR"},
 
-		// Multiple disks — numbered (1-indexed).
+		// Multiple disks: numbered (1-indexed).
 		{"first of two", "INTR", 0, 2, "INTR1"},
 		{"second of two", "INTR", 1, 2, "INTR2"},
 		{"third of three", "EXTR", 2, 3, "EXTR3"},
@@ -328,7 +328,7 @@ func TestParseRefreshRate(t *testing.T) {
 		{"decimal Hz", "Resolution: 3840x2160 @ 59.94Hz", "59Hz"},
 		{"ProMotion", "Resolution: 3456x2234 @ 120.00Hz", "120Hz"},
 
-		// Multiple lines — picks highest valid.
+		// Multiple lines: picks highest valid.
 		{"multiple rates", "Display 1: 60Hz\nDisplay 2: 120Hz", "120Hz"},
 
 		// Edge cases.

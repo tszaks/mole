@@ -296,9 +296,9 @@ func getDiskutilTotalBytes(mountpoint string) (uint64, error) {
 // correctAPFSDiskUsage returns Finder-accurate used bytes and percent for an
 // APFS volume, accounting for purgeable caches and APFS local snapshots that
 // statfs incorrectly counts as "used". Uses a three-tier fallback:
-//  1. Finder via osascript (startup disk only) — exact match with macOS Finder
-//  2. diskutil APFSContainerFree — corrects APFS snapshot space
-//  3. Raw gopsutil values — original statfs-based calculation
+//  1. Finder via osascript (startup disk only), exact match with macOS Finder
+//  2. diskutil APFSContainerFree, corrects APFS snapshot space
+//  3. Raw gopsutil values, original statfs-based calculation
 func correctAPFSDiskUsage(mountpoint string, total, rawUsed uint64) (used uint64, usedPercent float64) {
 	// Tier 1: Finder via osascript (startup disk at "/" only).
 	if mountpoint == "/" && commandExists("osascript") {

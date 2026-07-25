@@ -878,7 +878,7 @@ opt_prune_spotlight_orphan_rules() {
 # The previous implementation also wiped every "*.db" under
 # ~/Library/Application Support/Dock, which deleted macOS's
 # desktoppicture.db and reset the user's wallpaper (#995). No .db under
-# that directory needs to be cleared for Dock to refresh — killall plus
+# that directory needs to be cleared for Dock to refresh, killall plus
 # touching the plist is sufficient.
 opt_dock_refresh() {
     local dock_plist="$HOME/Library/Preferences/com.apple.dock.plist"

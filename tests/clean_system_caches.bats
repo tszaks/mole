@@ -127,7 +127,7 @@ setup() {
 
 # Regression for #724: MV3 extension SW caches are keyed by origin hash,
 # so the PROTECTED_SW_DOMAINS domain-match never fires for them. The
-# whitelist is the only escape hatch users have — respect it here.
+# whitelist is the only escape hatch users have, respect it here.
 @test "clean_service_worker_cache honors is_path_whitelisted (#724)" {
     local test_cache="$HOME/test_sw_cache_wl"
     mkdir -p "$test_cache/abc123hash_extension"

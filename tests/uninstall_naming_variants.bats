@@ -216,7 +216,7 @@ find_app_files 'invalid_bundle' ''"
     [[ "$result" == *"Library/Application Support/AnkiProgramFiles"* ]]
 }
 
-# Independent CLI dotdir protection — issue #993.
+# Independent CLI dotdir protection, issue #993.
 # Uninstalling a GUI app named "Claude" / "OpenCode" / etc. must not delete
 # the same-named standalone CLI tool's state directory.
 

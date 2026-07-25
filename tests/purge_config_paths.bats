@@ -137,7 +137,7 @@ EOF
 
     # On case-insensitive FS (macOS default) both resolve to the same path,
     # so count should be 1. On case-sensitive FS, Code doesn't exist, so
-    # resolve_path_case returns it unchanged — count may be 2 which is correct
+    # resolve_path_case returns it unchanged, count may be 2 which is correct
     # since they really are different directories.
     if [[ -d "$HOME/Code" && "$(cd "$HOME/Code" && pwd -P)" == "$(cd "$HOME/code" && pwd -P)" ]]; then
         [ "$output" = "1" ]
@@ -149,7 +149,7 @@ EOF
     mkdir -p "$HOME/code/myproject"
     touch "$HOME/code/myproject/package.json"
 
-    # No config file — triggers discovery
+    # No config file, triggers discovery
     run env HOME="$HOME" bash -c "
         source '$PROJECT_ROOT/lib/clean/project.sh'
         discover_project_dirs

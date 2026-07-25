@@ -172,7 +172,7 @@ readonly ORPHAN_NEVER_DELETE_PATTERNS=(
 )
 
 # In-memory mdfind result cache (Bash 3.2 compatible, no associative arrays).
-# Newline-delimited strings checked via case glob — no subprocess per lookup.
+# Newline-delimited strings checked via case glob, no subprocess per lookup.
 _MOLE_MDFIND_FOUND=""
 _MOLE_MDFIND_NOTFOUND=""
 
@@ -600,7 +600,7 @@ clean_orphaned_system_services() {
     }
 
     # Returns 0 if the binary path is managed by a package manager or lives in a
-    # system directory — these should never be treated as orphans even when missing.
+    # system directory; these should never be treated as orphans even when missing.
     _is_package_managed_binary() {
         local binary="$1"
         case "$binary" in
@@ -883,7 +883,7 @@ clean_orphaned_system_services() {
 
 # Remove stub-only ~/Library/Containers directories left by uninstalled apps.
 # A stub container contains only .com.apple.containermanagerd.metadata.plist
-# with no Data/ subdirectory — it holds no user data and is safe to remove.
+# with no Data/ subdirectory, it holds no user data and is safe to remove.
 # Only targets a hardcoded allowlist of apps known to leave such stubs.
 _remove_verified_container_stub() {
     local container_dir="$1"

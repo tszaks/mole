@@ -1574,8 +1574,8 @@ batch_uninstall_applications() {
     local -a local_network_warning_apps=()
     local -a system_extension_warning_apps=()
     # Apps whose process was still running after the kill ladder. We do not
-    # abort the uninstall for these — macOS allows deleting a running bundle
-    # (the process keeps using its mmap'd code) — but we warn the user so they
+    # abort the uninstall for these: macOS allows deleting a running bundle
+    # (the process keeps using its mmap'd code), but we warn the user so they
     # know to quit/relaunch the lingering process.
     local -a running_at_uninstall_apps=()
 

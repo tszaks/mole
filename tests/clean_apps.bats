@@ -1082,7 +1082,7 @@ EOF
 
     # `|| return 1` after each assertion ensures bats fails as soon as one fails
     # (bare `[[ ]]` in the middle of a test body gets swallowed by the next
-    # passing command — see #886 review notes).
+    # passing command; see #886 review notes).
     [ "$status" -eq 0 ]
     [[ "$output" == *"Found 1 orphaned"* ]] || return 1
     [[ "$output" == *"skipped 1 protected"* ]] || return 1
@@ -1345,7 +1345,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
 
-# Container has a Data/ subtree — real sandbox data, must NOT be deleted
+# Container has a Data/ subtree: real sandbox data, must NOT be deleted
 stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
 mkdir -p "$stub/Data/Library/Preferences"
 touch "$stub/.com.apple.containermanagerd.metadata.plist"

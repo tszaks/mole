@@ -713,7 +713,7 @@ _scan_resolve_uncached() {
     update_scan_status "Scanning applications..." "0" "$total_apps"
 
     # Skip Pass 2 when the warm cache already wrote every row to $scan_raw_file.
-    # Also avoids expanding an empty array — macOS bash 3.2 (the /bin/bash that
+    # Also avoids expanding an empty array; macOS bash 3.2 (the /bin/bash that
     # this script targets) treats `"${empty[@]}"` as unbound under `set -u`.
     if ((total_apps > 0)); then
         for app_data_tuple in "${app_data_tuples[@]}"; do

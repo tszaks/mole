@@ -846,7 +846,7 @@ select_purge_categories() {
             printf "%s\n" "$clear_line"
         fi
 
-        # Adaptive footer hints — mirrors menu_paginated.sh pattern
+        # Adaptive footer hints, mirrors menu_paginated.sh pattern
         local _term_w
         _term_w=$(tput cols 2> /dev/null || echo 80)
         [[ "$_term_w" =~ ^[0-9]+$ ]] || _term_w=80
@@ -1462,7 +1462,7 @@ clean_project_artifacts() {
         item_sizes+=("$size_kb")
         item_size_unknown_flags+=("$size_unknown")
         item_recent_flags+=("$is_recent")
-        # Build human-readable age label (bash 3.2 compatible — no assoc arrays).
+        # Build human-readable age label (bash 3.2 compatible, no assoc arrays).
         local _mod_time _age_secs _age_d
         _mod_time=$(get_file_mtime "$item" 2> /dev/null || echo "0")
         _age_secs=$((_now_epoch - _mod_time))
