@@ -2839,3 +2839,50 @@ func TestCalculateDirSizeFastHighFanoutCompletes(t *testing.T) {
 		t.Fatalf("calculateDirSizeFast did not complete under high fan-out")
 	}
 }
+
+func TestSystemOverviewRootsDefaultsToRealSystemPaths(t *testing.T) {
+	os.Unsetenv(systemRootsEnv)
+
+	roots := systemOverviewRoots()
+	if len(roots) != 2 {
+		t.Fatalf("expected 2 default system roots, got %d", len(roots))
+	}
+	if roots[0].Path != "/Applications" || roots[1].Path != "/Library" {
+		t.Fatalf("unexpected default system roots: %q, %q", roots[0].Path, roots[1].Path)
+	}
+	for _, root := range roots {
+		if root.Size != -1 || !root.IsDir {
+			t.Fatalf("default root %q must start pending and be a dir, got size=%d isDir=%v",
+				root.Path, root.Size, root.IsDir)
+		}
+	}
+}
+
+func TestSystemOverviewRootsHonorsOverride(t *testing.T) {
+	first := t.TempDir()
+	second := t.TempDir()
+	// Empty segments must not become rows: a trailing separator would otherwise
+	// queue a measurement of "" and log a spurious error.
+	t.Setenv(systemRootsEnv, first+string(os.PathListSeparator)+string(os.PathListSeparator)+second)
+
+	roots := systemOverviewRoots()
+	if len(roots) != 2 {
+		t.Fatalf("expected 2 overridden system roots, got %d", len(roots))
+	}
+	if roots[0].Path != first || roots[1].Path != second {
+		t.Fatalf("override not applied: got %q, %q", roots[0].Path, roots[1].Path)
+	}
+	if roots[0].Name != filepath.Base(first) {
+		t.Fatalf("expected row name from basename, got %q", roots[0].Name)
+	}
+}
+
+func TestSystemOverviewRootsEmptyOverrideDropsSystemRows(t *testing.T) {
+	// An explicit empty value is the "measure no system volume at all" case; it
+	// must yield zero rows rather than falling back to /Applications.
+	t.Setenv(systemRootsEnv, "")
+
+	if roots := systemOverviewRoots(); len(roots) != 0 {
+		t.Fatalf("expected no system roots for an empty override, got %d", len(roots))
+	}
+}

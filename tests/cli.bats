@@ -622,7 +622,16 @@ assert data['path'] == '/tmp' or data['path'] == '/private/tmp', \
 		skip "analyze binary not available (go not installed?)"
 	fi
 
-	run "$ANALYZE_BIN" --json
+	# Every overview row except the two system ones derives from $HOME, which is
+	# already a temp dir here. Scope those two as well: measuring the real
+	# /Applications and /Library took 106s of this file's 134s on a CI runner,
+	# where nothing is cached and Xcode sits in /Applications. The schema under
+	# assertion does not depend on which roots were measured.
+	local system_root="$HOME/overview-system-root"
+	mkdir -p "$system_root/payload"
+	printf 'overview fixture\n' > "$system_root/payload/data.bin"
+
+	run env MO_ANALYZE_SYSTEM_ROOTS="$system_root" "$ANALYZE_BIN" --json
 	[ "$status" -eq 0 ]
 
 	echo "$output" | python3 -c "
