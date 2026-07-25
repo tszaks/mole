@@ -1367,7 +1367,35 @@ clean_browsers() {
             clean_service_worker_cache "Arc" "$_arc_profile/Service Worker/CacheStorage"
         done
     fi
+    # Dia Browser. company.thebrowser.dia only holds Sentry crash state; the real
+    # caches are the Chromium ones under ~/Library/Caches/Dia/User Data (HTTP and
+    # code cache) and ~/Library/Application Support/Dia/User Data (GPU and CRX
+    # caches). Dia has no ShaderCache / GrShaderCache / DawnCache / Crashpad tree
+    # like Arc, so those rows are intentionally absent.
     safe_clean ~/Library/Caches/company.thebrowser.dia/* "Dia cache"
+    if [[ -d ~/Library/Application\ Support/Dia ]]; then
+        local _dia_profile
+        local _dia_running=false
+        pgrep -x "Dia" > /dev/null 2>&1 && _dia_running=true
+        if [[ "$_dia_running" != "true" ]]; then
+            safe_clean ~/Library/Caches/Dia/User\ Data/*/Cache/* "Dia HTTP cache"
+            safe_clean ~/Library/Caches/Dia/User\ Data/*/Code\ Cache/* "Dia code cache"
+            safe_clean ~/Library/Application\ Support/Dia/User\ Data/GraphiteDawnCache/* "Dia Graphite Dawn cache"
+            safe_clean ~/Library/Application\ Support/Dia/User\ Data/GPUPersistentCache/* "Dia GPU cache"
+            safe_clean ~/Library/Application\ Support/Dia/User\ Data/component_crx_cache/* "Dia component CRX cache"
+            safe_clean ~/Library/Application\ Support/Dia/User\ Data/extensions_crx_cache/* "Dia extensions CRX cache"
+            safe_clean ~/Library/Application\ Support/Dia/User\ Data/*/DawnGraphiteCache/* "Dia Dawn Graphite cache"
+            safe_clean ~/Library/Application\ Support/Dia/User\ Data/*/DawnWebGPUCache/* "Dia Dawn WebGPU cache"
+            safe_clean ~/Library/Application\ Support/Dia/User\ Data/*/GPUCache/* "Dia GPU cache"
+        else
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Dia Application Support cache · skipped (Dia running)"
+            note_activity
+        fi
+        for _dia_profile in "$HOME/Library/Application Support/Dia/User Data"/*/; do
+            [[ -d "$_dia_profile" ]] || continue
+            clean_service_worker_cache "Dia" "$_dia_profile/Service Worker/CacheStorage"
+        done
+    fi
     if [[ -d ~/Library/Application\ Support/BraveSoftware ]]; then
         safe_clean ~/Library/Caches/BraveSoftware/Brave-Browser/* "Brave cache"
         local _brave_profile

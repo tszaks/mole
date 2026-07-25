@@ -1215,3 +1215,77 @@ EOF
     [[ "$output" == *"Sandboxed app caches"* ]]
     [[ "$output" == *"SIZE_CALLS=2"* ]]
 }
+
+# Regression for discussion #583: the only Dia row used to be
+# ~/Library/Caches/company.thebrowser.dia, which on a real install holds nothing
+# but Sentry crash state. The actual Chromium caches live under
+# ~/Library/Caches/Dia/User Data and ~/Library/Application Support/Dia/User Data,
+# so `mo clean` reclaimed 0 bytes from Dia. Paths below were measured on Dia
+# 1.41.1 (bundle company.thebrowser.dia), not inferred from Chromium convention.
+@test "clean_browsers covers the real Dia cache locations" {
+    mkdir -p "$HOME/Library/Caches/company.thebrowser.dia/io.sentry"
+    mkdir -p "$HOME/Library/Caches/Dia/User Data/Default/Cache/Cache_Data"
+    mkdir -p "$HOME/Library/Caches/Dia/User Data/Default/Code Cache/js"
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/GraphiteDawnCache"
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/GPUPersistentCache"
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/component_crx_cache"
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/extensions_crx_cache"
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/Default/DawnGraphiteCache"
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/Default/DawnWebGPUCache"
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/Default/GPUCache"
+    touch "$HOME/Library/Caches/Dia/User Data/Default/Cache/Cache_Data/entry"
+    touch "$HOME/Library/Application Support/Dia/User Data/component_crx_cache/blob"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+clean_service_worker_cache() { :; }
+# Must be mocked: an unmocked pgrep sees the maintainer's real Dia process and
+# silently flips this test to the skip branch.
+pgrep() { return 1; }
+safe_clean() { local n=$#; echo "CLEAN:${!n}"; }
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"CLEAN:Dia HTTP cache"* ]] || return 1
+    [[ "$output" == *"CLEAN:Dia code cache"* ]] || return 1
+    [[ "$output" == *"CLEAN:Dia component CRX cache"* ]] || return 1
+    [[ "$output" == *"CLEAN:Dia extensions CRX cache"* ]] || return 1
+    [[ "$output" == *"CLEAN:Dia Graphite Dawn cache"* ]] || return 1
+    [[ "$output" == *"CLEAN:Dia GPU cache"* ]] || return 1
+    [[ "$output" == *"CLEAN:Dia Dawn Graphite cache"* ]] || return 1
+    [[ "$output" == *"CLEAN:Dia Dawn WebGPU cache"* ]] || return 1
+}
+
+@test "clean_browsers skips Dia Application Support caches while Dia runs" {
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/component_crx_cache"
+    mkdir -p "$HOME/Library/Caches/Dia/User Data/Default/Cache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+clean_service_worker_cache() { :; }
+pgrep() { [[ "${2:-}" == "Dia" ]] && return 0; return 1; }
+safe_clean() { local n=$#; echo "CLEAN:${!n}"; }
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Dia Application Support cache"* ]] || return 1
+    [[ "$output" == *"skipped (Dia running)"* ]] || return 1
+    [[ "$output" != *"CLEAN:Dia component CRX cache"* ]] || return 1
+    [[ "$output" != *"CLEAN:Dia HTTP cache"* ]] || return 1
+}
