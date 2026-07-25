@@ -749,6 +749,41 @@ EOF
     [[ "$list_content" != *"com.example.ocr"* ]] || return 1
 }
 
+@test "active clean sections report isolated category totals" {
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            start_section "First"
+            total_size_cleaned=$((total_size_cleaned + 3000))
+            note_activity
+            end_section
+            start_section "Second"
+            total_size_cleaned=$((total_size_cleaned + 2000))
+            note_activity
+            end_section
+        '
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"First"*"Category total"*"3.1MB"*"Second"*"Category total"*"2.0MB"* ]] || return 1
+    [[ "$(printf '%s\n' "$output" | grep -c "Category total")" -eq 2 ]] || return 1
+}
+
+@test "report-only clean sections omit the category total" {
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            start_section "Large files"
+            log_success "iOS backups"
+            end_section
+        '
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == *"iOS backups"* ]] || return 1
+    # A hint row is activity but reclaims nothing: a "0B" footer under a row
+    # quoting a huge directory reads as a bug, so there must be no footer.
+    [[ "$output" != *"Category total"* ]] || return 1
+}
+
 @test "log rows do not trigger purge's export-only note_activity override" {
     export_file="$HOME/purge-log-activity.txt"
     # shellcheck disable=SC2016  # inner bash expands these from its environment
@@ -803,4 +838,5 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Idle Alpha"* ]] || return 1
     [[ "$output" == *"Nothing to clean"* ]] || return 1
+    [[ "$output" != *"Category total"* ]] || return 1
 }

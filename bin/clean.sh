@@ -187,6 +187,7 @@ fi
 total_items=0
 TRACK_SECTION=0
 SECTION_ACTIVITY=0
+SECTION_START_SIZE_KB=0
 files_cleaned=0
 total_size_cleaned=0
 whitelist_skipped_count=0
@@ -367,6 +368,7 @@ flush_idle_section_slot() {
 start_section() {
     TRACK_SECTION=1
     SECTION_ACTIVITY=0
+    SECTION_START_SIZE_KB="${total_size_cleaned:-0}"
     CURRENT_SECTION="$1"
     if [[ "${IDLE_SECTION_PENDING:-0}" == "1" ]]; then
         # Overwrite the previous idle section's header line in place (the
@@ -401,6 +403,15 @@ end_section() {
         fi
     else
         IDLE_SECTION_PENDING=0
+        # Report-only sections (Large files, System Data clues, Project
+        # artifacts, hint-only App leftovers) mark activity without reclaiming
+        # anything, so a footer there would read "Category total · 0B" directly
+        # under a row quoting a 100GB directory. Only sections that actually
+        # moved the tracked total get one.
+        local section_size_kb=$((total_size_cleaned - SECTION_START_SIZE_KB))
+        if [[ "$section_size_kb" -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · $(colorize_human_size "$(bytes_to_human_kb "$section_size_kb")")"
+        fi
     fi
     TRACK_SECTION=0
 }
