@@ -89,12 +89,17 @@ run_clean_dry_run() {
         "$PROJECT_ROOT/mole" clean --dry-run
 }
 
-# Stub the two host toolchains the real pipeline shells out to. brew is required
-# to be mocked by project policy: no verification run may reach a real package
-# manager. xcrun is here for cost, not policy: clean_dev_mobile probes
-# `simctl list devices` with a 5s budget and one 8s retry, and on a cold runner
-# with Xcode installed that probe plus brew's first-call startup is the bulk of
-# what these two full-pipeline tests spend. Neither tool feeds an assertion.
+# Stub the two host toolchains the real pipeline shells out to, so what these
+# tests measure does not depend on the machine's Homebrew or Xcode. brew is
+# required to be mocked by project policy: no verification run may reach a real
+# package manager. xcrun follows for the same reason, and returning non-zero is
+# the CLT-only shape clean already handles. Neither tool feeds an assertion.
+#
+# These stubs are correctness, not speed. They were first added expecting a cold
+# runner's brew and CoreSimulator startup to be the bulk of the ~30s each of
+# these tests costs on CI; a timed dry-run on a runner disproved that. The whole
+# pipeline takes ~10s there with these seams applied, and the rest is contention
+# from running the suite at more jobs than the runner has cores.
 set_mock_host_toolchains() {
     local mock_home="${1:-$HOME}"
     MOCK_TOOLCHAIN_BIN="$mock_home/toolchain-bin"

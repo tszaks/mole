@@ -98,12 +98,9 @@ report_slowest_test_files() {
     local report="${MOLE_TEST_REPORT_DIR:-}/report.xml"
     [[ -n "${MOLE_TEST_REPORT_DIR:-}" && -f "$report" ]] || return 0
 
-    local top="${MOLE_TEST_REPORT_TOP:-10}"
-    [[ "$top" =~ ^[0-9]+$ ]] || top=10
-
     printf "\n%s\n" "Slowest test files (seconds):"
     sed -n 's/.*<testsuite name="\([^"]*\)".*time="\([0-9.]*\)".*/\2 \1/p' "$report" |
-        sort -rn | head -n "$top" |
+        sort -rn | head -n 10 |
         awk '{ printf "  %8.1f  %s\n", $1, $2 }'
 }
 
