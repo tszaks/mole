@@ -45,20 +45,48 @@ curl_download_with_retry() {
     done
 }
 
+# Version discovery must report "unknown" by returning empty, never by failing.
+# These run inside `latest=$(...)` command substitutions in a shell with
+# `set -euo pipefail`, so a nonzero pipeline (curl refused by a flaky proxy, or
+# grep finding no match) would kill the whole command before the caller's own
+# fallback and error message could run. `mo update` exited 1 with no output at
+# all that way. The trailing `|| true` is what keeps the failure recoverable.
 get_latest_version() {
     curl -fsSL --connect-timeout 2 --max-time 3 -H "Cache-Control: no-cache" \
         "https://raw.githubusercontent.com/tw93/mole/main/mole" 2> /dev/null |
-        grep '^VERSION=' | head -1 | sed 's/VERSION="\(.*\)"/\1/'
+        grep '^VERSION=' | head -1 | sed 's/VERSION="\(.*\)"/\1/' || true
 }
 
 get_latest_version_from_github() {
     local version
     version=$(curl -fsSL --connect-timeout 2 --max-time 3 \
         "https://api.github.com/repos/tw93/mole/releases/latest" 2> /dev/null |
-        grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+        grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
     version="${version#v}"
     version="${version#V}"
     echo "$version"
+}
+
+# Foreground `mo update` version discovery. The single-shot helpers above stay
+# fast because the update-available banner calls them on every command; an
+# explicit update is worth a bounded retry instead, since the same proxy reset
+# that breaks the installer download also breaks this request.
+resolve_latest_stable_version() {
+    local attempt=1
+    local max_attempts=3
+    local candidate=""
+
+    while true; do
+        candidate=$(get_latest_version_from_github)
+        [[ -z "$candidate" ]] && candidate=$(get_latest_version)
+        if [[ -n "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+        [[ "$attempt" -ge "$max_attempts" ]] && return 0
+        sleep 1 || return 0
+        attempt=$((attempt + 1))
+    done
 }
 
 run_brew_command() {
@@ -478,8 +506,17 @@ update_mole() {
             fi
         fi
     else
-        latest=$(get_latest_version_from_github)
-        [[ -z "$latest" ]] && latest=$(get_latest_version)
+        # Announce before resolving, never after. The bounded retry can spend
+        # ~20s across three rounds on a flaky proxy, and an unannounced wait that
+        # long reads as a hang, which is the report this retry was added for.
+        local check_label="Checking for updates..."
+        if [[ -t 1 ]]; then
+            start_inline_spinner "$check_label"
+        else
+            echo "${check_label%...}"
+        fi
+        latest=$(resolve_latest_stable_version)
+        if [[ -t 1 ]]; then stop_inline_spinner; fi
 
         if [[ -z "$latest" ]]; then
             log_error "Unable to check for updates. Check network connection."

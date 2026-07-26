@@ -244,6 +244,89 @@ SCRIPT
 	[ "$(cat "$installer_version_log")" = "V$current_version" ]
 }
 
+@test "mo update reports unreachable version discovery instead of exiting silently" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local curl_attempt_log="$TEST_ROOT/discovery.attempts"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "0.0.1"
+
+	# Every request fails the way a flaky local proxy fails. Version discovery
+	# runs inside `latest=$(...)`, so before the fix the nonzero pipeline tripped
+	# errexit and killed `mo update` with an empty screen and no diagnosis.
+	cat > "$fake_bin/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'x\n' >> "$CURL_ATTEMPT_LOG"
+exit 28
+SCRIPT
+	printf '#!/bin/bash\nexit 0\n' > "$fake_bin/sleep"
+	chmod +x "$fake_bin/curl" "$fake_bin/sleep"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_ATTEMPT_LOG="$curl_attempt_log" \
+		"$manual_bin/mo" update
+
+	[ "$status" -eq 1 ] || return 1
+	[[ "$output" == *"Unable to check for updates"* ]] || return 1
+	[[ "$output" == *"https://github.com"* ]] || return 1
+	# The bounded retry must not run behind a blank screen.
+	[[ "$output" == *"Checking for updates"* ]] || return 1
+	# Two endpoints per round, three bounded rounds.
+	[ "$(wc -l < "$curl_attempt_log" | tr -d ' ')" -eq 6 ]
+}
+
+@test "mo update announces the check before the bounded retry, not after it" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local curl_attempt_log="$TEST_ROOT/announce.attempts"
+	local out_file="$TEST_ROOT/announce.out"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "0.0.1"
+	cat > "$fake_bin/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'x\n' >> "$CURL_ATTEMPT_LOG"
+exit 28
+SCRIPT
+	chmod +x "$fake_bin/curl"
+	: > "$out_file"
+	: > "$curl_attempt_log"
+
+	# Sampled mid-flight on purpose. Asserting the final output cannot tell an
+	# announcement before the retry loop from one after it, which is the whole
+	# point: three rounds of failing requests behind a blank screen is the
+	# "looks hung" report this retry was added for. `sleep` is deliberately not
+	# stubbed here, so the resolver's real 1s pause between rounds leaves a wide
+	# sampling window.
+	env HOME="$HOME" PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_ATTEMPT_LOG="$curl_attempt_log" \
+		"$manual_bin/mo" update > "$out_file" 2>&1 &
+	local update_pid=$!
+
+	local waited=0
+	while [[ "$(wc -l < "$curl_attempt_log" 2> /dev/null || echo 0)" -lt 2 ]]; do
+		sleep 0.05
+		waited=$((waited + 1))
+		if [[ "$waited" -gt 200 ]]; then
+			break
+		fi
+	done
+
+	local mid_output
+	mid_output=$(cat "$out_file")
+	wait "$update_pid" || true
+
+	# Round one is done but the resolver has not finished: the label must already
+	# be visible, and the final verdict must not be.
+	[[ "$mid_output" == *"Checking for updates"* ]] || return 1
+	[[ "$mid_output" != *"Unable to check for updates"* ]]
+}
+
 @test "mo update targets the invoked manual install, not another Homebrew mole in PATH" {
 	local manual_bin="$TEST_ROOT/manual/bin"
 	local manual_config="$TEST_ROOT/manual/config"
