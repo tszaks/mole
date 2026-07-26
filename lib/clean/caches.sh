@@ -176,7 +176,7 @@ discover_project_cache_roots() {
                 ;;
         esac
 
-        (project_cache_has_indicators "$dir" 5 && echo "$dir" >> "$_indicator_tmp") &
+        (project_cache_has_indicators "$dir" 5 && echo "$dir" >> "$_indicator_tmp") < /dev/null &
         _indicator_pids+=($!)
 
         if [[ ${#_indicator_pids[@]} -ge $_max_jobs ]]; then

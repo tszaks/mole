@@ -84,6 +84,8 @@ Public docs and examples should prefer the installed `mo` command. Use `./mole` 
 - Use `MOLE_DRY_RUN=1` before destructive cleanup flows.
 - Use `MOLE_TEST_NO_AUTH=1` for tests, manual repro, and verification unless real auth behavior is being tested.
 - Any new direct use of `sudo`, `osascript`, or `launchctl` must have a `MOLE_TEST_MODE` / `MOLE_TEST_NO_AUTH` guard or be fully mocked in tests.
+- Never auto-delete Software Update-owned staging trees such as `/Library/Updates` or `/macOS Install Data`. Directory age, process lists, and Software Update plist state cannot prove those trees stay inactive across a scan-to-delete window; keep this surface read-only.
+- Never run a privileged path-based delete or move through an invoking-user-mutable ancestor. `safe_sudo_remove`, `safe_sudo_find_delete`, and `mole_delete` must downgrade or fail closed there; privileged Trash moves must cross into dedicated immutable root-owned staging under `/Library` before the invoking user moves the item into Trash.
 - **`install.sh` stays fail-closed on verification failure.** A checksum or attestation mismatch aborts and says why; it must never downgrade to a source build, which turns "the binary was tampered with" into a quieter path with weaker verification. Resolving no release tag and falling back to `main` must warn that this is a nightly source install. The abort cases in `tests/install_checksum.bats` pin both. Keep the README install URL on unpinned `main`: pinning it there blocks fixes from reaching new installs.
 - Do not change ESC timeout behavior in `lib/core/ui.sh` unless explicitly requested.
 - Preserve operation logging to the project log path unless the user explicitly asks to change `MO_NO_OPLOG` behavior.

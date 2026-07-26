@@ -1343,3 +1343,28 @@ EOF
     [[ "$output" != *"CLEAN:Dia component CRX cache"* ]] || return 1
     [[ "$output" != *"CLEAN:Dia HTTP cache"* ]] || return 1
 }
+
+@test "clean_browsers fails closed when the Dia process probe errors" {
+    mkdir -p "$HOME/Library/Application Support/Dia/User Data/component_crx_cache"
+    mkdir -p "$HOME/Library/Caches/Dia/User Data/Default/Cache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+clean_service_worker_cache() { :; }
+pgrep() { return 2; }
+safe_clean() { local n=$#; echo "CLEAN:${!n}"; }
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"skipped (process state unknown)"* ]] || return 1
+    [[ "$output" != *"CLEAN:Dia component CRX cache"* ]] || return 1
+    [[ "$output" != *"CLEAN:Dia HTTP cache"* ]] || return 1
+}

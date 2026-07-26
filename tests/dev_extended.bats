@@ -555,7 +555,11 @@ EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"$HOME/Library/Logs/JetBrains/*|JetBrains IDE logs"* ]] || return 1
-	[[ "$output" != *"Library/Caches/JetBrains"* ]]
+	[[ "$output" != *"Library/Caches/JetBrains"* ]] || return 1
+	[[ "$output" == *"$HOME/Library/Caches/Homebrew/downloads/*|Homebrew cache"* ]] || return 1
+	[[ "$output" != *"$HOME/Library/Caches/Homebrew/*|Homebrew cache"* ]] || return 1
+	[[ "$output" != *"Library/Caches/Homebrew/api"* ]] || return 1
+	[[ "$output" != *"Library/Caches/Homebrew/bootsnap"* ]]
 }
 
 @test "clean_dev_misc does not touch Claude Code state" {
@@ -1182,11 +1186,14 @@ EOF
 	mkdir -p "$copilot_root" "$bin_dir"
 
 	mkdir -p "$copilot_root/1.0.5" "$copilot_root/1.0.32" "$copilot_root/1.0.34"
+	: >"$copilot_root/1.0.32/copilot"
+	ln -s "../../.copilot/pkg/universal/1.0.32/copilot" "$bin_dir/copilot"
+
+	# Keep the active version older than a pre-downloaded update. The launcher,
+	# not mtime order, must decide which version remains pinned.
 	touch -t 202604010000 "$copilot_root/1.0.5"
 	touch -t 202604200000 "$copilot_root/1.0.32"
 	touch -t 202604250000 "$copilot_root/1.0.34"
-	: >"$copilot_root/1.0.32/copilot"
-	ln -s "$copilot_root/1.0.32/copilot" "$bin_dir/copilot"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

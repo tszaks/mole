@@ -1469,9 +1469,15 @@ clean_browsers() {
     safe_clean ~/Library/Caches/company.thebrowser.dia/* "Dia cache"
     if [[ -d ~/Library/Application\ Support/Dia ]]; then
         local _dia_profile
-        local _dia_running=false
-        pgrep -x "Dia" > /dev/null 2>&1 && _dia_running=true
-        if [[ "$_dia_running" != "true" ]]; then
+        local _dia_process_state=2
+        if command -v pgrep > /dev/null 2>&1; then
+            if pgrep -x "Dia" > /dev/null 2>&1; then
+                _dia_process_state=0
+            else
+                _dia_process_state=$?
+            fi
+        fi
+        if [[ $_dia_process_state -eq 1 ]]; then
             safe_clean ~/Library/Caches/Dia/User\ Data/*/Cache/* "Dia HTTP cache"
             safe_clean ~/Library/Caches/Dia/User\ Data/*/Code\ Cache/* "Dia code cache"
             safe_clean ~/Library/Application\ Support/Dia/User\ Data/GraphiteDawnCache/* "Dia Graphite Dawn cache"
@@ -1482,7 +1488,9 @@ clean_browsers() {
             safe_clean ~/Library/Application\ Support/Dia/User\ Data/*/DawnWebGPUCache/* "Dia Dawn WebGPU cache"
             safe_clean ~/Library/Application\ Support/Dia/User\ Data/*/GPUCache/* "Dia GPU cache"
         else
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Dia Application Support cache · skipped (Dia running)"
+            local _dia_skip_reason="Dia running"
+            [[ $_dia_process_state -gt 1 ]] && _dia_skip_reason="process state unknown"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Dia Application Support cache · skipped ($_dia_skip_reason)"
             note_activity
         fi
         for _dia_profile in "$HOME/Library/Application Support/Dia/User Data"/*/; do

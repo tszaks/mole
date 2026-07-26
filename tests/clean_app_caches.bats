@@ -296,6 +296,27 @@ EOF
     [[ "$output" != *"unexpected safe_clean"* ]] || return 1
 }
 
+@test "clean_jianying_pro_generated_caches fails closed when the process probe errors" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+mkdir -p "$HOME/Movies/JianyingPro/User Data/Cache/recognize"
+pgrep() { return 2; }
+safe_clean() {
+    echo "unexpected safe_clean"
+    return 1
+}
+
+clean_jianying_pro_generated_caches
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"skipped (process state unknown)"* ]] || return 1
+    [[ "$output" != *"unexpected safe_clean"* ]] || return 1
+}
+
 @test "clean_jianying_pro_generated_caches is a no-op when cache root is absent" {
     local empty_home
     empty_home="$(mktemp -d "${BATS_TEST_DIRNAME}/tmp-app-caches.XXXXXX")"

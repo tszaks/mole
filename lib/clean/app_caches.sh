@@ -317,14 +317,25 @@ clean_final_cut_pro_generated_caches() {
 }
 
 jianying_pro_is_running() {
-    command -v pgrep > /dev/null 2>&1 || return 1
+    command -v pgrep > /dev/null 2>&1 || return 2
 
     # Match the main editor process only. Narrow the -f pattern to the primary
     # executable path so the always-resident menu-bar agent
     # (.../Frameworks/VideoFusion-macOSTrayHelper.app/.../VideoFusion-macOSTrayHelper)
     # does not read as "editor running" and permanently skip cleanup.
-    pgrep -x "VideoFusion-macOS" > /dev/null 2>&1 && return 0
-    pgrep -f "/VideoFusion-macOS.app/Contents/MacOS/VideoFusion-macOS" > /dev/null 2>&1 && return 0
+    local probe_rc=0
+    if pgrep -x "VideoFusion-macOS" > /dev/null 2>&1; then
+        return 0
+    else
+        probe_rc=$?
+        [[ $probe_rc -eq 1 ]] || return 2
+    fi
+    if pgrep -f "/VideoFusion-macOS.app/Contents/MacOS/VideoFusion-macOS" > /dev/null 2>&1; then
+        return 0
+    else
+        probe_rc=$?
+        [[ $probe_rc -eq 1 ]] || return 2
+    fi
     return 1
 }
 
@@ -332,8 +343,12 @@ clean_jianying_pro_generated_caches() {
     local cache_root="$HOME/Movies/JianyingPro/User Data/Cache"
     [[ -d "$cache_root" && ! -L "$cache_root" ]] || return 0
 
-    if jianying_pro_is_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} JianyingPro generated caches · skipped (JianyingPro running)"
+    local process_state=0
+    jianying_pro_is_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        local skip_reason="JianyingPro running"
+        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} JianyingPro generated caches · skipped ($skip_reason)"
         note_activity
         return 0
     fi

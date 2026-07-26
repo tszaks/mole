@@ -1655,21 +1655,51 @@ clean_dev_ai_agents() {
             fi
             local target
             target=$(readlink "$active_symlink" 2> /dev/null || true)
-            if [[ -n "$target" ]]; then
-                case "$target" in
-                    /*) ;;
-                    *) target="$(cd "$(dirname "$active_symlink")" 2> /dev/null && pwd -P)/$target" ;;
+            if [[ -z "$target" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
+                note_activity
+                continue
+            fi
+            case "$target" in
+                /*) ;;
+                *) target="$(dirname "$active_symlink")/$target" ;;
+            esac
+
+            # Resolve dot segments and symlinked parent directories before
+            # comparing. Launchers commonly use ../../relative targets, and a
+            # lexical comparison would fail to pin the active version.
+            local target_parent target_name
+            target_parent=$(dirname "$target")
+            target_name=$(basename "$target")
+            if ! target_parent=$(cd "$target_parent" 2> /dev/null && pwd -P); then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
+                note_activity
+                continue
+            fi
+            target="$target_parent/$target_name"
+
+            local entry entry_resolved entry_parent entry_name
+            for entry in "$versions_root"/*; do
+                [[ -e "$entry" ]] || continue
+                if [[ -d "$entry" ]]; then
+                    entry_resolved=$(cd "$entry" 2> /dev/null && pwd -P) || continue
+                else
+                    entry_parent=$(dirname "$entry")
+                    entry_name=$(basename "$entry")
+                    entry_parent=$(cd "$entry_parent" 2> /dev/null && pwd -P) || continue
+                    entry_resolved="$entry_parent/$entry_name"
+                fi
+                case "$target/" in
+                    "$entry_resolved"/*)
+                        active_path="$entry"
+                        break
+                        ;;
                 esac
-                local entry
-                for entry in "$versions_root"/*; do
-                    [[ -e "$entry" ]] || continue
-                    case "$target/" in
-                        "$entry"/*)
-                            active_path="$entry"
-                            break
-                            ;;
-                    esac
-                done
+            done
+            if [[ -z "$active_path" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
+                note_activity
+                continue
             fi
         fi
 

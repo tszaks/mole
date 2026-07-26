@@ -1110,7 +1110,7 @@ safe_clean() {
                             echo "0 0" > "$tmp_file"
                         fi
                         mv "$tmp_file" "$temp_dir/result_${idx}" 2> /dev/null || true
-                    ) &
+                    ) < /dev/null &
                     pids+=($!)
                     idx=$((idx + 1))
 

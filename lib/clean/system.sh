@@ -61,57 +61,6 @@ software_update_pending_or_unknown() {
     return 0
 }
 
-# Newest mtime across an install-data root and its direct children (bounded).
-# POSIX only bumps the root mtime when a direct entry is added, removed, or
-# renamed, so an update freshly staged inside an existing subdirectory keeps
-# an old root mtime; the age gate must look at the children too. An unreadable
-# root or child reads as "modified now" so the gate fails closed.
-install_data_newest_mtime() {
-    local root="$1"
-    local newest
-    newest=$(get_file_mtime "$root")
-    if [[ "$newest" -le 0 ]]; then
-        get_epoch_seconds
-        return 0
-    fi
-    # A root we cannot enumerate (mo runs unprivileged; only the final remove
-    # elevates) must read as "modified now": a swallowed find failure would
-    # silently fall back to the stale root mtime and reopen the exact hole
-    # the child scan exists to close.
-    if [[ ! -r "$root" || ! -x "$root" ]]; then
-        get_epoch_seconds
-        return 0
-    fi
-    local child="" child_mtime=0 checked=0
-    while IFS= read -r -d '' child; do
-        checked=$((checked + 1))
-        if [[ $checked -gt 128 ]]; then
-            break
-        fi
-        child_mtime=$(get_file_mtime "$child")
-        if [[ "$child_mtime" -le 0 ]]; then
-            newest=$(get_epoch_seconds)
-            break
-        fi
-        if [[ "$child_mtime" -gt "$newest" ]]; then
-            newest="$child_mtime"
-        fi
-    done < <(find "$root" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
-    echo "$newest"
-}
-
-# Modern OTA updates stage /macOS Install Data via InstallAssistant and
-# UpdateBrainService rather than a visible "Install macOS *.app" process.
-macos_installer_process_running() {
-    # No pgrep = cannot prove the installer is idle; fail closed like the
-    # sibling gates (practically unreachable, pgrep ships with macOS).
-    command -v pgrep > /dev/null 2>&1 || return 0
-    pgrep -if "InstallAssistant" > /dev/null 2>&1 && return 0
-    pgrep -if "UpdateBrainService" > /dev/null 2>&1 && return 0
-    pgrep -if "Install macOS" > /dev/null 2>&1 && return 0
-    return 1
-}
-
 # System caches, logs, and temp files.
 clean_deep_system() {
     stop_section_spinner
@@ -183,55 +132,13 @@ clean_deep_system() {
     fi
     stop_section_spinner
     [[ $third_party_logs_cleaned -eq 1 ]] && log_success "Third-party system logs"
-    start_section_spinner "Scanning system library updates..."
-    if [[ -d "/Library/Updates" && ! -L "/Library/Updates" ]]; then
-        local updates_cleaned=0
-        while IFS= read -r -d '' item; do
-            if [[ -z "$item" ]] || [[ ! "$item" =~ ^/Library/Updates/[^/]+$ ]]; then
-                debug_log "Skipping malformed path: $item"
-                continue
-            fi
-            local item_flags
-            item_flags=$($STAT_BSD -f%Sf "$item" 2> /dev/null || echo "")
-            if [[ "$item_flags" == *"restricted"* ]]; then
-                continue
-            fi
-            if safe_sudo_remove "$item"; then
-                updates_cleaned=$((updates_cleaned + 1))
-            fi
-        done < <(find /Library/Updates -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
-        stop_section_spinner
-        [[ $updates_cleaned -gt 0 ]] && log_success "System library updates"
-    else
-        stop_section_spinner
-    fi
+    # Software Update owns /Library/Updates and /macOS Install Data. Age,
+    # process, and plist probes cannot prove those staging trees are inactive
+    # across the full scan-to-delete window, so clean never removes them.
+    [[ -d "/Library/Updates" ]] && debug_log "Keeping /Library/Updates: managed by Software Update"
+    [[ -d "/macOS Install Data" ]] && debug_log "Keeping macOS Install Data: managed by Software Update"
+
     start_section_spinner "Scanning macOS installer files..."
-    if [[ -d "/macOS Install Data" ]]; then
-        if software_update_pending_or_unknown; then
-            debug_log "Keeping macOS Install Data: Software Update pending or state unknown"
-        elif macos_installer_process_running; then
-            debug_log "Keeping macOS Install Data: installer process running"
-        else
-            local mtime
-            mtime=$(install_data_newest_mtime "/macOS Install Data")
-            local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
-            debug_log "Found macOS Install Data, age ${age_days} days"
-            if [[ $age_days -ge 14 ]]; then
-                local size_kb
-                size_kb=$(get_path_size_kb "/macOS Install Data")
-                if [[ -n "$size_kb" && "$size_kb" -gt 0 ]]; then
-                    local size_human
-                    size_human=$(bytes_to_human "$((size_kb * 1024))")
-                    debug_log "Cleaning macOS Install Data: $size_human, ${age_days} days old"
-                    if safe_sudo_remove "/macOS Install Data"; then
-                        log_success "macOS Install Data, $size_human"
-                    fi
-                fi
-            else
-                debug_log "Keeping macOS Install Data, only ${age_days} days old, needs 14+"
-            fi
-        fi
-    fi
     # Clean macOS installer apps (e.g., "Install macOS Sequoia.app")
     # Only remove installers older than 14 days, not currently running,
     # and not matching the currently installed macOS version (recovery safety).
