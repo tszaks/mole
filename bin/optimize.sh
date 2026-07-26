@@ -17,6 +17,7 @@ trap cleanup_temp_files EXIT INT TERM
 source "$SCRIPT_DIR/lib/core/sudo.sh"
 source "$SCRIPT_DIR/lib/optimize/diagnostics.sh"
 source "$SCRIPT_DIR/lib/optimize/maintenance.sh"
+source "$SCRIPT_DIR/lib/optimize/catalog.sh"
 source "$SCRIPT_DIR/lib/optimize/tasks.sh"
 source "$SCRIPT_DIR/lib/check/health_json.sh"
 source "$SCRIPT_DIR/lib/manage/whitelist.sh"
@@ -26,8 +27,7 @@ print_header() {
     echo -e "${PURPLE_BOLD}Optimize${NC}"
 }
 
-# Bash-native JSON parsing helpers (no jq dependency).
-# Extract a simple numeric value from JSON by key.
+# Extract a simple numeric value from JSON by key without a jq dependency.
 json_get_value() {
     local json="$1"
     local key="$2"
@@ -43,41 +43,6 @@ json_validate() {
     [[ "$json" == *'"memory_used_gb"'* ]] &&
         [[ "$json" == *'"optimizations"'* ]] &&
         [[ "$json" == *'{'* ]] && [[ "$json" == *'}'* ]]
-}
-
-# Parse optimization items from JSON array.
-# Outputs pipe-delimited records: action|name|description|safe
-# Single awk pass instead of per-item grep+sed to avoid subprocess overhead.
-parse_optimization_items() {
-    local json="$1"
-    awk '
-    function extract(line, key,    pat, val, start, end) {
-        pat = "\"" key "\"[ \t]*:[ \t]*\""
-        if (match(line, pat)) {
-            start = RSTART + RLENGTH
-            val = substr(line, start)
-            # Find closing quote (skip escaped quotes)
-            end = 1
-            while (end <= length(val)) {
-                if (substr(val, end, 1) == "\"" && substr(val, end-1, 1) != "\\") break
-                end++
-            }
-            return substr(val, 1, end - 1)
-        }
-        return ""
-    }
-    /"optimizations".*\[/ { in_arr=1; next }
-    !in_arr { next }
-    /\]/ && !in_obj { exit }
-    /{/ { in_obj=1; action=""; name=""; desc=""; safe="" }
-    in_obj && /"action"/ { action = extract($0, "action") }
-    in_obj && /"name"/ { name = extract($0, "name") }
-    in_obj && /"description"/ { desc = extract($0, "description") }
-    in_obj && /"safe"/ {
-        val = $0; sub(/.*"safe"[[:space:]]*:[[:space:]]*/, "", val); sub(/[^a-z].*/, "", val); safe = val
-    }
-    /}/ { if (in_obj && action != "") print action "|" name "|" desc "|" safe; in_obj=0 }
-    ' <<< "$json"
 }
 
 show_optimization_summary() {
@@ -170,8 +135,6 @@ show_system_health() {
 
 announce_action() {
     local name="$1"
-    local desc="$2"
-    local kind="$3"
 
     if [[ "${FIRST_ACTION:-true}" == "true" ]]; then
         export FIRST_ACTION=false
@@ -287,16 +250,6 @@ main() {
 
     run_optimize_diagnostics
 
-    local -a items=()
-    local opts_file
-    opts_file=$(mktemp_file)
-    parse_optimization_items "$health_json" > "$opts_file"
-
-    while IFS='|' read -r action name desc safe; do
-        [[ -z "$action" ]] && continue
-        items+=("${name}|${desc}|${action}|")
-    done < "$opts_file"
-
     echo ""
     # Track sudo availability so individual tasks can skip cleanly when admin
     # access was denied. Without this, every sudo task re-prompts for the
@@ -312,17 +265,19 @@ main() {
     fi
 
     export FIRST_ACTION=true
-    for item in "${items[@]}"; do
-        IFS='|' read -r name desc action path <<< "$item"
+    local safe_count=0
+    local index action health_name
+    for ((index = 0; index < ${#MOLE_OPTIMIZE_ACTIONS[@]}; index++)); do
+        action=${MOLE_OPTIMIZE_ACTIONS[$index]}
+        health_name=${MOLE_OPTIMIZE_HEALTH_NAMES[$index]}
+        safe_count=$((safe_count + 1))
         if command -v is_whitelisted > /dev/null && is_whitelisted "$action"; then
-            opt_msg "Skipped (whitelisted): $name"
+            opt_msg "Skipped (whitelisted): $health_name"
             continue
         fi
-        announce_action "$name" "$desc" "safe"
-        execute_optimization "$action" "$path"
+        announce_action "$health_name"
+        execute_optimization "$action"
     done
-
-    local safe_count=${#items[@]}
 
     export OPTIMIZE_SAFE_COUNT=$safe_count
     export OPTIMIZE_CONFIRM_COUNT=0

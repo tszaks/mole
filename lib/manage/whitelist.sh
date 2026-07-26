@@ -8,6 +8,7 @@ set -euo pipefail
 _MOLE_MANAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_MOLE_MANAGE_DIR/../core/common.sh"
 source "$_MOLE_MANAGE_DIR/../ui/menu_simple.sh"
+source "$_MOLE_MANAGE_DIR/../optimize/catalog.sh"
 
 # Config file paths
 readonly WHITELIST_CONFIG_CLEAN="$HOME/.config/mole/whitelist"
@@ -163,30 +164,12 @@ EOF
 # Get all optimize items with their patterns
 get_optimize_whitelist_items() {
     # Format: "display_name|pattern|category"
-    cat << 'EOF'
-DNS & Spotlight Check|system_maintenance|optimize_task
-Finder Cache Refresh|cache_refresh|optimize_task
-App State Cleanup|saved_state_cleanup|optimize_task
-Broken Config Repair|fix_broken_configs|optimize_task
-Network Cache Refresh|network_optimization|optimize_task
-Database Optimization|sqlite_vacuum|optimize_task
-LaunchServices Repair|launch_services_rebuild|optimize_task
-Dock Refresh|dock_refresh|optimize_task
-Prevent Finder .DS_Store|prevent_network_dsstore|optimize_task
-Memory Optimization|memory_pressure_relief|optimize_task
-Network Stack Refresh|network_stack_optimize|optimize_task
-Permission Repair|disk_permissions_repair|optimize_task
-Spotlight Optimization|spotlight_index_optimize|optimize_task
-Spotlight Orphan Rules|spotlight_orphan_rules_cleanup|optimize_task
-Periodic Maintenance|periodic_maintenance|optimize_task
-Shared File Lists|shared_file_list_repair|optimize_task
-Disk Health|disk_verify|optimize_task
-Login Items Audit|login_items_audit|optimize_task
-Quarantine Database Cleanup|quarantine_cleanup|optimize_task
-Launch Agents Cleanup|launch_agents_cleanup|optimize_task
-Notifications|notification_cleanup|optimize_task
-Usage Data|coreduet_cleanup|optimize_task
-EOF
+    local index
+    for ((index = 0; index < ${#MOLE_OPTIMIZE_ACTIONS[@]}; index++)); do
+        printf '%s|%s|optimize_task\n' \
+            "${MOLE_OPTIMIZE_WHITELIST_NAMES[$index]}" \
+            "${MOLE_OPTIMIZE_ACTIONS[$index]}"
+    done
 }
 
 patterns_equivalent() {

@@ -3,6 +3,15 @@
 
 set -euo pipefail
 
+if [[ -n "${MOLE_OPTIMIZE_TASKS_LOADED:-}" ]]; then
+    return 0
+fi
+readonly MOLE_OPTIMIZE_TASKS_LOADED=1
+
+_MOLE_OPTIMIZE_TASKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly _MOLE_OPTIMIZE_TASKS_DIR
+source "$_MOLE_OPTIMIZE_TASKS_DIR/catalog.sh"
+
 # Config constants (override via env).
 readonly MOLE_TM_THIN_TIMEOUT=180
 readonly MOLE_TM_THIN_VALUE=9999999999
@@ -1467,40 +1476,21 @@ opt_login_items_audit() {
 # Dispatch optimization by action name.
 execute_optimization() {
     local action="$1"
-    local path="${2:-}"
 
     if command -v is_whitelisted > /dev/null && is_whitelisted "$action"; then
         opt_msg "Skipped (whitelisted): $action"
         return 0
     fi
 
-    case "$action" in
-        system_maintenance) opt_system_maintenance ;;
-        cache_refresh) opt_cache_refresh ;;
-        saved_state_cleanup) opt_saved_state_cleanup ;;
-        fix_broken_configs) opt_fix_broken_configs ;;
-        network_optimization) opt_network_optimization ;;
-        quarantine_cleanup) opt_quarantine_cleanup ;;
-        sqlite_vacuum) opt_sqlite_vacuum ;;
-        launch_services_rebuild) opt_launch_services_rebuild ;;
-        dock_refresh) opt_dock_refresh ;;
-        prevent_network_dsstore) opt_prevent_network_dsstore ;;
-        legacy_overrides_audit) opt_legacy_overrides_audit ;;
-        memory_pressure_relief) opt_memory_pressure_relief ;;
-        network_stack_optimize) opt_network_stack_optimize ;;
-        disk_permissions_repair) opt_disk_permissions_repair ;;
-        spotlight_index_optimize) opt_spotlight_index_optimize ;;
-        spotlight_orphan_rules_cleanup) opt_prune_spotlight_orphan_rules ;;
-        launch_agents_cleanup) opt_launch_agents_cleanup ;;
-        periodic_maintenance) opt_periodic_maintenance ;;
-        shared_file_list_repair) opt_shared_file_list_repair ;;
-        notification_cleanup) opt_notification_cleanup ;;
-        disk_verify) opt_disk_verify ;;
-        coreduet_cleanup) opt_coreduet_cleanup ;;
-        login_items_audit) opt_login_items_audit ;;
-        *)
-            echo -e "${YELLOW}${ICON_ERROR}${NC} Unknown action: $action"
-            return 1
-            ;;
-    esac
+    local handler
+    if ! handler=$(optimize_catalog_handler_for "$action"); then
+        echo -e "${YELLOW}${ICON_ERROR}${NC} Unknown action: $action"
+        return 1
+    fi
+    if ! declare -F "$handler" > /dev/null; then
+        echo -e "${YELLOW}${ICON_ERROR}${NC} Missing optimization handler: $handler"
+        return 1
+    fi
+
+    "$handler"
 }
