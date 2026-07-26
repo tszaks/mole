@@ -33,6 +33,41 @@ setup() {
 	mkdir -p "$HOME/.cache/mole"
 
 	rm -rf "${HOME:?}/www"/* "${HOME:?}/dev"/*
+	rm -rf "${HOME:?}/Library/CloudStorage" "${HOME:?}/Library/Mobile Documents"
+}
+
+@test "mole_purge_is_cloud_synced_path matches only exact cloud roots and descendants" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+physical_home="$HOME/cloud-home-physical"
+logical_home="$HOME/cloud-home-link"
+mkdir -p "$physical_home"
+ln -s "$physical_home" "$logical_home"
+HOME="$logical_home"
+source "$PROJECT_ROOT/lib/clean/purge_shared.sh"
+
+mole_purge_is_cloud_synced_path "$HOME/Library/CloudStorage"
+mole_purge_is_cloud_synced_path "$HOME/Library/CloudStorage/Provider/project/target"
+mole_purge_is_cloud_synced_path "$HOME/Library/Mobile Documents"
+mole_purge_is_cloud_synced_path "$HOME/Library/Mobile Documents/com~apple~CloudDocs/project/node_modules"
+mole_purge_is_cloud_synced_path "$physical_home/Library/CloudStorage/Provider/project/target"
+mole_purge_is_cloud_synced_path "$physical_home/Library/Mobile Documents/com~apple~CloudDocs/project/node_modules"
+
+if mole_purge_is_cloud_synced_path "$HOME/Library/CloudStorageBackup/project/target"; then
+	exit 1
+fi
+if mole_purge_is_cloud_synced_path "$HOME/Library/Mobile Documents-old/project/target"; then
+	exit 1
+fi
+if mole_purge_is_cloud_synced_path "$physical_home/Library/CloudStorageBackup/project/target"; then
+	exit 1
+fi
+if mole_purge_is_cloud_synced_path "$physical_home/Library/Mobile Documents-old/project/target"; then
+	exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ] || return 1
 }
 
 @test "is_safe_project_artifact: rejects shallow paths (protection against accidents)" {
@@ -452,7 +487,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/project.sh"
 drain_pending_input() { :; }
-confirm_purge_cleanup 2 1024 0 <<< ''
+confirm_purge_cleanup 2 1024 0 0 <<< ''
 EOF
 
 	[ "$status" -eq 0 ]
@@ -463,7 +498,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/project.sh"
 drain_pending_input() { :; }
-confirm_purge_cleanup 2 1024 0 "~/www/app/node_modules" "~/www/app/dist" <<< ''
+confirm_purge_cleanup 2 1024 0 0 "~/www/app/node_modules" "~/www/app/dist" <<< ''
 EOF
 
 	[ "$status" -eq 0 ]
@@ -472,12 +507,32 @@ EOF
 	[[ "$output" == *"~/www/app/dist"* ]]
 }
 
+@test "confirm_purge_cleanup warns once before confirming cloud-synced artifacts" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+drain_pending_input() { :; }
+confirm_purge_cleanup 2 1024 0 1 "[cloud] ~/Library/CloudStorage/Provider/app/target" "~/www/app/dist" <<< ''
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Cloud-synced artifacts may also be removed from other devices."* ]] || return 1
+	[[ "$output" == *"mo purge --paths"* ]] || return 1
+	local warning_count
+	warning_count=$(printf '%s\n' "$output" | grep -cF "Cloud-synced artifacts may also be removed from other devices.")
+	[ "$warning_count" -eq 1 ] || return 1
+	local warning_line prompt_line
+	warning_line=$(printf '%s\n' "$output" | grep -nF "Cloud-synced artifacts may also be removed from other devices." | cut -d: -f1)
+	prompt_line=$(printf '%s\n' "$output" | grep -nF "Remove 2 artifacts" | cut -d: -f1)
+	[ "$warning_line" -lt "$prompt_line" ] || return 1
+}
+
 @test "confirm_purge_cleanup cancels on ESC" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/project.sh"
 drain_pending_input() { :; }
-confirm_purge_cleanup 2 1024 0 <<< $'\033'
+confirm_purge_cleanup 2 1024 0 0 <<< $'\033'
 EOF
 
     [ "$status" -eq 1 ]
@@ -1162,6 +1217,89 @@ EOF
 	[[ "$output" == *"REMOVE:$BATS_TEST_TMPDIR/var-www/site/node_modules"* ]]
 }
 
+@test "clean_project_artifacts: non-interactive dry-run shows cloud marker and preserves artifact" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+cloud_root="$HOME/Library/CloudStorage"
+cloud_artifact="$cloud_root/TestProvider/SampleProject/target"
+mkdir -p "$cloud_artifact" "$HOME/.cache/mole"
+touch "$cloud_root/TestProvider/SampleProject/Cargo.toml"
+
+PURGE_SEARCH_PATHS=("$cloud_root")
+scan_purge_targets() { printf '%s\n' "$cloud_artifact" > "$2"; }
+get_dir_size_kb() { echo 4; }
+is_recently_modified() {
+	_PURGE_ACTIVITY_STATE=old
+	return 1
+}
+purge_target_activity_still_safe() { return 0; }
+safe_remove() {
+	printf 'REMOVE:%s\n' "$1"
+	return 0
+}
+
+export MOLE_DRY_RUN=1
+clean_project_artifacts </dev/null
+
+[[ -d "$cloud_artifact" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"REMOVE:$HOME/Library/CloudStorage/TestProvider/SampleProject/target"* ]] || return 1
+	[[ "$output" == *"[cloud] ~/Library/CloudStorage/TestProvider/SampleProject/target"* ]] || return 1
+	[[ "$output" == *"4KB"* ]] || return 1
+}
+
+@test "clean_project_artifacts: non-interactive real run skips cloud and keeps local selection aligned after sorting" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+cloud_root="$HOME/Library/CloudStorage"
+cloud_artifact="$cloud_root/TestProvider/CloudProject/target"
+local_root="$HOME/www"
+local_artifact="$local_root/LocalProject/node_modules"
+mkdir -p "$cloud_artifact" "$local_artifact" "$HOME/.cache/mole"
+touch "$cloud_root/TestProvider/CloudProject/Cargo.toml"
+touch "$local_root/LocalProject/package.json"
+
+PURGE_SEARCH_PATHS=("$cloud_root" "$local_root")
+scan_purge_targets() {
+	case "$1" in
+		"$cloud_root") printf '%s\n' "$cloud_artifact" > "$2" ;;
+		"$local_root") printf '%s\n' "$local_artifact" > "$2" ;;
+	esac
+}
+get_dir_size_kb() {
+	case "$1" in
+		"$cloud_artifact") echo 4 ;;
+		"$local_artifact") echo 8 ;;
+	esac
+}
+is_recently_modified() {
+	_PURGE_ACTIVITY_STATE=old
+	return 1
+}
+purge_target_activity_still_safe() { return 0; }
+safe_remove() {
+	printf 'REMOVE:%s\n' "$1"
+	return 0
+}
+
+unset MOLE_DRY_RUN
+clean_project_artifacts </dev/null
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Skipped 1 cloud-synced artifact in non-interactive mode"* ]] || return 1
+	[[ "$output" == *"REMOVE:$HOME/www/LocalProject/node_modules"* ]] || return 1
+	[[ "$output" != *"REMOVE:$HOME/Library/CloudStorage/TestProvider/CloudProject/target"* ]] || return 1
+}
+
 @test "clean_project_artifacts: scans and finds artifacts" {
 	if ! command -v gtimeout >/dev/null 2>&1 && ! command -v timeout >/dev/null 2>&1; then
 		skip "gtimeout/timeout not available"
@@ -1499,4 +1637,67 @@ SCRIPT
 
 	# Index 1 → smaller artifact → alpha's path.
 	[[ "$path1" == *"alpha"* ]]
+}
+
+@test "sort: cloud marker stays aligned across menu and full-path arrays" {
+	mkdir -p "$HOME/www/local-project/node_modules"
+	mkdir -p "$HOME/Library/CloudStorage/TestProvider/cloud-project/node_modules"
+	echo '{}' > "$HOME/www/local-project/package.json"
+	echo '{}' > "$HOME/Library/CloudStorage/TestProvider/cloud-project/package.json"
+	dd if=/dev/zero of="$HOME/www/local-project/node_modules/data" bs=1024 count=200 2>/dev/null
+	dd if=/dev/zero of="$HOME/Library/CloudStorage/TestProvider/cloud-project/node_modules/data" bs=1024 count=5 2>/dev/null
+
+	local capture_file script_file
+	capture_file=$(mktemp "$HOME/sort_cloud_capture.XXXXXX")
+	script_file=$(mktemp "$HOME/sort_cloud_script.XXXXXX.sh")
+
+	cat > "$script_file" << SCRIPT
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+mkdir -p "$HOME/.cache/mole"
+export XDG_CACHE_HOME="$HOME/.cache"
+export TERM="dumb"
+PURGE_SEARCH_PATHS=("$HOME/www" "$HOME/Library/CloudStorage")
+
+select_purge_categories() {
+	local i=0
+	for option in "\$@"; do
+		echo "MENU[\$i]=\$option" >> "$capture_file"
+		i=\$((i + 1))
+	done
+	i=0
+	for path in "\${PURGE_CATEGORY_FULL_PATHS_ARRAY[@]}"; do
+		echo "PATH[\$i]=\$path" >> "$capture_file"
+		i=\$((i + 1))
+	done
+	PURGE_SELECTION_RESULT=""
+	return 1
+}
+
+clean_project_artifacts 2>/dev/null || true
+SCRIPT
+
+	_run_in_pty "$script_file"
+	rm -f "$script_file"
+
+	if [[ ! -s "$capture_file" ]]; then
+		rm -f "$capture_file"
+		fail "capture file is empty; select_purge_categories was never called"
+	fi
+
+	local menu0 menu1 path0 path1
+	menu0=$(grep '^MENU\[0\]=' "$capture_file" | cut -d= -f2-)
+	menu1=$(grep '^MENU\[1\]=' "$capture_file" | cut -d= -f2-)
+	path0=$(grep '^PATH\[0\]=' "$capture_file" | cut -d= -f2-)
+	path1=$(grep '^PATH\[1\]=' "$capture_file" | cut -d= -f2-)
+	rm -f "$capture_file"
+
+	[[ "$menu0" != *"[cloud]"* ]] || return 1
+	[[ "$path0" != *"[cloud]"* ]] || return 1
+	[[ "$menu0" == *"local-project"* ]] || return 1
+	[[ "$path0" == *"local-project"* ]] || return 1
+	[[ "$menu1" == *"[cloud]"* ]] || return 1
+	[[ "$path1" == *"[cloud]"* ]] || return 1
+	[[ "$menu1" == *"cloud-project"* ]] || return 1
+	[[ "$path1" == *"cloud-project"* ]] || return 1
 }

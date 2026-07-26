@@ -59,6 +59,21 @@ EOF
     [[ "$output" != *"$HOME/GitHub"* ]]
 }
 
+@test "load_purge_config can exclude default cloud storage roots" {
+    local config_file="$HOME/.config/mole/purge_paths"
+
+    cat > "$config_file" << EOF
+$HOME/custom/projects
+EOF
+
+    run env HOME="$HOME" /bin/bash -c "source '$PROJECT_ROOT/lib/clean/project.sh'; printf '%s\n' \"\${PURGE_SEARCH_PATHS[@]}\""
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == "$HOME/custom/projects" ]] || return 1
+    [[ "$output" != *"$HOME/Library/CloudStorage"* ]] || return 1
+    [[ "$output" != *"$HOME/Library/Mobile Documents"* ]] || return 1
+}
+
 @test "load_purge_config expands tilde in paths" {
     local config_file="$HOME/.config/mole/purge_paths"
     

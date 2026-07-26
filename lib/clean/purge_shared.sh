@@ -8,6 +8,12 @@ if [[ -n "${MOLE_PURGE_SHARED_LOADED:-}" ]]; then
 fi
 readonly MOLE_PURGE_SHARED_LOADED=1
 
+MOLE_PURGE_PHYSICAL_HOME="$HOME"
+if [[ -d "$HOME" ]]; then
+    MOLE_PURGE_PHYSICAL_HOME=$(cd "$HOME" 2> /dev/null && pwd -P) || MOLE_PURGE_PHYSICAL_HOME="$HOME"
+fi
+readonly MOLE_PURGE_PHYSICAL_HOME
+
 # Canonical purge targets (heavy project build artifacts).
 readonly MOLE_PURGE_TARGETS=(
     "node_modules"
@@ -100,6 +106,20 @@ readonly MOLE_PURGE_QUICK_HINT_EXCLUDED_TARGETS=(
     "bin"
     "vendor"
 )
+
+mole_purge_is_cloud_synced_path() {
+    local path="${1:-}"
+    [[ -n "$path" ]] || return 1
+
+    case "$path" in
+        "$HOME/Library/CloudStorage" | "$HOME/Library/CloudStorage/"* | "$HOME/Library/Mobile Documents" | "$HOME/Library/Mobile Documents/"* | \
+            "$MOLE_PURGE_PHYSICAL_HOME/Library/CloudStorage" | "$MOLE_PURGE_PHYSICAL_HOME/Library/CloudStorage/"* | "$MOLE_PURGE_PHYSICAL_HOME/Library/Mobile Documents" | "$MOLE_PURGE_PHYSICAL_HOME/Library/Mobile Documents/"*)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
 
 mole_purge_is_project_root() {
     local dir="$1"

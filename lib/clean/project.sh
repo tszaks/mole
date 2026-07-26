@@ -1063,11 +1063,13 @@ confirm_purge_cleanup() {
     local item_count="${1:-0}"
     local total_size_kb="${2:-0}"
     local unknown_count="${3:-0}"
-    local -a selected_paths=("${@:4}")
+    local cloud_count="${4:-0}"
+    local -a selected_paths=("${@:5}")
 
     [[ "$item_count" =~ ^[0-9]+$ ]] || item_count=0
     [[ "$total_size_kb" =~ ^[0-9]+$ ]] || total_size_kb=0
     [[ "$unknown_count" =~ ^[0-9]+$ ]] || unknown_count=0
+    [[ "$cloud_count" =~ ^[0-9]+$ ]] || cloud_count=0
 
     local item_text="artifact"
     [[ $item_count -ne 1 ]] && item_text="artifacts"
@@ -1089,6 +1091,12 @@ confirm_purge_cleanup() {
         for selected_path in "${selected_paths[@]}"; do
             echo "  $selected_path"
         done
+    fi
+
+    if [[ $cloud_count -gt 0 ]]; then
+        echo ""
+        echo -e "${YELLOW}${ICON_WARNING}${NC} Cloud-synced artifacts may also be removed from other devices."
+        echo -e "${GRAY}Use 'mo purge --paths' to exclude cloud storage roots.${NC}"
     fi
 
     echo -ne "${PURPLE}${ICON_ARROW}${NC} Remove ${item_count} ${item_text}, ${size_display}${unknown_hint}  ${GREEN}Enter${NC} confirm, ${GRAY}ESC${NC} cancel: "
@@ -1299,6 +1307,7 @@ clean_project_artifacts() {
     local -a item_size_unknown_flags=()
     local -a item_recent_flags=()
     local -a item_age_labels=()
+    local -a item_cloud_flags=()
     # Find the best project root for an artifact once; callers decide how to
     # display it. Monorepo indicators win over plain project indicators.
     find_purge_project_root_for_artifact() {
@@ -1462,6 +1471,12 @@ clean_project_artifacts() {
         local max_path_width="${5:-}"
         local artifact_col="${6:-12}"
         local available_width
+        local path_prefix=""
+
+        if [[ "$project_path" == "[cloud] "* ]]; then
+            path_prefix="[cloud] "
+            project_path="${project_path#"[cloud] "}"
+        fi
 
         if [[ -n "$max_path_width" ]]; then
             available_width="$max_path_width"
@@ -1484,7 +1499,9 @@ clean_project_artifacts() {
 
         # Truncate project path if needed
         local truncated_path
-        truncated_path=$(compact_purge_menu_path "$project_path" "$available_width")
+        local compact_width=$((available_width - ${#path_prefix}))
+        [[ $compact_width -lt 4 ]] && compact_width=4
+        truncated_path="${path_prefix}$(compact_purge_menu_path "$project_path" "$compact_width")"
         local current_width
         current_width=$(get_display_width "$truncated_path")
 
@@ -1554,13 +1571,25 @@ clean_project_artifacts() {
 
         local is_recent="${safe_recent_flags[$item_index]:-true}"
         local activity_state="${safe_activity_states[$item_index]:-uncertain}"
-        raw_project_paths+=("$project_path")
+        local is_cloud=false
+        if mole_purge_is_cloud_synced_path "$item"; then
+            is_cloud=true
+        fi
+        local display_project_path="$project_path"
+        local display_item_path
+        display_item_path=$(format_purge_target_path "$item")
+        if [[ "$is_cloud" == "true" ]]; then
+            display_project_path="[cloud] $display_project_path"
+            display_item_path="[cloud] $display_item_path"
+        fi
+        raw_project_paths+=("$display_project_path")
         raw_artifact_types+=("$artifact_type")
         item_paths+=("$item")
-        item_display_paths+=("$(format_purge_target_path "$item")")
+        item_display_paths+=("$display_item_path")
         item_sizes+=("$size_kb")
         item_size_unknown_flags+=("$size_unknown")
         item_recent_flags+=("$is_recent")
+        item_cloud_flags+=("$is_cloud")
         # Build human-readable age label (bash 3.2 compatible, no assoc arrays).
         local _mod_time _age_secs _age_d
         _mod_time=$(get_file_mtime "$item" 2> /dev/null || echo "0")
@@ -1657,6 +1686,7 @@ clean_project_artifacts() {
         local -a sorted_item_recent_flags=()
         local -a sorted_item_display_paths=()
         local -a sorted_item_age_labels=()
+        local -a sorted_item_cloud_flags=()
 
         for idx in "${sorted_indices[@]}"; do
             sorted_menu_options+=("${menu_options[idx]}")
@@ -1666,6 +1696,7 @@ clean_project_artifacts() {
             sorted_item_recent_flags+=("${item_recent_flags[idx]}")
             sorted_item_display_paths+=("${item_display_paths[idx]}")
             sorted_item_age_labels+=("${item_age_labels[idx]}")
+            sorted_item_cloud_flags+=("${item_cloud_flags[idx]}")
         done
 
         # Replace original arrays with sorted versions
@@ -1676,6 +1707,7 @@ clean_project_artifacts() {
         item_recent_flags=("${sorted_item_recent_flags[@]}")
         item_display_paths=("${sorted_item_display_paths[@]}")
         item_age_labels=("${sorted_item_age_labels[@]}")
+        item_cloud_flags=("${sorted_item_cloud_flags[@]}")
     fi
     if [[ -t 1 ]]; then
         stop_inline_spinner
@@ -1712,12 +1744,23 @@ clean_project_artifacts() {
         fi
     else
         # Non-interactive: select all non-recent items
+        local skipped_cloud_count=0
         for ((i = 0; i < ${#menu_options[@]}; i++)); do
+            if [[ "${item_cloud_flags[i]:-false}" == "true" && "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+                skipped_cloud_count=$((skipped_cloud_count + 1))
+                continue
+            fi
             if [[ ${item_recent_flags[i]} != "true" ]]; then
                 [[ -n "$PURGE_SELECTION_RESULT" ]] && PURGE_SELECTION_RESULT+=","
                 PURGE_SELECTION_RESULT+="$i"
             fi
         done
+        if [[ $skipped_cloud_count -gt 0 ]]; then
+            local skipped_cloud_text="artifact"
+            [[ $skipped_cloud_count -ne 1 ]] && skipped_cloud_text="artifacts"
+            echo ""
+            echo -e "${YELLOW}${ICON_WARNING}${NC} Skipped ${skipped_cloud_count} cloud-synced ${skipped_cloud_text} in non-interactive mode (confirmation required)"
+        fi
     fi
     if [[ -z "$PURGE_SELECTION_RESULT" ]]; then
         echo ""
@@ -1730,6 +1773,7 @@ clean_project_artifacts() {
     IFS=',' read -r -a selected_indices <<< "$PURGE_SELECTION_RESULT"
     local selected_total_kb=0
     local selected_unknown_count=0
+    local selected_cloud_count=0
     local -a selected_display_paths=()
     for idx in "${selected_indices[@]}"; do
         local selected_size_kb="${item_sizes[idx]:-0}"
@@ -1738,11 +1782,14 @@ clean_project_artifacts() {
         if [[ "${item_size_unknown_flags[idx]:-false}" == "true" ]]; then
             selected_unknown_count=$((selected_unknown_count + 1))
         fi
+        if [[ "${item_cloud_flags[idx]:-false}" == "true" ]]; then
+            selected_cloud_count=$((selected_cloud_count + 1))
+        fi
         selected_display_paths+=("${item_display_paths[idx]}")
     done
 
     if [[ -t 0 ]]; then
-        if ! confirm_purge_cleanup "${#selected_indices[@]}" "$selected_total_kb" "$selected_unknown_count" "${selected_display_paths[@]}"; then
+        if ! confirm_purge_cleanup "${#selected_indices[@]}" "$selected_total_kb" "$selected_unknown_count" "$selected_cloud_count" "${selected_display_paths[@]}"; then
             echo -e "${GRAY}Purge cancelled${NC}"
             printf '\n'
             PURGE_CATEGORY_FULL_PATHS_ARRAY=()
@@ -1759,8 +1806,7 @@ clean_project_artifacts() {
     local dry_run_mode="${MOLE_DRY_RUN:-0}"
     for idx in "${selected_indices[@]}"; do
         local item_path="${item_paths[idx]}"
-        local display_item_path
-        display_item_path=$(format_purge_target_path "$item_path")
+        local display_item_path="${item_display_paths[idx]}"
         local size_kb="${item_sizes[idx]}"
         local size_unknown="${item_size_unknown_flags[idx]:-false}"
         local size_human
@@ -1795,12 +1841,12 @@ clean_project_artifacts() {
         fi
         if [[ -t 1 ]]; then
             stop_inline_spinner
-            if [[ "$removal_recorded" == "true" ]]; then
-                if [[ "$dry_run_mode" == "1" ]]; then
-                    echo -e "${GREEN}${ICON_SUCCESS}${NC} [DRY RUN] $display_item_path${NC}, ${GREEN}$size_human${NC}"
-                else
-                    echo -e "${GREEN}${ICON_SUCCESS}${NC} $display_item_path${NC}, ${GREEN}$size_human${NC}"
-                fi
+        fi
+        if [[ "$removal_recorded" == "true" ]]; then
+            if [[ "$dry_run_mode" == "1" ]]; then
+                echo -e "${GREEN}${ICON_SUCCESS}${NC} [DRY RUN] $display_item_path${NC}, ${GREEN}$size_human${NC}"
+            elif [[ -t 1 ]]; then
+                echo -e "${GREEN}${ICON_SUCCESS}${NC} $display_item_path${NC}, ${GREEN}$size_human${NC}"
             fi
         fi
     done
