@@ -31,12 +31,30 @@ MO_TIMEOUT_PERL_BIN="/usr/bin/perl"
 
 caller_pgrp=$(ps -o pgid= -p $$ | tr -d ' ')
 
+export MOLE_TTY_PROBE_MODE="$MODE"
+
+# The handoff is not synchronous with this child starting: run_with_timeout's
+# perl parent calls tcsetpgrp *after* forking, so sampling the foreground group
+# the instant the child runs can legitimately still show the caller's group.
+# That raced on CI while passing 30 consecutive local runs. Wait for the handoff
+# in tty mode instead of racing it, and in devnull mode let the terminal settle
+# first, so a delayed handoff would still be caught rather than sampled past.
 # shellcheck disable=SC2016  # Perl source; $pgrp/$tty/$fg are Perl variables.
 child_probe='
     use POSIX qw(tcgetpgrp);
     my $pgrp = getpgrp();
     open(my $tty, "<", "/dev/tty") or exit 3;
     my $fg = tcgetpgrp(fileno($tty));
+    if (($ENV{MOLE_TTY_PROBE_MODE} || "") eq "tty") {
+        for (1 .. 200) {
+            last if $fg == $pgrp;
+            select(undef, undef, undef, 0.01);
+            $fg = tcgetpgrp(fileno($tty));
+        }
+    } else {
+        select(undef, undef, undef, 0.2);
+        $fg = tcgetpgrp(fileno($tty));
+    }
     print "CHILD_PGRP=$pgrp FG=$fg\n";
 '
 
