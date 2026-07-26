@@ -182,6 +182,7 @@ run_with_timeout() {
 
             my $duration = 0 + shift @ARGV;
             $duration = 1 if $duration <= 0;
+            my $caller_pid = getppid();
 
             # Only the process group that currently owns the terminal may hand it
             # to a child. Mole runs these helpers concurrently inside one process
@@ -216,6 +217,14 @@ run_with_timeout() {
                 exit 127;
             }
 
+            # Perl defers these handlers until a safe point. Record the desired
+            # exit status here and let the normal wait loop terminate and reap
+            # the whole timed process group.
+            my $shutdown_status = 0;
+            $SIG{INT} = sub { $shutdown_status ||= 130; };
+            $SIG{TERM} = sub { $shutdown_status ||= 143; };
+            $SIG{HUP} = sub { $shutdown_status ||= 129; };
+
             # The child is a separate process group so timeout cleanup can kill
             # its descendants. A tty only permits its foreground process group
             # to read, however, so hand the terminal to the child while it runs.
@@ -241,6 +250,22 @@ run_with_timeout() {
                 tcsetpgrp($tty_fd, $original_pgrp);
             };
 
+            my $terminate_child = sub {
+                my $sent = kill "TERM", -$pid;
+                kill "TERM", $pid unless $sent;
+
+                my $grace_deadline = time() + 2;
+                while (time() < $grace_deadline) {
+                    my $result = waitpid($pid, WNOHANG);
+                    return if $result == $pid || $result == -1;
+                    sleep 0.1;
+                }
+
+                $sent = kill "KILL", -$pid;
+                kill "KILL", $pid unless $sent;
+                waitpid($pid, 0);
+            };
+
             my $deadline = time() + $duration;
 
             while (1) {
@@ -257,21 +282,18 @@ run_with_timeout() {
                     exit 1;
                 }
 
+                # A background shell worker can be killed without forwarding
+                # TERM to this Perl child. Detect reparenting so the timed
+                # command never outlives the worker that owned its deadline.
+                if ($shutdown_status || getppid() != $caller_pid) {
+                    my $status = $shutdown_status || 143;
+                    $terminate_child->();
+                    $restore_tty->();
+                    exit $status;
+                }
+
                 if (time() >= $deadline) {
-                    kill "TERM", -$pid;
-                    sleep 0.5;
-
-                    for (1 .. 6) {
-                        $result = waitpid($pid, WNOHANG);
-                        if ($result == $pid) {
-                            $restore_tty->();
-                            exit 124;
-                        }
-                        sleep 0.25;
-                    }
-
-                    kill "KILL", -$pid;
-                    waitpid($pid, 0);
+                    $terminate_child->();
                     $restore_tty->();
                     exit 124;
                 }

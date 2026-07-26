@@ -224,6 +224,55 @@ setup() {
     [[ $duration -lt 7 ]]
 }
 
+@test "run_with_timeout: perl fallback cleans child when its caller dies" {
+    if [[ "$(uname -s)" != "Darwin" || ! -x /usr/bin/perl ]]; then
+        skip "macOS perl required"
+    fi
+
+    local child_pid_file="$BATS_TEST_TMPDIR/timeout-child.pid"
+    local caller_pid=""
+    local perl_pid=""
+    local child_pid=""
+
+    /bin/bash "$PROJECT_ROOT/tests/timeout_parent_death_fixture.sh" \
+        "$PROJECT_ROOT" "$child_pid_file" > /dev/null 2>&1 &
+    caller_pid=$!
+
+    for _ in {1..50}; do
+        [[ -s "$child_pid_file" ]] && break
+        /bin/sleep 0.1
+    done
+    [[ -s "$child_pid_file" ]] || {
+        kill -KILL "$caller_pid" 2> /dev/null || true
+        return 1
+    }
+
+    child_pid=$(cat "$child_pid_file")
+    perl_pid=$(pgrep -P "$caller_pid" -x perl 2> /dev/null | head -1 || true)
+    [[ "$child_pid" =~ ^[0-9]+$ && "$perl_pid" =~ ^[0-9]+$ ]] || {
+        kill -KILL "$caller_pid" "$child_pid" 2> /dev/null || true
+        return 1
+    }
+
+    kill -TERM "$caller_pid"
+    for _ in {1..50}; do
+        if ! kill -0 "$perl_pid" 2> /dev/null && ! kill -0 "$child_pid" 2> /dev/null; then
+            break
+        fi
+        /bin/sleep 0.1
+    done
+
+    local leaked=0
+    if kill -0 "$perl_pid" 2> /dev/null || kill -0 "$child_pid" 2> /dev/null; then
+        leaked=1
+        kill -KILL "$perl_pid" "$child_pid" 2> /dev/null || true
+    fi
+    kill -KILL "$caller_pid" 2> /dev/null || true
+    wait "$caller_pid" 2> /dev/null || true
+
+    [ "$leaked" -eq 0 ]
+}
+
 # setsid() in the perl fallback strips the controlling terminal, which breaks
 # nested sudo inside brew cask uninstall scripts (issue #1003). The fallback must
 # use setpgid to keep the tty while still enabling process-group kill. This guards

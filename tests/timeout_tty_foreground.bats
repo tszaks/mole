@@ -47,12 +47,25 @@ setup() {
 	[ "$status" -eq 0 ] || return 1
 }
 
-# Class-level guard. run_with_timeout's Perl fallback hands the controlling
-# terminal to its timed child whenever stdin is a tty, so any background job
-# that can reach it must detach stdin first. Enumerating the call sites here
-# means a new background worker fails the build instead of suspending someone's
-# terminal with SIGTTOU.
-@test "every background job reaching run_with_timeout detaches stdin" {
+@test "clean: indirect background timeout workers detach stdin from the terminal" {
+	run awk '
+		/get_cleanup_path_size_kb "\$path"/ { in_worker = 1; remaining = 12 }
+		in_worker && /\)[[:space:]]*< \/dev\/null &/ { found = 1; exit }
+		in_worker && --remaining <= 0 { exit }
+		END { exit(found ? 0 : 1) }
+	' "$PROJECT_ROOT/bin/clean.sh"
+	[ "$status" -eq 0 ] || return 1
+
+	# shellcheck disable=SC2016  # Match literal variables in the source line.
+	run grep -nF 'project_cache_has_indicators "$dir" 5 && echo "$dir" >> "$_indicator_tmp") < /dev/null &' \
+		"$PROJECT_ROOT/lib/clean/caches.sh"
+	[ "$status" -eq 0 ] || return 1
+}
+
+# Source-level guard for direct calls and nearby subshell bodies. Shell has no
+# static call graph, so indirect workers are pinned explicitly above and in the
+# other call-site tests in this file.
+@test "direct background timeout calls and nearby subshells detach stdin" {
 	local offenders=""
 	local file line text
 	while IFS= read -r hit; do
