@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"testing"
+)
 
 // TestSavePrefPreservesOtherKeys is the whole point of the refactor: writing one
 // preference must not clobber another. The previous single-string store failed
@@ -48,4 +54,45 @@ func TestLoadPrefsIgnoresBlanksAndComments(t *testing.T) {
 	if len(prefs) != 1 || prefs["cat_hidden"] != "true" {
 		t.Fatalf("unexpected prefs after seed: %#v", prefs)
 	}
+}
+
+func TestSavePrefConcurrentProcessesPreserveEveryKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const writers = 16
+
+	commands := make([]*exec.Cmd, 0, writers)
+	for i := range writers {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestSavePrefProcessHelper$")
+		cmd.Env = append(os.Environ(),
+			"HOME="+home,
+			"MOLE_PREFS_TEST_HELPER=1",
+			fmt.Sprintf("MOLE_PREFS_TEST_KEY=key_%02d", i),
+			"MOLE_PREFS_TEST_VALUE="+strconv.Itoa(i),
+		)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start writer %d: %v", i, err)
+		}
+		commands = append(commands, cmd)
+	}
+	for i, cmd := range commands {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("writer %d failed: %v", i, err)
+		}
+	}
+
+	prefs := loadPrefs()
+	for i := range writers {
+		key := fmt.Sprintf("key_%02d", i)
+		if got := prefs[key]; got != strconv.Itoa(i) {
+			t.Errorf("%s = %q, want %q", key, got, strconv.Itoa(i))
+		}
+	}
+}
+
+func TestSavePrefProcessHelper(t *testing.T) {
+	if os.Getenv("MOLE_PREFS_TEST_HELPER") != "1" {
+		return
+	}
+	savePref(os.Getenv("MOLE_PREFS_TEST_KEY"), os.Getenv("MOLE_PREFS_TEST_VALUE"))
 }

@@ -8,11 +8,14 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // getConfigPath returns the path to the status preferences file, or "" if the
@@ -63,13 +66,28 @@ func savePref(key, value string) {
 		return
 	}
 
-	prefs := loadPrefs()
-	prefs[key] = value
-
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
+
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() {
+		_ = lock.Close()
+	}()
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
+		return
+	}
+	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN) //nolint:errcheck
+
+	// Read only after acquiring the inter-process lock. Otherwise two status
+	// instances can both load the same old map and the later writer drops the
+	// other instance's new key.
+	prefs := loadPrefs()
+	prefs[key] = value
 
 	// Sort keys so the file is deterministic: stable on disk, clean diffs,
 	// and testable (map iteration order is randomized in Go).
@@ -86,7 +104,38 @@ func savePref(key, value string) {
 		b.WriteString(prefs[k])
 		b.WriteByte('\n')
 	}
-	_ = os.WriteFile(path, []byte(b.String()), 0o644)
+	if err := writePrefsAtomically(path, []byte(b.String())); err != nil {
+		return
+	}
+}
+
+func writePrefsAtomically(path string, data []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), ".status_prefs.*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+
+	if err := temp.Chmod(0o644); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("replace preferences: %w", err)
+	}
+	return nil
 }
 
 // Typed accessors: the rest of the code speaks in bools/ints, not raw strings.
