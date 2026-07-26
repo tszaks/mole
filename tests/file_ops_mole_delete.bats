@@ -104,13 +104,19 @@ export MOLE_DELETE_MODE=trash
 export PATH="$fake_bin:\$PATH"
 export HOME="$fake_home"
 export MOLE_TEST_TRACE="$trace"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+_mole_create_privileged_trash_stage() {
+    local stage="$SANDBOX/stage-sudo-trash"
+    mkdir -p "\$stage"
+    printf '%s\n' "\$stage"
+}
 mole_delete "$victim" true
 EOF
 
     [ "$status" -eq 0 ]
     [[ ! -e "$victim" ]] || return 1
     [[ -d "$fake_home/.Trash/$(basename "$victim")" ]] || return 1
-    [[ "$(grep -c '^sudo -n mv ' "$trace" 2> /dev/null || true)" -eq 1 ]]
+    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 1 ]]
     [[ "$(grep -c '^sudo -n trash ' "$trace" 2> /dev/null || true)" -eq 0 ]]
     [[ "$(grep -c '^trash ' "$trace" 2> /dev/null || true)" -eq 0 ]]
     [[ "$(grep -c '^osascript ' "$trace" 2> /dev/null || true)" -eq 0 ]]
@@ -149,13 +155,14 @@ export MOLE_DELETE_MODE=trash
 export PATH="$fake_bin:\$PATH"
 export HOME="$fake_home"
 export MOLE_TEST_TRACE="$trace"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
 mole_delete "$victim" true
 EOF
 
     [ "$status" -ne 0 ]
     [[ -e "$victim" ]] || return 1
     [[ -z "$(ls -A "$redirected" 2> /dev/null || true)" ]]
-    [[ "$(grep -c '^sudo -n mv ' "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 0 ]]
 
     local status_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
@@ -190,6 +197,12 @@ export MOLE_DELETE_MODE=trash
 export PATH="$fake_bin:\$PATH"
 export HOME="$fake_home"
 export MOLE_TEST_TRACE="$trace"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+_mole_create_privileged_trash_stage() {
+    local stage="$SANDBOX/stage-conflict-trash"
+    mkdir -p "\$stage"
+    printf '%s\n' "\$stage"
+}
 mole_delete "$victim" true
 EOF
 
@@ -197,11 +210,61 @@ EOF
     [[ ! -e "$victim" ]] || return 1
     [[ -d "$fake_home/.Trash/$(basename "$victim")" ]] || return 1
     [[ -n "$(find "$fake_home/.Trash" -mindepth 1 -maxdepth 1 -name "$(basename "$victim").*" -print -quit)" ]] || return 1
-    [[ "$(grep -c '^sudo -n mv -n ' "$trace" 2> /dev/null || true)" -eq 1 ]]
+    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 1 ]]
 
     local status_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
     [ "$status_col" = "ok" ]
+}
+
+@test "sudo Trash preserves staged payload without privileged rollback after handoff" {
+    local victim="$SANDBOX/recovery_app"
+    local fake_home="$SANDBOX/home"
+    local stage="$SANDBOX/recovery-stage"
+    local trace="$SANDBOX/recovery-sudo.log"
+
+    mkdir -p "$fake_home" "$victim"
+    printf 'payload' > "$victim/data.txt"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export MOLE_DELETE_MODE=trash
+export HOME="$fake_home"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+_mole_create_privileged_trash_stage() {
+    command chmod 500 "$fake_home/.Trash"
+    mkdir -p "$stage"
+    printf '%s\n' "$stage"
+}
+sudo() {
+    [[ "\${1:-}" == "-n" ]] && shift
+    printf '%s\n' "\$*" >> "$trace"
+    "\$@"
+}
+set +e
+mole_delete "$victim" true
+rc=\$?
+set -e
+printf 'RC=%s\n' "\$rc"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=1"* ]] || return 1
+    [[ "$output" == *"item preserved for recovery"* ]] || return 1
+    [[ ! -e "$victim" ]] || return 1
+    [[ -f "$stage/item/data.txt" ]] || return 1
+    [[ "$(grep -c "/bin/rm -rf $stage" "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ "$(grep -c "/bin/mv $stage/item $victim" "$trace" 2> /dev/null || true)" -eq 0 ]]
+}
+
+@test "privileged Trash staging never uses world-writable Library Caches" {
+    run grep -nF '/Library/Caches/.mole-trash' "$PROJECT_ROOT/lib/core/file_ops.sh"
+    [ "$status" -ne 0 ]
+
+    run grep -nF 'stage_root="/Library/MoleTrashStaging"' "$PROJECT_ROOT/lib/core/file_ops.sh"
+    [ "$status" -eq 0 ]
 }
 
 @test "Microsoft Word app path uses the direct Trash mover without trash or Finder" {

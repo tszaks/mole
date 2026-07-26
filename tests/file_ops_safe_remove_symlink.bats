@@ -76,3 +76,20 @@ EOF
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [[ -L "$link" ]] || { echo "dry-run deleted the link"; return 1; }
 }
+
+@test "safe_remove_symlink honours the cleanup whitelist" {
+    local target="$SANDBOX/whitelist_target"
+    local link="$SANDBOX/whitelist_link"
+    mkdir -p "$target"
+    ln -s "$target" "$link"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+is_path_whitelisted() { [[ "\$1" == "$link" ]]; }
+safe_remove_symlink "$link"
+EOF
+
+    [ "$status" -ne 0 ] || { echo "whitelisted link reported removal success"; return 1; }
+    [[ -L "$link" ]] || { echo "whitelisted link was deleted"; return 1; }
+    [[ -d "$target" ]] || { echo "symlink target was damaged"; return 1; }
+}

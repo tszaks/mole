@@ -1344,10 +1344,11 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 # common.sh turns errexit on; the probes below are EXPECTED to return 1.
 set +e
 
-stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
+# Keep this policy probe independent of the checkout location. A detached
+# worktree commonly lives below /private/var/folders, whose children are
+# intentionally accepted as disposable temp data before app protection runs.
+stub="/Users/mole-clean-apps-fixture-$$/Library/Containers/com.macpaw.CleanMyMac-mas"
 plist="$stub/.com.apple.containermanagerd.metadata.plist"
-mkdir -p "$stub"
-touch "$plist"
 
 validate_path_for_deletion "$stub" > /dev/null 2>&1
 echo "validate_dir_rc=$?"

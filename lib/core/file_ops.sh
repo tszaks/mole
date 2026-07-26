@@ -502,6 +502,21 @@ safe_remove_symlink() {
         return 1
     fi
 
+    if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$path"; then
+        debug_log "Skipped symlink removal for whitelisted path: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "whitelist"
+        return 1
+    fi
+
+    if [[ "$use_sudo" == "true" ]] && _mole_privileged_path_has_mutable_ancestor "$path"; then
+        if [[ ${EUID:-0} -ne 0 ]]; then
+            use_sudo=false
+        else
+            debug_log "Refusing privileged symlink removal below mutable parent: $path"
+            return 1
+        fi
+    fi
+
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         _record_file_ops_dry_run_target "$path"
         debug_log "[DRY RUN] Would remove symlink: $path"
@@ -528,7 +543,55 @@ safe_remove_symlink() {
     fi
 }
 
-# Safe sudo removal with symlink protection
+# A privileged path operation is only safe when every parent directory is
+# immutable to unprivileged users. Checking `-w` alone is insufficient: a
+# directory owner can chmod a 0555 parent after validation, replace a component,
+# and redirect a later sudo rm/mv. Fail closed on non-root ownership, writable
+# mode bits, symlinks, unreadable metadata, and effective ACL write access.
+_mole_privileged_path_has_mutable_ancestor() {
+    local path="$1"
+    local probe="${path%/*}"
+    local invoking_uid=""
+    [[ -n "$probe" ]] || probe="/"
+    invoking_uid=$(get_invoking_uid 2> /dev/null || true)
+    [[ "$invoking_uid" =~ ^[0-9]+$ ]] || return 0
+
+    while true; do
+        if [[ -L "$probe" ]]; then
+            return 0
+        fi
+
+        local owner_uid=""
+        local mode=""
+        owner_uid=$($STAT_BSD -f%u "$probe" 2> /dev/null || true)
+        mode=$($STAT_BSD -f%Lp "$probe" 2> /dev/null || true)
+        if [[ ! "$owner_uid" =~ ^[0-9]+$ || ! "$mode" =~ ^[0-7]+$ ]]; then
+            return 0
+        fi
+        if [[ "$owner_uid" -ne 0 ]] || (((8#$mode & 0022) != 0)); then
+            return 0
+        fi
+        if [[ "$invoking_uid" -ne 0 ]]; then
+            if [[ ${EUID:-0} -eq "$invoking_uid" ]]; then
+                [[ -w "$probe" ]] && return 0
+            elif [[ ${EUID:-0} -eq 0 ]]; then
+                # Under `sudo mo`, the shell's -w probe reflects root rather
+                # than the invoking user. Drop authority for the ACL check so
+                # immutable system parents do not become false positives.
+                sudo -n -u "#$invoking_uid" /usr/bin/test -w "$probe" 2> /dev/null && return 0
+            else
+                return 0
+            fi
+        fi
+
+        [[ "$probe" == "/" ]] && break
+        probe="${probe%/*}"
+        [[ -n "$probe" ]] || probe="/"
+    done
+    return 1
+}
+
+# Safe sudo removal with symlink and parent-component protection
 safe_sudo_remove() {
     local path="$1"
 
@@ -548,6 +611,22 @@ safe_sudo_remove() {
 
     if [[ -L "$path" ]]; then
         log_error "Refusing to sudo remove symlink: $path"
+        return 1
+    fi
+
+    if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$path"; then
+        debug_log "Skipped sudo remove for whitelisted path: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "whitelist"
+        return 1
+    fi
+
+    if _mole_privileged_path_has_mutable_ancestor "$path"; then
+        if [[ ${EUID:-0} -ne 0 ]]; then
+            debug_log "Downgrading sudo remove below mutable parent: $path"
+            safe_remove "$path" true
+            return $?
+        fi
+        debug_log "Refusing sudo remove below mutable parent: $path"
         return 1
     fi
 
@@ -702,6 +781,17 @@ mole_delete() {
     if ! validate_path_for_deletion "$path"; then
         _mole_delete_log "$mode" "0" "rejected" "$path"
         return 1
+    fi
+
+    if [[ "$needs_sudo" == "true" ]] && _mole_privileged_path_has_mutable_ancestor "$path"; then
+        if [[ ${EUID:-0} -ne 0 ]]; then
+            debug_log "Downgrading privileged delete below mutable parent: $path"
+            needs_sudo=false
+        else
+            _mole_delete_log "$mode" "unknown" "mutable-parent" "$path"
+            debug_log "Refusing privileged delete below mutable parent: $path"
+            return 1
+        fi
     fi
 
     # Capture size before the delete so the log line is still useful when the
@@ -877,6 +967,50 @@ end run
 APPLESCRIPT
 }
 
+_mole_create_privileged_trash_stage() {
+    local stage_root="/Library/MoleTrashStaging"
+    local stage_dir=""
+
+    # /Library/Caches is mode 0777 on supported macOS releases, so it cannot
+    # anchor a privileged path operation. Create an exact root-owned parent
+    # under immutable /Library; mode 0711 lets the invoking user traverse into
+    # only the randomized staging directory handed to them later.
+    # Refuse an existing symlink before any ownership or mode operation. Only
+    # root can mutate /Library, but a stale privileged symlink must not make
+    # chown/chmod follow into an unrelated tree.
+    if [[ -e "$stage_root" || -L "$stage_root" ]]; then
+        [[ -d "$stage_root" && ! -L "$stage_root" ]] || return 1
+    else
+        sudo -n /bin/mkdir "$stage_root" 2> /dev/null || return 1
+    fi
+    sudo -n /usr/sbin/chown 0:0 "$stage_root" 2> /dev/null || return 1
+    sudo -n /bin/chmod -N "$stage_root" 2> /dev/null || return 1
+    sudo -n /bin/chmod 711 "$stage_root" 2> /dev/null || return 1
+
+    local root_uid=""
+    local root_mode=""
+    root_uid=$($STAT_BSD -f%u "$stage_root" 2> /dev/null || true)
+    root_mode=$($STAT_BSD -f%Lp "$stage_root" 2> /dev/null || true)
+    if [[ -L "$stage_root" || "$root_uid" != "0" || "$root_mode" != "711" ]]; then
+        return 1
+    fi
+
+    stage_dir=$(sudo -n /usr/bin/mktemp -d "$stage_root/item.XXXXXX" 2> /dev/null) || return 1
+    if [[ "$stage_dir" != "$stage_root"/item.* || ! -d "$stage_dir" || -L "$stage_dir" ]]; then
+        return 1
+    fi
+    if _mole_privileged_path_has_mutable_ancestor "$stage_dir/item"; then
+        sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact empty staging directory created by mktemp above
+        _mole_remove_privileged_trash_stage_root_if_empty
+        return 1
+    fi
+    printf '%s\n' "$stage_dir"
+}
+
+_mole_remove_privileged_trash_stage_root_if_empty() {
+    sudo -n /bin/rmdir "/Library/MoleTrashStaging" 2> /dev/null || true
+}
+
 _mole_move_path_to_user_trash() {
     local path="$1"
     local needs_sudo="${2:-false}"
@@ -893,25 +1027,17 @@ _mole_move_path_to_user_trash() {
         return 1
     fi
 
-    local trash_dir="${user_home%/}/.Trash"
-
-    # The destination must be the invoking user's Trash, even though sudo is
-    # needed to unlink the original protected path.
-    if [[ -L "$trash_dir" ]]; then
-        debug_log "Refusing direct Trash move: invoking user Trash is a symlink: $trash_dir"
-        return 1
-    fi
-    if ! mkdir -p "$trash_dir" 2> /dev/null; then
-        if [[ "$needs_sudo" != "true" ]] || ! sudo -n mkdir -p "$trash_dir" 2> /dev/null; then
-            debug_log "Failed to create invoking user Trash: $trash_dir"
+    if [[ "$needs_sudo" == "true" ]] && _mole_privileged_path_has_mutable_ancestor "$path"; then
+        if [[ ${EUID:-0} -ne 0 ]]; then
+            debug_log "Downgrading Trash move below mutable parent: $path"
+            needs_sudo=false
+        else
+            debug_log "Refusing privileged Trash move below mutable parent: $path"
             return 1
         fi
     fi
-    if [[ ! -d "$trash_dir" || -L "$trash_dir" ]]; then
-        debug_log "Refusing direct Trash move: invoking user Trash is not a normal directory: $trash_dir"
-        return 1
-    fi
 
+    local trash_dir="${user_home%/}/.Trash"
     local owner_uid="" owner_gid=""
     if declare -f get_invoking_uid > /dev/null 2>&1; then
         owner_uid=$(get_invoking_uid)
@@ -919,14 +1045,45 @@ _mole_move_path_to_user_trash() {
     if declare -f get_invoking_gid > /dev/null 2>&1; then
         owner_gid=$(get_invoking_gid)
     fi
-    if [[ "$needs_sudo" == "true" && "$owner_uid" =~ ^[0-9]+$ && "$owner_gid" =~ ^[0-9]+$ ]]; then
-        sudo -n chown "$owner_uid:$owner_gid" "$trash_dir" 2> /dev/null || true
+    if [[ ! "$owner_uid" =~ ^[0-9]+$ || ! "$owner_gid" =~ ^[0-9]+$ ]]; then
+        debug_log "Failed to resolve invoking user ownership for Trash"
+        return 1
     fi
-    if ! chmod 700 "$trash_dir" 2> /dev/null; then
-        if [[ "$needs_sudo" != "true" ]] || ! sudo -n chmod 700 "$trash_dir" 2> /dev/null; then
+
+    # The destination must be the invoking user's Trash, even though sudo is
+    # needed to unlink the original protected path.
+    if [[ -L "$trash_dir" ]]; then
+        debug_log "Refusing direct Trash move: invoking user Trash is a symlink: $trash_dir"
+        return 1
+    fi
+    if [[ ${EUID:-0} -eq 0 ]]; then
+        sudo -n -u "#$owner_uid" mkdir -p "$trash_dir" 2> /dev/null || {
+            debug_log "Failed to create invoking user Trash: $trash_dir"
+            return 1
+        }
+    elif ! mkdir -p "$trash_dir" 2> /dev/null; then
+        debug_log "Failed to create invoking user Trash: $trash_dir"
+        return 1
+    fi
+    if [[ ! -d "$trash_dir" || -L "$trash_dir" ]]; then
+        debug_log "Refusing direct Trash move: invoking user Trash is not a normal directory: $trash_dir"
+        return 1
+    fi
+
+    local trash_owner_uid=""
+    trash_owner_uid=$($STAT_BSD -f%u "$trash_dir" 2> /dev/null || true)
+    if [[ "$trash_owner_uid" != "$owner_uid" ]]; then
+        debug_log "Refusing direct Trash move: invoking user does not own Trash: $trash_dir"
+        return 1
+    fi
+    if [[ ${EUID:-0} -eq 0 ]]; then
+        if ! sudo -n -u "#$owner_uid" chmod 700 "$trash_dir" 2> /dev/null; then
             debug_log "Failed to set invoking user Trash permissions: $trash_dir"
             return 1
         fi
+    elif ! chmod 700 "$trash_dir" 2> /dev/null; then
+        debug_log "Failed to set invoking user Trash permissions: $trash_dir"
+        return 1
     fi
 
     # Avoid Finder-style ':' path weirdness and keep generated names filesystem-safe.
@@ -953,7 +1110,69 @@ _mole_move_path_to_user_trash() {
     local move_output=""
     local move_rc=0
     if [[ "$needs_sudo" == "true" ]]; then
-        move_output=$(sudo -n mv -n "$path" "$dest" 2>&1) || move_rc=$?
+        # Never point a root mv directly into ~/.Trash: that directory is
+        # intentionally controlled by the invoking user and can be replaced
+        # after validation. First cross the privileged boundary into a
+        # root-owned staging directory, then perform the final Trash move with
+        # only the invoking user's authority.
+        local stage_dir=""
+        local stage_path=""
+        stage_dir=$(_mole_create_privileged_trash_stage) || {
+            debug_log "Failed to create immutable Trash staging directory"
+            return 1
+        }
+        stage_path="$stage_dir/item"
+
+        # The first move must be a same-filesystem rename. A cross-volume mv
+        # degrades into copy-then-delete and can leave the only payload split
+        # between source and staging if it fails midway.
+        local source_device=""
+        local stage_device=""
+        source_device=$($STAT_BSD -f%d "$path" 2> /dev/null || true)
+        stage_device=$($STAT_BSD -f%d "$stage_dir" 2> /dev/null || true)
+        if [[ ! "$source_device" =~ ^[0-9]+$ || "$source_device" != "$stage_device" ]]; then
+            sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact empty staging directory created by mktemp above
+            _mole_remove_privileged_trash_stage_root_if_empty
+            debug_log "Refusing cross-volume privileged Trash staging: $path"
+            return 1
+        fi
+
+        if ! sudo -n /bin/mv "$path" "$stage_path" 2> /dev/null; then
+            sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact root-owned directory created by mktemp above
+            _mole_remove_privileged_trash_stage_root_if_empty
+            debug_log "Failed to move path into immutable Trash staging: $path"
+            return 1
+        fi
+        # Keep the stage root-owned while ownership is repaired. `-h` prevents
+        # chown from following symlinks inside the payload. Once either payload
+        # ownership or stage ownership changes, preserve on any later failure
+        # rather than reintroducing user-owned content into the privileged
+        # source path.
+        if ! sudo -n /bin/chmod 700 "$stage_dir" 2> /dev/null ||
+            ! sudo -n /usr/sbin/chown -Rh "$owner_uid:$owner_gid" "$stage_path" 2> /dev/null ||
+            ! sudo -n /usr/sbin/chown "$owner_uid:$owner_gid" "$stage_dir" 2> /dev/null; then
+            log_error "Trash move failed; item preserved for recovery at: $stage_path"
+            debug_log "Failed to hand Trash staging directory to invoking user"
+            return 1
+        fi
+
+        if [[ ${EUID:-0} -eq 0 ]]; then
+            move_output=$(sudo -n -u "#$owner_uid" /bin/mv -n "$stage_path" "$dest" 2>&1) || move_rc=$?
+        else
+            move_output=$(/bin/mv -n "$stage_path" "$dest" 2>&1) || move_rc=$?
+        fi
+
+        if [[ $move_rc -ne 0 || -e "$stage_path" || -L "$stage_path" ]]; then
+            move_rc=1
+            # stage_dir is user-controlled after the ownership handoff above.
+            # Never let root resolve stage_path again: it may have been replaced
+            # between the failed user move and this branch. Preserve the item
+            # in staging and report the exact recovery location instead.
+            log_error "Trash move failed; item preserved for recovery at: $stage_path"
+        else
+            rmdir "$stage_dir" 2> /dev/null || true
+            _mole_remove_privileged_trash_stage_root_if_empty
+        fi
     else
         move_output=$(mv -n "$path" "$dest" 2>&1) || move_rc=$?
     fi
@@ -970,11 +1189,6 @@ _mole_move_path_to_user_trash() {
     if [[ -e "$path" || -L "$path" ]] || [[ ! -e "$dest" && ! -L "$dest" ]]; then
         debug_log "Failed to move path directly without overwriting destination: $path -> $dest"
         return 1
-    fi
-
-    # Best-effort ownership repair makes restored Trash items behave like user files.
-    if [[ "$needs_sudo" == "true" && "$owner_uid" =~ ^[0-9]+$ && "$owner_gid" =~ ^[0-9]+$ ]]; then
-        sudo -n chown -R "$owner_uid:$owner_gid" "$dest" 2> /dev/null || true
     fi
 
     debug_log "Moved path directly to invoking user Trash: $path -> $dest"
@@ -1198,6 +1412,18 @@ safe_sudo_find_delete() {
             continue
         fi
         if declare -f is_path_whitelisted > /dev/null && is_path_whitelisted "$match"; then
+            continue
+        fi
+        if _mole_privileged_path_has_mutable_ancestor "$match"; then
+            # A privileged path-based delete cannot safely cross a directory
+            # the invoking user can rename or replace. Delete only with the
+            # caller's own permissions; root invocations skip the path because
+            # they have no unprivileged identity to fall back to.
+            if [[ ${EUID:-0} -ne 0 ]]; then
+                safe_remove "$match" true || true
+            else
+                debug_log "Skipping sudo delete below mutable parent: $match"
+            fi
             continue
         fi
         if [[ "${MOLE_DRY_RUN:-0}" == "1" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then

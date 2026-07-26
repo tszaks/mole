@@ -394,6 +394,10 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
+# This test models a root-owned, immutable system path so it reaches the
+# noninteractive sudo authentication branch.
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+
 sudo() {
     if [[ "${1:-}" != "-n" ]]; then
         echo "INTERACTIVE_SUDO:$*" >&2
@@ -435,6 +439,10 @@ SCRIPT
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
+
+# This test models a root-owned, immutable system path so it reaches the
+# noninteractive sudo authentication branch.
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
 
 sudo() {
     if [[ "${1:-}" != "-n" ]]; then
@@ -480,7 +488,7 @@ SCRIPT
     cat > "$script" <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-TRACE="$TARGET_DIR/sudo.trace"
+TRACE="${TARGET_DIR}.sudo.trace"
 > "$TRACE"
 
 sudo() {
@@ -543,6 +551,9 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 TRACE="$TARGET_DIR/sudo.trace"
 > "$TRACE"
+
+# This test models a root-owned, non-user-writable log tree.
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
 
 WHITELIST_PATTERNS=("$TARGET_DIR/keep.log")
 
@@ -616,6 +627,9 @@ SCRIPT
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 
+# This test models a root-owned, non-user-writable log tree.
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+
 # Simulate a credential that dies right after the find: the batch xargs rm
 # fails, and every later sudo probe (true / test / rm) fails for the same
 # auth reason. Nothing was deleted, so no REMOVED lines may be logged.
@@ -673,6 +687,9 @@ set -euo pipefail
 printf 'DIAG_BASH:%s (%s)\n' "$BASH_VERSION" "$(command -v bash || true)"
 source "$PROJECT_ROOT/lib/core/common.sh"
 echo "DIAG_SOURCED"
+
+# This test models a root-owned, non-user-writable log tree.
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
 
 sudo() {
     printf 'MOCK_CALL:%s\n' "$*" >> "$TARGET_DIR/mock.trace" || true
@@ -743,6 +760,9 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 TRACE="$TARGET_DIR/sudo.trace"
 > "$TRACE"
 
+# This test models a root-owned, non-user-writable log tree.
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+
 sudo() {
     printf 'SUDO:%s\n' "$*" >> "$TRACE"
     if [[ "${1:-}" != "-n" ]]; then
@@ -793,6 +813,139 @@ SCRIPT
     [[ "$output" == *"SUDO:-n xargs -0 rm -f --"* ]] || return 1
     [[ "$output" == *"SUDO:-n rm -rf $target_dir/stuck.log"* ]] || return 1
     [[ "$output" != *"INTERACTIVE_SUDO"* ]] || return 1
+}
+
+@test "safe_sudo_find_delete never elevates deletion below a user-writable parent" {
+    local target_dir="$TEST_DIR/sudo-mutable-parent"
+    local script="$TEST_DIR/sudo-mutable-parent-test.sh"
+    mkdir -p "$target_dir"
+    touch "$target_dir/old.log"
+
+    cat > "$script" <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+TRACE="$TARGET_DIR/sudo.trace"
+> "$TRACE"
+
+sudo() {
+    printf 'SUDO:%s\n' "$*" >> "$TRACE"
+    [[ "${1:-}" == "-n" ]] || return 99
+    shift
+    case "${1:-}" in
+        test)
+            shift
+            command test "$@"
+            ;;
+        find)
+            printf '%s\0' "$TARGET_DIR/old.log"
+            ;;
+        xargs | rm)
+            echo "PRIVILEGED_DELETE:$*"
+            return 0
+            ;;
+        *)
+            "$@"
+            ;;
+    esac
+}
+export -f sudo
+
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
+[[ -e "$TARGET_DIR/old.log" ]] && echo "TARGET_SURVIVED" || echo "TARGET_REMOVED"
+cat "$TRACE"
+SCRIPT
+    chmod +x "$script"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TARGET_REMOVED"* ]] || return 1
+    [[ "$output" != *"PRIVILEGED_DELETE"* ]] || return 1
+    [[ "$output" != *"SUDO:-n xargs"* ]] || return 1
+    [[ "$output" != *"SUDO:-n rm"* ]] || return 1
+}
+
+@test "safe_sudo_find_delete treats a user-owned 0555 parent as mutable" {
+    local target_dir="$TEST_DIR/sudo-owner-mutable-parent"
+    local script="$TEST_DIR/sudo-owner-mutable-parent-test.sh"
+    mkdir -p "$target_dir"
+    touch "$target_dir/old.log"
+    chmod 0555 "$target_dir"
+
+    cat > "$script" <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+TRACE="${TARGET_DIR}.sudo.trace"
+> "$TRACE"
+
+sudo() {
+    printf 'SUDO:%s\n' "$*" >> "$TRACE"
+    [[ "${1:-}" == "-n" ]] || return 99
+    shift
+    case "${1:-}" in
+        test)
+            shift
+            command test "$@"
+            ;;
+        find)
+            printf '%s\0' "$TARGET_DIR/old.log"
+            ;;
+        xargs | rm)
+            echo "PRIVILEGED_DELETE:$*"
+            return 0
+            ;;
+        *)
+            "$@"
+            ;;
+    esac
+}
+export -f sudo
+
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
+[[ -e "$TARGET_DIR/old.log" ]] && echo "TARGET_SURVIVED" || echo "TARGET_REMOVED"
+cat "$TRACE"
+SCRIPT
+    chmod +x "$script"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
+    chmod 0755 "$target_dir"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TARGET_SURVIVED"* ]] || return 1
+    [[ "$output" != *"PRIVILEGED_DELETE"* ]] || return 1
+    [[ "$output" != *"SUDO:-n xargs"* ]] || return 1
+    [[ "$output" != *"SUDO:-n rm"* ]] || return 1
+}
+
+@test "safe_sudo_remove honours the cleanup whitelist before sudo" {
+    local target="$TEST_DIR/whitelisted-sudo-target"
+    mkdir -p "$target"
+    touch "$target/data"
+
+    # shellcheck disable=SC2016  # The inner bash expands TARGET and PROJECT_ROOT.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET="$target" \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc -c '
+            set -euo pipefail
+            source "$PROJECT_ROOT/lib/core/common.sh"
+            is_path_whitelisted() { [[ "$1" == "$TARGET" ]]; }
+            sudo() {
+                echo "UNEXPECTED_SUDO:$*"
+                return 99
+            }
+            set +e
+            safe_sudo_remove "$TARGET"
+            rc=$?
+            set -e
+            printf "RC=%s\n" "$rc"
+            [[ -e "$TARGET/data" ]] && echo "TARGET_SURVIVED"
+        '
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=1"* ]] || return 1
+    [[ "$output" == *"TARGET_SURVIVED"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SUDO"* ]]
 }
 
 @test "safe_find_delete rejects symlinked directory" {
