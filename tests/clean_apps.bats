@@ -611,7 +611,9 @@ EOF
 }
 
 @test "clean_orphaned_system_services respects dry-run" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
+    # Without MOLE_TEST_MODE=0 the sweep early-returns under setup_file's
+    # MOLE_TEST_MODE=1, leaving $output empty and both negative assertions true.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 DRY_RUN=true MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
@@ -623,7 +625,20 @@ debug_log() { :; }
 
 tmp_dir="$(mktemp -d)"
 tmp_plist="$tmp_dir/com.sogou.test.plist"
-touch "$tmp_plist"
+# An empty file is never classified as an orphan, so the sweep found nothing and
+# the dry-run branch under test never ran.
+cat > "$tmp_plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sogou.test</string>
+    <key>Program</key>
+    <string>$tmp_dir/missing-binary</string>
+</dict>
+</plist>
+PLIST
 
 sudo() {
   if [[ "$1" == "-n" && "$2" == "true" ]]; then
@@ -654,7 +669,10 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"rm-called"* ]] || return 1
-    [[ "$output" != *"launchctl-called"* ]]
+    [[ "$output" != *"launchctl-called"* ]] || return 1
+    # Positive control: every other assertion here is true on empty output, so
+    # without this the test cannot distinguish "dry-run behaved" from "nothing ran".
+    [[ "$output" == *"Orphaned services · "*" found dry"* ]]
 }
 
 @test "clean_orphaned_system_services reads unreadable plists through sudo PlistBuddy" {
