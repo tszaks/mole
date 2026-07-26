@@ -40,6 +40,78 @@ gpu_cache_dir_is_stale() {
     [[ -z "$recent_file" ]]
 }
 
+# Fail-closed Software Update probe for macOS installer cleanup. Returns 0
+# (treat as pending) when recommended updates are queued, and also when the
+# plist is unreadable, plutil fails, or the key is missing: removing staged
+# update payloads on a wrong "no updates" answer left a Mac unbootable on a
+# macOS 27 beta, so an unknown state must block cleanup.
+software_update_pending_or_unknown() {
+    local plist="${1:-/Library/Preferences/com.apple.SoftwareUpdate.plist}"
+    [[ -f "$plist" ]] || return 0
+    local recommended=""
+    if ! recommended=$(plutil -extract RecommendedUpdates json -o - "$plist" 2> /dev/null); then
+        return 0
+    fi
+    recommended=$(printf '%s' "$recommended" | tr -d '[:space:]')
+    # Only a readable, explicitly empty RecommendedUpdates array means "no
+    # pending updates"; anything else stays fail-closed.
+    if [[ "$recommended" == "[]" ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Newest mtime across an install-data root and its direct children (bounded).
+# POSIX only bumps the root mtime when a direct entry is added, removed, or
+# renamed, so an update freshly staged inside an existing subdirectory keeps
+# an old root mtime; the age gate must look at the children too. An unreadable
+# root or child reads as "modified now" so the gate fails closed.
+install_data_newest_mtime() {
+    local root="$1"
+    local newest
+    newest=$(get_file_mtime "$root")
+    if [[ "$newest" -le 0 ]]; then
+        get_epoch_seconds
+        return 0
+    fi
+    # A root we cannot enumerate (mo runs unprivileged; only the final remove
+    # elevates) must read as "modified now": a swallowed find failure would
+    # silently fall back to the stale root mtime and reopen the exact hole
+    # the child scan exists to close.
+    if [[ ! -r "$root" || ! -x "$root" ]]; then
+        get_epoch_seconds
+        return 0
+    fi
+    local child="" child_mtime=0 checked=0
+    while IFS= read -r -d '' child; do
+        checked=$((checked + 1))
+        if [[ $checked -gt 128 ]]; then
+            break
+        fi
+        child_mtime=$(get_file_mtime "$child")
+        if [[ "$child_mtime" -le 0 ]]; then
+            newest=$(get_epoch_seconds)
+            break
+        fi
+        if [[ "$child_mtime" -gt "$newest" ]]; then
+            newest="$child_mtime"
+        fi
+    done < <(find "$root" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+    echo "$newest"
+}
+
+# Modern OTA updates stage /macOS Install Data via InstallAssistant and
+# UpdateBrainService rather than a visible "Install macOS *.app" process.
+macos_installer_process_running() {
+    # No pgrep = cannot prove the installer is idle; fail closed like the
+    # sibling gates (practically unreachable, pgrep ships with macOS).
+    command -v pgrep > /dev/null 2>&1 || return 0
+    pgrep -if "InstallAssistant" > /dev/null 2>&1 && return 0
+    pgrep -if "UpdateBrainService" > /dev/null 2>&1 && return 0
+    pgrep -if "Install macOS" > /dev/null 2>&1 && return 0
+    return 1
+}
+
 # System caches, logs, and temp files.
 clean_deep_system() {
     stop_section_spinner
@@ -135,23 +207,29 @@ clean_deep_system() {
     fi
     start_section_spinner "Scanning macOS installer files..."
     if [[ -d "/macOS Install Data" ]]; then
-        local mtime
-        mtime=$(get_file_mtime "/macOS Install Data")
-        local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
-        debug_log "Found macOS Install Data, age ${age_days} days"
-        if [[ $age_days -ge 14 ]]; then
-            local size_kb
-            size_kb=$(get_path_size_kb "/macOS Install Data")
-            if [[ -n "$size_kb" && "$size_kb" -gt 0 ]]; then
-                local size_human
-                size_human=$(bytes_to_human "$((size_kb * 1024))")
-                debug_log "Cleaning macOS Install Data: $size_human, ${age_days} days old"
-                if safe_sudo_remove "/macOS Install Data"; then
-                    log_success "macOS Install Data, $size_human"
-                fi
-            fi
+        if software_update_pending_or_unknown; then
+            debug_log "Keeping macOS Install Data: Software Update pending or state unknown"
+        elif macos_installer_process_running; then
+            debug_log "Keeping macOS Install Data: installer process running"
         else
-            debug_log "Keeping macOS Install Data, only ${age_days} days old, needs 14+"
+            local mtime
+            mtime=$(install_data_newest_mtime "/macOS Install Data")
+            local age_days=$((($(get_epoch_seconds) - mtime) / 86400))
+            debug_log "Found macOS Install Data, age ${age_days} days"
+            if [[ $age_days -ge 14 ]]; then
+                local size_kb
+                size_kb=$(get_path_size_kb "/macOS Install Data")
+                if [[ -n "$size_kb" && "$size_kb" -gt 0 ]]; then
+                    local size_human
+                    size_human=$(bytes_to_human "$((size_kb * 1024))")
+                    debug_log "Cleaning macOS Install Data: $size_human, ${age_days} days old"
+                    if safe_sudo_remove "/macOS Install Data"; then
+                        log_success "macOS Install Data, $size_human"
+                    fi
+                fi
+            else
+                debug_log "Keeping macOS Install Data, only ${age_days} days old, needs 14+"
+            fi
         fi
     fi
     # Clean macOS installer apps (e.g., "Install macOS Sequoia.app")
@@ -162,6 +240,12 @@ clean_deep_system() {
     current_macos_version=$(sw_vers -productVersion 2> /dev/null | cut -d. -f1 || true)
     for installer_app in /Applications/Install\ macOS*.app; do
         [[ -d "$installer_app" ]] || continue
+        # Same fail-closed gate as /macOS Install Data: a queued Software
+        # Update may be about to use this installer.
+        if software_update_pending_or_unknown; then
+            debug_log "Skipping macOS installer app cleanup: Software Update pending or state unknown"
+            break
+        fi
         local app_name
         app_name=$(basename "$installer_app")
         # Skip if installer is currently running

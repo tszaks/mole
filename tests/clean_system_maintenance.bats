@@ -1803,3 +1803,141 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Spotlight index already optimal"* ]]
 }
+
+@test "software_update_pending_or_unknown fails closed and trusts only an empty RecommendedUpdates array" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+fixture_dir="$HOME/su_probe"
+mkdir -p "$fixture_dir"
+
+cat > "$fixture_dir/pending.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>RecommendedUpdates</key>
+    <array>
+        <dict>
+            <key>Display Name</key>
+            <string>macOS Update</string>
+        </dict>
+    </array>
+</dict>
+</plist>
+PLIST
+
+cat > "$fixture_dir/empty.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>RecommendedUpdates</key>
+    <array/>
+</dict>
+</plist>
+PLIST
+
+cat > "$fixture_dir/nokey.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>LastSuccessfulDate</key>
+    <string>never</string>
+</dict>
+</plist>
+PLIST
+
+printf 'not a plist' > "$fixture_dir/corrupt.plist"
+
+# Queued updates block cleanup.
+software_update_pending_or_unknown "$fixture_dir/pending.plist" || exit 1
+# Only a readable, explicitly empty array clears the gate.
+if software_update_pending_or_unknown "$fixture_dir/empty.plist"; then exit 1; fi
+# Missing key, unreadable state, and a missing file all fail closed.
+software_update_pending_or_unknown "$fixture_dir/nokey.plist" || exit 1
+software_update_pending_or_unknown "$fixture_dir/corrupt.plist" || exit 1
+software_update_pending_or_unknown "$fixture_dir/does-not-exist.plist" || exit 1
+echo "GATES_OK"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"GATES_OK"* ]]
+}
+
+@test "install_data_newest_mtime sees a fresh direct child under an old root" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+root="$HOME/install_data_fixture"
+rm -rf "$root"
+mkdir -p "$root/UpdateBrainService" "$root/payload"
+# Fresh staging inside an existing child: set child mtimes AFTER dating the
+# root, so only the child carries the recent timestamp (POSIX keeps the root
+# mtime unchanged for writes inside existing subdirs).
+touch -t 202601010000 "$root"
+touch -t 202601010000 "$root/payload"
+touch -t 202607250000 "$root/UpdateBrainService"
+
+root_mtime=$(get_file_mtime "$root")
+child_mtime=$(get_file_mtime "$root/UpdateBrainService")
+newest=$(install_data_newest_mtime "$root")
+[[ "$newest" -eq "$child_mtime" ]] || exit 1
+[[ "$newest" -gt "$root_mtime" ]] || exit 1
+
+# With every entry old, the root mtime governs as before.
+touch -t 202601020000 "$root/UpdateBrainService"
+newest_old=$(install_data_newest_mtime "$root")
+[[ "$newest_old" -lt "$newest" ]] || exit 1
+
+# A missing root reads as "modified now" so the age gate fails closed.
+now=$(get_epoch_seconds)
+missing=$(install_data_newest_mtime "$HOME/no-such-install-data")
+[[ $((now - missing)) -lt 60 ]] || exit 1
+
+# An UNLISTABLE root (stat works, enumeration denied: mo runs unprivileged)
+# must also read as "modified now": a swallowed find failure silently fell
+# back to the stale root mtime, letting a freshly staged update pass the
+# age gate while hidden inside an unenumerable root.
+locked="$HOME/install_data_locked"
+rm -rf "$locked"
+mkdir -p "$locked/payload"
+touch -t 202601010000 "$locked"
+chmod 000 "$locked"
+unlistable=$(install_data_newest_mtime "$locked")
+chmod 755 "$locked"
+rm -rf "$locked"
+[[ $((now - unlistable)) -lt 60 ]] || exit 1
+echo "MTIME_OK"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"MTIME_OK"* ]]
+}
+
+@test "macos_installer_process_running matches modern OTA staging processes" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+pgrep() {
+    [[ "$*" == *"$MOCK_RUNNING"* ]] && return 0
+    return 1
+}
+
+MOCK_RUNNING="InstallAssistant" macos_installer_process_running || exit 1
+MOCK_RUNNING="UpdateBrainService" macos_installer_process_running || exit 1
+MOCK_RUNNING="Install macOS" macos_installer_process_running || exit 1
+if MOCK_RUNNING="nothing-running" macos_installer_process_running; then exit 1; fi
+echo "PROC_OK"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PROC_OK"* ]]
+}
