@@ -111,6 +111,45 @@ EOF
     [[ "$output" == *"AFTER:cleaned"* ]]
 }
 
+@test "a forked child does not adopt the parent temp registry" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -uo pipefail
+source "$PROJECT_ROOT/lib/core/base.sh"
+
+MOLE_RESOLVED_TMPDIR="$HOME/.cache/mole/tmp"
+MOLE_TEMP_REGISTRY_FILE=""
+export MOLE_RESOLVED_TMPDIR MOLE_TEMP_REGISTRY_FILE
+mkdir -p "$MOLE_RESOLVED_TMPDIR"
+
+# `mole` resolves the temp root at startup, so the registry path is exported
+# from the main shell rather than from a command-substitution subshell.
+ensure_mole_temp_root
+parent_file=$(mktemp_file "parent-installer")
+[[ -f "$parent_file" ]] || exit 1
+
+# install.sh runs the freshly installed `mole --version` while `mo update`
+# still holds its downloaded installer. That child inherits the exported
+# registry path; adopting it would delete the parent's live temp files.
+/bin/bash --noprofile --norc -c '
+    source "$PROJECT_ROOT/lib/core/base.sh"
+    printf "CHILD_ADOPTED:%s\n" "$MOLE_TEMP_REGISTRY_FILE"
+    ensure_mole_temp_registry_file || exit 1
+    printf "CHILD_OWNS:%s\n" "$MOLE_TEMP_REGISTRY_FILE"
+    cleanup_temp_files
+' || exit 1
+
+printf 'PARENT_FILE:%s\n' "$([[ -f "$parent_file" ]] && echo kept || echo deleted)"
+cleanup_temp_files
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PARENT_FILE:kept"* ]] || return 1
+    child_adopted=$(printf '%s\n' "$output" | sed -n 's/^CHILD_ADOPTED://p')
+    child_owns=$(printf '%s\n' "$output" | sed -n 's/^CHILD_OWNS://p')
+    [[ -n "$child_adopted" && -n "$child_owns" ]] || return 1
+    [ "$child_adopted" != "$child_owns" ]
+}
+
 @test "cleanup_temp_files rejects registry paths outside the temp root (#1203)" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

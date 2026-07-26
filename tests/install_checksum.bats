@@ -34,6 +34,7 @@ MOLE
 }
 
 load_installer_binary_helpers() {
+	eval "$(sed -n '/^curl_download_with_retry()/,/^}/p' "$PROJECT_ROOT/install.sh")"
 	eval "$(sed -n '/^get_source_version()/,/^install_files()/p' "$PROJECT_ROOT/install.sh" | sed '$d')"
 }
 export -f load_installer_binary_helpers
@@ -88,6 +89,72 @@ test -x "$CONFIG_DIR/bin/analyze-go"
 EOF
 
 	[ "$status" -eq 0 ]
+	[[ "$output" == *"SUCCESS:Downloaded analyze binary"* ]]
+}
+
+@test "download_binary retries transient asset and checksum failures" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+INSTALL_DIR="$HOME/install"
+CONFIG_DIR="$HOME/config"
+SOURCE_DIR="$HOME/source"
+VERBOSE=1
+GREEN='' BLUE='' YELLOW='' RED='' NC=''
+ICON_SUCCESS='ok'
+ICON_ERROR='err'
+
+load_installer_binary_helpers
+
+start_line_spinner() { :; }
+stop_line_spinner() { :; }
+log_success() { echo "SUCCESS:$*"; }
+log_warning() { echo "WARNING:$*"; }
+log_error() { echo "ERROR:$*"; }
+verify_release_attestation() { return 2; }
+sleep() { :; }
+
+content="retried-binary"
+asset="analyze-darwin-$(uname -m | sed 's/x86_64/amd64/')"
+hash=$(printf '%s' "$content" | shasum -a 256 | awk '{print $1}')
+asset_attempts="$HOME/asset.attempts"
+checksum_attempts="$HOME/checksum.attempts"
+
+curl() {
+	local out="" url="" counter="" attempt=0
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-o) out="$2"; shift 2 ;;
+			http*) url="$1"; shift ;;
+			*) shift ;;
+		esac
+	done
+
+	case "$url" in
+		*"SHA256SUMS") counter="$checksum_attempts" ;;
+		*"${asset}") counter="$asset_attempts" ;;
+		*) return 22 ;;
+	esac
+	[[ -f "$counter" ]] && attempt=$(cat "$counter")
+	attempt=$((attempt + 1))
+	printf '%s\n' "$attempt" > "$counter"
+	if [[ "$attempt" -lt 3 ]]; then
+		return 35
+	fi
+
+	case "$url" in
+		*"SHA256SUMS") printf '%s  %s\n' "$hash" "$asset" > "$out" ;;
+		*"${asset}") printf '%s' "$content" > "$out" ;;
+	esac
+}
+
+download_binary "analyze"
+[ "$(cat "$asset_attempts")" -eq 3 ] || exit 1
+[ "$(cat "$checksum_attempts")" -eq 3 ] || exit 1
+grep -qx "$content" "$CONFIG_DIR/bin/analyze-go"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"SUCCESS:Downloaded analyze binary"* ]]
 }
 

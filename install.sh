@@ -62,6 +62,34 @@ log_error() { echo -e "${YELLOW}${ICON_ERROR}${NC} $1"; }
 log_admin() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}${ICON_ADMIN}${NC} $1"; }
 log_confirm() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}${ICON_CONFIRM}${NC} $1"; }
 
+curl_download_with_retry() {
+    local url="$1"
+    local output_file="$2"
+    local attempt=1
+    local max_attempts=3
+    local curl_exit=0
+
+    while true; do
+        if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$output_file"; then
+            return 0
+        else
+            curl_exit=$?
+        fi
+
+        rm -f "$output_file" 2> /dev/null || true
+        case "$curl_exit" in
+            6 | 7 | 18 | 28 | 35 | 52 | 55 | 56) ;;
+            *) return "$curl_exit" ;;
+        esac
+
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            return "$curl_exit"
+        fi
+        sleep 1 || return "$curl_exit"
+        attempt=$((attempt + 1))
+    done
+}
+
 safe_rm() {
     local target="${1:-}"
     local tmp_root
@@ -203,7 +231,7 @@ resolve_source_dir() {
 
     start_line_spinner "Fetching Mole source, ${branch}..."
     if command -v curl > /dev/null 2>&1; then
-        if curl -fsSL --connect-timeout 10 --max-time 60 -o "$tmp/mole.tar.gz" "$url" 2> /dev/null; then
+        if curl_download_with_retry "$url" "$tmp/mole.tar.gz" 2> /dev/null; then
             if tar -xzf "$tmp/mole.tar.gz" -C "$tmp" 2> /dev/null; then
                 stop_line_spinner
 
@@ -311,7 +339,7 @@ download_release_checksums() {
     local url
     url="$(release_checksums_url "$tag")"
 
-    curl -fsSL --connect-timeout 10 --max-time 60 -o "$output_file" "$url"
+    curl_download_with_retry "$url" "$output_file"
 }
 
 # Verify the Sigstore/GitHub Actions build-provenance attestation for a release
@@ -737,7 +765,7 @@ download_binary() {
         echo "Downloading ${binary_name}..."
     fi
 
-    if curl -fsSL --connect-timeout 10 --max-time 60 -o "$staged_path" "$url"; then
+    if curl_download_with_retry "$url" "$staged_path"; then
         if [[ -t 1 ]]; then stop_line_spinner; fi
         if verify_release_asset_checksum "$release_tag" "$asset_name" "$staged_path" &&
             install_staged_binary "$staged_path" "$target_path"; then
@@ -767,7 +795,7 @@ download_binary() {
         else
             echo "Retrying ${binary_name} from ${fallback_tag}..."
         fi
-        if curl -fsSL --connect-timeout 10 --max-time 60 -o "$staged_path" "$fallback_url"; then
+        if curl_download_with_retry "$fallback_url" "$staged_path"; then
             if [[ -t 1 ]]; then stop_line_spinner; fi
             if verify_release_asset_checksum "$fallback_tag" "$asset_name" "$staged_path" &&
                 install_staged_binary "$staged_path" "$target_path"; then

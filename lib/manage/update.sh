@@ -17,6 +17,34 @@ if [[ -n "${MOLE_MANAGE_UPDATE_LOADED:-}" ]]; then
 fi
 readonly MOLE_MANAGE_UPDATE_LOADED=1
 
+curl_download_with_retry() {
+    local url="$1"
+    local output_file="$2"
+    local attempt=1
+    local max_attempts=3
+    local curl_exit=0
+
+    while true; do
+        if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$output_file"; then
+            return 0
+        else
+            curl_exit=$?
+        fi
+
+        rm -f "$output_file" 2> /dev/null || true
+        case "$curl_exit" in
+            6 | 7 | 18 | 28 | 35 | 52 | 55 | 56) ;;
+            *) return "$curl_exit" ;;
+        esac
+
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            return "$curl_exit"
+        fi
+        sleep 1 || return "$curl_exit"
+        attempt=$((attempt + 1))
+    done
+}
+
 get_latest_version() {
     curl -fsSL --connect-timeout 2 --max-time 3 -H "Cache-Control: no-cache" \
         "https://raw.githubusercontent.com/tw93/mole/main/mole" 2> /dev/null |
@@ -511,7 +539,7 @@ update_mole() {
 
     local download_error=""
     if command -v curl > /dev/null 2>&1; then
-        download_error=$(curl -fsSL --connect-timeout 10 --max-time 60 "$installer_url" -o "$tmp_installer" 2>&1) || {
+        download_error=$(curl_download_with_retry "$installer_url" "$tmp_installer" 2>&1) || {
             local curl_exit=$?
             if [[ -t 1 ]]; then stop_inline_spinner; fi
             rm -f "$tmp_installer"
@@ -522,6 +550,7 @@ update_mole() {
                 7) echo -e "${ICON_REVIEW} Failed to connect. Check network or proxy settings." ;;
                 22) echo -e "${ICON_REVIEW} HTTP 404 Not Found. The installer may have moved." ;;
                 28) echo -e "${ICON_REVIEW} Connection timed out. Try again or check firewall." ;;
+                35 | 56) echo -e "${ICON_REVIEW} TLS connection reset. A local proxy or VPN is likely blocking GitHub." ;;
                 *) echo -e "${ICON_REVIEW} Check network connection and try again." ;;
             esac
             echo -e "${ICON_REVIEW} URL: $installer_url"

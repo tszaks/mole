@@ -687,12 +687,19 @@ prune_stale_mole_temp_files() {
 }
 
 initialize_mole_temp_registry_path() {
-    [[ -n "${MOLE_TEMP_REGISTRY_FILE:-}" ]] && return 0
     [[ -n "${MOLE_RESOLVED_TMPDIR:-}" ]] || return 1
 
-    # Bash keeps $$ stable inside command substitutions, so the parent and all
-    # of its subshells independently derive the same registry path.
-    MOLE_TEMP_REGISTRY_FILE="${MOLE_RESOLVED_TMPDIR%/}/mole.registry.$$"
+    # Bash keeps $$ stable inside command substitutions and across exec, so the
+    # parent, its subshells, and an exec'd bin/*.sh all derive the same registry
+    # path. A forked child gets a different $$: the registry is exported, so an
+    # inherited value that no longer matches belongs to the parent process, and
+    # adopting it would make the child's exit cleanup delete the parent's live
+    # temp files. `mo update` lost its downloaded installer exactly this way,
+    # because install.sh runs the freshly installed `mole --version`.
+    local owned="${MOLE_RESOLVED_TMPDIR%/}/mole.registry.$$"
+    [[ "${MOLE_TEMP_REGISTRY_FILE:-}" == "$owned" ]] && return 0
+
+    MOLE_TEMP_REGISTRY_FILE="$owned"
     export MOLE_TEMP_REGISTRY_FILE
 }
 

@@ -96,6 +96,15 @@ done
 [[ -n "\$url" ]] && printf '%s\n' "\$url" >> "\$CURL_URL_LOG"
 
 if [[ -n "\$out" ]]; then
+	if [[ -n "\${CURL_TRANSIENT_FAILURES:-}" && -n "\${CURL_ATTEMPT_LOG:-}" ]]; then
+		attempt=0
+		[[ -f "\$CURL_ATTEMPT_LOG" ]] && attempt=\$(cat "\$CURL_ATTEMPT_LOG")
+		attempt=\$((attempt + 1))
+		printf '%s\n' "\$attempt" > "\$CURL_ATTEMPT_LOG"
+		if [[ "\$attempt" -le "\$CURL_TRANSIENT_FAILURES" ]]; then
+			exit "\${CURL_TRANSIENT_STATUS:-35}"
+		fi
+	fi
 	cat > "\$out" <<'INSTALLER'
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
@@ -197,6 +206,41 @@ SCRIPT
 	if grep -q -- "--update" "$installer_args_log"; then
 		return 1
 	fi
+	[ "$(cat "$installer_version_log")" = "V$current_version" ]
+}
+
+@test "mo update retries transient installer download failures" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local installer_version_log="$TEST_ROOT/installer.version"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local curl_attempt_log="$TEST_ROOT/curl.attempts"
+	local current_version
+
+	current_version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "$PROJECT_ROOT/mole" | head -1)"
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "0.0.1"
+	make_update_curl_stub "$fake_bin" "$current_version"
+	printf '#!/bin/bash\nexit 0\n' > "$fake_bin/sleep"
+	chmod +x "$fake_bin/sleep"
+	: > "$curl_url_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		CURL_ATTEMPT_LOG="$curl_attempt_log" \
+		CURL_TRANSIENT_FAILURES=2 \
+		CURL_TRANSIENT_STATUS=35 \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		INSTALLER_VERSION_LOG="$installer_version_log" \
+		"$manual_bin/mo" update
+
+	[ "$status" -eq 0 ] || return 1
+	[ -f "$installer_args_log" ] || return 1
+	[ "$(cat "$curl_attempt_log")" -eq 3 ] || return 1
 	[ "$(cat "$installer_version_log")" = "V$current_version" ]
 }
 
@@ -448,4 +492,28 @@ EOF
 	[[ "$output" == *"Homebrew upgrade failed"* ]] || return 1
 	[[ "$output" == *"The upgrade command was interrupted"* ]] || return 1
 	[[ "$output" != *"Updated to latest version"* ]]
+}
+
+@test "mo update never treats mixed failure output as already installed" {
+	local fake_brew_bin="$TEST_ROOT/homebrew/bin"
+	local fake_brew_mole="$TEST_ROOT/homebrew/Cellar/mole/9.9.9/bin/mole"
+	local brew_log="$TEST_ROOT/brew.log"
+	local brew_upgrade_output
+	brew_upgrade_output=$'mole 1.48.0 already installed\nError: simulated upgrade failure'
+
+	make_homebrew_shadow "$fake_brew_bin" "$fake_brew_mole"
+	: > "$brew_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_brew_bin:/usr/bin:/bin" \
+		BREW_LOG="$brew_log" \
+		BREW_UPGRADE_OUTPUT="$brew_upgrade_output" \
+		BREW_UPGRADE_STATUS=1 \
+		"$fake_brew_bin/mo" update
+
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Homebrew upgrade failed"* ]] || return 1
+	[[ "$output" == *"Error: simulated upgrade failure"* ]] || return 1
+	[[ "$output" != *"Already on latest version"* ]]
 }
