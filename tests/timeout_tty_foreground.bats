@@ -35,3 +35,14 @@ setup() {
 	run grep -nE '^[[:space:]]*\) > /dev/null 2>&1 < /dev/null &' "$PROJECT_ROOT/bin/uninstall.sh"
 	[ "$status" -eq 0 ]
 }
+
+# Purge scans and size calculations run behind a tty-writing spinner. They must
+# not let run_with_timeout's Perl fallback hand the controlling terminal to a
+# background child, which suspends the foreground command with SIGTTOU (#1205).
+@test "purge: background timeout workers detach stdin from the terminal (#1205)" {
+	run grep -nF "scan_purge_targets \"\$path\" \"\$scan_output\" < /dev/null &" "$PROJECT_ROOT/lib/clean/project.sh"
+	[ "$status" -eq 0 ] || return 1
+
+	run grep -nF "(get_dir_size_kb \"\$_sz_item\" > \"\$_stmp\" 2> /dev/null) < /dev/null &" "$PROJECT_ROOT/lib/clean/project.sh"
+	[ "$status" -eq 0 ] || return 1
+}

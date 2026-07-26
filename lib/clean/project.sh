@@ -1162,7 +1162,7 @@ clean_project_artifacts() {
             scan_output=$(mktemp)
             scan_temps+=("$scan_output")
             # Launch scan in background for true parallelism
-            scan_purge_targets "$path" "$scan_output" &
+            scan_purge_targets "$path" "$scan_output" < /dev/null &
             local scan_pid=$!
             scan_pids+=("$scan_pid")
         fi
@@ -1290,7 +1290,7 @@ clean_project_artifacts() {
         _stmp=$(mktemp)
         register_temp_file "$_stmp"
         _size_tmpfiles+=("$_stmp")
-        (get_dir_size_kb "$_sz_item" > "$_stmp" 2> /dev/null) &
+        (get_dir_size_kb "$_sz_item" > "$_stmp" 2> /dev/null) < /dev/null &
         _size_pids+=($!)
 
         if [[ ${#_size_pids[@]} -ge $_max_size_jobs ]]; then
