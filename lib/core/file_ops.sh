@@ -967,22 +967,27 @@ end run
 APPLESCRIPT
 }
 
-_mole_create_privileged_trash_stage() {
-    local stage_root="/Library/MoleTrashStaging"
-    local stage_dir=""
+# /Library/Caches is mode 0777 on supported macOS releases, so it cannot anchor a
+# privileged path operation. This prepares an exact root-owned parent under
+# immutable /Library; mode 0711 lets the invoking user traverse into only the
+# randomized staging directory handed to them later.
+#
+# Takes the root as an argument so the concurrency behaviour is reachable from a
+# test without a real /Library write.
+_mole_prepare_privileged_trash_stage_root() {
+    local stage_root="$1"
 
-    # /Library/Caches is mode 0777 on supported macOS releases, so it cannot
-    # anchor a privileged path operation. Create an exact root-owned parent
-    # under immutable /Library; mode 0711 lets the invoking user traverse into
-    # only the randomized staging directory handed to them later.
     # Refuse an existing symlink before any ownership or mode operation. Only
     # root can mutate /Library, but a stale privileged symlink must not make
-    # chown/chmod follow into an unrelated tree.
-    if [[ -e "$stage_root" || -L "$stage_root" ]]; then
-        [[ -d "$stage_root" && ! -L "$stage_root" ]] || return 1
-    else
-        sudo -n /bin/mkdir "$stage_root" 2> /dev/null || return 1
+    # chown/chmod follow into an unrelated tree. Then mkdir -p rather than
+    # test-then-mkdir: two concurrent Mole processes can both see a missing root,
+    # and the loser of a plain mkdir would abort a Trash move that was safe.
+    # Tolerating EEXIST costs nothing, because the verification below is what
+    # actually decides whether this root can anchor the operation.
+    if [[ -L "$stage_root" ]]; then
+        return 1
     fi
+    sudo -n /bin/mkdir -p "$stage_root" 2> /dev/null || return 1
     sudo -n /usr/sbin/chown 0:0 "$stage_root" 2> /dev/null || return 1
     sudo -n /bin/chmod -N "$stage_root" 2> /dev/null || return 1
     sudo -n /bin/chmod 711 "$stage_root" 2> /dev/null || return 1
@@ -994,6 +999,13 @@ _mole_create_privileged_trash_stage() {
     if [[ -L "$stage_root" || "$root_uid" != "0" || "$root_mode" != "711" ]]; then
         return 1
     fi
+}
+
+_mole_create_privileged_trash_stage() {
+    local stage_root="/Library/MoleTrashStaging"
+    local stage_dir=""
+
+    _mole_prepare_privileged_trash_stage_root "$stage_root" || return 1
 
     stage_dir=$(sudo -n /usr/bin/mktemp -d "$stage_root/item.XXXXXX" 2> /dev/null) || return 1
     if [[ "$stage_dir" != "$stage_root"/item.* || ! -d "$stage_dir" || -L "$stage_dir" ]]; then
@@ -1001,15 +1013,20 @@ _mole_create_privileged_trash_stage() {
     fi
     if _mole_privileged_path_has_mutable_ancestor "$stage_dir/item"; then
         sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact empty staging directory created by mktemp above
-        _mole_remove_privileged_trash_stage_root_if_empty
         return 1
     fi
     printf '%s\n' "$stage_dir"
 }
 
-_mole_remove_privileged_trash_stage_root_if_empty() {
-    sudo -n /bin/rmdir "/Library/MoleTrashStaging" 2> /dev/null || true
-}
+# The staging root is deliberately persistent. Removing it when it looked empty
+# raced with a concurrent Mole process that had just validated it and was about
+# to mktemp inside, turning a safe Trash move into a spurious failure.
+#
+# `mo remove` deliberately leaves it behind too. It is an empty root-owned
+# directory, and removing it would add a privileged step to an uninstall that
+# may need no privileges at all: a ~/.local-only install would meet a sudo
+# prompt for nothing. Any non-empty state is a payload a failed Trash move
+# preserved for the user, which uninstall must not touch either.
 
 _mole_move_path_to_user_trash() {
     local path="$1"
@@ -1132,24 +1149,25 @@ _mole_move_path_to_user_trash() {
         stage_device=$($STAT_BSD -f%d "$stage_dir" 2> /dev/null || true)
         if [[ ! "$source_device" =~ ^[0-9]+$ || "$source_device" != "$stage_device" ]]; then
             sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact empty staging directory created by mktemp above
-            _mole_remove_privileged_trash_stage_root_if_empty
             debug_log "Refusing cross-volume privileged Trash staging: $path"
             return 1
         fi
 
         if ! sudo -n /bin/mv "$path" "$stage_path" 2> /dev/null; then
             sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact root-owned directory created by mktemp above
-            _mole_remove_privileged_trash_stage_root_if_empty
             debug_log "Failed to move path into immutable Trash staging: $path"
             return 1
         fi
-        # Keep the stage root-owned while ownership is repaired. `-h` prevents
-        # chown from following symlinks inside the payload. Once either payload
-        # ownership or stage ownership changes, preserve on any later failure
-        # rather than reintroducing user-owned content into the privileged
-        # source path.
+        # Keep the stage root-owned while ownership is repaired. `-h` keeps chown
+        # off symlink targets, and `-x` keeps it from descending into a nested
+        # mount: the same-device gate above only compares the payload root with
+        # the stage, so a disk image or FUSE volume mounted *inside* the payload
+        # is still reachable, and chown -R would rewrite ownership on that
+        # filesystem and can block on it. Once either payload ownership or stage
+        # ownership changes, preserve on any later failure rather than
+        # reintroducing user-owned content into the privileged source path.
         if ! sudo -n /bin/chmod 700 "$stage_dir" 2> /dev/null ||
-            ! sudo -n /usr/sbin/chown -Rh "$owner_uid:$owner_gid" "$stage_path" 2> /dev/null ||
+            ! sudo -n /usr/sbin/chown -Rhx "$owner_uid:$owner_gid" "$stage_path" 2> /dev/null ||
             ! sudo -n /usr/sbin/chown "$owner_uid:$owner_gid" "$stage_dir" 2> /dev/null; then
             log_error "Trash move failed; item preserved for recovery at: $stage_path"
             debug_log "Failed to hand Trash staging directory to invoking user"
@@ -1170,8 +1188,9 @@ _mole_move_path_to_user_trash() {
             # in staging and report the exact recovery location instead.
             log_error "Trash move failed; item preserved for recovery at: $stage_path"
         else
-            rmdir "$stage_dir" 2> /dev/null || true
-            _mole_remove_privileged_trash_stage_root_if_empty
+            # The invoking user owns stage_dir but has no write bit on the
+            # root-owned 0711 parent, so only a privileged rmdir can unlink it.
+            sudo -n /bin/rmdir "$stage_dir" 2> /dev/null || true
         fi
     else
         move_output=$(mv -n "$path" "$dest" 2>&1) || move_rc=$?

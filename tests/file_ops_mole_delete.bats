@@ -116,10 +116,19 @@ EOF
     [ "$status" -eq 0 ]
     [[ ! -e "$victim" ]] || return 1
     [[ -d "$fake_home/.Trash/$(basename "$victim")" ]] || return 1
-    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 1 ]]
-    [[ "$(grep -c '^sudo -n trash ' "$trace" 2> /dev/null || true)" -eq 0 ]]
-    [[ "$(grep -c '^trash ' "$trace" 2> /dev/null || true)" -eq 0 ]]
-    [[ "$(grep -c '^osascript ' "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
+    [[ "$(grep -c '^sudo -n trash ' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
+    [[ "$(grep -c '^trash ' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
+    [[ "$(grep -c '^osascript ' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
+    # The per-item stage lives inside a root-owned 0711 parent, so an
+    # unprivileged rmdir cannot unlink it and would leak one directory per move.
+    [[ "$(grep -c "^sudo -n /bin/rmdir $SANDBOX/stage-sudo-trash\$" "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
+    # The shared staging root stays: removing it raced with concurrent runs.
+    [[ "$(grep -c 'rmdir /Library/MoleTrashStaging' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
+    [[ ! -d "$SANDBOX/stage-sudo-trash" ]] || return 1
+    # -x stops the recursive chown at a mount point nested inside the payload;
+    # the same-device gate only covers the payload root.
+    [[ "$(grep -c '^sudo -n /usr/sbin/chown -Rhx ' "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
 
     local status_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
@@ -161,8 +170,8 @@ EOF
 
     [ "$status" -ne 0 ]
     [[ -e "$victim" ]] || return 1
-    [[ -z "$(ls -A "$redirected" 2> /dev/null || true)" ]]
-    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ -z "$(ls -A "$redirected" 2> /dev/null || true)" ]] || return 1
+    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
 
     local status_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
@@ -210,7 +219,7 @@ EOF
     [[ ! -e "$victim" ]] || return 1
     [[ -d "$fake_home/.Trash/$(basename "$victim")" ]] || return 1
     [[ -n "$(find "$fake_home/.Trash" -mindepth 1 -maxdepth 1 -name "$(basename "$victim").*" -print -quit)" ]] || return 1
-    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 1 ]]
+    [[ "$(grep -c '^sudo -n /bin/mv ' "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
 
     local status_col
     status_col=$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")
@@ -255,7 +264,7 @@ EOF
     [[ "$output" == *"item preserved for recovery"* ]] || return 1
     [[ ! -e "$victim" ]] || return 1
     [[ -f "$stage/item/data.txt" ]] || return 1
-    [[ "$(grep -c "/bin/rm -rf $stage" "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ "$(grep -c "/bin/rm -rf $stage" "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
     [[ "$(grep -c "/bin/mv $stage/item $victim" "$trace" 2> /dev/null || true)" -eq 0 ]]
 }
 
@@ -298,7 +307,7 @@ EOF
 
     [ "$status" -eq 0 ]
     grep -qF "direct:/Applications/Microsoft Word.app:false" "$trace"
-    [[ "$(grep -c '^trash:' "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ "$(grep -c '^trash:' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
     [[ "$(grep -c '^osascript:' "$trace" 2> /dev/null || true)" -eq 0 ]]
 }
 
@@ -333,7 +342,7 @@ EOF
     [[ -d "$existing" ]] || return 1
     [[ -n "$(find "$fake_home/.Trash" -mindepth 1 -maxdepth 1 -name 'com.microsoft.Word.*' -print -quit)" ]] || return 1
     [ "$(stat -f '%Lp' "$fake_home/.Trash")" = "700" ]
-    [[ "$(grep -c '^trash:' "$trace" 2> /dev/null || true)" -eq 0 ]]
+    [[ "$(grep -c '^trash:' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
     [[ "$(grep -c '^osascript:' "$trace" 2> /dev/null || true)" -eq 0 ]]
 }
 
@@ -609,7 +618,7 @@ first_rc=\$?
 mole_delete "$second"
 second_rc=\$?
 set -e
-[[ \$first_rc -ne 0 && \$second_rc -ne 0 ]]
+[[ \$first_rc -ne 0 && \$second_rc -ne 0 ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]
@@ -666,7 +675,7 @@ first_rc=\$?
 mole_delete "$second"
 second_rc=\$?
 set -e
-[[ \$first_rc -ne 0 && \$second_rc -ne 0 ]]
+[[ \$first_rc -ne 0 && \$second_rc -ne 0 ]] || exit 1
 EOF
 
     chmod 0755 "$(dirname "$blocked")"
@@ -759,4 +768,83 @@ EOF
     [ "$output" = "0" ] || return 1
     # Generous ceiling: 1s timeout + escalation grace, never 30s.
     [ "$elapsed" -lt 10 ] || return 1
+}
+
+# The stage-root preparation is the part with a concurrency contract, and the
+# Trash tests above mock the whole stage creator, so it needs its own coverage:
+# two Mole processes can both observe a missing root, and a plain mkdir would
+# make the loser abort a Trash move that was perfectly safe.
+@test "privileged Trash stage root tolerates a concurrent creator" {
+    local stage_root="$SANDBOX/stage-root"
+    local trace="$SANDBOX/root-prep.log"
+    local fake_bin="$SANDBOX/bin"
+
+    mkdir -p "$fake_bin"
+    # `mkdir` without -p loses the race: another process created the root between
+    # this process's check and its own mkdir, which is the EEXIST the fix
+    # absorbs. chown/chmod cannot really run unprivileged, so they report
+    # success; reaching them at all is the evidence that mkdir did not abort.
+    cat > "$fake_bin/sudo" <<'SH'
+#!/bin/bash
+printf 'sudo %s\n' "$*" >> "$MOLE_TEST_TRACE"
+if [[ "${1:-}" == "-n" ]]; then
+    shift
+fi
+case "$1" in
+    */mkdir)
+        shift
+        if [[ "${1:-}" == "-p" ]]; then
+            shift
+            mkdir -p "$@"
+            exit $?
+        fi
+        mkdir "$@" 2> /dev/null
+        exit $?
+        ;;
+    */chown | */chmod) exit 0 ;;
+esac
+"$@"
+SH
+    chmod +x "$fake_bin/sudo"
+    # The concurrent winner already created it.
+    mkdir -p "$stage_root"
+    : > "$trace"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+export PATH="$fake_bin:\$PATH"
+export MOLE_TEST_TRACE="$trace"
+_mole_prepare_privileged_trash_stage_root "$stage_root"
+EOF
+
+    # mkdir -p absorbed the existing root and the flow continued into the
+    # ownership steps. A plain mkdir returns EEXIST and never reaches them.
+    [[ "$(grep -c '^sudo -n /bin/mkdir -p ' "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
+    [[ "$(grep -c '^sudo -n /usr/sbin/chown 0:0 ' "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
+    [[ "$(grep -c '^sudo -n /bin/chmod 711 ' "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
+    # The sandbox root is owned by the test user, so the verification gate must
+    # still refuse it: tolerating EEXIST must not weaken the ownership check.
+    [ "$status" -ne 0 ] || return 1
+    [[ -d "$stage_root" ]]
+}
+
+@test "privileged Trash stage root refuses a symlinked root" {
+    local real_dir="$SANDBOX/elsewhere"
+    local stage_root="$SANDBOX/stage-root-link"
+    local trace="$SANDBOX/root-link.log"
+
+    mkdir -p "$real_dir"
+    ln -s "$real_dir" "$stage_root"
+    : > "$trace"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+export MOLE_TEST_TRACE="$trace"
+sudo() { printf 'sudo %s\n' "\$*" >> "$trace"; return 0; }
+_mole_prepare_privileged_trash_stage_root "$stage_root"
+EOF
+
+    [ "$status" -ne 0 ] || return 1
+    # Nothing privileged may run against a symlinked root.
+    [[ ! -s "$trace" ]]
 }
