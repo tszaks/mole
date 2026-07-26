@@ -178,4 +178,9 @@ EOF
     [ "$status" -ne 0 ]
 
     [ ! -e "$PROJECT_ROOT/scripts/update_homebrew_tap_formula.sh" ]
+
+    run grep -Eq 'Homebrew tap|personal tap' "$PROJECT_ROOT/.claude/skills/release-notes/SKILL.md"
+    [ "$status" -ne 0 ]
+    run grep -q 'Homebrew Core PR is workflow-driven' "$PROJECT_ROOT/.claude/skills/release-notes/SKILL.md"
+    [ "$status" -eq 0 ]
 }

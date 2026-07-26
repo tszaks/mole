@@ -95,7 +95,7 @@ Then add the six reactions with this skill's helper (path is relative to this SK
 ## After publish
 
 - `gh release view V<version> --repo tw93/Mole --web` (open in browser) so the user can eyeball it.
-- Remind the user: Homebrew tap + Homebrew core PR are workflow-driven and should already be in flight; do not re-run them manually unless the workflow log shows a failure.
+- Remind the user: the Homebrew Core PR is workflow-driven and should already be in flight; do not re-run it manually unless the workflow log shows a failure.
 
 ## When NOT to act
 
