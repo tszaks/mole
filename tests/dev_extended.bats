@@ -1174,3 +1174,31 @@ EOF
     [[ "$output" == *"DELETE_COUNT=1"* ]] || return 1
     [[ "$output" != *"removed 1"* ]] || return 1
 }
+
+@test "clean_dev_ai_agents protects the copilot version pointed at by ~/.local/bin/copilot" {
+	local copilot_root="$HOME/.copilot/pkg/universal"
+	local bin_dir="$HOME/.local/bin"
+	rm -rf "$HOME/.copilot" "$HOME/.local/share/claude" "$HOME/.local/share/cursor-agent" "$bin_dir"
+	mkdir -p "$copilot_root" "$bin_dir"
+
+	mkdir -p "$copilot_root/1.0.5" "$copilot_root/1.0.32" "$copilot_root/1.0.34"
+	touch -t 202604010000 "$copilot_root/1.0.5"
+	touch -t 202604200000 "$copilot_root/1.0.32"
+	touch -t 202604250000 "$copilot_root/1.0.34"
+	: >"$copilot_root/1.0.32/copilot"
+	ln -s "$copilot_root/1.0.32/copilot" "$bin_dir/copilot"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() { echo "$1|$2"; }
+clean_dev_ai_agents
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"/1.0.5|GitHub Copilot CLI old version"* ]] || return 1
+	[[ "$output" != *"/1.0.32|"* ]] || return 1
+	[[ "$output" != *"/1.0.34|"* ]]
+}

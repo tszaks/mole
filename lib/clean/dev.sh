@@ -1634,7 +1634,7 @@ clean_dev_ai_agents() {
     local -a agent_specs=(
         "$HOME/.local/share/claude/versions|Claude Code old version|$HOME/.local/bin/claude"
         "$HOME/.local/share/cursor-agent/versions|Cursor Agent old version|$HOME/.local/bin/cursor-agent"
-        "$HOME/.copilot/pkg/universal|GitHub Copilot CLI old version|"
+        "$HOME/.copilot/pkg/universal|GitHub Copilot CLI old version|$HOME/.local/bin/copilot"
     )
 
     local spec
@@ -2144,8 +2144,10 @@ clean_developer_tools() {
     clean_xcode_tools
     clean_code_editors
 
-    # Homebrew
-    safe_clean ~/Library/Caches/Homebrew/* "Homebrew cache"
+    # Homebrew: only blanket-clean downloads/. Wiping api/ (JSON that needs a
+    # network re-download) and bootsnap/ (recompiled Ruby) leaves brew silent
+    # for ~94s before its first output on the next run.
+    safe_clean ~/Library/Caches/Homebrew/downloads/* "Homebrew cache"
     local brew_lock_dirs=(
         "/opt/homebrew/var/homebrew/locks"
         "/usr/local/var/homebrew/locks"
