@@ -825,13 +825,28 @@ note_activity() { :; }
 debug_log() { :; }
 bundle_has_installed_app() { return 1; }
 safe_sudo_remove() {
-  echo "unexpected-remove"
+  echo "removed:$1"
   return 0
 }
 
+# Routed through /Library/LaunchDaemons, which exists on every macOS box. The
+# PrivilegedHelperTools scan is guarded by [[ -d /Library/PrivilegedHelperTools ]]
+# in lib/clean/apps.sh, and that directory is absent on GitHub runners, so a
+# helper fixture makes this case find nothing and pass vacuously in CI.
 tmp_dir="$(mktemp -d)"
-tmp_helper="$tmp_dir/org.amnezia.awg"
-touch "$tmp_helper"
+tmp_helper="$tmp_dir/org.amnezia.awg.plist"
+cat > "$tmp_helper" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>org.amnezia.awg</string>
+    <key>Program</key>
+    <string>$tmp_dir/missing-binary</string>
+</dict>
+</plist>
+PLIST
 
 sudo() {
   if [[ "$1" == "-n" && "$2" == "true" ]]; then
@@ -840,7 +855,7 @@ sudo() {
   [[ "${1:-}" == "-n" ]] && shift
   if [[ "$1" == "find" ]]; then
     case "$2" in
-      /Library/PrivilegedHelperTools) printf '%s\0' "$tmp_helper" ;;
+      /Library/LaunchDaemons) printf '%s\0' "$tmp_helper" ;;
       *) : ;;
     esac
     return 0
@@ -850,7 +865,7 @@ sudo() {
     return 0
   fi
   if [[ "$1" == "launchctl" ]]; then
-    echo "unexpected-launchctl"
+    echo "launchctl-unload:$*"
     return 0
   fi
   command "$@"
@@ -861,8 +876,10 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Orphaned services · cleaned 1"* ]] || return 1
-    [[ "$output" == *"unexpected-remove"* ]] || return 1
-    [[ "$output" != *"unexpected-launchctl"* ]]
+    [[ "$output" == *"removed:"*"org.amnezia.awg.plist"* ]] || return 1
+    # A LaunchDaemon orphan is unloaded before removal, so this call is the
+    # expected order rather than a stray one.
+    [[ "$output" == *"launchctl-unload:"*"org.amnezia.awg.plist"* ]]
 }
 
 @test "_privileged_helper_bundle_id_from_binary prefers Info.plist bundle ID over directory and executable names" {
