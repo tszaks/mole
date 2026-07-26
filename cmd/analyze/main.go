@@ -20,9 +20,6 @@ var (
 	jsonMode = flag.Bool("json", false, "output analysis as JSON instead of TUI")
 )
 
-// systemRootsEnv overrides the machine-wide overview rows. See systemOverviewRoots.
-const systemRootsEnv = "MO_ANALYZE_SYSTEM_ROOTS"
-
 func main() {
 	flag.Parse()
 
@@ -154,28 +151,11 @@ func createOverviewEntriesWithInsights(insightEntries []dirEntry) []dirEntry {
 	return entries
 }
 
-// systemOverviewRoots are the machine-wide overview rows. Every other overview
-// and insight row derives from $HOME, so these two are the only ones a test
-// cannot scope by repointing HOME. MO_ANALYZE_SYSTEM_ROOTS replaces them with a
-// colon-separated list, which is what keeps an end-to-end overview scan off the
-// host's real system volumes: measuring them on a cold CI runner takes minutes.
 func systemOverviewRoots() []dirEntry {
-	override, ok := os.LookupEnv(systemRootsEnv)
-	if !ok {
-		return []dirEntry{
-			{Name: "Applications", Path: "/Applications", IsDir: true, Size: -1},
-			{Name: "System Library", Path: "/Library", IsDir: true, Size: -1},
-		}
+	return []dirEntry{
+		{Name: "Applications", Path: "/Applications", IsDir: true, Size: -1},
+		{Name: "System Library", Path: "/Library", IsDir: true, Size: -1},
 	}
-
-	var entries []dirEntry
-	for _, path := range filepath.SplitList(override) {
-		if path == "" {
-			continue
-		}
-		entries = append(entries, dirEntry{Name: filepath.Base(path), Path: path, IsDir: true, Size: -1})
-	}
-	return entries
 }
 
 func sumKnownEntrySizes(entries []dirEntry) int64 {

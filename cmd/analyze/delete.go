@@ -13,9 +13,11 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/sys/unix"
 )
 
 const trashTimeout = 30 * time.Second
@@ -50,6 +52,7 @@ func deleteMultiplePathsCmd(paths []string, counter *int64) tea.Cmd {
 	return func() tea.Msg {
 		var totalCount int64
 		var errors []string
+		var removedPaths []string
 
 		// Process deeper paths first to avoid parent/child conflicts.
 		pathsToDelete := append([]string(nil), paths...)
@@ -62,10 +65,13 @@ func deleteMultiplePathsCmd(paths []string, counter *int64) tea.Cmd {
 			totalCount += count
 			if err != nil {
 				if os.IsNotExist(err) {
+					removedPaths = append(removedPaths, path)
 					continue
 				}
 				errors = append(errors, err.Error())
+				continue
 			}
+			removedPaths = append(removedPaths, path)
 		}
 
 		var resultErr error
@@ -74,10 +80,11 @@ func deleteMultiplePathsCmd(paths []string, counter *int64) tea.Cmd {
 		}
 
 		return deleteProgressMsg{
-			done:  true,
-			err:   resultErr,
-			count: totalCount,
-			path:  "",
+			done:         true,
+			err:          resultErr,
+			count:        totalCount,
+			path:         "",
+			removedPaths: removedPaths,
 		}
 	}
 }
@@ -106,7 +113,7 @@ func trashPathWithProgress(root string, counter *int64) (int64, error) {
 	// first made large directory deletes appear hung before the move began.
 	const count int64 = 1
 
-	// Move through the native Trash route, with Finder as the compatibility fallback.
+	// Move through a headless Trash route, with Finder as the last compatibility fallback.
 	if err := moveToTrash(root); err != nil {
 		return 0, err
 	}
@@ -117,9 +124,9 @@ func trashPathWithProgress(root string, counter *int64) (int64, error) {
 	return count, nil
 }
 
-// moveToTrash moves a file/directory to the user Trash, preferring trash(8) and
-// falling back to Finder AppleScript when it is unavailable. This mirrors the
-// shell side in lib/core/file_ops.sh, which has always tried a trash CLI first.
+// moveToTrash moves a file/directory to the user Trash. macOS 15+ ships
+// trash(8); older supported systems use an atomic, no-overwrite move into the
+// correct per-volume Trash. Finder is only the final compatibility fallback.
 func moveToTrash(path string) error {
 	// Validate raw input before Abs resolves ".." components away.
 	if err := validateTrashTarget(path); err != nil {
@@ -137,6 +144,9 @@ func moveToTrash(path string) error {
 	}
 
 	if trashErr := moveToTrashViaBinary(absPath); trashErr == nil {
+		return nil
+	}
+	if filesystemErr := moveToTrashViaFilesystem(absPath); filesystemErr == nil {
 		return nil
 	}
 
@@ -165,8 +175,107 @@ func moveToTrashViaBinary(absPath string) error {
 	return nil
 }
 
-// moveToTrashViaFinder is the pre-trash(8) path, kept for macOS versions that
-// do not ship the binary. It cannot succeed in a headless or SSH session.
+// moveToTrashViaFilesystem provides a headless path for macOS versions before
+// trash(8). It uses renameatx_np(RENAME_EXCL), so a concurrent name collision
+// can never overwrite an existing Trash item.
+func moveToTrashViaFilesystem(absPath string) error {
+	trashDir, err := trashDirectoryForPath(absPath)
+	if err != nil {
+		return err
+	}
+
+	base := filepath.Base(absPath)
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return fmt.Errorf("invalid Trash item name")
+	}
+
+	stamp := time.Now().UnixNano()
+	for attempt := range 100 {
+		name := base
+		if attempt > 0 {
+			name = fmt.Sprintf("%s.%d.%d.%d", base, stamp, os.Getpid(), attempt)
+		}
+		dest := filepath.Join(trashDir, name)
+		err = unix.RenameatxNp(unix.AT_FDCWD, absPath, unix.AT_FDCWD, dest, unix.RENAME_EXCL)
+		if err == nil {
+			return nil
+		}
+		if err != syscall.EEXIST {
+			return fmt.Errorf("failed to move to Trash: %w", err)
+		}
+	}
+
+	return fmt.Errorf("failed to choose unique Trash destination for %s", absPath)
+}
+
+func trashDirectoryForPath(absPath string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve home directory: %w", err)
+	}
+
+	var pathFS, homeFS unix.Statfs_t
+	if err := unix.Statfs(absPath, &pathFS); err != nil {
+		return "", fmt.Errorf("failed to inspect target volume: %w", err)
+	}
+	if err := unix.Statfs(home, &homeFS); err != nil {
+		return "", fmt.Errorf("failed to inspect home volume: %w", err)
+	}
+
+	if pathFS.Fsid == homeFS.Fsid {
+		trashDir := filepath.Join(home, ".Trash")
+		if err := ensureOwnedTrashDirectory(trashDir, true); err != nil {
+			return "", err
+		}
+		return trashDir, nil
+	}
+
+	mountPoint := strings.TrimRight(string(pathFS.Mntonname[:]), "\x00")
+	if mountPoint == "" {
+		return "", fmt.Errorf("target volume has no mount point")
+	}
+	trashRoot := filepath.Join(mountPoint, ".Trashes")
+	rootInfo, err := os.Lstat(trashRoot)
+	if err != nil {
+		return "", fmt.Errorf("volume Trash is unavailable: %w", err)
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return "", fmt.Errorf("volume Trash is not a normal directory")
+	}
+
+	trashDir := filepath.Join(trashRoot, fmt.Sprintf("%d", os.Getuid()))
+	if err := ensureOwnedTrashDirectory(trashDir, true); err != nil {
+		return "", err
+	}
+	return trashDir, nil
+}
+
+func ensureOwnedTrashDirectory(path string, create bool) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) && create {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			return fmt.Errorf("failed to create Trash directory: %w", err)
+		}
+		info, err = os.Lstat(path)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to inspect Trash directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("trash path is not a normal directory")
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != uint32(os.Getuid()) {
+		return fmt.Errorf("trash directory is not owned by the current user")
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("trash directory is writable by another user")
+	}
+	return nil
+}
+
+// moveToTrashViaFinder remains as a last fallback for unusual volume layouts.
 func moveToTrashViaFinder(absPath string) error {
 	// Escape path for AppleScript (handle quotes and backslashes).
 	escapedPath := strings.ReplaceAll(absPath, "\\", "\\\\")

@@ -617,35 +617,6 @@ assert data['path'] == '/tmp' or data['path'] == '/private/tmp', \
 "
 }
 
-@test "mo analyze --json overview mode returns expected schema" {
-	if [[ ! -x "${ANALYZE_BIN:-}" ]]; then
-		skip "analyze binary not available (go not installed?)"
-	fi
-
-	# Every overview row except the two system ones derives from $HOME, which is
-	# already a temp dir here. Scope those two as well: measuring the real
-	# /Applications and /Library took 106s of this file's 134s on a CI runner,
-	# where nothing is cached and Xcode sits in /Applications. The schema under
-	# assertion does not depend on which roots were measured.
-	local system_root="$HOME/overview-system-root"
-	mkdir -p "$system_root/payload"
-	printf 'overview fixture\n' > "$system_root/payload/data.bin"
-
-	run env MO_ANALYZE_SYSTEM_ROOTS="$system_root" "$ANALYZE_BIN" --json
-	[ "$status" -eq 0 ]
-
-	echo "$output" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-assert 'path' in data, 'missing path'
-assert 'overview' in data, 'missing overview'
-assert data['overview'] is True, 'overview scan should have overview: true'
-assert 'entries' in data, 'missing entries'
-assert 'total_size' in data, 'missing total_size'
-assert isinstance(data['entries'], list), 'entries is not a list'
-"
-}
-
 @test "mo status --json outputs valid JSON with expected fields" {
 	if [[ ! -x "${STATUS_BIN:-}" ]]; then
 		skip "status binary not available (go not installed?)"

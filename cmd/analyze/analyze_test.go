@@ -2841,8 +2841,6 @@ func TestCalculateDirSizeFastHighFanoutCompletes(t *testing.T) {
 }
 
 func TestSystemOverviewRootsDefaultsToRealSystemPaths(t *testing.T) {
-	os.Unsetenv(systemRootsEnv)
-
 	roots := systemOverviewRoots()
 	if len(roots) != 2 {
 		t.Fatalf("expected 2 default system roots, got %d", len(roots))
@@ -2855,35 +2853,6 @@ func TestSystemOverviewRootsDefaultsToRealSystemPaths(t *testing.T) {
 			t.Fatalf("default root %q must start pending and be a dir, got size=%d isDir=%v",
 				root.Path, root.Size, root.IsDir)
 		}
-	}
-}
-
-func TestSystemOverviewRootsHonorsOverride(t *testing.T) {
-	first := t.TempDir()
-	second := t.TempDir()
-	// Empty segments must not become rows: a trailing separator would otherwise
-	// queue a measurement of "" and log a spurious error.
-	t.Setenv(systemRootsEnv, first+string(os.PathListSeparator)+string(os.PathListSeparator)+second)
-
-	roots := systemOverviewRoots()
-	if len(roots) != 2 {
-		t.Fatalf("expected 2 overridden system roots, got %d", len(roots))
-	}
-	if roots[0].Path != first || roots[1].Path != second {
-		t.Fatalf("override not applied: got %q, %q", roots[0].Path, roots[1].Path)
-	}
-	if roots[0].Name != filepath.Base(first) {
-		t.Fatalf("expected row name from basename, got %q", roots[0].Name)
-	}
-}
-
-func TestSystemOverviewRootsEmptyOverrideDropsSystemRows(t *testing.T) {
-	// An explicit empty value is the "measure no system volume at all" case; it
-	// must yield zero rows rather than falling back to /Applications.
-	t.Setenv(systemRootsEnv, "")
-
-	if roots := systemOverviewRoots(); len(roots) != 0 {
-		t.Fatalf("expected no system roots for an empty override, got %d", len(roots))
 	}
 }
 
@@ -2906,5 +2875,56 @@ func TestDeleteViewHidesZeroTally(t *testing.T) {
 	view = m.View()
 	if !strings.Contains(view, "2") || !strings.Contains(view, "items") {
 		t.Fatalf("expected the tally once paths completed, got:\n%s", view)
+	}
+}
+
+func TestDeleteProgressPartialFailureRemovesSucceededPathsAndRefreshes(t *testing.T) {
+	var filesScanned int64
+	var dirsScanned int64
+	var bytesScanned int64
+	var currentPath atomic.Value
+	parent := t.TempDir()
+	removed := filepath.Join(parent, "removed")
+	failed := filepath.Join(parent, "failed")
+
+	m := model{
+		path:         parent,
+		entries:      []dirEntry{{Path: removed, Size: 10}, {Path: failed, Size: 20}},
+		entriesAll:   []dirEntry{{Path: removed, Size: 10}, {Path: failed, Size: 20}},
+		totalSize:    30,
+		deleting:     true,
+		filesScanned: &filesScanned,
+		dirsScanned:  &dirsScanned,
+		bytesScanned: &bytesScanned,
+		currentPath:  &currentPath,
+		cache: map[string]historyEntry{
+			parent: {},
+		},
+		multiSelected:      map[string]bool{removed: true, failed: true},
+		largeMultiSelected: map[string]bool{},
+	}
+
+	updated, cmd := m.Update(deleteProgressMsg{
+		done:         true,
+		err:          fmt.Errorf("permission denied"),
+		count:        1,
+		removedPaths: []string{removed},
+	})
+	got := updated.(model)
+
+	if len(got.entries) != 1 || got.entries[0].Path != failed {
+		t.Fatalf("expected only failed path to remain, got %#v", got.entries)
+	}
+	if got.totalSize != 20 {
+		t.Fatalf("expected successful removal to update total size, got %d", got.totalSize)
+	}
+	if !strings.Contains(got.status, "Deleted 1 items; some failed") {
+		t.Fatalf("expected partial-failure status, got %q", got.status)
+	}
+	if entry := got.cache[parent]; !entry.NeedsRefresh {
+		t.Fatal("expected current path cache to be marked for refresh")
+	}
+	if cmd == nil {
+		t.Fatal("expected partial success to trigger a rescan")
 	}
 }

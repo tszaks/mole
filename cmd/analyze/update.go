@@ -298,15 +298,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deleting = false
 			m.multiSelected = make(map[string]bool)
 			m.largeMultiSelected = make(map[string]bool)
-			if msg.err != nil {
-				m.status = fmt.Sprintf("Failed to delete: %v", msg.err)
-			} else {
-				if msg.path != "" {
-					m.removePathFromView(msg.path)
-					invalidateCache(msg.path)
-				}
+			removedPaths := append([]string(nil), msg.removedPaths...)
+			if msg.err == nil && msg.path != "" {
+				removedPaths = append(removedPaths, msg.path)
+			}
+			for _, removedPath := range removedPaths {
+				m.removePathFromView(removedPath)
+				invalidateCache(removedPath)
+			}
+
+			if len(removedPaths) > 0 {
 				invalidateCache(m.path)
-				m.status = fmt.Sprintf("Deleted %d items", msg.count)
+				if msg.err != nil {
+					m.status = fmt.Sprintf("Deleted %d items; some failed: %v", msg.count, msg.err)
+				} else {
+					m.status = fmt.Sprintf("Deleted %d items", msg.count)
+				}
 
 				// Selective invalidation: only mark current path and ancestors as needing refresh
 				currentPath := m.path
@@ -335,6 +342,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentPath.Store("")
 				}
 				return m, tea.Batch(m.scanCmd(m.path), tickCmd())
+			}
+			if msg.err != nil {
+				m.status = fmt.Sprintf("Failed to delete: %v", msg.err)
+			} else {
+				m.status = fmt.Sprintf("Deleted %d items", msg.count)
 			}
 		}
 		return m, nil
