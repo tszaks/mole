@@ -151,6 +151,18 @@ run_with_timeout() {
     fi
 
     # Use timeout command if available (preferred path)
+    #
+    # This backend has no owner-death detection, unlike the perl fallback below,
+    # and that asymmetry is deliberate. Measured on macOS with coreutils
+    # gtimeout: SIGKILLing the calling worker leaves gtimeout and its child
+    # alive, but both still die when gtimeout's own deadline fires, so the orphan
+    # window is capped by the caller's timeout budget (2-30s here) rather than
+    # unbounded. Ctrl-C already reaches them, since the signal goes to the whole
+    # foreground process group. Closing the remaining SIGKILL gap would mean
+    # either routing every non-TTY run through perl, which is every CI run and
+    # every piped run, or backgrounding the backend and polling it, which
+    # reopens the terminal-handoff class behind #1222/#1218. Neither is worth a
+    # window the deadline already bounds.
     if [[ -n "${MO_TIMEOUT_BIN:-}" ]]; then
         local timeout_bin="$MO_TIMEOUT_BIN"
         if [[ "$timeout_bin" != */* ]]; then
