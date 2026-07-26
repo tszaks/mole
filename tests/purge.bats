@@ -1522,7 +1522,8 @@ EOF
 # stdin is a tty.
 _run_in_pty() {
 	local script_file="$1"
-	script -q /dev/null /bin/bash --noprofile --norc "$script_file" 2>/dev/null
+	# A socket-backed runner stdin makes macOS script(1) fail before the child starts.
+	script -q /dev/null /bin/bash --noprofile --norc "$script_file" < /dev/null 2>/dev/null
 }
 
 @test "sort: PURGE_CATEGORY_FULL_PATHS_ARRAY[0] is the largest artifact after size-descending sort" {
