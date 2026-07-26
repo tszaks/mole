@@ -2928,3 +2928,46 @@ func TestDeleteProgressPartialFailureRemovesSucceededPathsAndRefreshes(t *testin
 		t.Fatal("expected partial success to trigger a rescan")
 	}
 }
+
+// The no-argument invocation is the overview scan. Flipping that routing used to
+// be invisible: every Go and CLI JSON test passed with the overview branch
+// disabled, because the CLI cases all pass an explicit directory.
+func TestResolveScanTargetRouting(t *testing.T) {
+	cases := []struct {
+		name         string
+		envPath      string
+		args         []string
+		wantOverview bool
+		wantPath     string
+	}{
+		{name: "no target is the overview scan", wantOverview: true, wantPath: "/"},
+		{name: "explicit arg is a directory scan", args: []string{"/tmp"}, wantPath: "/tmp"},
+		{name: "env target is a directory scan", envPath: "/tmp", wantPath: "/tmp"},
+		{name: "env target wins over args", envPath: "/tmp", args: []string{"/var"}, wantPath: "/tmp"},
+		{name: "relative arg resolves to absolute", args: []string{"."}, wantPath: mustAbs(t, ".")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path, isOverview, err := resolveScanTarget(tc.envPath, tc.args)
+			if err != nil {
+				t.Fatalf("resolveScanTarget: %v", err)
+			}
+			if isOverview != tc.wantOverview {
+				t.Errorf("isOverview = %v, want %v", isOverview, tc.wantOverview)
+			}
+			if path != tc.wantPath {
+				t.Errorf("path = %q, want %q", path, tc.wantPath)
+			}
+		})
+	}
+}
+
+func mustAbs(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("filepath.Abs(%q): %v", path, err)
+	}
+	return abs
+}
