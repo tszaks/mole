@@ -272,8 +272,8 @@ printf 'Update 1.43.0 available, run mo update\n' > "$msg_cache"
 touch -t 200001010000 "$msg_cache"
 source "$PROJECT_ROOT/mole"
 message="$(read_update_message_cache "$msg_cache")"
-[[ -z "$message" ]]
-[[ ! -s "$msg_cache" ]]
+[[ -z "$message" ]] || exit 1
+[[ ! -s "$msg_cache" ]] || exit 1
 EOF
 
 	[ "$status" -eq 0 ]

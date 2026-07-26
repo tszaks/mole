@@ -421,7 +421,7 @@ sudo() {
 export -f sudo
 
 safe_sudo_remove "$TARGET_DIR"
-[[ ! -e "$TARGET_DIR" ]]
+[[ ! -e "$TARGET_DIR" ]] || exit 1
 SCRIPT
 
     [ "$status" -eq 0 ]
@@ -448,7 +448,7 @@ export -f sudo
 
 safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
 echo "RC=$rc"
-[[ -e "$TARGET_DIR" ]]
+[[ -e "$TARGET_DIR" ]] || exit 1
 SCRIPT
 
     [ "$status" -eq 0 ]

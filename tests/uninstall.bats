@@ -1093,9 +1093,9 @@ stop_launch_services "com.example.TestApp" "false" ""
 	grep -Fq "launchctl unload $HOME/Library/LaunchAgents/com.example.TestApp.helper.plist" "$trace"
 	! grep -Fq "com.example.TestApplication.plist" "$trace"
 	! grep -q "safe_remove" "$trace"
-	[[ -f "$HOME/Library/LaunchAgents/com.example.TestApp.plist" ]]
-	[[ -f "$HOME/Library/LaunchAgents/com.example.TestApp.helper.plist" ]]
-	[[ -f "$HOME/Library/LaunchAgents/com.example.TestApplication.plist" ]]
+	[[ -f "$HOME/Library/LaunchAgents/com.example.TestApp.plist" ]] || exit 1
+	[[ -f "$HOME/Library/LaunchAgents/com.example.TestApp.helper.plist" ]] || exit 1
+	[[ -f "$HOME/Library/LaunchAgents/com.example.TestApplication.plist" ]] || exit 1
 EOF
 
 	[ "$status" -eq 0 ]
@@ -1491,7 +1491,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
 if result=$(decode_file_list "not-valid-base64!!!" "TestApp" 2>/dev/null); then
-    [[ -z "$result" ]]
+    [[ -z "$result" ]] || exit 1
 else
     true
 fi
@@ -1600,7 +1600,7 @@ source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
 empty_data=$(printf '' | base64)
 result=$(decode_file_list "$empty_data" "TestApp" 2>/dev/null) || true
-[[ -z "$result" ]]
+[[ -z "$result" ]] || exit 1
 EOF
 
 	[ "$status" -eq 0 ]
@@ -1614,7 +1614,7 @@ source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 
 bad_data=$(printf 'relative/path' | base64)
 if result=$(decode_file_list "$bad_data" "TestApp" 2>/dev/null); then
-    [[ -z "$result" ]]
+    [[ -z "$result" ]] || exit 1
 else
     true
 fi
@@ -2161,7 +2161,7 @@ set -e
 echo "rc=$rc"
 echo "mode=${MOLE_MENU_SORT_MODE:-}"
 echo "result=${MOLE_SELECTION_RESULT:-}"
-[[ $rc -eq 0 ]]
+[[ $rc -eq 0 ]] || exit 1
 INNER
 
 	[ "$status" -eq 0 ]
@@ -2205,8 +2205,8 @@ set -e
 echo "default_rc=$default_rc"
 echo "reverse_rc=$reverse_rc"
 echo "reverse=${MOLE_SELECTION_RESULT:-}"
-[[ $default_rc -eq 0 ]]
-[[ $reverse_rc -eq 0 ]]
+[[ $default_rc -eq 0 ]] || exit 1
+[[ $reverse_rc -eq 0 ]] || exit 1
 INNER
 
 	[ "$status" -eq 0 ]

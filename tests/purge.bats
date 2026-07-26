@@ -793,9 +793,9 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/project.sh"
 scan_purge_targets "$HOME/www" "$scan_output"
-[[ ! -e "$HOME/find-called" ]]
-[[ -f "$scan_output" ]]
-[[ ! -s "$scan_output" ]]
+[[ ! -e "$HOME/find-called" ]] || exit 1
+[[ -f "$scan_output" ]] || exit 1
+[[ ! -s "$scan_output" ]] || exit 1
 EOF
 
 	rm -f "$scan_output"
@@ -892,7 +892,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/project.sh"
 _PURGE_ACTIVITY_DEADLINE_EPOCH=1
 is_recently_modified "$HOME/www/budget-project/node_modules"
-[[ "$_PURGE_ACTIVITY_STATE" == "uncertain" ]]
+[[ "$_PURGE_ACTIVITY_STATE" == "uncertain" ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]

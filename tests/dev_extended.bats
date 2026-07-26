@@ -778,7 +778,7 @@ EOF
 	cat > "$tmp_bin/xcrun" <<'XEOF'
 #!/bin/bash
 if [[ "$*" == "--find simctl" ]]; then
-    [[ "${DEVELOPER_DIR:-}" == "$EXPECTED_DEVELOPER_DIR" ]]
+    [[ "${DEVELOPER_DIR:-}" == "$EXPECTED_DEVELOPER_DIR" ]] || exit 1
     exit
 fi
 printf '%s|%s\n' "${DEVELOPER_DIR:-}" "$*" >> "$SIMCTL_CALL_LOG"

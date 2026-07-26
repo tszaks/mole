@@ -331,7 +331,7 @@ mole_delete "$victim" false
 rc=\$?
 set -e
 printf 'RC=%s\n' "\$rc"
-[[ \$rc -eq \$MOLE_ERR_PRIVACY_DENIED ]]
+[[ \$rc -eq \$MOLE_ERR_PRIVACY_DENIED ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]
@@ -362,7 +362,7 @@ _mole_move_path_to_user_trash "$victim" false
 rc=\$?
 set -e
 printf 'RC=%s\n' "\$rc"
-[[ \$rc -eq \$MOLE_ERR_PRIVACY_DENIED ]]
+[[ \$rc -eq \$MOLE_ERR_PRIVACY_DENIED ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]
@@ -403,7 +403,7 @@ set +e
 mole_delete "$victim" false
 rc=\$?
 set -e
-[[ \$rc -eq 1 ]]
+[[ \$rc -eq 1 ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]

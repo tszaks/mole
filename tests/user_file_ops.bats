@@ -126,13 +126,13 @@ touch "$persistent_file"
 printf '%s\n' "$persistent_file" > "$MOLE_TEMP_REGISTRY_FILE"
 
 cleanup_temp_files
-[[ -e "$persistent_file" ]]
+[[ -e "$persistent_file" ]] || exit 1
 
 invalid_registry="$HOME/.cache/mole/not-a-temp-registry"
 printf '%s\n' "$persistent_file" > "$invalid_registry"
 MOLE_TEMP_REGISTRY_FILE="$invalid_registry"
 cleanup_temp_files
-[[ -e "$invalid_registry" ]]
+[[ -e "$invalid_registry" ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]
@@ -156,11 +156,11 @@ touch -t 202001010101 "$old_temp" "$old_spinner" "$persistent_cache"
 
 prune_stale_mole_temp_files "$temp_root"
 
-[[ ! -e "$old_temp" ]]
-[[ ! -e "$old_spinner" ]]
-[[ -e "$fresh_temp" ]]
-[[ -e "$fresh_spinner/message" ]]
-[[ -e "$persistent_cache" ]]
+[[ ! -e "$old_temp" ]] || exit 1
+[[ ! -e "$old_spinner" ]] || exit 1
+[[ -e "$fresh_temp" ]] || exit 1
+[[ -e "$fresh_spinner/message" ]] || exit 1
+[[ -e "$persistent_cache" ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]

@@ -111,7 +111,7 @@ brew() {
 export -f brew
 
 owned=$(_detect_cask_via_brew_list "$HOME/Applications/Owned.app" "Owned.app")
-[[ "$owned" == "owned" ]]
+[[ "$owned" == "owned" ]] || exit 1
 ! _detect_cask_via_brew_list "$HOME/Applications/Other.app" "Other.app"
 EOF
 

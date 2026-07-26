@@ -988,8 +988,8 @@ run_clean_preview_as_invoking_user() {
 }
 
 publish_clean_preview_file
-[[ "$EXPORT_LIST_FILE" == "$CLEAN_PREVIEW_FINAL_FILE" ]]
-[[ "$(cat "$CLEAN_PREVIEW_FINAL_FILE")" == "preview content" ]]
+[[ "$EXPORT_LIST_FILE" == "$CLEAN_PREVIEW_FINAL_FILE" ]] || exit 1
+[[ "$(cat "$CLEAN_PREVIEW_FINAL_FILE")" == "preview content" ]] || exit 1
 grep -q '^/bin/mkdir -p ' "$calls"
 grep -q '^/usr/bin/tee ' "$calls"
 EOF
