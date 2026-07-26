@@ -46,3 +46,39 @@ setup() {
 	run grep -nF "(get_dir_size_kb \"\$_sz_item\" > \"\$_stmp\" 2> /dev/null) < /dev/null &" "$PROJECT_ROOT/lib/clean/project.sh"
 	[ "$status" -eq 0 ] || return 1
 }
+
+# Class-level guard. run_with_timeout's Perl fallback hands the controlling
+# terminal to its timed child whenever stdin is a tty, so any background job
+# that can reach it must detach stdin first. Enumerating the call sites here
+# means a new background worker fails the build instead of suspending someone's
+# terminal with SIGTTOU.
+@test "every background job reaching run_with_timeout detaches stdin" {
+	local offenders=""
+	local file line text
+	while IFS= read -r hit; do
+		file="${hit%%:*}"
+		line="${hit#*:}"
+		line="${line%%:*}"
+		text="${hit#*:*:}"
+		# Background jobs already redirecting stdin are fine.
+		case "$text" in
+			*"< /dev/null"*) continue ;;
+		esac
+		# The job either calls run_with_timeout directly, or is a subshell whose
+		# body does. Look back a few lines for the subshell case.
+		if printf '%s' "$text" | grep -q 'run_with_timeout'; then
+			offenders="$offenders$file:$line"$'\n'
+			continue
+		fi
+		if [[ "$text" == *")"* ]] &&
+			sed -n "$((line > 12 ? line - 12 : 1)),${line}p" "$file" | grep -q 'run_with_timeout'; then
+			offenders="$offenders$file:$line"$'\n'
+		fi
+	done < <(grep -rnE '[^&|]& *$' "$PROJECT_ROOT/lib" "$PROJECT_ROOT/bin" --include='*.sh' | grep -v 'disown')
+
+	if [[ -n "$offenders" ]]; then
+		echo "Background jobs reaching run_with_timeout without '< /dev/null':" >&2
+		printf '%s' "$offenders" >&2
+		return 1
+	fi
+}

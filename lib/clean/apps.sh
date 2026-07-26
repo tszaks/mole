@@ -138,13 +138,13 @@ scan_installed_apps() {
         if command -v lsappinfo > /dev/null 2>&1; then
             run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" lsappinfo list 2> /dev/null | grep -o '"CFBundleIdentifier"="[^"]*"' | cut -d'"' -f4 >> "$scan_tmp_dir/running.txt" 2> /dev/null || true
         fi
-    ) &
+    ) < /dev/null &
     pids+=($!)
     (
         run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find ~/Library/LaunchAgents /Library/LaunchAgents \
             -name "*.plist" -type f 2> /dev/null |
             xargs -I {} basename {} .plist > "$scan_tmp_dir/agents.txt" 2> /dev/null || true
-    ) &
+    ) < /dev/null &
     pids+=($!)
     debug_log "Waiting for ${#pids[@]} background processes: ${pids[*]}"
     if [[ ${#pids[@]} -gt 0 ]]; then
