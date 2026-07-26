@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 // TestSavePrefPreservesOtherKeys is the whole point of the refactor: writing one
@@ -56,10 +58,19 @@ func TestLoadPrefsIgnoresBlanksAndComments(t *testing.T) {
 	}
 }
 
+// Staggered process starts do not prove anything here: each writer finishes its
+// whole read-modify-write before the next one is scheduled, so an unlocked
+// implementation passes too. Every helper must sit on a barrier and enter
+// savePref together. Without the flock, this loses keys.
 func TestSavePrefConcurrentProcessesPreserveEveryKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	const writers = 16
+	barrier := filepath.Join(home, "barrier")
+	readyDir := filepath.Join(home, "ready")
+	if err := os.MkdirAll(readyDir, 0o700); err != nil {
+		t.Fatalf("create ready dir: %v", err)
+	}
 
 	commands := make([]*exec.Cmd, 0, writers)
 	for i := range writers {
@@ -69,12 +80,33 @@ func TestSavePrefConcurrentProcessesPreserveEveryKey(t *testing.T) {
 			"MOLE_PREFS_TEST_HELPER=1",
 			fmt.Sprintf("MOLE_PREFS_TEST_KEY=key_%02d", i),
 			"MOLE_PREFS_TEST_VALUE="+strconv.Itoa(i),
+			"MOLE_PREFS_TEST_BARRIER="+barrier,
+			fmt.Sprintf("MOLE_PREFS_TEST_READY=%s", filepath.Join(readyDir, strconv.Itoa(i))),
 		)
 		if err := cmd.Start(); err != nil {
 			t.Fatalf("start writer %d: %v", i, err)
 		}
 		commands = append(commands, cmd)
 	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		entries, err := os.ReadDir(readyDir)
+		if err != nil {
+			t.Fatalf("read ready dir: %v", err)
+		}
+		if len(entries) == writers {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of %d writers reached the barrier", len(entries), writers)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if err := os.WriteFile(barrier, []byte("go"), 0o600); err != nil {
+		t.Fatalf("release barrier: %v", err)
+	}
+
 	for i, cmd := range commands {
 		if err := cmd.Wait(); err != nil {
 			t.Fatalf("writer %d failed: %v", i, err)
@@ -93,6 +125,23 @@ func TestSavePrefConcurrentProcessesPreserveEveryKey(t *testing.T) {
 func TestSavePrefProcessHelper(t *testing.T) {
 	if os.Getenv("MOLE_PREFS_TEST_HELPER") != "1" {
 		return
+	}
+	if barrier := os.Getenv("MOLE_PREFS_TEST_BARRIER"); barrier != "" {
+		if ready := os.Getenv("MOLE_PREFS_TEST_READY"); ready != "" {
+			if err := os.WriteFile(ready, []byte("1"), 0o600); err != nil {
+				t.Fatalf("signal ready: %v", err)
+			}
+		}
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			if _, err := os.Stat(barrier); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("barrier %s never opened", barrier)
+			}
+			time.Sleep(time.Millisecond)
+		}
 	}
 	savePref(os.Getenv("MOLE_PREFS_TEST_KEY"), os.Getenv("MOLE_PREFS_TEST_VALUE"))
 }
