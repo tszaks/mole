@@ -657,10 +657,20 @@ _sim_runtime_size_kb() { echo "1"; }
 safe_sudo_remove() { echo "REMOVE:$1"; return 0; }
 
 clean_xcode_simulator_runtime_volumes
+
+# Positive control. The guard makes this path print nothing at all, so "no
+# REMOVE line" alone cannot tell a working guard from a run that never reached
+# the deletion branch. Same fixture, this time with mounts enumerable.
+echo "CONTROL"
+_sim_runtime_mount_points() { printf '%s\n' "/"; }
+clean_xcode_simulator_runtime_volumes
 EOF
 
 	[ "$status" -eq 0 ] || return 1
-	[[ "$output" != *"REMOVE:"* ]] || { echo "deleted a volume despite unknown mount state"; return 1; }
+	guarded="${output%%CONTROL*}"
+	control="${output#*CONTROL}"
+	[[ "$guarded" != *"REMOVE:"* ]] || { echo "deleted a volume despite unknown mount state"; return 1; }
+	[[ "$control" == *"REMOVE:"* ]] || { echo "control run removed nothing, so the guarded run proves nothing"; return 1; }
 }
 
 @test "clean_dev_mobile continues cleanup when simctl is unavailable" {

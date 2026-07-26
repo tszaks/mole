@@ -253,7 +253,12 @@ EOF
     [[ "$output" == *"Messages preview sticker cache"* ]]
 }
 
-@test "clean_app_caches skips protected containers" {
+@test "clean_app_caches never hands a third-party container to safe_clean" {
+    # The previous version mocked safe_clean to a no-op and asserted only that
+    # "App caches" was absent from empty output, so it could not fail. It also
+    # could not test what its name claimed: clean_app_caches walks a fixed list of
+    # Apple container paths and never enumerates arbitrary bundle ids, so the
+    # com.example.app fixture was never in scope either way.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -262,9 +267,7 @@ start_section_spinner() { :; }
 stop_section_spinner() { :; }
 bytes_to_human() { echo "0B"; }
 note_activity() { :; }
-safe_clean() { :; }
-should_protect_data() { return 0; }
-is_critical_system_component() { return 0; }
+safe_clean() { echo "CLEAN:$1"; }
 files_cleaned=0
 total_size_cleaned=0
 total_items=0
@@ -274,7 +277,10 @@ clean_app_caches
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"App caches"* ]] || [[ "$output" == *"already clean"* ]]
+    # Positive control: without it every assertion below is true on empty output.
+    [[ "$output" == *"CLEAN:"*"Containers/com.apple."* ]] || return 1
+    [[ "$output" != *"com.example.app"* ]] || return 1
+    [[ "$output" != *"Containers/com.example"* ]]
 }
 
 @test "clean_app_caches preserves nested E5RT caches in sandboxed apps" {

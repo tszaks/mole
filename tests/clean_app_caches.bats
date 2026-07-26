@@ -646,10 +646,15 @@ EOF
     local ext_root="$HOME/.cursor/extensions"
     mkdir -p "$ext_root"
     mkdir -p "$HOME/obsolete-victim"
+    # A legitimate entry alongside the malicious ones. Without it the function has
+    # nothing to clean, output is empty, and "no CLEAN: line" cannot distinguish
+    # "traversal rejected" from "never ran".
+    mkdir -p "$ext_root/publisher.legit-1.0.0"
     cat > "$ext_root/.obsolete" << 'JSON'
 {
   "../../obsolete-victim": true,
-  "..": true
+  "..": true,
+  "publisher.legit-1.0.0": true
 }
 JSON
 
@@ -662,7 +667,10 @@ clean_editor_obsolete_extensions
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"CLEAN:"* ]]
+    [[ "$output" == *"CLEAN:$ext_root/publisher.legit-1.0.0"* ]] || return 1
+    [[ "$output" != *"obsolete-victim"* ]] || return 1
+    [[ "$output" != *"CLEAN:$HOME/.cursor\""* ]] || return 1
+    [ -d "$HOME/obsolete-victim" ]
 }
 
 @test "clean_code_editors includes CodeBuddy Extension caches when directory exists" {
@@ -844,7 +852,11 @@ clean_neatdm_stale_segments
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"NeatDM stale downloads"* ]]
+    [[ "$output" != *"NeatDM stale downloads"* ]] || return 1
+    # This path prints nothing, so the absence check alone cannot fail. Assert the
+    # survival the test is named for.
+    [ -f "$neatdm_dir/history-backup/seg.x0" ]
+    [ -d "$neatdm_dir/history-backup" ]
 }
 
 @test "clean_neatdm_stale_segments skips when directory absent" {
