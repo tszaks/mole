@@ -600,3 +600,136 @@ EOF
 	[[ "$output" == *"Error: simulated upgrade failure"* ]] || return 1
 	[[ "$output" != *"Already on latest version"* ]]
 }
+
+make_self_heal_curl_stub() {
+	local bin_dir="$1"
+	local latest_version="$2"
+	local heal_mode="$3"
+	cat > "$bin_dir/curl" <<SCRIPT
+#!/usr/bin/env bash
+out=""
+url=""
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+		-o)
+			out="\$2"
+			shift 2
+			;;
+		http*://*)
+			url="\$1"
+			shift
+			;;
+		*)
+			shift
+			;;
+	esac
+done
+[[ -n "\$url" ]] && printf '%s\n' "\$url" >> "\$CURL_URL_LOG"
+
+if [[ -n "\$out" ]]; then
+	cat > "\$out" <<'INSTALLER'
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\$INSTALLER_ARGS_LOG"
+exit 1
+INSTALLER
+	exit 0
+fi
+
+if [[ "\$url" == *"/main/install.sh"* ]]; then
+	if [[ "$heal_mode" == "fail" ]]; then
+		exit 22
+	fi
+	cat <<'HEAL'
+#!/usr/bin/env bash
+prefix=""
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+		--prefix)
+			prefix="\$2"
+			shift 2
+			;;
+		*)
+			shift
+			;;
+	esac
+done
+printf '%s %s\n' "\${MOLE_VERSION:-}" "\$prefix" >> "\$HEAL_LOG"
+printf '#!/bin/bash\necho "Mole version %s"\n' "\${MOLE_VERSION#V}" > "\$prefix/mole.healed"
+chmod +x "\$prefix/mole.healed"
+mv "\$prefix/mole.healed" "\$prefix/mole"
+HEAL
+	exit 0
+fi
+
+if [[ "\$url" == *"api.github.com"* ]]; then
+	printf '{"tag_name":"%s"}\n' "$latest_version"
+	exit 0
+fi
+
+printf 'VERSION="%s"\n' "$latest_version"
+SCRIPT
+	chmod +x "$bin_dir/curl"
+}
+
+@test "mo update self-heals with a direct reinstall when the staged installer fails (#1297)" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local heal_log="$TEST_ROOT/heal.log"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local current_version
+
+	current_version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "$PROJECT_ROOT/mole" | head -1)"
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "0.0.1"
+	make_self_heal_curl_stub "$fake_bin" "$current_version" "heal"
+	: > "$curl_url_log"
+	: > "$installer_args_log"
+	: > "$heal_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		HEAL_LOG="$heal_log" \
+		"$manual_bin/mo" update
+
+	[ "$status" -eq 0 ] || return 1
+	grep -q -- "--update" "$installer_args_log" || return 1
+	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
+	[[ "$output" == *"Updated to latest version, $current_version"* ]] || return 1
+	[ "$(cat "$heal_log")" = "V$current_version $manual_bin" ]
+}
+
+@test "mo update prints the manual reinstall command when self-heal fails too" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local heal_log="$TEST_ROOT/heal.log"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local current_version
+
+	current_version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "$PROJECT_ROOT/mole" | head -1)"
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "0.0.1"
+	make_self_heal_curl_stub "$fake_bin" "$current_version" "fail"
+	: > "$curl_url_log"
+	: > "$installer_args_log"
+	: > "$heal_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		HEAL_LOG="$heal_log" \
+		"$manual_bin/mo" update
+
+	[ "$status" -ne 0 ] || return 1
+	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
+	[[ "$output" == *"Update failed"* ]] || return 1
+	[[ "$output" == *"install.sh | bash"* ]]
+}

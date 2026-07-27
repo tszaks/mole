@@ -45,6 +45,46 @@ curl_download_with_retry() {
     done
 }
 
+# Last-resort self-heal for a failed staged install. The staged path runs
+# through local bootstrap code (temp file, registry, exec) that is frozen on
+# the user's machine, which is exactly what a broken installed version cannot
+# fix by itself (#1297). Streaming install.sh from main straight into bash
+# skips all of it, so a server-side install.sh fix reaches every stuck install
+# on its next `mo update`. install.sh only dispatches on its final line, and
+# pipefail surfaces a truncated download, so a partial script runs nothing.
+_update_self_heal_reinstall() {
+    local assume_sudo="$1"
+    local update_tag="$2"
+    local install_dir="$3"
+    local config_dir="$4"
+    local mole_path="$5"
+    local success_label="$6"
+
+    command -v curl > /dev/null 2>&1 || return 1
+    echo "Retrying with a direct reinstall from GitHub..."
+
+    local heal_output=""
+    heal_output=$(
+        set -o pipefail
+        curl -fsSL --connect-timeout 10 --max-time 60 \
+            "https://raw.githubusercontent.com/tw93/mole/main/install.sh" |
+            MOLE_ASSUME_SUDO_AUTH="$assume_sudo" MOLE_VERSION="$update_tag" \
+                bash -s -- --prefix "$install_dir" --config "$config_dir" 2>&1
+    ) || {
+        [[ -n "$heal_output" ]] && printf '%s\n' "$heal_output" | tail -5 >&2
+        return 1
+    }
+
+    # Claim success only when the installed binary reports the target version.
+    # Trusting installer output here would repeat the V1.47.1 false success.
+    local installed_version=""
+    installed_version=$("$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}')
+    if [[ "$installed_version" != "${update_tag#V}" ]]; then
+        return 1
+    fi
+    printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_version}"
+}
+
 # Version discovery must report "unknown" by returning empty, never by failing.
 # These run inside `latest=$(...)` command substitutions in a shell with
 # `set -euo pipefail`, so a nonzero pipeline (curl refused by a flaky proxy, or
@@ -687,6 +727,7 @@ update_mole() {
             _update_cleanup
             log_error "Nightly update failed"
             echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+            echo -e "${ICON_REVIEW} Reinstall manually: curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash"
             exit 1
         fi
     elif [[ "$force_update" == "true" || "$switch_to_stable_channel" == "true" || "$repair_install" == "true" ]]; then
@@ -694,11 +735,14 @@ update_mole() {
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
-            rm -f "$tmp_installer"
-            _update_cleanup
-            log_error "Update failed"
-            echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
-            exit 1
+            if ! _update_self_heal_reinstall "$installer_assume_sudo_auth" "$update_tag" "$install_dir" "$config_dir" "$mole_path" "$final_success_label"; then
+                rm -f "$tmp_installer"
+                _update_cleanup
+                log_error "Update failed"
+                echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+                echo -e "${ICON_REVIEW} Reinstall manually: curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash"
+                exit 1
+            fi
         fi
     else
         if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
@@ -708,11 +752,14 @@ update_mole() {
                 process_install_output "$install_output" "$latest" "$final_success_label"
             else
                 if [[ -t 1 ]]; then stop_inline_spinner; fi
-                rm -f "$tmp_installer"
-                _update_cleanup
-                log_error "Update failed"
-                echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
-                exit 1
+                if ! _update_self_heal_reinstall "$installer_assume_sudo_auth" "$update_tag" "$install_dir" "$config_dir" "$mole_path" "$final_success_label"; then
+                    rm -f "$tmp_installer"
+                    _update_cleanup
+                    log_error "Update failed"
+                    echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+                    echo -e "${ICON_REVIEW} Reinstall manually: curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash"
+                    exit 1
+                fi
             fi
         fi
     fi
