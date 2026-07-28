@@ -230,13 +230,20 @@ func getAppleSmartBatteryHealthData() (cycles int, capacity int) {
 }
 
 func parseAppleSmartBatteryHealth(out string) (cycles int, capacity int) {
-	var design, nominal, rawMax int
+	var normalizedCapacity, design, nominal, rawMax int
 	for line := range strings.Lines(out) {
 		line = strings.TrimSpace(line)
 		if cycles == 0 {
 			if raw, found := ioRegValueForKey(line, "CycleCount"); found {
 				if value, err := strconv.Atoi(raw); err == nil && value > 0 && value < 100000 {
 					cycles = value
+				}
+			}
+		}
+		if normalizedCapacity == 0 {
+			if raw, found := ioRegValueForKey(line, "MaxCapacity"); found {
+				if value, err := strconv.Atoi(raw); err == nil && value > 0 && value <= 100 {
+					normalizedCapacity = value
 				}
 			}
 		}
@@ -262,13 +269,16 @@ func parseAppleSmartBatteryHealth(out string) (cycles int, capacity int) {
 			}
 		}
 	}
+	if normalizedCapacity > 0 {
+		return cycles, normalizedCapacity
+	}
 	return cycles, batteryHealthPercent(design, nominal, rawMax)
 }
 
-// batteryHealthPercent mirrors the algorithm used by the Mole Mac app
-// (SystemMetricsCollector.batteryHealthPercent): NominalChargeCapacity is
-// preferred over AppleRawMaxCapacity, the ratio is rounded half-away-from-zero,
-// and the result is clamped to [0, 100].
+// batteryHealthPercent is the fallback estimate when ioreg does not expose a
+// normalized MaxCapacity percentage. NominalChargeCapacity is preferred over
+// AppleRawMaxCapacity, the ratio is rounded half-away-from-zero, and the result
+// is clamped to [0, 100].
 func batteryHealthPercent(design, nominal, rawMax int) int {
 	if design <= 0 {
 		return 0

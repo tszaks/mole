@@ -76,6 +76,44 @@ func TestMergeBatteryHealthDataPrefersAppleSmartBatteryCapacity(t *testing.T) {
 	}
 }
 
+func TestParseAppleSmartBatteryHealthPrefersNormalizedMaxCapacity(t *testing.T) {
+	out := `
+  | |   "BatteryData" = {"MaxCapacity"=100,"DesignCapacity"=6075,"BatteryHealthMetric"=0}
+  | |   "NominalChargeCapacity" = 6008
+  | |   "MaxCapacity" = 100
+  | |   "DesignCapacity" = 6075
+  | |   "AppleRawMaxCapacity" = 5858
+  | |   "CycleCount" = 48
+`
+
+	cycles, capacity := parseAppleSmartBatteryHealth(out)
+
+	if cycles != 48 {
+		t.Fatalf("cycles = %d, want 48", cycles)
+	}
+	if capacity != 100 {
+		t.Fatalf("capacity = %d, want 100", capacity)
+	}
+}
+
+func TestParseAppleSmartBatteryHealthIgnoresUnnormalizedMaxCapacity(t *testing.T) {
+	out := `
+  | |   "MaxCapacity" = 7745
+  | |   "DesignCapacity" = 8579
+  | |   "NominalChargeCapacity" = 7989
+  | |   "CycleCount" = 12
+`
+
+	cycles, capacity := parseAppleSmartBatteryHealth(out)
+
+	if cycles != 12 {
+		t.Fatalf("cycles = %d, want 12", cycles)
+	}
+	if capacity != 93 {
+		t.Fatalf("capacity = %d, want 93", capacity)
+	}
+}
+
 func TestParseAppleSmartBatteryHealthPrefersNominalCharge(t *testing.T) {
 	out := `
   | |   "DesignCapacity" = 10000
