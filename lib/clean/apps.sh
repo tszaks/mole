@@ -102,8 +102,13 @@ scan_installed_apps() {
         # Setapp applications
         "$HOME/Library/Application Support/Setapp/Applications"
     )
-    # Temp dir avoids write contention across parallel scans.
-    local scan_tmp_dir=$(create_temp_dir)
+    # Temp dir avoids write contention across parallel scans. The temp registry
+    # owns cleanup because safe_remove intentionally rejects root's private tree.
+    local scan_tmp_dir
+    if ! scan_tmp_dir=$(create_temp_dir); then
+        debug_log "Failed to create installed application scan temp directory"
+        return 1
+    fi
     local pids=()
     local dir_idx=0
     for app_dir in "${app_dirs[@]}"; do
@@ -154,7 +159,6 @@ scan_installed_apps() {
     fi
     debug_log "All background processes completed"
     cat "$scan_tmp_dir"/*.txt >> "$installed_bundles" 2> /dev/null || true
-    safe_remove "$scan_tmp_dir" true
     sort -u "$installed_bundles" -o "$installed_bundles"
     ensure_user_dir "$(dirname "$cache_file")"
     cp "$installed_bundles" "$cache_file" 2> /dev/null || true
