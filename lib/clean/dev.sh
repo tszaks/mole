@@ -1752,6 +1752,8 @@ clean_dev_api_tools() {
 codex_desktop_running() {
     command -v pgrep > /dev/null 2>&1 || return 1
 
+    pgrep -x "ChatGPT" > /dev/null 2>&1 && return 0
+    pgrep -f "/ChatGPT.app/" > /dev/null 2>&1 && return 0
     pgrep -x "Codex" > /dev/null 2>&1 && return 0
     pgrep -f "/Codex.app/" > /dev/null 2>&1 && return 0
     return 1

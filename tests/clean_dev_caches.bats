@@ -434,6 +434,63 @@ EOF
     [[ "$output" != *"docker called"* ]]
 }
 
+@test "codex_desktop_running recognizes current and legacy app aliases (#1305)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+
+matched_query=""
+pgrep() {
+    [[ "$*" == "$matched_query" ]]
+}
+
+for matched_query in "-x Codex" "-f /Codex.app/" "-x ChatGPT" "-f /ChatGPT.app/"; do
+    codex_desktop_running || exit 1
+done
+
+matched_query="-x unrelated"
+if codex_desktop_running; then
+    exit 1
+fi
+printf 'CODEX_DESKTOP_ALIASES_OK\n'
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"CODEX_DESKTOP_ALIASES_OK"* ]] || return 1
+}
+
+@test "ChatGPT running keeps Codex runtime and update staging cleanup dormant (#1305)" {
+    local case_home="$HOME/chatgpt-running-case"
+    local runtime_root="$case_home/.cache/codex-runtimes"
+    local staging_root="$case_home/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+    rm -rf "$case_home"
+    mkdir -p "$runtime_root/incomplete-install" "$staging_root/stale"
+    touch -t 202001010000 "$staging_root/stale"
+
+    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { [[ "$1" == "-x" && "$2" == "ChatGPT" ]]; }
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+get_path_size_kb() { echo "1024"; }
+bytes_to_human() { echo "1M"; }
+note_activity() { :; }
+
+clean_codex_runtimes
+clean_codex_desktop_staging
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Codex runtimes · skipped (Codex running)"* ]] || return 1
+    [[ "$output" == *"Codex Desktop update staging · skipped (Codex running)"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
+}
+
 @test "clean_codex_runtimes reports active runtime for manual review" {
     mkdir -p "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin"
     touch "$HOME/.cache/codex-runtimes/codex-primary-runtime/runtime.json"
