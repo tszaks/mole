@@ -497,6 +497,106 @@ EOF
     [[ "$output" != *"Touch ID"* ]]
 }
 
+@test "unrelated removal diagnostics do not probe Touch ID" {
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+touchid_checks=0
+check_touchid_support() {
+    touchid_checks=\$((touchid_checks + 1))
+    printf 'detector noise\n'
+    return 0
+}
+diagnose_removal_failure "\$MOLE_ERR_SIP_PROTECTED" "Microsoft Word"
+diagnose_removal_failure "\$MOLE_ERR_READONLY_FS" "Microsoft Word"
+diagnose_removal_failure "\$MOLE_ERR_PROTECTED_PATH" "Microsoft Word"
+diagnose_removal_failure "\$MOLE_ERR_PRIVACY_DENIED" "Microsoft Word"
+printf 'checks=%s\n' "\$touchid_checks"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"checks=0"* ]] || return 1
+    [[ "$output" != *"detector noise"* ]]
+}
+
+@test "removal diagnosis uses the shared Touch ID detector" {
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+touchid_checks=0
+check_touchid_support() {
+    touchid_checks=\$((touchid_checks + 1))
+    printf 'detector noise\n'
+    return 0
+}
+diagnose_removal_failure "\$MOLE_ERR_AUTH_FAILED" "Microsoft Word"
+diagnose_removal_failure "1" "Microsoft Word"
+printf 'checks=%s\n' "\$touchid_checks"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"authentication failed|Check your credentials or restart Terminal"* ]] || return 1
+    [[ "$output" == *"permission denied|Try running again or check file ownership"* ]] || return 1
+    [[ "$output" == *"checks=2"* ]] || return 1
+    [[ "$output" != *"detector noise"* ]] || return 1
+    [[ "$output" != *"mole touchid"* ]]
+}
+
+@test "common library wires the production Touch ID detector into diagnosis" {
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+[[ "\$(type -t check_touchid_support)" == "function" ]] || exit 1
+if check_touchid_support; then
+    expected="authentication failed|Check your credentials or restart Terminal"
+else
+    expected="authentication failed|Try 'mole touchid' to enable fingerprint auth"
+fi
+actual=\$(diagnose_removal_failure "\$MOLE_ERR_AUTH_FAILED" "Microsoft Word")
+[[ "\$actual" == "\$expected" ]] || exit 1
+printf 'production-detector-wired\n'
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"production-detector-wired"* ]]
+}
+
+@test "removal diagnosis retains Touch ID setup guidance when unavailable" {
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+check_touchid_support() {
+    return 1
+}
+diagnose_removal_failure "\$MOLE_ERR_AUTH_FAILED" "Microsoft Word"
+diagnose_removal_failure "1" "Microsoft Word"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"authentication failed|Try 'mole touchid' to enable fingerprint auth"* ]] || return 1
+    [[ "$output" == *"permission denied|Try 'mole touchid' or check with 'ls -l'"* ]]
+}
+
+@test "removal diagnosis ignores a same-named executable when the detector is missing" {
+    local fake_bin="$SANDBOX/bin"
+    local trace="$SANDBOX/external-detector.log"
+    mkdir -p "$fake_bin"
+    cat > "$fake_bin/check_touchid_support" <<'SH'
+#!/bin/bash
+printf 'called\n' >> "$MOLE_TEST_TRACE"
+exit 0
+SH
+    chmod +x "$fake_bin/check_touchid_support"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset -f check_touchid_support
+export MOLE_TEST_TRACE="$trace"
+export PATH="$fake_bin:\$PATH"
+diagnose_removal_failure "\$MOLE_ERR_AUTH_FAILED" "Microsoft Word"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"authentication failed|Try 'mole touchid' to enable fingerprint auth"* ]] || return 1
+    [[ ! -e "$trace" ]]
+}
+
 @test "mole_delete writes a tab-separated log line per call" {
     local victim="$SANDBOX/logged"
     : > "$victim"

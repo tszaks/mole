@@ -1619,7 +1619,6 @@ diagnose_removal_failure() {
 
     local reason=""
     local suggestion=""
-    local touchid_file="/etc/pam.d/sudo"
 
     case "$exit_code" in
         "$MOLE_ERR_SIP_PROTECTED")
@@ -1627,7 +1626,7 @@ diagnose_removal_failure() {
             ;;
         "$MOLE_ERR_AUTH_FAILED")
             reason="authentication failed"
-            if [[ -f "$touchid_file" ]] && grep -q "pam_tid.so" "$touchid_file" 2> /dev/null; then
+            if declare -F check_touchid_support > /dev/null 2>&1 && check_touchid_support > /dev/null 2>&1; then
                 suggestion="Check your credentials or restart Terminal"
             else
                 suggestion="Try 'mole touchid' to enable fingerprint auth"
@@ -1646,7 +1645,7 @@ diagnose_removal_failure() {
             ;;
         *)
             reason="permission denied"
-            if [[ -f "$touchid_file" ]] && grep -q "pam_tid.so" "$touchid_file" 2> /dev/null; then
+            if declare -F check_touchid_support > /dev/null 2>&1 && check_touchid_support > /dev/null 2>&1; then
                 suggestion="Try running again or check file ownership"
             else
                 suggestion="Try 'mole touchid' or check with 'ls -l'"
