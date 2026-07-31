@@ -43,7 +43,7 @@ set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/optimize/tasks.sh"
 getconf() { echo "$tmp_dir"; }
-opt_notification_cleanup
+execute_optimization notification_cleanup
 EOF
 
 	rm -rf "$tmp_dir"
@@ -64,7 +64,7 @@ source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/optimize/tasks.sh"
 getconf() { echo "$tmp_dir"; }
 sqlite3() { return 1; }
-opt_notification_cleanup
+execute_optimization notification_cleanup
 EOF
 
 	rm -rf "$tmp_dir"
@@ -83,7 +83,7 @@ EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/optimize/tasks.sh"
-opt_coreduet_cleanup
+execute_optimization coreduet_cleanup
 EOF
 
 	rm -rf "$tmp_dir"
@@ -110,7 +110,7 @@ set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/lib/optimize/tasks.sh"
 sqlite3() { return 1; }
-opt_coreduet_cleanup
+execute_optimization coreduet_cleanup
 EOF
 
 	rm -rf "$tmp_dir"

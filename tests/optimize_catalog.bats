@@ -56,6 +56,21 @@ EOF
     [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
 }
 
+@test "optimize catalog resolves handler and display ownership together" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/catalog.sh"
+
+[[ "$(optimize_catalog_handler_for dock_refresh)" == "opt_dock_refresh" ]] || exit 1
+[[ "$(optimize_catalog_health_name_for dock_refresh)" == "Dock Refresh" ]] || exit 1
+if optimize_catalog_health_name_for unknown_action; then
+    exit 1
+fi
+EOF
+
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
 @test "health JSON preserves the exact optimization contract" {
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

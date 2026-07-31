@@ -81,6 +81,44 @@ assert data["deletions"][1]["path"] == "/tmp/Old App.app"
 '
 }
 
+@test "mo history preserves failed optimize task counts" {
+    cat > "$HOME/Library/Logs/mole/operations.log" <<'EOF'
+# ========== optimize session started at 2026-05-24 12:00:00 ==========
+[2026-05-24 12:00:01] [optimize] TASK_FAILED disk_verify (task outcome)
+[2026-05-24 12:00:02] [optimize] TASK_FAILED periodic_maintenance (task outcome)
+# ========== optimize session ended at 2026-05-24 12:00:05, 3 items, 0B ==========
+EOF
+
+    run env HOME="$HOME" "$PROJECT_ROOT/mole" history
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"2 optimize tasks failed"* ]] || return 1
+
+    run env HOME="$HOME" "$PROJECT_ROOT/mole" history --json
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    printf '%s\n' "$output" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["sessions"][0]["command"] == "optimize"
+assert data["sessions"][0]["items"] == 3
+assert data["sessions"][0]["failed_tasks"] == 2
+'
+}
+
+@test "operation logging writes the canonical failed task action" {
+    local log_file="$HOME/Library/Logs/mole/task-outcome.log"
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" OPERATIONS_LOG_FILE="$log_file" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+log_operation optimize TASK_FAILED disk_verify "task outcome"
+cat "$OPERATIONS_LOG_FILE"
+EOF
+
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"[optimize] TASK_FAILED disk_verify (task outcome)"* ]] || return 1
+}
+
 @test "mo history --json escapes unusual path characters" {
     : > "$HOME/Library/Logs/mole/operations.log"
     weird_path=$'/tmp/unicode-\xe9\x9b\xaa-quote"slash\\tab\tbackspace\bformfeed\fend'

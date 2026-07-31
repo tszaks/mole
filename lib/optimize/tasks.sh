@@ -11,6 +11,7 @@ readonly MOLE_OPTIMIZE_TASKS_LOADED=1
 _MOLE_OPTIMIZE_TASKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly _MOLE_OPTIMIZE_TASKS_DIR
 source "$_MOLE_OPTIMIZE_TASKS_DIR/catalog.sh"
+source "$_MOLE_OPTIMIZE_TASKS_DIR/outcomes.sh"
 
 # Config constants (override via env).
 readonly MOLE_TM_THIN_TIMEOUT=180
@@ -52,6 +53,14 @@ opt_existing_path_size_kb() {
     }
 
     opt_numeric_kb "$(get_path_size_kb "$path" 2> /dev/null || echo "0")"
+}
+
+opt_existing_file_size_kb_strict() {
+    local path="$1"
+    local bytes=""
+    bytes=$($STAT_BSD -f%z "$path" 2> /dev/null) || return 1
+    [[ "$bytes" =~ ^[0-9]+$ ]] || return 1
+    echo "$(((bytes + 1023) / 1024))"
 }
 
 run_launchctl_unload() {
@@ -115,6 +124,8 @@ is_memory_pressure_high() {
     return 1
 }
 
+# Return 0 when a VPN is active, 1 when probes completed without finding one,
+# and 2 when the VPN state could not be determined safely.
 has_active_vpn_interface() {
     case "${MOLE_ASSUME_VPN_ACTIVE:-}" in
         1 | true | TRUE | yes | YES)
@@ -138,19 +149,33 @@ has_active_vpn_interface() {
     # Split-tunnel third-party VPNs that do not own the default route will not
     # be detected; route flushing may briefly disrupt their explicit routes,
     # which the VPN client re-establishes on its next reconcile.
-    if command -v scutil > /dev/null 2>&1; then
-        if scutil --nc list 2> /dev/null | grep -Eq '^\* \(Connected\)'; then
-            return 0
-        fi
+    if ! command -v scutil > /dev/null 2>&1; then
+        return 2
+    fi
+    local scutil_output=""
+    local scutil_status=0
+    scutil_output=$(LC_ALL=C run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" scutil --nc list 2> /dev/null) || scutil_status=$?
+    if [[ $scutil_status -ne 0 ]]; then
+        return 2
+    fi
+    if echo "$scutil_output" | grep -Eq '^\* \(Connected\)'; then
+        return 0
     fi
 
-    if command -v route > /dev/null 2>&1; then
-        local default_iface
-        default_iface=$(route -n get default 2> /dev/null |
-            awk -F': ' '$1 ~ /^[[:space:]]*interface$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}')
-        if [[ "$default_iface" =~ ^utun[0-9]+$ ]]; then
-            return 0
-        fi
+    if ! command -v route > /dev/null 2>&1; then
+        return 2
+    fi
+    local route_output=""
+    local route_status=0
+    route_output=$(LC_ALL=C run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" route -n get default 2> /dev/null) || route_status=$?
+    if [[ $route_status -ne 0 ]]; then
+        return 2
+    fi
+    local default_iface
+    default_iface=$(printf '%s\n' "$route_output" |
+        awk -F': ' '$1 ~ /^[[:space:]]*interface$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}')
+    if [[ "$default_iface" =~ ^utun[0-9]+$ ]]; then
+        return 0
     fi
 
     return 1
@@ -175,22 +200,43 @@ flush_dns_cache() {
 
 # Basic system maintenance.
 opt_system_maintenance() {
-    if flush_dns_cache; then
-        opt_msg "DNS cache flushed"
+    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]] && ! optimize_sudo_available; then
+        opt_msg "DNS & Spotlight check skipped (admin access required)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
+        return 0
     fi
 
-    local spotlight_status
-    spotlight_status=$(mdutil -s / 2> /dev/null || echo "")
-    if echo "$spotlight_status" | grep -qi "Indexing disabled"; then
+    local dns_flushed="false"
+    if flush_dns_cache; then
+        opt_msg "DNS cache flushed"
+        dns_flushed="true"
+    fi
+
+    local spotlight_status=""
+    local spotlight_failed=0
+    if ! spotlight_status=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" mdutil -s / 2> /dev/null); then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to verify Spotlight index"
+        spotlight_failed=1
+    elif echo "$spotlight_status" | grep -qi "Indexing disabled"; then
         echo -e "  ${GRAY}${ICON_EMPTY}${NC} Spotlight indexing disabled"
     else
         opt_msg "Spotlight index verified"
     fi
+
+    local applied=0
+    local failed="$spotlight_failed"
+    [[ "$dns_flushed" == "true" ]] && applied=1 || failed=$((failed + 1))
+    optimize_task_result_from_counts "$applied" "$failed"
 }
 
 # Refresh Finder caches (QuickLook/icon services).
 opt_cache_refresh() {
-    local total_cache_size=0
+    local cleaned_cache_size=0
+    local removed_count=0
+    local remove_failed=0
+    local refresh_failed=0
+    local quicklook_refreshed=0
+    local icons_refreshed=0
 
     local -a cache_targets=(
         "$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
@@ -204,9 +250,20 @@ opt_cache_refresh() {
         debug_risk_level "LOW" "Caches are automatically rebuilt"
     fi
 
-    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        qlmanage -r cache > /dev/null 2>&1 || true
-        qlmanage -r > /dev/null 2>&1 || true
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        quicklook_refreshed=1
+        icons_refreshed=1
+    else
+        if qlmanage -r cache > /dev/null 2>&1; then
+            quicklook_refreshed=1
+        else
+            refresh_failed=$((refresh_failed + 1))
+        fi
+        if qlmanage -r > /dev/null 2>&1; then
+            icons_refreshed=1
+        else
+            refresh_failed=$((refresh_failed + 1))
+        fi
     fi
 
     local -a removable_targets=()
@@ -221,7 +278,6 @@ opt_cache_refresh() {
         size_kb=$(opt_existing_path_size_kb "$target_path")
         removable_targets+=("$target_path")
         removable_sizes+=("$size_kb")
-        total_cache_size=$((total_cache_size + size_kb))
     done
 
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
@@ -242,12 +298,30 @@ opt_cache_refresh() {
 
     local index
     for index in "${!removable_targets[@]}"; do
-        safe_remove "${removable_targets[$index]}" true "${removable_sizes[$index]}" > /dev/null 2>&1 || true
+        if safe_remove "${removable_targets[$index]}" true "${removable_sizes[$index]}" > /dev/null 2>&1; then
+            removed_count=$((removed_count + 1))
+            cleaned_cache_size=$((cleaned_cache_size + removable_sizes[index]))
+        else
+            remove_failed=$((remove_failed + 1))
+        fi
     done
 
-    export OPTIMIZE_CACHE_CLEANED_KB="${total_cache_size}"
-    opt_msg "QuickLook thumbnails refreshed"
-    opt_msg "Icon services cache rebuilt"
+    export OPTIMIZE_CACHE_CLEANED_KB="${cleaned_cache_size}"
+    if [[ $quicklook_refreshed -eq 1 ]]; then
+        opt_msg "QuickLook thumbnails refreshed"
+    fi
+    if [[ $icons_refreshed -eq 1 ]]; then
+        opt_msg "Icon services cache rebuilt"
+    fi
+    if [[ $remove_failed -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to remove $remove_failed Finder cache target(s)"
+    fi
+    if [[ $refresh_failed -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to rebuild $refresh_failed Finder cache service(s)"
+    fi
+    optimize_task_result_from_counts \
+        "$((removed_count + quicklook_refreshed + icons_refreshed))" \
+        "$((remove_failed + refresh_failed))"
 }
 
 # Removed: opt_maintenance_scripts - macOS handles log rotation automatically via launchd
@@ -265,17 +339,42 @@ opt_saved_state_cleanup() {
     fi
 
     local state_dir="$HOME/Library/Saved Application State"
+    local removed=0
+    local scan_failed=0
+    local remove_failed=0
 
     if [[ -d "$state_dir" ]]; then
+        local scan_file=""
+        if ! scan_file=$(mktemp_file "optimize-saved-states"); then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to prepare saved state scan"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+            return 0
+        fi
+        if ! run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find "$state_dir" -type d -name "*.savedState" -mtime "+$MOLE_SAVED_STATE_AGE_DAYS" -print0 > "$scan_file" 2> /dev/null; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to scan old saved states"
+            scan_failed=1
+        fi
         while IFS= read -r -d '' state_path; do
             if should_protect_path "$state_path"; then
                 continue
             fi
-            safe_remove "$state_path" true > /dev/null 2>&1 || true
-        done < <(command find "$state_dir" -type d -name "*.savedState" -mtime "+$MOLE_SAVED_STATE_AGE_DAYS" -print0 2> /dev/null)
+            if safe_remove "$state_path" true > /dev/null 2>&1; then
+                removed=$((removed + 1))
+            else
+                remove_failed=$((remove_failed + 1))
+            fi
+        done < "$scan_file"
     fi
 
-    opt_msg "App saved states optimized"
+    if [[ $scan_failed -eq 0 && $remove_failed -eq 0 ]]; then
+        opt_msg "App saved states optimized"
+    elif [[ $removed -gt 0 ]]; then
+        opt_msg "Removed $removed old saved state(s)"
+    fi
+    if [[ $remove_failed -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to remove $remove_failed old saved state(s)"
+    fi
+    optimize_task_result_from_counts "$removed" "$((scan_failed + remove_failed))"
 }
 
 # Removed: opt_swap_cleanup - Direct virtual memory operations pose system crash risk
@@ -301,6 +400,7 @@ opt_fix_broken_configs() {
     local broken_prefs=""
     local prefs_partial=0
     broken_prefs=$(fix_broken_preferences) || prefs_partial=1
+    broken_prefs=${broken_prefs:-0}
 
     if [[ "$spinner_started" == "true" ]]; then
         stop_inline_spinner
@@ -311,13 +411,18 @@ opt_fix_broken_configs() {
     fi
 
     export OPTIMIZE_CONFIGS_REPAIRED="${broken_prefs}"
-    if [[ $prefs_partial -ne 0 ]]; then
+    if [[ $broken_prefs -gt 0 ]]; then
+        if [[ $prefs_partial -ne 0 ]]; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Preference scan hit its time budget, repaired ${broken_prefs:-0} so far"
+        else
+            opt_msg "Repaired $broken_prefs corrupted preference files"
+        fi
+    elif [[ $prefs_partial -ne 0 ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Preference scan hit its time budget, repaired ${broken_prefs:-0} so far"
-    elif [[ $broken_prefs -gt 0 ]]; then
-        opt_msg "Repaired $broken_prefs corrupted preference files"
     else
         opt_msg "All preference files valid"
     fi
+    optimize_task_result_from_counts "$broken_prefs" "$prefs_partial"
 }
 
 # DNS cache refresh.
@@ -332,14 +437,23 @@ opt_network_optimization() {
     if [[ "${MOLE_DNS_FLUSHED:-0}" == "1" ]]; then
         opt_msg "DNS cache already refreshed"
         opt_msg "mDNSResponder already restarted"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
+        return 0
+    fi
+
+    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]] && ! optimize_sudo_available; then
+        opt_msg "Network cache refresh skipped (admin access required)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
         return 0
     fi
 
     if flush_dns_cache; then
         opt_msg "DNS cache refreshed"
         opt_msg "mDNSResponder restarted"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
     else
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to refresh DNS cache"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
     fi
 }
 
@@ -355,6 +469,7 @@ opt_quarantine_cleanup() {
 
     if ! command -v sqlite3 > /dev/null 2>&1; then
         echo -e "  ${GRAY}-${NC} Quarantine cleanup skipped, sqlite3 unavailable"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
         return 0
     fi
 
@@ -362,20 +477,32 @@ opt_quarantine_cleanup() {
 
     if [[ ! -f "$quarantine_db" ]]; then
         opt_msg "Quarantine database already clean"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
     if should_protect_path "$quarantine_db"; then
         opt_msg "Quarantine database already clean"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
     # Check if database has any entries worth cleaning.
-    local row_count
-    row_count=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sqlite3 "$quarantine_db" "SELECT COUNT(*) FROM LSQuarantineEvent;" 2> /dev/null || echo "0")
+    local row_count=""
+    local count_status=0
+    set +e
+    row_count=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sqlite3 "$quarantine_db" "SELECT COUNT(*) FROM LSQuarantineEvent;" 2> /dev/null)
+    count_status=$?
+    set -e
 
-    if [[ ! "$row_count" =~ ^[0-9]+$ ]] || [[ "$row_count" -eq 0 ]]; then
+    if [[ $count_status -ne 0 || ! "$row_count" =~ ^[0-9]+$ ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect quarantine database"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+        return 0
+    fi
+    if [[ "$row_count" -eq 0 ]]; then
         opt_msg "Quarantine database already clean"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
@@ -388,11 +515,14 @@ opt_quarantine_cleanup() {
 
         if [[ $exit_code -eq 0 ]]; then
             opt_msg "Quarantine history cleared ($row_count entries)"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
         else
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to clean quarantine database"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
         fi
     else
         opt_msg "Quarantine history cleared ($row_count entries)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
     fi
 }
 
@@ -408,6 +538,7 @@ opt_sqlite_vacuum() {
 
     if ! command -v sqlite3 > /dev/null 2>&1; then
         echo -e "  ${GRAY}-${NC} Database optimization already optimal, sqlite3 unavailable"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
         return 0
     fi
 
@@ -422,6 +553,7 @@ opt_sqlite_vacuum() {
 
     if [[ ${#busy_apps[@]} -gt 0 ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Close these apps before database optimization: ${busy_apps[*]}"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
         return 0
     fi
 
@@ -441,7 +573,8 @@ opt_sqlite_vacuum() {
     local vacuumed=0
     local timed_out=0
     local failed=0
-    local skipped=0
+    local policy_skipped=0
+    local already_optimal=0
 
     for pattern in "${db_paths[@]}"; do
         while IFS= read -r db_file; do
@@ -459,13 +592,21 @@ opt_sqlite_vacuum() {
             local file_size
             file_size=$(get_file_size "$db_file")
             if [[ "$file_size" -gt "$MOLE_SQLITE_MAX_SIZE" ]]; then
-                skipped=$((skipped + 1))
+                policy_skipped=$((policy_skipped + 1))
                 continue
             fi
 
             # Skip if freelist is tiny (already compact).
             local page_info=""
-            page_info=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sqlite3 "$db_file" "PRAGMA page_count; PRAGMA freelist_count;" 2> /dev/null || echo "")
+            local page_status=0
+            set +e
+            page_info=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sqlite3 "$db_file" "PRAGMA page_count; PRAGMA freelist_count;" 2> /dev/null)
+            page_status=$?
+            set -e
+            if [[ $page_status -ne 0 ]]; then
+                failed=$((failed + 1))
+                continue
+            fi
             local page_count=""
             local freelist_count=""
             page_count="${page_info%%$'\n'*}"
@@ -475,7 +616,7 @@ opt_sqlite_vacuum() {
             fi
             if [[ "$page_count" =~ ^[0-9]+$ && "$freelist_count" =~ ^[0-9]+$ && "$page_count" -gt 0 ]]; then
                 if ((freelist_count * 100 < page_count * 5)); then
-                    skipped=$((skipped + 1))
+                    already_optimal=$((already_optimal + 1))
                     continue
                 fi
             fi
@@ -489,7 +630,7 @@ opt_sqlite_vacuum() {
                 set -e
 
                 if [[ $integrity_status -ne 0 || "$integrity_check" != "ok" ]]; then
-                    skipped=$((skipped + 1))
+                    failed=$((failed + 1))
                     continue
                 fi
             fi
@@ -527,8 +668,12 @@ opt_sqlite_vacuum() {
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Database optimization incomplete"
     fi
 
-    if [[ $skipped -gt 0 ]]; then
-        opt_msg "Already optimal for $skipped databases"
+    if [[ $already_optimal -gt 0 ]]; then
+        opt_msg "Already optimal for $already_optimal databases"
+    fi
+
+    if [[ $policy_skipped -gt 0 ]]; then
+        opt_msg "Skipped $policy_skipped oversized databases"
     fi
 
     if [[ $timed_out -gt 0 ]]; then
@@ -538,6 +683,8 @@ opt_sqlite_vacuum() {
     if [[ $failed -gt 0 ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed on $failed databases"
     fi
+
+    optimize_task_result_from_counts "$vacuumed" "$((timed_out + failed))" "$policy_skipped"
 }
 
 # LaunchServices rebuild ("Open with" issues).
@@ -581,14 +728,17 @@ opt_launch_services_rebuild() {
         if [[ $success -eq 0 ]]; then
             opt_msg "LaunchServices repaired"
             opt_msg "File associations refreshed"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
         else
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to rebuild LaunchServices"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
         fi
     else
         if [[ -t 1 ]]; then
             stop_inline_spinner
         fi
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} lsregister not found"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
     fi
 }
 
@@ -607,14 +757,16 @@ opt_memory_pressure_relief() {
         debug_risk_level "LOW" "Safe system command, does not affect active processes"
     fi
 
-    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        if ! is_memory_pressure_high; then
-            opt_msg "Memory pressure already optimal"
-            return 0
-        fi
+    if ! is_memory_pressure_high; then
+        opt_msg "Memory pressure already optimal"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
+        return 0
+    fi
 
+    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         if ! optimize_sudo_available; then
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Memory pressure relief · skipped (admin access required)"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
             return 0
         fi
 
@@ -636,12 +788,15 @@ opt_memory_pressure_relief() {
         if [[ "$purge_ok" == "true" ]]; then
             opt_msg "Inactive memory released"
             opt_msg "System responsiveness improved"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
         else
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to release memory pressure"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
         fi
     else
         opt_msg "Inactive memory released"
         opt_msg "System responsiveness improved"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
     fi
 }
 
@@ -650,29 +805,70 @@ opt_network_stack_optimize() {
     local route_flushed="false"
     local arp_flushed="false"
 
+    local vpn_status=0
     if has_active_vpn_interface; then
-        opt_msg "Network stack refresh skipped, active VPN detected"
+        vpn_status=0
+    else
+        vpn_status=$?
+    fi
+    case "$vpn_status" in
+        0)
+            opt_msg "Network stack refresh skipped, active VPN detected"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
+            return 0
+            ;;
+        1) ;;
+        *)
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect active VPN state"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+            return 0
+            ;;
+    esac
+
+    local route_ok=true
+    local dns_ok=true
+    local route_status=0
+    local dns_status=0
+
+    if run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" route -n get default > /dev/null 2>&1; then
+        route_status=0
+    else
+        route_status=$?
+    fi
+    if run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" dscacheutil -q host -a name "example.com" > /dev/null 2>&1; then
+        dns_status=0
+    else
+        dns_status=$?
+    fi
+
+    if [[ $route_status -eq 124 || $dns_status -eq 124 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Network health check timed out"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+        return 0
+    fi
+    if [[ $route_status -gt 1 || $dns_status -gt 1 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect network health"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+        return 0
+    fi
+
+    if [[ $route_status -ne 0 ]]; then
+        route_ok=false
+    fi
+    if [[ $dns_status -ne 0 ]]; then
+        dns_ok=false
+    fi
+
+    if [[ "$route_ok" == "true" && "$dns_ok" == "true" ]]; then
+        opt_msg "Network stack already optimal"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        local route_ok=true
-        local dns_ok=true
-
-        if ! route -n get default > /dev/null 2>&1; then
-            route_ok=false
-        fi
-        if ! dscacheutil -q host -a name "example.com" > /dev/null 2>&1; then
-            dns_ok=false
-        fi
-
-        if [[ "$route_ok" == "true" && "$dns_ok" == "true" ]]; then
-            opt_msg "Network stack already optimal"
-            return 0
-        fi
-
         if ! optimize_sudo_available; then
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Network stack refresh · skipped (admin access required)"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
             return 0
         fi
 
@@ -688,17 +884,25 @@ opt_network_stack_optimize() {
         arp_flushed="true"
     fi
 
+    local applied=0
+    local failed=0
     if [[ "$route_flushed" == "true" ]]; then
         opt_msg "Network routing table refreshed"
+        applied=$((applied + 1))
+    else
+        failed=$((failed + 1))
     fi
     if [[ "$arp_flushed" == "true" ]]; then
         opt_msg "ARP cache cleared"
+        applied=$((applied + 1))
     else
-        if [[ "$route_flushed" == "true" ]]; then
-            return 0
-        fi
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to optimize network stack"
+        failed=$((failed + 1))
     fi
+
+    if [[ $failed -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Network stack refresh incomplete ($failed operation(s) failed)"
+    fi
+    optimize_task_result_from_counts "$applied" "$failed"
 }
 
 # User directory permissions repair.
@@ -714,14 +918,16 @@ opt_disk_permissions_repair() {
     local user_id
     user_id=$(id -u)
 
-    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        if ! needs_permissions_repair; then
-            opt_msg "User directory permissions already optimal"
-            return 0
-        fi
+    if ! needs_permissions_repair; then
+        opt_msg "User directory permissions already optimal"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
+        return 0
+    fi
 
+    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         if ! optimize_sudo_available; then
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Disk permissions repair · skipped (admin access required)"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
             return 0
         fi
 
@@ -741,22 +947,36 @@ opt_disk_permissions_repair() {
         if [[ "$success" == "true" ]]; then
             opt_msg "User directory permissions repaired"
             opt_msg "File access issues resolved"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
         else
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to repair permissions, may not be needed"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
         fi
     else
         opt_msg "User directory permissions repaired"
         opt_msg "File access issues resolved"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
     fi
 }
 
 # Spotlight index check/rebuild (only if slow).
 opt_spotlight_index_optimize() {
-    local spotlight_status
-    spotlight_status=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" mdutil -s / 2> /dev/null || echo "")
+    local spotlight_status=""
+    local spotlight_status_code=0
+    set +e
+    spotlight_status=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" mdutil -s / 2> /dev/null)
+    spotlight_status_code=$?
+    set -e
+
+    if [[ $spotlight_status_code -ne 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect Spotlight index (exit=$spotlight_status_code)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+        return 0
+    fi
 
     if echo "$spotlight_status" | grep -qi "Indexing disabled"; then
         echo -e "  ${GRAY}${ICON_EMPTY}${NC} Spotlight indexing is disabled"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
         return 0
     fi
 
@@ -765,6 +985,7 @@ opt_spotlight_index_optimize() {
         # battery instead of measuring a result that would be discarded.
         if ! is_ac_power; then
             opt_msg "Spotlight index already optimal"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
             return 0
         fi
 
@@ -780,15 +1001,23 @@ opt_spotlight_index_optimize() {
         fi
 
         local slow_count=0
-        local test_start test_end test_duration probe
+        local probe_failed=0
+        local test_start test_end test_duration probe probe_status
         for probe in 1 2; do
             test_start=$(get_epoch_seconds)
             # A timeout counts as slow: an mdfind that cannot answer within
             # the probe ceiling is exactly the sluggishness being measured.
-            run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemFSName == 'Applications'" > /dev/null 2>&1 || true
+            set +e
+            run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemFSName == 'Applications'" > /dev/null 2>&1
+            probe_status=$?
+            set -e
             test_end=$(get_epoch_seconds)
             test_duration=$((test_end - test_start))
-            if [[ $test_duration -gt $slow_threshold ]]; then
+            if [[ $probe_status -eq 124 ]]; then
+                slow_count=$((slow_count + 1))
+            elif [[ $probe_status -ne 0 ]]; then
+                probe_failed=$((probe_failed + 1))
+            elif [[ $test_duration -gt $slow_threshold ]]; then
                 slow_count=$((slow_count + 1))
             fi
             if [[ "$probe" == "1" ]]; then
@@ -800,27 +1029,39 @@ opt_spotlight_index_optimize() {
             stop_inline_spinner
         fi
 
+        if [[ $probe_failed -gt 0 ]]; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Spotlight speed check failed ($probe_failed probe(s))"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+            return 0
+        fi
+
         if [[ $slow_count -ge 2 ]]; then
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
                 if ! optimize_sudo_available; then
                     echo -e "  ${YELLOW}${ICON_WARNING}${NC} Spotlight index rebuild · skipped (admin access required)"
+                    optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
                     return 0
                 fi
                 echo -e "  ${BLUE}${ICON_INFO}${NC} Spotlight search is slow, rebuilding index, may take 1-2 hours"
                 if sudo mdutil -E / > /dev/null 2>&1; then
                     opt_msg "Spotlight index rebuild started"
                     echo -e "  ${GRAY}Indexing will continue in background${NC}"
+                    optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
                 else
                     echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to rebuild Spotlight index"
+                    optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
                 fi
             else
                 opt_msg "Spotlight index rebuild started"
+                optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
             fi
         else
             opt_msg "Spotlight index already optimal"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         fi
     else
         opt_msg "Spotlight index verified"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
     fi
 }
 
@@ -835,6 +1076,7 @@ opt_prune_spotlight_orphan_rules() {
 
     if ! defaults read "$domain" EnabledPreferenceRules &> /dev/null; then
         opt_msg "Spotlight search rules already clean"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
@@ -863,24 +1105,33 @@ opt_prune_spotlight_orphan_rules() {
 
     if [[ ${#removed[@]} -eq 0 ]]; then
         opt_msg "Spotlight search rules already clean"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         opt_msg "Would remove ${#removed[@]} orphan Spotlight rule(s)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
         return 0
     fi
 
     # Rewrite the filtered array through cfprefsd (defaults), not by deleting
     # plist indices in place: this avoids the cfprefsd cache overwriting a direct
     # file edit, and ensures System Settings reflects the change and it persists.
+    local write_status=0
     if [[ ${#keep[@]} -gt 0 ]]; then
-        defaults write "$domain" EnabledPreferenceRules -array "${keep[@]}" 2> /dev/null || true
+        defaults write "$domain" EnabledPreferenceRules -array "${keep[@]}" 2> /dev/null || write_status=$?
     else
-        defaults delete "$domain" EnabledPreferenceRules 2> /dev/null || true
+        defaults delete "$domain" EnabledPreferenceRules 2> /dev/null || write_status=$?
     fi
 
-    opt_msg "Removed ${#removed[@]} orphan Spotlight rule(s)"
+    if [[ $write_status -eq 0 ]]; then
+        opt_msg "Removed ${#removed[@]} orphan Spotlight rule(s)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
+    else
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to remove orphan Spotlight rules"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+    fi
 }
 
 # Dock refresh (restart Dock so plist edits take effect).
@@ -891,15 +1142,32 @@ opt_prune_spotlight_orphan_rules() {
 # touching the plist is sufficient.
 opt_dock_refresh() {
     local dock_plist="$HOME/Library/Preferences/com.apple.dock.plist"
-    if [[ -f "$dock_plist" ]]; then
-        touch "$dock_plist" 2> /dev/null || true
+    local applied=0
+    local failed=0
+
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        applied=1
+    else
+        if [[ -f "$dock_plist" ]]; then
+            if touch "$dock_plist" 2> /dev/null; then
+                applied=$((applied + 1))
+            else
+                failed=$((failed + 1))
+            fi
+        fi
+        if killall Dock 2> /dev/null; then
+            applied=$((applied + 1))
+        else
+            failed=$((failed + 1))
+        fi
     fi
 
-    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        killall Dock 2> /dev/null || true
+    if [[ $failed -eq 0 ]]; then
+        opt_msg "Dock refreshed"
+    else
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Dock refresh incomplete ($failed operation(s) failed)"
     fi
-
-    opt_msg "Dock refreshed"
+    optimize_task_result_from_counts "$applied" "$failed"
 }
 
 # Prevent .DS_Store on network and USB volumes.
@@ -911,6 +1179,7 @@ opt_prevent_network_dsstore() {
     local -a keys=("DSDontWriteNetworkStores" "DSDontWriteUSBStores")
     local changed=0
     local already=0
+    local failed=0
 
     for key in "${keys[@]}"; do
         local current
@@ -927,17 +1196,24 @@ opt_prevent_network_dsstore() {
 
         if defaults write "$domain" "$key" -bool true 2> /dev/null; then
             changed=$((changed + 1))
+        else
+            failed=$((failed + 1))
         fi
     done
 
     if [[ $changed -eq 0 && $already -gt 0 ]]; then
         opt_msg ".DS_Store prevention already enabled on network & USB volumes"
-        return 0
     fi
 
     if [[ $changed -gt 0 ]]; then
         opt_msg ".DS_Store prevention enabled on network & USB volumes"
+    elif [[ $failed -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to enable .DS_Store prevention"
     fi
+    if [[ $changed -gt 0 && $failed -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to enable .DS_Store prevention for $failed volume type(s)"
+    fi
+    optimize_task_result_from_counts "$changed" "$failed"
 }
 
 # Legacy override audit (#1242, #1243): old tweak utilities leave behind
@@ -986,25 +1262,32 @@ opt_legacy_overrides_audit() {
 
     if [[ ${#found_keys[@]} -eq 0 ]]; then
         opt_msg "No legacy App Nap or disk-image overrides found"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
-    local idx
+    local changed=0 skipped=0 failed=0 idx
     for idx in "${!found_keys[@]}"; do
         if command -v is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "${found_plists[$idx]}"; then
             opt_msg "Skipped (whitelisted): ${found_labels[$idx]}"
+            skipped=$((skipped + 1))
             continue
         fi
         if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Would remove override: ${found_labels[$idx]}"
+            changed=$((changed + 1))
             continue
         fi
         if defaults delete "${found_domains[$idx]}" "${found_keys[$idx]}" 2> /dev/null; then
             opt_msg "Removed override: ${found_labels[$idx]}"
+            changed=$((changed + 1))
         else
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Could not remove override: ${found_labels[$idx]}"
+            failed=$((failed + 1))
         fi
     done
+
+    optimize_task_result_from_counts "$changed" "$failed" "$skipped"
 }
 
 # True unless the path lives on an unmounted /Volumes/<disk>. A LaunchAgent
@@ -1028,6 +1311,7 @@ opt_launch_agents_cleanup() {
 
     if [[ ! -d "$agents_dir" ]]; then
         opt_msg "Launch Agents all healthy"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
@@ -1056,15 +1340,28 @@ opt_launch_agents_cleanup() {
 
     if [[ $broken_count -eq 0 ]]; then
         opt_msg "Launch Agents all healthy"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
+    local removed_count=0
+    local failed=0
     for plist in "${broken_plists[@]}"; do
         run_launchctl_unload "$plist"
-        safe_remove "$plist" true > /dev/null 2>&1 || true
+        if safe_remove "$plist" true > /dev/null 2>&1; then
+            removed_count=$((removed_count + 1))
+        else
+            failed=$((failed + 1))
+        fi
     done
 
-    opt_msg "Cleaned $broken_count broken Launch Agent(s)"
+    if [[ $removed_count -gt 0 ]]; then
+        opt_msg "Cleaned $removed_count broken Launch Agent(s)"
+    fi
+    if [[ $failed -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to remove $failed broken Launch Agent(s)"
+    fi
+    optimize_task_result_from_counts "$removed_count" "$failed"
 }
 
 # macOS periodic maintenance scripts (daily/weekly/monthly).
@@ -1074,6 +1371,7 @@ opt_periodic_maintenance() {
     # Check if periodic command exists (removed in macOS 26+)
     if ! command -v periodic > /dev/null 2>&1; then
         opt_msg "Periodic maintenance skipped (not available on this macOS version)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
         return 0
     fi
 
@@ -1088,6 +1386,7 @@ opt_periodic_maintenance() {
 
         if [[ $age_days -lt $stale_days ]]; then
             opt_msg "Periodic maintenance already current (${age_days}d ago)"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
             return 0
         fi
     fi
@@ -1095,6 +1394,7 @@ opt_periodic_maintenance() {
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]] || ! optimize_sudo_available; then
             opt_msg "Periodic maintenance skipped (requires sudo)"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
             return 0
         fi
         # Capture stderr so --debug can surface the real failure reason
@@ -1102,15 +1402,18 @@ opt_periodic_maintenance() {
         local periodic_output rc
         if periodic_output=$(sudo periodic daily weekly monthly 2>&1); then
             opt_msg "Periodic maintenance triggered"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
         else
             rc=$?
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to run periodic maintenance (exit=$rc)"
             if [[ -n "$periodic_output" ]]; then
                 debug_log "periodic stderr: $periodic_output"
             fi
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
         fi
     else
         opt_msg "Periodic maintenance triggered"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
     fi
 }
 
@@ -1119,27 +1422,45 @@ opt_shared_file_list_repair() {
     local sfl_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"
     if [[ ! -d "$sfl_dir" ]]; then
         opt_msg "Shared file lists directory not found"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
     local repaired=0
+    local scan_failed=0
+    local remove_failed=0
+    local scan_file=""
+    if ! scan_file=$(mktemp_file "optimize-shared-file-lists"); then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to prepare shared file list scan"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+        return 0
+    fi
+    if ! run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find "$sfl_dir" \( -name "*.sfl2" -o -name "*.sfl3" \) -type f ! -path "*ApplicationRecentDocuments*" -print0 > "$scan_file" 2> /dev/null; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to scan shared file lists"
+        scan_failed=1
+    fi
     while IFS= read -r -d '' sfl_file; do
         [[ -f "$sfl_file" ]] || continue
         # Skip recent-documents list (user data, not a cache)
         [[ "$sfl_file" == *"ApplicationRecentDocuments"* ]] && continue
         if ! plutil -lint "$sfl_file" > /dev/null 2>&1; then
-            if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                safe_remove "$sfl_file" true > /dev/null 2>&1 || true
+            if [[ "${MOLE_DRY_RUN:-0}" == "1" ]] || safe_remove "$sfl_file" true > /dev/null 2>&1; then
+                repaired=$((repaired + 1))
+            else
+                remove_failed=$((remove_failed + 1))
             fi
-            repaired=$((repaired + 1))
         fi
-    done < <(command find "$sfl_dir" \( -name "*.sfl2" -o -name "*.sfl3" \) -type f ! -path "*ApplicationRecentDocuments*" -print0 2> /dev/null || true)
+    done < "$scan_file"
 
     if [[ $repaired -gt 0 ]]; then
         opt_msg "Repaired $repaired corrupted shared file list(s)"
-    else
+    elif [[ $scan_failed -eq 0 && $remove_failed -eq 0 ]]; then
         opt_msg "Shared file lists all healthy"
     fi
+    if [[ $remove_failed -gt 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to repair $remove_failed corrupted shared file list(s)"
+    fi
+    optimize_task_result_from_counts "$repaired" "$((scan_failed + remove_failed))"
 }
 
 # Clean old delivered notifications from NotificationCenter database.
@@ -1150,15 +1471,21 @@ opt_notification_cleanup() {
 
     if [[ ! -f "$nc_db" ]]; then
         opt_msg "Notification Center database not found"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
-    local db_size
-    db_size=$(opt_existing_path_size_kb "$nc_db")
+    local db_size=""
+    if ! db_size=$(opt_existing_file_size_kb_strict "$nc_db"); then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect Notification Center database size"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+        return 0
+    fi
 
     # Only clean if database exceeds 50MB (51200 KB)
     if [[ $db_size -lt 51200 ]]; then
         opt_msg "Notification Center database is healthy ($(bytes_to_human $((db_size * 1024))))"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
@@ -1171,14 +1498,18 @@ opt_notification_cleanup() {
             if [[ $sql_ok -eq 0 ]]; then
                 killall NotificationCenter 2> /dev/null || true
                 opt_msg "Notification Center database cleaned (was $(bytes_to_human $((db_size * 1024))))"
+                optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
             else
                 echo -e "  ${YELLOW}${ICON_WARNING}${NC} Notification Center cleanup skipped (database busy or locked)"
+                optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
             fi
         else
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} sqlite3 not available"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
         fi
     else
         opt_msg "Notification Center database cleaned (was $(bytes_to_human $((db_size * 1024))))"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
     fi
 }
 
@@ -1189,29 +1520,44 @@ opt_notification_cleanup() {
 opt_disk_verify() {
     if [[ "${MOLE_ENABLE_DISK_VERIFY:-0}" != "1" ]]; then
         opt_msg "Disk verify skipped (set MOLE_ENABLE_DISK_VERIFY=1 to enable)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
         return 0
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         opt_msg "Disk verify · skipped in dry-run"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
         return 0
     fi
 
     if [[ -t 1 ]]; then
         MOLE_SPINNER_PREFIX="  " start_inline_spinner "Verifying disk filesystem..."
     fi
-    local output
-    output=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" diskutil verifyVolume / 2>&1 || true)
+    local output=""
+    local verify_status=0
+    set +e
+    output=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" diskutil verifyVolume / 2>&1)
+    verify_status=$?
+    set -e
     if [[ -t 1 ]]; then
         stop_inline_spinner
     fi
 
-    if echo "$output" | grep -qi "appears to be OK\|volume appears to be ok"; then
+    if [[ $verify_status -eq 124 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Disk verification timed out"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+    elif [[ $verify_status -ne 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Disk verification failed (exit=$verify_status)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+    elif echo "$output" | grep -qi "appears to be OK\|volume appears to be ok"; then
         opt_msg "Disk filesystem verified OK"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
     elif echo "$output" | grep -qi "error\|corrupt\|invalid"; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Disk issues detected · run: sudo diskutil repairVolume /"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_ATTENTION"
     else
-        opt_msg "Disk verify complete"
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Disk verification result was not recognized"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
     fi
 }
 
@@ -1222,6 +1568,7 @@ opt_coreduet_cleanup() {
 
     if [[ ! -f "$knowledge_db" ]]; then
         opt_msg "Knowledge database not found"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
@@ -1236,37 +1583,68 @@ opt_coreduet_cleanup() {
     done
 
     if [[ ${#knowledge_files[@]} -gt 0 ]]; then
-        total_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skcP "${knowledge_files[@]}" 2> /dev/null | awk 'END {print $1 + 0}' || echo "0")
-        total_size=$(opt_numeric_kb "$total_size")
+        local size_status=0
+        set +e
+        total_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skcP "${knowledge_files[@]}" 2> /dev/null | awk 'END {print $1 + 0}')
+        size_status=$?
+        set -e
+        if [[ $size_status -ne 0 || ! "$total_size" =~ ^[0-9]+$ ]]; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect Knowledge database size"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+            return 0
+        fi
     fi
 
     # Skip if combined size < 100MB (102400 KB)
     if [[ $total_size -lt 102400 ]]; then
         opt_msg "Knowledge database is healthy ($(bytes_to_human $((total_size * 1024))))"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+        if ! command -v sqlite3 > /dev/null 2>&1; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} sqlite3 not available"
+            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
+            return 0
+        fi
+
         # Remove WAL and SHM files safely (auto-regenerated by SQLite)
+        local removed_count=0
+        local remove_failed=0
         for f in "$wal_file" "$shm_file"; do
-            [[ -f "$f" ]] && safe_remove "$f" true > /dev/null 2>&1 || true
+            if [[ -f "$f" ]]; then
+                if safe_remove "$f" true > /dev/null 2>&1; then
+                    removed_count=$((removed_count + 1))
+                else
+                    remove_failed=$((remove_failed + 1))
+                fi
+            fi
         done
         # Remove ZOBJECT entries older than 90 days (CoreTime is Mac epoch: seconds since 2001-01-01)
-        if command -v sqlite3 > /dev/null 2>&1; then
-            local sql_ok=0
-            sqlite3 "$knowledge_db" \
-                "DELETE FROM ZOBJECT WHERE ZCREATIONDATE < (strftime('%s','now','-90 days') - strftime('%s','2001-01-01')); VACUUM;" \
-                2> /dev/null || sql_ok=$?
-            if [[ $sql_ok -eq 0 ]]; then
-                opt_msg "Knowledge database cleaned (was $(bytes_to_human $((total_size * 1024))))"
-            else
-                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Knowledge database cleanup skipped (database busy or locked)"
-            fi
+        local sql_applied=0
+        local sql_failed=0
+        if sqlite3 "$knowledge_db" \
+            "DELETE FROM ZOBJECT WHERE ZCREATIONDATE < (strftime('%s','now','-90 days') - strftime('%s','2001-01-01')); VACUUM;" \
+            2> /dev/null; then
+            sql_applied=1
         else
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} sqlite3 not available"
+            sql_failed=1
         fi
+
+        if [[ $sql_failed -gt 0 ]]; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Knowledge database cleanup skipped (database busy or locked)"
+        elif [[ $remove_failed -gt 0 ]]; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Knowledge database cleanup incomplete"
+        else
+            opt_msg "Knowledge database cleaned (was $(bytes_to_human $((total_size * 1024))))"
+        fi
+        optimize_task_result_from_counts \
+            "$((removed_count + sql_applied))" \
+            "$((remove_failed + sql_failed))"
     else
         opt_msg "Knowledge database cleaned (was $(bytes_to_human $((total_size * 1024))))"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
     fi
 }
 
@@ -1442,14 +1820,26 @@ _login_item_app_exists() {
 opt_login_items_audit() {
     if [[ "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
         opt_msg "Login items audit · skipped in test mode"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
         return 0
     fi
 
-    local items_output
-    items_output=$(_login_items_snapshot 2> /dev/null || true)
+    local items_output=""
+    local snapshot_status=0
+    set +e
+    items_output=$(_login_items_snapshot 2> /dev/null)
+    snapshot_status=$?
+    set -e
+
+    if [[ $snapshot_status -ne 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect login items"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+        return 0
+    fi
 
     if [[ -z "$items_output" ]]; then
         opt_msg "No login items found"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
         return 0
     fi
 
@@ -1468,8 +1858,10 @@ opt_login_items_audit() {
 
     if [[ $broken -eq 0 ]]; then
         opt_msg "Login items all healthy ($checked checked)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
     else
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} $broken broken login item(s) · remove via System Settings > General > Login Items"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_ATTENTION"
     fi
 }
 
@@ -1477,20 +1869,26 @@ opt_login_items_audit() {
 execute_optimization() {
     local action="$1"
 
-    if command -v is_whitelisted > /dev/null && is_whitelisted "$action"; then
-        opt_msg "Skipped (whitelisted): $action"
-        return 0
-    fi
-
-    local handler
+    local handler health_name
     if ! handler=$(optimize_catalog_handler_for "$action"); then
         echo -e "${YELLOW}${ICON_ERROR}${NC} Unknown action: $action"
         return 1
     fi
+    health_name=$(optimize_catalog_health_name_for "$action")
     if ! declare -F "$handler" > /dev/null; then
         echo -e "${YELLOW}${ICON_ERROR}${NC} Missing optimization handler: $handler"
         return 1
     fi
 
+    if command -v is_whitelisted > /dev/null && is_whitelisted "$action"; then
+        optimize_task_start
+        opt_msg "Skipped (whitelisted): $health_name"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
+        optimize_task_finish "$action"
+        return 0
+    fi
+
+    optimize_task_start
     "$handler"
+    optimize_task_finish "$action"
 }

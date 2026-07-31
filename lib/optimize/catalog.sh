@@ -98,16 +98,28 @@ _optimize_catalog_register coreduet_cleanup opt_coreduet_cleanup \
     "Usage Data" "Usage Data" \
     "Clean old usage tracking data" true
 
-optimize_catalog_handler_for() {
+optimize_catalog_index_for() {
     local requested_action="$1"
     local index
     for ((index = 0; index < ${#MOLE_OPTIMIZE_ACTIONS[@]}; index++)); do
         if [[ "${MOLE_OPTIMIZE_ACTIONS[$index]}" == "$requested_action" ]]; then
-            printf '%s\n' "${MOLE_OPTIMIZE_HANDLERS[$index]}"
+            printf '%s\n' "$index"
             return 0
         fi
     done
     return 1
+}
+
+optimize_catalog_handler_for() {
+    local index
+    index=$(optimize_catalog_index_for "$1") || return 1
+    printf '%s\n' "${MOLE_OPTIMIZE_HANDLERS[$index]}"
+}
+
+optimize_catalog_health_name_for() {
+    local index
+    index=$(optimize_catalog_index_for "$1") || return 1
+    printf '%s\n' "${MOLE_OPTIMIZE_HEALTH_NAMES[$index]}"
 }
 
 optimize_catalog_validate() {

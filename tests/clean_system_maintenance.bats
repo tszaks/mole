@@ -926,7 +926,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-opt_saved_state_cleanup
+execute_optimization saved_state_cleanup
 EOF
 
     [ "$status" -eq 0 ]
@@ -939,14 +939,14 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-opt_saved_state_cleanup
+execute_optimization saved_state_cleanup
 EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"App saved states optimized"* ]]
 }
 
-@test "opt_saved_state_cleanup continues on permission denied (silent exit)" {
+@test "opt_saved_state_cleanup reports a removal failure" {
     local state_dir="$HOME/Library/Saved Application State"
     mkdir -p "$state_dir/com.example.old.savedState"
     touch -t 202301010000 "$state_dir/com.example.old.savedState" 2> /dev/null || true
@@ -956,14 +956,14 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 safe_remove() { return 1; }
-opt_saved_state_cleanup
+execute_optimization saved_state_cleanup
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"App saved states optimized"* ]]
+    [[ "$output" == *"Failed to remove 1 old saved state(s)"* ]]
 }
 
-@test "opt_cache_refresh continues on permission denied (silent exit)" {
+@test "opt_cache_refresh reports a removal failure" {
     local cache_dir="$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache"
     mkdir -p "$cache_dir"
     touch "$cache_dir/test.db"
@@ -973,12 +973,13 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 qlmanage() { return 0; }
+should_protect_path() { return 1; }
 safe_remove() { return 1; }
-opt_cache_refresh
+execute_optimization cache_refresh
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"QuickLook thumbnails refreshed"* ]]
+    [[ "$output" == *"Failed to remove 1 Finder cache target(s)"* ]]
 }
 
 @test "opt_cache_refresh cleans Quick Look cache" {
@@ -996,7 +997,7 @@ cleanup_path() {
     [[ -e "$path" ]] && rm -rf "$path" 2>/dev/null || true
 }
 export -f qlmanage cleanup_path
-opt_cache_refresh
+execute_optimization cache_refresh
 EOF
 
     [ "$status" -eq 0 ]
@@ -1041,7 +1042,7 @@ fix_broken_preferences() {
     echo 2
 }
 
-opt_fix_broken_configs
+execute_optimization fix_broken_configs
 EOF
 
     [ "$status" -eq 0 ]
@@ -1574,7 +1575,7 @@ memory_pressure() {
 }
 export -f memory_pressure
 
-opt_memory_pressure_relief
+execute_optimization memory_pressure_relief
 EOF
 
     [ "$status" -eq 0 ]
@@ -1605,7 +1606,7 @@ export -f sudo
 # Sudo is mocked above; explicitly opt out of the test-mode short-circuit
 # in optimize_sudo_available so this success-path test reaches the mock.
 unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
-opt_memory_pressure_relief
+execute_optimization memory_pressure_relief
 EOF
 
     [ "$status" -eq 0 ]
@@ -1619,6 +1620,13 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
+mock_bin="$HOME/network-healthy-bin"
+mkdir -p "$mock_bin"
+printf '#!/bin/bash\nexit 0\n' > "$mock_bin/route"
+printf '#!/bin/bash\necho "ip_address: 93.184.216.34"\n' > "$mock_bin/dscacheutil"
+chmod +x "$mock_bin/route" "$mock_bin/dscacheutil"
+PATH="$mock_bin:$PATH"
+
 route() {
     return 0
 }
@@ -1630,7 +1638,7 @@ dscacheutil() {
 }
 export -f dscacheutil
 
-opt_network_stack_optimize
+execute_optimization network_stack_optimize
 EOF
 
     [ "$status" -eq 0 ]
@@ -1655,7 +1663,7 @@ sudo() {
 }
 export -f sudo
 
-opt_network_stack_optimize
+execute_optimization network_stack_optimize
 EOF
 
     [ "$status" -eq 0 ]
@@ -1669,6 +1677,13 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+mock_bin="$HOME/network-failure-bin"
+mkdir -p "$mock_bin"
+printf '#!/bin/bash\nexit 1\n' > "$mock_bin/route"
+printf '#!/bin/bash\nexit 1\n' > "$mock_bin/dscacheutil"
+chmod +x "$mock_bin/route" "$mock_bin/dscacheutil"
+PATH="$mock_bin:$PATH"
 
 route() {
     if [[ "$2" == "get" ]]; then
@@ -1706,7 +1721,7 @@ export -f dscacheutil
 # Sudo is mocked above; explicitly opt out of the test-mode short-circuit
 # in optimize_sudo_available so this success-path test reaches the mock.
 unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
-opt_network_stack_optimize
+execute_optimization network_stack_optimize
 EOF
 
     [ "$status" -eq 0 ]
@@ -1728,7 +1743,7 @@ test() {
 }
 export -f test
 
-opt_disk_permissions_repair
+execute_optimization disk_permissions_repair
 EOF
 
     [ "$status" -eq 0 ]
@@ -1765,7 +1780,7 @@ export -f start_inline_spinner stop_inline_spinner
 # Sudo is mocked above; explicitly opt out of the test-mode short-circuit
 # in optimize_sudo_available so this success-path test reaches the mock.
 unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
-opt_disk_permissions_repair
+execute_optimization disk_permissions_repair
 EOF
 
     [ "$status" -eq 0 ]
@@ -1797,7 +1812,7 @@ date() {
 }
 export -f date
 
-opt_spotlight_index_optimize
+execute_optimization spotlight_index_optimize
 EOF
 
     [ "$status" -eq 0 ]

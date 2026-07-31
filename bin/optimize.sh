@@ -46,45 +46,54 @@ json_validate() {
 }
 
 show_optimization_summary() {
-    local safe_count="${OPTIMIZE_SAFE_COUNT:-0}"
-    if ((safe_count == 0)); then
+    local total
+    total=$(optimize_outcome_total)
+    if ((total == 0)); then
         return
     fi
 
     local summary_title
     local -a summary_details=()
-    local total_applied=$safe_count
+    local applied unchanged skipped unavailable attention failed
+    applied=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_APPLIED")
+    unchanged=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED")
+    skipped=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_SKIPPED")
+    unavailable=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE")
+    attention=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_ATTENTION")
+    failed=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_FAILED")
+
+    local -a outcome_parts=()
+    [[ $unchanged -gt 0 ]] && outcome_parts+=("$unchanged unchanged")
+    [[ $skipped -gt 0 ]] && outcome_parts+=("$skipped skipped")
+    [[ $unavailable -gt 0 ]] && outcome_parts+=("$unavailable unavailable")
+    [[ $attention -gt 0 ]] && outcome_parts+=("$attention need attention")
+    [[ $failed -gt 0 ]] && outcome_parts+=("$failed failed")
+
+    local outcome_line=""
+    if [[ ${#outcome_parts[@]} -gt 0 ]]; then
+        outcome_line="${outcome_parts[0]}"
+        local index
+        for ((index = 1; index < ${#outcome_parts[@]}; index++)); do
+            outcome_line+=" | ${outcome_parts[$index]}"
+        done
+    fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         summary_title="Dry Run Complete, No Changes Made"
-        summary_details+=("Would apply ${YELLOW}${total_applied:-0}${NC} optimizations")
+        summary_details+=("Would apply ${YELLOW}${applied}${NC} optimizations")
+        [[ -n "$outcome_line" ]] && summary_details+=("$outcome_line")
         summary_details+=("Run without ${YELLOW}--dry-run${NC} to apply these changes")
     else
         summary_title="Optimization Complete"
 
-        # Build statistics summary
-        local -a stats=()
         local cache_kb="${OPTIMIZE_CACHE_CLEANED_KB:-0}"
         local db_count="${OPTIMIZE_DATABASES_COUNT:-0}"
         local config_count="${OPTIMIZE_CONFIGS_REPAIRED:-0}"
 
-        if [[ "$cache_kb" =~ ^[0-9]+$ ]] && [[ "$cache_kb" -gt 0 ]]; then
-            local cache_human=$(bytes_to_human "$((cache_kb * 1024))")
-            stats+=("${cache_human} cache cleaned")
-        fi
-
-        if [[ "$db_count" =~ ^[0-9]+$ ]] && [[ "$db_count" -gt 0 ]]; then
-            stats+=("${db_count} databases optimized")
-        fi
-
-        if [[ "$config_count" =~ ^[0-9]+$ ]] && [[ "$config_count" -gt 0 ]]; then
-            stats+=("${config_count} configs repaired")
-        fi
-
-        # Build first summary line with most important stat only
         local key_stat=""
         if [[ "$cache_kb" =~ ^[0-9]+$ ]] && [[ "$cache_kb" -gt 0 ]]; then
-            local cache_human=$(bytes_to_human "$((cache_kb * 1024))")
+            local cache_human
+            cache_human=$(bytes_to_human "$((cache_kb * 1024))")
             key_stat="${cache_human} cache cleaned"
         elif [[ "$db_count" =~ ^[0-9]+$ ]] && [[ "$db_count" -gt 0 ]]; then
             key_stat="${db_count} databases optimized"
@@ -93,12 +102,17 @@ show_optimization_summary() {
         fi
 
         if [[ -n "$key_stat" ]]; then
-            summary_details+=("Applied ${GREEN}${total_applied:-0}${NC} optimizations, ${key_stat}")
+            summary_details+=("Applied ${GREEN}${applied}${NC} optimizations, ${key_stat}")
         else
-            summary_details+=("Applied ${GREEN}${total_applied:-0}${NC} optimizations, all services tuned")
+            summary_details+=("Applied ${GREEN}${applied}${NC} optimizations")
         fi
 
-        summary_details+=("System fully optimized")
+        [[ -n "$outcome_line" ]] && summary_details+=("$outcome_line")
+        if [[ $attention -gt 0 || $failed -gt 0 ]]; then
+            summary_details+=("Review the warnings above")
+        else
+            summary_details+=("Optimization pass complete")
+        fi
     fi
 
     print_summary_block "$summary_title" "${summary_details[@]}"
@@ -149,10 +163,20 @@ cleanup_all() {
     stop_sudo_session
     cleanup_temp_files
     # Log session end
-    log_operation_session_end "optimize" "${OPTIMIZE_SAFE_COUNT:-0}" "0"
+    local applied=0
+    if declare -F optimize_outcome_count > /dev/null; then
+        applied=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_APPLIED")
+        local failed_action
+        while IFS= read -r failed_action; do
+            [[ -n "$failed_action" ]] || continue
+            log_operation "optimize" "TASK_FAILED" "$failed_action" "task outcome"
+        done < <(optimize_failed_actions)
+    fi
+    log_operation_session_end "optimize" "$applied" "0"
 }
 
 handle_interrupt() {
+    trap - EXIT
     cleanup_all
     exit 130
 }
@@ -265,26 +289,24 @@ main() {
     fi
 
     export FIRST_ACTION=true
-    local safe_count=0
+    optimize_outcomes_reset
     local index action health_name
     for ((index = 0; index < ${#MOLE_OPTIMIZE_ACTIONS[@]}; index++)); do
         action=${MOLE_OPTIMIZE_ACTIONS[$index]}
         health_name=${MOLE_OPTIMIZE_HEALTH_NAMES[$index]}
-        safe_count=$((safe_count + 1))
-        if command -v is_whitelisted > /dev/null && is_whitelisted "$action"; then
-            opt_msg "Skipped (whitelisted): $health_name"
-            continue
-        fi
         announce_action "$health_name"
         execute_optimization "$action"
     done
 
-    export OPTIMIZE_SAFE_COUNT=$safe_count
-    export OPTIMIZE_CONFIRM_COUNT=0
+    if [[ "$(optimize_outcome_total)" -ne ${#MOLE_OPTIMIZE_ACTIONS[@]} ]]; then
+        log_error "Optimize task outcomes are incomplete"
+        return 1
+    fi
 
     show_optimization_summary
 
     printf '\n'
+    optimize_outcomes_succeeded
 }
 
 main "$@"
