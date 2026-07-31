@@ -9,15 +9,17 @@ set -euo pipefail
 # ============================================================================
 
 check_touchid_support() {
+    local pam_sudo_file="${MOLE_PAM_SUDO_FILE:-/etc/pam.d/sudo}"
+    local pam_sudo_local_file="${MOLE_PAM_SUDO_LOCAL_FILE:-$(dirname "$pam_sudo_file")/sudo_local}"
+
     # Check sudo_local first (Sonoma+)
-    if [[ -f /etc/pam.d/sudo_local ]]; then
-        grep -q "pam_tid.so" /etc/pam.d/sudo_local 2> /dev/null
-        return $?
+    if [[ -f "$pam_sudo_local_file" ]] && grep -q "pam_tid.so" "$pam_sudo_local_file" 2> /dev/null; then
+        return 0
     fi
 
     # Fallback to checking sudo directly
-    if [[ -f /etc/pam.d/sudo ]]; then
-        grep -q "pam_tid.so" /etc/pam.d/sudo 2> /dev/null
+    if [[ -f "$pam_sudo_file" ]]; then
+        grep -q "pam_tid.so" "$pam_sudo_file" 2> /dev/null
         return $?
     fi
     return 1

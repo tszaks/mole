@@ -10,6 +10,30 @@ setup() {
     source "$PROJECT_ROOT/lib/core/sudo.sh"
 }
 
+@test "check_touchid_support falls back to legacy sudo when sudo_local is present" {
+    local pam_sudo="$BATS_TEST_TMPDIR/sudo"
+    local pam_sudo_local="$BATS_TEST_TMPDIR/sudo_local"
+
+    printf 'auth sufficient pam_tid.so\n' > "$pam_sudo"
+    printf 'auth include pam_opendirectory.so\n' > "$pam_sudo_local"
+
+    run env \
+        MOLE_PAM_SUDO_FILE="$pam_sudo" \
+        MOLE_PAM_SUDO_LOCAL_FILE="$pam_sudo_local" \
+        /bin/bash --noprofile --norc -c \
+        'source "$PROJECT_ROOT/lib/core/common.sh"; check_touchid_support'
+    [ "$status" -eq 0 ]
+
+    printf 'auth include pam_opendirectory.so\n' > "$pam_sudo"
+
+    run env \
+        MOLE_PAM_SUDO_FILE="$pam_sudo" \
+        MOLE_PAM_SUDO_LOCAL_FILE="$pam_sudo_local" \
+        /bin/bash --noprofile --norc -c \
+        'source "$PROJECT_ROOT/lib/core/common.sh"; check_touchid_support'
+    [ "$status" -eq 1 ]
+}
+
 @test "has_sudo_session returns 1 when no sudo session" {
     # shellcheck disable=SC2329
     sudo() { return 1; }
