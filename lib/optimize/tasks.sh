@@ -110,20 +110,6 @@ is_ac_power() {
     pmset -g batt 2> /dev/null | grep -q "AC Power"
 }
 
-is_memory_pressure_high() {
-    if ! command -v memory_pressure > /dev/null 2>&1; then
-        return 1
-    fi
-
-    local mp_output
-    mp_output=$(memory_pressure -Q 2> /dev/null || echo "")
-    if echo "$mp_output" | grep -Eiq "warning|critical"; then
-        return 0
-    fi
-
-    return 1
-}
-
 # Return 0 when a VPN is active, 1 when probes completed without finding one,
 # and 2 when the VPN state could not be determined safely.
 has_active_vpn_interface() {
@@ -746,59 +732,6 @@ opt_launch_services_rebuild() {
 # - opt_startup_items_cleanup: Risk of deleting legitimate app helpers
 # - opt_dyld_cache_update: Low benefit, time-consuming, auto-managed by macOS
 # - opt_system_services_refresh: Risk of data loss when killing system services
-
-# Memory pressure relief.
-opt_memory_pressure_relief() {
-    if [[ "${MO_DEBUG:-}" == "1" ]]; then
-        debug_operation_start "Memory Pressure Relief" "Release inactive memory if pressure is high"
-        debug_operation_detail "Method" "Run purge command to clear inactive memory"
-        debug_operation_detail "Condition" "Only runs if memory pressure is warning/critical"
-        debug_operation_detail "Expected outcome" "More available memory, improved responsiveness"
-        debug_risk_level "LOW" "Safe system command, does not affect active processes"
-    fi
-
-    if ! is_memory_pressure_high; then
-        opt_msg "Memory pressure already optimal"
-        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
-        return 0
-    fi
-
-    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-        if ! optimize_sudo_available; then
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Memory pressure relief · skipped (admin access required)"
-            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
-            return 0
-        fi
-
-        local spinner_started="false"
-        if [[ -t 1 ]]; then
-            MOLE_SPINNER_PREFIX="  " start_inline_spinner "Releasing inactive memory..."
-            spinner_started="true"
-        fi
-
-        local purge_ok="false"
-        if sudo purge > /dev/null 2>&1; then
-            purge_ok="true"
-        fi
-
-        if [[ "$spinner_started" == "true" ]]; then
-            stop_inline_spinner
-        fi
-
-        if [[ "$purge_ok" == "true" ]]; then
-            opt_msg "Inactive memory released"
-            opt_msg "System responsiveness improved"
-            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
-        else
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to release memory pressure"
-            optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
-        fi
-    else
-        opt_msg "Inactive memory released"
-        opt_msg "System responsiveness improved"
-        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"
-    fi
-}
 
 # Network stack reset (route + ARP).
 opt_network_stack_optimize() {

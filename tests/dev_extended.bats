@@ -212,14 +212,72 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 note_activity() { :; }
-pgrep() { return 0; }
+pgrep() {
+    [[ "$1" == "-x" && "$2" == "Simulator" ]]
+}
+debug_log() { echo "DEBUG:$*"; }
 safe_sudo_remove() { echo "UNEXPECTED_SAFE_SUDO_REMOVE"; }
 clean_xcode_system_coresimulator_caches
 EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Xcode Simulator system cache · skipped (CoreSimulator running)"* ]] || return 1
+	[[ "$output" == *"DEBUG:CoreSimulator process detected: Simulator"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
+}
+
+@test "clean_xcode_system_coresimulator_caches fails closed when pgrep fails (#1304)" {
+	local cache_root
+	cache_root="$HOME/SystemCoreSimulatorCaches"
+	mkdir -p "$cache_root/dyld"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 2; }
+debug_log() { echo "DEBUG:$*"; }
+safe_sudo_remove() { echo "UNEXPECTED_SAFE_SUDO_REMOVE"; }
+clean_xcode_system_coresimulator_caches
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Xcode Simulator system cache · skipped (process status unknown)"* ]] || return 1
+	[[ "$output" == *"DEBUG:CoreSimulator process check failed: Xcode (exit=2)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]] || return 1
+}
+
+@test "CoreSimulator process guard reports the exact matched probe (#1304)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+debug_log() { :; }
+pgrep() {
+    [[ "$1" == "$EXPECTED_MODE" && "$2" == "$EXPECTED_PATTERN" ]]
+}
+
+while IFS='|' read -r EXPECTED_MODE EXPECTED_PATTERN expected_label; do
+    [[ -n "$EXPECTED_PATTERN" ]] || continue
+    _coresimulator_cache_process_running || exit 1
+    [[ "$_MOLE_XCODE_PROCESS_MATCH" == "$expected_label" ]] || exit 2
+    printf 'matched:%s\n' "$_MOLE_XCODE_PROCESS_MATCH"
+done <<'CASES'
+-x|Xcode|Xcode
+-x|Simulator|Simulator
+-x|CoreSimulatorService|CoreSimulatorService
+-x|simdiskimaged|simdiskimaged
+-f|com.apple.CoreSimulator|com.apple.CoreSimulator
+CASES
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"matched:Xcode"* ]] || return 1
+	[[ "$output" == *"matched:Simulator"* ]] || return 1
+	[[ "$output" == *"matched:CoreSimulatorService"* ]] || return 1
+	[[ "$output" == *"matched:simdiskimaged"* ]] || return 1
+	[[ "$output" == *"matched:com.apple.CoreSimulator"* ]] || return 1
 }
 
 @test "clean_xcode_xctest_devices targets only exact XCTestDevices directory" {
@@ -712,7 +770,7 @@ clean_dev_mobile
 EOF
 
 	[ "$status" -eq 0 ] || return 1
-	[[ "$output" == *"simctl not available"* ]] || return 1
+	[[ "$output" == *"simctl could not be resolved"* ]] || return 1
 	[[ "$output" == *"DEVICE_SUPPORT:iOS DeviceSupport"* ]] || return 1
 	[[ "$output" == *"SAFE_CLEAN:Android SDK cache"* ]] || return 1
 }
@@ -779,7 +837,79 @@ EOF
     [ "$status" -eq 0 ] || return 1
     [[ "$output" == *"simctl probe succeeded on retry"* ]] || return 1
     [[ "$output" != *"simctl not available"* ]] || return 1
-    [[ "$output" != *"UNEXPECTED_SLEEP"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SLEEP"* ]] || return 1
+}
+
+@test "clean_dev_mobile classifies simctl probe failures and sanitizes debug output (#1304)" {
+	local tmp_bin
+	tmp_bin="$HOME/simctl-classification-bin"
+	mkdir -p "$tmp_bin" "$HOME/Xcode.app/Contents/Developer"
+	cat > "$tmp_bin/xcrun" <<'XEOF'
+#!/bin/bash
+exit 0
+XEOF
+	chmod +x "$tmp_bin/xcrun"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+
+check_android_ndk() { :; }
+clean_xcode_documentation_cache() { :; }
+clean_xcode_system_coresimulator_caches() { :; }
+clean_xcode_simulator_runtime_volumes() { :; }
+clean_xcode_xctest_devices() { :; }
+clean_xcode_device_support() { :; }
+safe_clean() { :; }
+note_activity() { :; }
+debug_log() { echo "DEBUG:$*"; }
+_resolve_simctl_developer_dir() {
+    _MOLE_SIMCTL_DEVELOPER_DIR="$HOME/Xcode.app/Contents/Developer"
+    _MOLE_SIMCTL_RESOLUTION_STATUS="ready"
+}
+
+_run_simctl() {
+    local timeout_seconds="$1"
+    shift
+    if [[ "$*" == "list devices" ]]; then
+        __probe_call=$((__probe_call + 1))
+        printf '%b' "$PROBE_STDERR" >&2
+        if [[ $__probe_call -eq 1 ]]; then
+            return "$PROBE_FIRST_STATUS"
+        fi
+        return "$PROBE_RETRY_STATUS"
+    fi
+    if [[ "$*" == "list devices unavailable" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+run_probe_case() {
+    local label="$1"
+    PROBE_FIRST_STATUS="$2"
+    PROBE_RETRY_STATUS="$3"
+    __probe_call=0
+    PROBE_STDERR="$HOME/Library/Developer/private"$'\n\033[31mprobe failed\033[0m\n'
+    printf 'CASE:%s\n' "$label"
+    clean_dev_mobile
+}
+
+run_probe_case retry-success 124 0
+run_probe_case timeout 124 124
+run_probe_case failure 7 7
+run_probe_case failure-then-timeout 7 124
+run_probe_case timeout-then-failure 124 7
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"DEBUG:simctl probe statuses: first=124 retry=0"* ]] || return 1
+	[[ "$output" == *"Xcode unavailable simulators · simctl probe timed out"* ]] || return 1
+	[[ "$output" == *"Xcode unavailable simulators · simctl probe failed (exit=7)"* ]] || return 1
+	[[ "$output" == *"DEBUG:simctl probe statuses: first=7 retry=124"* ]] || return 1
+	[[ "$output" == *"DEBUG:simctl probe first stderr: ~/Library/Developer/private [31mprobe failed[0m"* ]] || return 1
+	[[ "$output" != *"$HOME/Library/Developer/private"* ]] || return 1
 }
 
 @test "clean_dev_mobile uses the sole Xcode Beta candidate when CLT is selected (#1261)" {
@@ -939,7 +1069,7 @@ clean_dev_mobile
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"simctl not available"* ]] || return 1
+    [[ "$output" == *"simctl could not be resolved"* ]] || return 1
     [[ "$(cat "$HOME/simctl-selected-invalid.log")" == "$selected|--find simctl" ]] || return 1
     [[ "$(cat "$HOME/simctl-selected-invalid.log")" != *"$candidate|"* ]] || return 1
 }

@@ -1563,57 +1563,6 @@ EOF
     [[ "$output" == *"SUCCESS:Accessible rebuildable GPU caches, 1 item"* ]] || return 1
 }
 
-@test "opt_memory_pressure_relief skips when pressure is normal" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-
-memory_pressure() {
-    echo "System-wide memory free percentage: 50%"
-    return 0
-}
-export -f memory_pressure
-
-execute_optimization memory_pressure_relief
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Memory pressure already optimal"* ]]
-}
-
-@test "opt_memory_pressure_relief executes purge when pressure is high" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-
-memory_pressure() {
-    echo "System-wide memory free percentage: warning"
-    return 0
-}
-export -f memory_pressure
-
-sudo() {
-    if [[ "$1" == "purge" ]]; then
-        echo "purge:executed"
-        return 0
-    fi
-    return 1
-}
-export -f sudo
-
-# Sudo is mocked above; explicitly opt out of the test-mode short-circuit
-# in optimize_sudo_available so this success-path test reaches the mock.
-unset MOLE_TEST_MODE MOLE_TEST_NO_AUTH
-execute_optimization memory_pressure_relief
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Inactive memory released"* ]] || return 1
-    [[ "$output" == *"System responsiveness improved"* ]]
-}
-
 @test "opt_network_stack_optimize skips when network is healthy" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_ASSUME_VPN_ACTIVE=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

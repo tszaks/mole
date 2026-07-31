@@ -5,6 +5,30 @@ setup_file() {
     export PROJECT_ROOT
 }
 
+@test "optimize exposes no manual memory purge task (#1309)" {
+	run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/catalog.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+for action in "${MOLE_OPTIMIZE_ACTIONS[@]}"; do
+    [[ "$action" != "memory_pressure_relief" ]] || exit 1
+done
+if declare -F is_memory_pressure_high > /dev/null 2>&1; then
+    exit 2
+fi
+if declare -F opt_memory_pressure_relief > /dev/null 2>&1; then
+    exit 3
+fi
+if command grep -nE '(^|[^[:alnum:]_])(/usr/sbin/)?purge([[:space:]]|$)' "$PROJECT_ROOT/lib/optimize/tasks.sh"; then
+    exit 4
+fi
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+}
+
 @test "optimize catalog preserves the complete public task contract" {
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -21,7 +45,6 @@ launch_services_rebuild|opt_launch_services_rebuild|LaunchServices Repair|Launch
 dock_refresh|opt_dock_refresh|Dock Refresh|Dock Refresh|Fix broken icons and visual glitches in the Dock|true
 prevent_network_dsstore|opt_prevent_network_dsstore|Prevent Finder .DS_Store|Prevent Finder .DS_Store|Set a persistent Finder preference to stop writing .DS_Store on SMB/AFP/NFS and USB volumes|true
 legacy_overrides_audit|opt_legacy_overrides_audit|Legacy Overrides|Legacy Overrides|Remove hidden App Nap and disk-image verification overrides left by old tweak tools|true
-memory_pressure_relief|opt_memory_pressure_relief|Memory Optimization|Memory Optimization|Release inactive memory to improve system responsiveness|true
 network_stack_optimize|opt_network_stack_optimize|Network Stack Refresh|Network Stack Refresh|Flush routing table and ARP cache to resolve network issues|true
 disk_permissions_repair|opt_disk_permissions_repair|Permission Repair|Permission Repair|Fix user directory permission issues|true
 spotlight_index_optimize|opt_spotlight_index_optimize|Spotlight Optimization|Spotlight Optimization|Rebuild index if search is slow (smart detection)|true
@@ -82,7 +105,7 @@ contract_hash=$(
         shasum -a 256 |
         awk '{print $1}'
 )
-expected_hash="9c00db8177c600e35ba56df69c3c3dc078ffefee57d982a96b71b3174cb340ac"
+expected_hash="b8f6437492514511196d347db3c094dcd6a997ab137a63be00624cd9f4da09d7"
 if [[ "$contract_hash" != "$expected_hash" ]]; then
     echo "health optimization contract hash: expected $expected_hash, got $contract_hash"
     exit 1
@@ -98,7 +121,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
 
 contract_hash=$(get_optimize_whitelist_items | shasum -a 256 | awk '{print $1}')
-expected_hash="89f0731c4074f1eaeabb4a2c7ab65e14392f28f31ebbc4abefc9f6919406f65a"
+expected_hash="42d16255249d38e10df905e15295a4da178b59c590deeee25d599dfe0f1ef03f"
 if [[ "$contract_hash" != "$expected_hash" ]]; then
     echo "optimize whitelist contract hash: expected $expected_hash, got $contract_hash"
     exit 1
@@ -159,7 +182,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-[[ ${#MOLE_OPTIMIZE_ACTIONS[@]} -eq 23 ]] || exit 1
+[[ ${#MOLE_OPTIMIZE_ACTIONS[@]} -eq 22 ]] || exit 1
 for handler in "${MOLE_OPTIMIZE_HANDLERS[@]}"; do
     if ! declare -F "$handler" >/dev/null; then
         echo "missing handler: $handler"

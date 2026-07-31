@@ -2216,20 +2216,17 @@ INNER
 	[[ "$output" == *"reverse=0"* ]]
 }
 
-@test "main rescans cleanly after returning from a completed uninstall (#866)" {
-	local first_cache second_cache
+@test "main reuses the app list after a removal-only uninstall (#866, #1315)" {
+	local first_cache
 	first_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-866-first.XXXXXX")"
-	second_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-866-second.XXXXXX")"
 
 	mkdir -p "$HOME/Applications/FirstApp.app" "$HOME/Applications/SecondApp.app"
 	cat > "$first_cache" <<CACHE
 1700000000|$HOME/Applications/FirstApp.app|FirstApp|com.example.FirstApp|10MB|Today|10240
-CACHE
-	cat > "$second_cache" <<CACHE
 1700000001|$HOME/Applications/SecondApp.app|SecondApp|com.example.SecondApp|11MB|Today|11264
 CACHE
 
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" FIRST_CACHE="$first_cache" SECOND_CACHE="$second_cache" \
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" FIRST_CACHE="$first_cache" \
 		/bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2249,7 +2246,13 @@ clear_screen() { :; }
 start_uninstall_interactive_screen() { :; }
 stop_uninstall_interactive_screen() { :; }
 drain_pending_input() { :; }
-uninstall_app_inventory_fingerprint() { printf '%s\n' "$fingerprint_state"; }
+uninstall_app_inventory_fingerprint() {
+    if [[ "$fingerprint_state" == "before" ]]; then
+        printf '%s|1\n%s|1\n' "$HOME/Applications/FirstApp.app" "$HOME/Applications/SecondApp.app"
+    else
+        printf '%s|1\n' "$HOME/Applications/SecondApp.app"
+    fi
+}
 batch_uninstall_applications() {
     printf 'batch\n' >> "$trace_file"
     rmdir "$HOME/Applications/FirstApp.app"
@@ -2263,11 +2266,7 @@ scan_applications() {
     scan_count=$((scan_count + 1))
     printf '%s\n' "$scan_count" > "$scan_state_file"
     printf 'scan:%s\n' "$scan_count" >> "$trace_file"
-    if [[ $scan_count -eq 1 ]]; then
-        printf '%s\n' "$FIRST_CACHE"
-    else
-        printf '%s\n' "$SECOND_CACHE"
-    fi
+    printf '%s\n' "$FIRST_CACHE"
 }
 load_applications() {
     local apps_file="$1"
@@ -2290,11 +2289,12 @@ select_apps_for_uninstall() {
     return 1
 }
 
+eval "$(sed -n '/^uninstall_inventory_can_reuse_cached_apps()/,/^}/p' "$PROJECT_ROOT/bin/uninstall.sh")"
 eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 
 printf '\n' | main
 
-expected=$(printf 'scan:1\nload:%s/Applications/FirstApp.app|FirstApp|com.example.FirstApp|10MB|Today|10240\nselect:1\nbatch\nscan:2\nload:%s/Applications/SecondApp.app|SecondApp|com.example.SecondApp|11MB|Today|11264\nselect:2\n' "$HOME" "$HOME")
+expected=$(printf 'scan:1\nload:%s/Applications/FirstApp.app|FirstApp|com.example.FirstApp|10MB|Today|10240\nselect:1\nbatch\nload:%s/Applications/SecondApp.app|SecondApp|com.example.SecondApp|11MB|Today|11264\nselect:2\n' "$HOME" "$HOME")
 actual=$(cat "$trace_file")
 [[ "$actual" == "$expected" ]] || {
     printf 'unexpected trace:\n%s\n' "$actual" >&2
@@ -2302,8 +2302,33 @@ actual=$(cat "$trace_file")
 }
 INNER
 
-	rm -f "$first_cache" "$second_cache"
+	rm -f "$first_cache"
 	[ "$status" -eq 0 ]
+}
+
+@test "inventory cache reuse accepts removals only and rejects stale changes (#1315)" {
+	run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+eval "$(sed -n '/^uninstall_inventory_can_reuse_cached_apps()/,/^}/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+old=$(printf '/Applications/First.app|1\n/Applications/Second.app|1\n')
+removed=$(printf '/Applications/Second.app|1\n')
+changed=$(printf '/Applications/Second.app|2\n')
+added=$(printf '/Applications/Second.app|1\n/Applications/Third.app|1\n')
+
+uninstall_inventory_can_reuse_cached_apps "$old" "$removed" || exit 1
+if uninstall_inventory_can_reuse_cached_apps "$old" "$changed"; then
+    exit 2
+fi
+if uninstall_inventory_can_reuse_cached_apps "$old" "$added"; then
+    exit 3
+fi
+if uninstall_inventory_can_reuse_cached_apps "$old" ""; then
+    exit 4
+fi
+INNER
+
+	[ "$status" -eq 0 ] || return 1
 }
 
 

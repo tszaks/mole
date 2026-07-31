@@ -539,7 +539,23 @@ uninstall_app_inventory_fingerprint() {
                 printf '%s|%s\n' "$app_path" "${app_mtime:-0}"
             done < <(uninstall_print_app_paths_with_mtime "$app_dir")
         done < <(uninstall_print_app_search_dirs)
-    } | sort -u
+    } | LC_ALL=C sort -u
+}
+
+# The in-session app index remains valid when the live inventory only loses
+# rows. load_applications rechecks path existence before displaying each row.
+# New rows and changed mtimes must rebuild the index so protection and bundle
+# metadata are evaluated again.
+uninstall_inventory_can_reuse_cached_apps() {
+    local cached_inventory="$1"
+    local current_inventory="$2"
+    local additions=""
+
+    [[ -n "$cached_inventory" && -n "$current_inventory" ]] || return 1
+    additions=$(LC_ALL=C comm -13 \
+        <(printf '%s\n' "$cached_inventory") \
+        <(printf '%s\n' "$current_inventory")) || return 1
+    [[ -z "$additions" ]]
 }
 
 # Internal helpers for scan_applications. They read and write locals
@@ -1562,9 +1578,10 @@ main() {
         if [[ -n "$cached_apps_file" && -f "$cached_apps_file" && -n "$cached_inventory_fingerprint" ]]; then
             local current_inventory_fingerprint
             current_inventory_fingerprint=$(uninstall_app_inventory_fingerprint 2> /dev/null || echo "")
-            if [[ -n "$current_inventory_fingerprint" && "$current_inventory_fingerprint" == "$cached_inventory_fingerprint" ]]; then
+            if uninstall_inventory_can_reuse_cached_apps "$cached_inventory_fingerprint" "$current_inventory_fingerprint"; then
                 apps_file="$cached_apps_file"
                 reused_app_cache=true
+                cached_inventory_fingerprint="$current_inventory_fingerprint"
             fi
         fi
 

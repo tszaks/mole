@@ -75,28 +75,12 @@ EOF
 	[[ "$output" == *"ac"* ]]
 }
 
-@test "is_memory_pressure_high detects warning" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-memory_pressure() { echo "warning"; }
-export -f memory_pressure
-if is_memory_pressure_high; then
-    echo "high"
-fi
-EOF
-
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"high"* ]]
-}
-
 @test "dry-run keeps healthy conditional system tasks unchanged" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 MOLE_ASSUME_VPN_ACTIVE=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-is_memory_pressure_high() { return 1; }
 mkdir -p "$HOME/bin"
 printf '#!/bin/bash\nexit 0\n' > "$HOME/bin/route"
 printf '#!/bin/bash\nexit 0\n' > "$HOME/bin/dscacheutil"
@@ -104,14 +88,12 @@ chmod +x "$HOME/bin/route" "$HOME/bin/dscacheutil"
 PATH="$HOME/bin:$PATH"
 needs_permissions_repair() { return 1; }
 
-execute_optimization memory_pressure_relief
 execute_optimization network_stack_optimize
 execute_optimization disk_permissions_repair
-[[ "$(optimize_outcome_count unchanged)" == "3" ]] || exit 1
+[[ "$(optimize_outcome_count unchanged)" == "2" ]] || exit 1
 EOF
 
 	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Memory pressure already optimal"* ]] || return 1
 	[[ "$output" == *"Network stack already optimal"* ]] || return 1
 	[[ "$output" == *"User directory permissions already optimal"* ]] || return 1
 }
@@ -1653,7 +1635,6 @@ sudo() {
 export -f sudo
 
 # Force the "needs work" branch so each task reaches its sudo block.
-is_memory_pressure_high() { return 0; }
 needs_permissions_repair() { return 0; }
 has_active_vpn_interface() { return 1; }
 route() { return 1; }
@@ -1672,7 +1653,6 @@ opt_msg() { :; }
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }
 
-execute_optimization memory_pressure_relief 2>&1 || true
 execute_optimization network_stack_optimize 2>&1 || true
 execute_optimization disk_permissions_repair 2>&1 || true
 execute_optimization periodic_maintenance 2>&1 || true

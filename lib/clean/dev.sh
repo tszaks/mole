@@ -580,29 +580,86 @@ clean_xcode_documentation_cache() {
     fi
 }
 
+_MOLE_XCODE_PROCESS_MATCH=""
+
+# Return 0 when a matching process is running, 1 when none match, and 2 when
+# pgrep cannot establish a reliable answer. Callers must fail closed on 2.
 _coresimulator_cache_process_running() {
-    pgrep -x "Xcode" > /dev/null 2>&1 ||
-        pgrep -x "Simulator" > /dev/null 2>&1 ||
-        pgrep -x "CoreSimulatorService" > /dev/null 2>&1 ||
-        pgrep -x "simdiskimaged" > /dev/null 2>&1 ||
-        pgrep -f "com.apple.CoreSimulator" > /dev/null 2>&1
+    local match_mode match_pattern match_label probe_status
+    _MOLE_XCODE_PROCESS_MATCH=""
+
+    while IFS='|' read -r match_mode match_pattern match_label; do
+        [[ -n "$match_pattern" ]] || continue
+        if pgrep "$match_mode" "$match_pattern" > /dev/null 2>&1; then
+            _MOLE_XCODE_PROCESS_MATCH="$match_label"
+            debug_log "CoreSimulator process detected: $match_label"
+            return 0
+        else
+            probe_status=$?
+        fi
+        if [[ $probe_status -ne 1 ]]; then
+            debug_log "CoreSimulator process check failed: $match_label (exit=$probe_status)"
+            return 2
+        fi
+    done << 'EOF'
+-x|Xcode|Xcode
+-x|Simulator|Simulator
+-x|CoreSimulatorService|CoreSimulatorService
+-x|simdiskimaged|simdiskimaged
+-f|com.apple.CoreSimulator|com.apple.CoreSimulator
+EOF
+
+    return 1
 }
 
 _xcode_xctest_devices_process_running() {
-    _coresimulator_cache_process_running ||
-        pgrep -x "xcodebuild" > /dev/null 2>&1 ||
-        pgrep -x "xctest" > /dev/null 2>&1 ||
-        pgrep -x "XCTRunner" > /dev/null 2>&1 ||
-        pgrep -f "com.apple.dt.XCTest" > /dev/null 2>&1 ||
-        pgrep -f "XCTest" > /dev/null 2>&1
+    local match_mode match_pattern match_label probe_status
+
+    if _coresimulator_cache_process_running; then
+        return 0
+    else
+        probe_status=$?
+    fi
+    [[ $probe_status -eq 1 ]] || return 2
+
+    while IFS='|' read -r match_mode match_pattern match_label; do
+        [[ -n "$match_pattern" ]] || continue
+        if pgrep "$match_mode" "$match_pattern" > /dev/null 2>&1; then
+            _MOLE_XCODE_PROCESS_MATCH="$match_label"
+            debug_log "XCTest process detected: $match_label"
+            return 0
+        else
+            probe_status=$?
+        fi
+        if [[ $probe_status -ne 1 ]]; then
+            debug_log "XCTest process check failed: $match_label (exit=$probe_status)"
+            return 2
+        fi
+    done << 'EOF'
+-x|xcodebuild|xcodebuild
+-x|xctest|xctest
+-x|XCTRunner|XCTRunner
+-f|com.apple.dt.XCTest|com.apple.dt.XCTest
+-f|XCTest|XCTest
+EOF
+
+    return 1
 }
 
 clean_xcode_xctest_devices() {
     local xctest_devices_dir="${MOLE_XCODE_XCTEST_DEVICES_DIR:-$HOME/Library/Developer/XCTestDevices}"
     [[ -d "$xctest_devices_dir" ]] || return 0
 
+    local process_probe_status
     if _xcode_xctest_devices_process_running; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (Xcode or XCTest running)"
+        note_activity
+        return 0
+    else
+        process_probe_status=$?
+    fi
+    if [[ $process_probe_status -ne 1 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (process status unknown)"
         note_activity
         return 0
     fi
@@ -614,8 +671,16 @@ clean_xcode_system_coresimulator_caches() {
     local cache_root="${MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR:-/Library/Developer/CoreSimulator/Caches}"
     [[ -d "$cache_root" ]] || return 0
 
+    local process_probe_status
     if _coresimulator_cache_process_running; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (CoreSimulator running)"
+        note_activity
+        return 0
+    else
+        process_probe_status=$?
+    fi
+    if [[ $process_probe_status -ne 1 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (process status unknown)"
         note_activity
         return 0
     fi
@@ -1126,6 +1191,34 @@ _run_simctl() {
         env "DEVELOPER_DIR=$_MOLE_SIMCTL_DEVELOPER_DIR" xcrun simctl "$@"
 }
 
+_simctl_debug_excerpt() {
+    local value="$1"
+    value=$(printf '%s' "$value" | LC_ALL=C tr '\r\n\t' '   ' | LC_ALL=C tr -cd '[:print:] ') || value=""
+
+    if [[ -n "${HOME:-}" ]]; then
+        local prefix suffix
+        while [[ "$value" == *"$HOME"* ]]; do
+            prefix=${value%%"$HOME"*}
+            suffix=${value#*"$HOME"}
+            value="${prefix}~${suffix}"
+        done
+    fi
+
+    if [[ ${#value} -gt 240 ]]; then
+        value="${value:0:240}..."
+    fi
+    printf '%s' "$value"
+}
+
+_debug_simctl_probe_stderr() {
+    local attempt="$1"
+    local raw_stderr="$2"
+    local excerpt
+    excerpt=$(_simctl_debug_excerpt "$raw_stderr")
+    [[ -n "$excerpt" ]] || return 0
+    debug_log "simctl probe $attempt stderr: $excerpt"
+}
+
 clean_dev_mobile() {
     check_android_ndk
     clean_xcode_documentation_cache
@@ -1143,6 +1236,7 @@ clean_dev_mobile() {
             note_activity
         elif [[ "$_MOLE_SIMCTL_RESOLUTION_STATUS" == "ready" ]]; then
             debug_log "Checking for unavailable Xcode simulators"
+            debug_log "Resolved simctl DEVELOPER_DIR: $_MOLE_SIMCTL_DEVELOPER_DIR"
             local unavailable_before=0
             local unavailable_after=0
             local removed_unavailable=0
@@ -1156,19 +1250,56 @@ clean_dev_mobile() {
             # with a longer timeout. See #890.
             local simctl_available=true
             local simctl_probe_ok=false
-            if _run_simctl "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" list devices > /dev/null 2>&1; then
+            local simctl_probe_first_status=0
+            local simctl_probe_retry_status=0
+            local simctl_probe_first_stderr=""
+            local simctl_probe_retry_stderr=""
+            local simctl_probe_stderr_file=""
+            local simctl_probe_stderr_target="/dev/null"
+            if ensure_mole_temp_root && [[ -n "${MOLE_RESOLVED_TMPDIR:-}" ]]; then
+                simctl_probe_stderr_file=$(mktemp "$MOLE_RESOLVED_TMPDIR/mole-simctl-probe.XXXXXX" 2> /dev/null || true)
+            fi
+            if [[ -n "$simctl_probe_stderr_file" ]]; then
+                simctl_probe_stderr_target="$simctl_probe_stderr_file"
+            else
+                debug_log "Unable to create simctl probe stderr capture file"
+            fi
+
+            if _run_simctl "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" list devices > /dev/null 2> "$simctl_probe_stderr_target"; then
                 simctl_probe_ok=true
             else
-                if _run_simctl 8 list devices > /dev/null 2>&1; then # 8s: simctl retry after warmup, see lib/core/timeouts.sh
+                simctl_probe_first_status=$?
+                if [[ -n "$simctl_probe_stderr_file" ]]; then
+                    simctl_probe_first_stderr=$(< "$simctl_probe_stderr_file")
+                    : > "$simctl_probe_stderr_file"
+                fi
+                if _run_simctl 8 list devices > /dev/null 2> "$simctl_probe_stderr_target"; then # 8s: simctl retry after warmup, see lib/core/timeouts.sh
                     simctl_probe_ok=true
+                    simctl_probe_retry_status=0
                     debug_log "simctl probe succeeded on retry (CoreSimulatorService warmup)"
                 else
-                    debug_log "simctl probe failed after retry (5s + 8s timeouts)"
+                    simctl_probe_retry_status=$?
                 fi
+                if [[ -n "$simctl_probe_stderr_file" ]]; then
+                    simctl_probe_retry_stderr=$(< "$simctl_probe_stderr_file")
+                fi
+                debug_log "simctl probe statuses: first=$simctl_probe_first_status retry=$simctl_probe_retry_status"
+                _debug_simctl_probe_stderr "first" "$simctl_probe_first_stderr"
+                _debug_simctl_probe_stderr "retry" "$simctl_probe_retry_stderr"
+            fi
+            if [[ -n "$simctl_probe_stderr_file" ]]; then
+                rm -f -- "$simctl_probe_stderr_file" 2> /dev/null || true # SAFE: exact temporary file created by mktemp above
             fi
             if [[ "$simctl_probe_ok" != "true" ]]; then
-                debug_log "simctl not accessible or CoreSimulator service not running"
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl not available"
+                if [[ $simctl_probe_first_status -eq 124 && $simctl_probe_retry_status -eq 124 ]]; then
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl probe timed out"
+                else
+                    local simctl_probe_exit_code=$simctl_probe_retry_status
+                    if [[ $simctl_probe_exit_code -eq 124 ]]; then
+                        simctl_probe_exit_code=$simctl_probe_first_status
+                    fi
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl probe failed (exit=${simctl_probe_exit_code})"
+                fi
                 note_activity
                 simctl_available=false
             fi
@@ -1290,7 +1421,7 @@ clean_dev_mobile() {
                 note_activity
             fi # End of simctl_available check
         else
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl not available"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl could not be resolved"
             note_activity
         fi
     fi

@@ -58,9 +58,6 @@ _optimize_catalog_register prevent_network_dsstore opt_prevent_network_dsstore \
 _optimize_catalog_register legacy_overrides_audit opt_legacy_overrides_audit \
     "Legacy Overrides" "Legacy Overrides" \
     "Remove hidden App Nap and disk-image verification overrides left by old tweak tools" true
-_optimize_catalog_register memory_pressure_relief opt_memory_pressure_relief \
-    "Memory Optimization" "Memory Optimization" \
-    "Release inactive memory to improve system responsiveness" true
 _optimize_catalog_register network_stack_optimize opt_network_stack_optimize \
     "Network Stack Refresh" "Network Stack Refresh" \
     "Flush routing table and ARP cache to resolve network issues" true
