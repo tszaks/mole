@@ -113,7 +113,7 @@ note_activity() { :; }
 is_path_whitelisted() { return 1; }
 DRY_RUN=false
 
-    pgrep() { [[ "$1" == "-x" && "$2" == "xcodebuild" ]]; }
+pgrep() { [[ "$1" == "-x" && "$2" == "xcodebuild" ]]; }
 export -f pgrep
 
 dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
@@ -124,7 +124,7 @@ clean_xcode_derived_data
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Xcode DerivedData · skipped (Xcode or build tooling running)"* ]] || return 1
+    [[ "$output" == *"Xcode DerivedData · skipped (Xcode or build tooling running)"* ]]
 }
 
 @test "clean_xcode_derived_data keeps build output when pgrep fails" {
@@ -144,7 +144,7 @@ clean_xcode_derived_data
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"skipped (Xcode or build tooling running)"* ]] || return 1
+    [[ "$output" == *"skipped (process state unknown)"* ]] || return 1
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
@@ -164,7 +164,124 @@ clean_xcode_derived_data
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"skipped (Xcode or build tooling running)"* ]]
+    [[ "$output" == *"skipped (process state unknown)"* ]]
+}
+
+@test "clean_xcode_derived_data reports completed removals before a tooling race stops it" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+cleanup_result_color_kb() { echo ""; }
+bytes_to_human() { echo "$1 bytes"; }
+get_path_size_kb() { echo 1; }
+safe_remove() { command rm -rf "$1"; }
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+probe_round=0
+_xcode_cleanup_process_state() {
+    probe_round=$((probe_round + 1))
+    if [[ $probe_round -le 3 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
+rm -rf "$dd_dir"
+mkdir -p "$dd_dir/One" "$dd_dir/Two" "$dd_dir/Three"
+
+clean_xcode_derived_data
+
+remaining=$(command find "$dd_dir" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+[[ "$remaining" -eq 2 ]] || { echo "WRONG_REMAINING:$remaining"; exit 1; }
+[[ "$files_cleaned" -eq 1 && "$total_items" -eq 1 && "$total_size_cleaned" -eq 1 ]] || {
+    echo "WRONG_COUNTERS:$files_cleaned:$total_items:$total_size_cleaned"
+    exit 1
+}
+rm -rf "$dd_dir"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"Xcode DerivedData · 1 project"* ]] || return 1
+    [[ "$output" == *"Xcode DerivedData · stopped (Xcode or build tooling running)"* ]]
+}
+
+@test "clean_xcode_derived_data rechecks tooling after the size probe" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+get_path_size_kb() { touch "$HOME/xcode-started"; echo 1; }
+safe_remove() { echo "UNEXPECTED_REMOVE:$1"; }
+_xcode_cleanup_process_state() {
+    [[ -e "$HOME/xcode-started" ]] && return 0
+    return 1
+}
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
+rm -rf "$dd_dir" "$HOME/xcode-started"
+mkdir -p "$dd_dir/One"
+clean_xcode_derived_data
+[[ -d "$dd_dir/One" ]] || { echo "WRONG: project removed"; exit 1; }
+rm -rf "$dd_dir" "$HOME/xcode-started"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"Xcode DerivedData · stopped (Xcode or build tooling running)"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "clean_xcode_derived_data passes its measured size to the real deletion sink" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+cleanup_result_color_kb() { echo ""; }
+bytes_to_human() { echo "$1 bytes"; }
+get_path_size_kb() {
+    printf 'size\n' >> "$HOME/derived-size-probes"
+    local round
+    round=$(wc -l < "$HOME/derived-size-probes" | tr -d ' ')
+    [[ $round -ge 2 ]] && touch "$HOME/xcode-started"
+    echo 1
+}
+_xcode_cleanup_process_state() {
+    [[ -e "$HOME/xcode-started" ]] && return 0
+    return 1
+}
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
+rm -rf "$dd_dir" "$HOME/xcode-started" "$HOME/derived-size-probes"
+mkdir -p "$dd_dir/One"
+clean_xcode_derived_data
+[[ ! -e "$dd_dir/One" ]] || { echo "WRONG: project remains"; exit 1; }
+[[ ! -e "$HOME/xcode-started" ]] || { echo "WRONG: deletion sink repeated size probe"; exit 1; }
+[[ "$(wc -l < "$HOME/derived-size-probes" | tr -d ' ')" -eq 1 ]] || exit 1
+rm -rf "$dd_dir" "$HOME/derived-size-probes"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "clean_xcode_derived_data handles empty DerivedData" {

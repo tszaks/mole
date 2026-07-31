@@ -495,8 +495,12 @@ clean_xcode_documentation_cache() {
     local doc_cache_root="${MOLE_XCODE_DOCUMENTATION_CACHE_DIR:-/Library/Developer/Xcode/DocumentationCache}"
     [[ -d "$doc_cache_root" ]] || return 0
 
-    if xcode_build_tooling_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (Xcode or build tooling running)"
+    local process_state=0
+    _xcode_xctest_devices_process_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        local skip_reason="Xcode or build tooling running"
+        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (${skip_reason})"
         note_activity
         return 0
     fi
@@ -553,14 +557,28 @@ clean_xcode_documentation_cache() {
 
     local removed_count=0
     local skipped_count=0
+    local failed_count=0
+    local stop_reason=""
     local stale_entry
     for stale_entry in "${stale_entries[@]}"; do
         if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry"; then
             skipped_count=$((skipped_count + 1))
             continue
         fi
-        if safe_sudo_remove "$stale_entry"; then
+        local stale_size_kb=0
+        stale_size_kb=$(_sim_runtime_size_kb "$stale_entry")
+
+        process_state=0
+        _xcode_xctest_devices_process_running || process_state=$?
+        if [[ $process_state -ne 1 ]]; then
+            stop_reason="Xcode or build tools started"
+            [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
+            break
+        fi
+        if safe_sudo_remove "$stale_entry" "$stale_size_kb"; then
             removed_count=$((removed_count + 1))
+        else
+            failed_count=$((failed_count + 1))
         fi
     done
 
@@ -569,13 +587,28 @@ clean_xcode_documentation_cache() {
         if [[ $skipped_count -gt 0 ]]; then
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${skipped_count} protected items"
         fi
+        if [[ $failed_count -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · could not remove ${failed_count} old indexes"
+        fi
+        note_activity
+    elif [[ $failed_count -gt 0 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · could not remove ${failed_count} old indexes"
+        if [[ $skipped_count -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${skipped_count} protected items"
+        fi
         note_activity
     elif [[ $skipped_count -gt 0 ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode documentation cache · already clean"
+        if [[ -z "$stop_reason" ]]; then
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode documentation cache · already clean"
+        fi
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${skipped_count} protected items"
         note_activity
-    else
+    elif [[ -z "$stop_reason" ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · no items removed"
+        note_activity
+    fi
+    if [[ -n "$stop_reason" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · stopped (${stop_reason})"
         note_activity
     fi
 }
@@ -613,8 +646,16 @@ EOF
 }
 
 _xcode_xctest_devices_process_running() {
-    local match_mode match_pattern match_label probe_status
+    local match_mode match_pattern match_label probe_status=0
 
+    xcode_build_tooling_process_state || probe_status=$?
+    if [[ $probe_status -eq 0 ]]; then
+        _MOLE_XCODE_PROCESS_MATCH="Xcode/build tooling"
+        return 0
+    fi
+    [[ $probe_status -eq 1 ]] || return 2
+
+    probe_status=0
     if _coresimulator_cache_process_running; then
         return 0
     else
@@ -636,9 +677,6 @@ _xcode_xctest_devices_process_running() {
             return 2
         fi
     done << 'EOF'
--x|xcodebuild|xcodebuild
--x|xctest|xctest
--x|XCTRunner|XCTRunner
 -f|com.apple.dt.XCTest|com.apple.dt.XCTest
 -f|XCTest|XCTest
 EOF
@@ -646,41 +684,85 @@ EOF
     return 1
 }
 
+_xcode_delete_guard_allows() {
+    local process_state=0
+    _xcode_xctest_devices_process_running || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_XCODE_DELETE_GUARD_REASON="Xcode or build tools started"
+    [[ $process_state -eq 2 ]] && _MOLE_XCODE_DELETE_GUARD_REASON="process state unknown"
+    return 1
+}
+
+_coresimulator_delete_guard_allows() {
+    local process_state=0
+    _coresimulator_cache_process_running || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_XCODE_DELETE_GUARD_REASON="CoreSimulator started"
+    [[ $process_state -eq 2 ]] && _MOLE_XCODE_DELETE_GUARD_REASON="process state unknown"
+    return 1
+}
+
+# Production safe_clean_guarded binds the process probe to its internal
+# post-size deletion boundary. Unit-level callers that source this module
+# without bin/clean.sh keep the historical safe_clean surface.
+_xcode_safe_clean_guarded() {
+    local delete_guard="$1"
+    local display_name="$2"
+    shift 2
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        safe_clean "$@"
+        return $?
+    fi
+
+    local _MOLE_XCODE_DELETE_GUARD_REASON="process state changed"
+    local guarded_rc=0
+    safe_clean_guarded "$delete_guard" "$@" || guarded_rc=$?
+    if [[ $guarded_rc -eq 75 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
+        note_activity
+        return 1
+    fi
+    return "$guarded_rc"
+}
+
 clean_xcode_xctest_devices() {
     local xctest_devices_dir="${MOLE_XCODE_XCTEST_DEVICES_DIR:-$HOME/Library/Developer/XCTestDevices}"
     [[ -d "$xctest_devices_dir" ]] || return 0
 
-    local process_probe_status
-    if _xcode_xctest_devices_process_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (Xcode or XCTest running)"
-        note_activity
-        return 0
-    else
-        process_probe_status=$?
-    fi
-    if [[ $process_probe_status -ne 1 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (process status unknown)"
+    local process_state=0
+    _xcode_xctest_devices_process_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        local skip_reason="Xcode or XCTest running"
+        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (${skip_reason})"
         note_activity
         return 0
     fi
 
-    safe_clean "$xctest_devices_dir" "Xcode XCTestDevices test data"
+    _xcode_safe_clean_guarded \
+        _xcode_delete_guard_allows \
+        "Xcode XCTestDevices" \
+        "$xctest_devices_dir" \
+        "Xcode XCTestDevices test data" || true
 }
 
 clean_xcode_system_coresimulator_caches() {
     local cache_root="${MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR:-/Library/Developer/CoreSimulator/Caches}"
     [[ -d "$cache_root" ]] || return 0
 
-    local process_probe_status
-    if _coresimulator_cache_process_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (CoreSimulator running)"
-        note_activity
-        return 0
-    else
-        process_probe_status=$?
-    fi
-    if [[ $process_probe_status -ne 1 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (process status unknown)"
+    local process_state=0
+    _coresimulator_cache_process_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        local skip_reason="CoreSimulator running"
+        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (${skip_reason})"
         note_activity
         return 0
     fi
@@ -729,7 +811,16 @@ clean_xcode_system_coresimulator_caches() {
     local removed_count=0
     local removed_size_kb=0
     local skipped_count=0
+    local failed_count=0
+    local stop_reason=""
     for entry in "${cache_entries[@]}"; do
+        process_state=0
+        _coresimulator_cache_process_running || process_state=$?
+        if [[ $process_state -ne 1 ]]; then
+            stop_reason="CoreSimulator started"
+            [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
+            break
+        fi
         if should_protect_path "$entry" || is_path_whitelisted "$entry"; then
             skipped_count=$((skipped_count + 1))
             continue
@@ -737,9 +828,21 @@ clean_xcode_system_coresimulator_caches() {
         local entry_size_kb
         entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null || echo 0)
         [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
-        if safe_sudo_remove "$entry"; then
+
+        # A bounded size probe can still overlap Simulator startup. Recheck
+        # immediately before the privileged deletion sink.
+        process_state=0
+        _coresimulator_cache_process_running || process_state=$?
+        if [[ $process_state -ne 1 ]]; then
+            stop_reason="CoreSimulator started"
+            [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
+            break
+        fi
+        if safe_sudo_remove "$entry" "$entry_size_kb"; then
             removed_count=$((removed_count + 1))
             removed_size_kb=$((removed_size_kb + entry_size_kb))
+        else
+            failed_count=$((failed_count + 1))
         fi
     done
 
@@ -753,12 +856,25 @@ clean_xcode_system_coresimulator_caches() {
         else
             echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode Simulator system cache · removed ${removed_count} (${line_color}${removed_human}${NC})"
         fi
+        if [[ $failed_count -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · could not remove ${failed_count} entries"
+        fi
+        note_activity
+    elif [[ $failed_count -gt 0 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · could not remove ${failed_count} entries"
+        if [[ $skipped_count -gt 0 ]]; then
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped ${skipped_count} protected"
+        fi
         note_activity
     elif [[ $skipped_count -gt 0 ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped ${skipped_count} protected, none removed"
         note_activity
-    else
+    elif [[ -z "$stop_reason" ]]; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode Simulator system cache · already clean"
+        note_activity
+    fi
+    if [[ -n "$stop_reason" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · stopped (${stop_reason})"
         note_activity
     fi
 }
@@ -775,30 +891,72 @@ clean_xcode_device_support() {
 
     [[ -d "$ds_dir" ]] || return 0
 
-    if xcode_build_tooling_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (Xcode or build tooling running)"
+    # DeviceSupport contains symbols used by active builds, tests, and device
+    # debugging. Keep every version when any Xcode tooling is active.
+    local process_state=0
+    _xcode_xctest_devices_process_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        local skip_reason="Xcode or build tooling running"
+        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (${skip_reason})"
         note_activity
         return 0
     fi
 
     # Collect version directories (each is a platform version like "17.5 (21F79)")
     local -a version_dirs=()
+    local scan_file=""
+    scan_file=$(mktemp "${TMPDIR:-/tmp}/mole-device-support.XXXXXX") || {
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (scan unavailable)"
+        note_activity
+        return 0
+    }
+    if ! command find "$ds_dir" -mindepth 1 -maxdepth 1 -print0 > "$scan_file" 2> /dev/null; then
+        rm -f "$scan_file" # SAFE: exact temporary file created by mktemp above
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (scan unavailable)"
+        note_activity
+        return 0
+    fi
     while IFS= read -r -d '' entry; do
         # Skip non-directories (e.g. .log files at the top level)
         [[ -d "$entry" ]] || continue
         version_dirs+=("$entry")
-    done < <(command find "$ds_dir" -mindepth 1 -maxdepth 1 -print0 2> /dev/null)
+    done < "$scan_file"
+    rm -f "$scan_file" # SAFE: exact temporary file created by mktemp above
 
     if [[ ${#version_dirs[@]} -gt 0 ]]; then
-        # Sort by modification time (most recent first)
+        local -a version_mtimes=()
+        local mtime=""
+        for entry in "${version_dirs[@]}"; do
+            if ! mtime=$(stat -f%m "$entry" 2> /dev/null) || [[ ! "$mtime" =~ ^[0-9]+$ ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (metadata unavailable)"
+                note_activity
+                return 0
+            fi
+            version_mtimes+=("$mtime")
+        done
+
+        # Sort by modification time (most recent first) without serializing
+        # pathnames through newline-delimited text. DeviceSupport is writable by
+        # the invoking user, so even unusual names must stay byte-exact.
         local -a sorted_dirs=()
-        while IFS= read -r line; do
-            sorted_dirs+=("${line#* }")
-        done < <(
-            for entry in "${version_dirs[@]}"; do
-                printf '%s %s\n' "$(stat -f%m "$entry" 2> /dev/null || echo 0)" "$entry"
-            done | sort -rn
-        )
+        local -a pending_dirs=("${version_dirs[@]}")
+        local -a pending_mtimes=("${version_mtimes[@]}")
+        local index best_index
+        while [[ ${#pending_dirs[@]} -gt 0 ]]; do
+            best_index=0
+            for ((index = 1; index < ${#pending_dirs[@]}; index++)); do
+                if [[ ${pending_mtimes[$index]} -gt ${pending_mtimes[$best_index]} ]]; then
+                    best_index=$index
+                fi
+            done
+            sorted_dirs+=("${pending_dirs[$best_index]}")
+            unset "pending_dirs[$best_index]" "pending_mtimes[$best_index]"
+            if [[ ${#pending_dirs[@]} -gt 0 ]]; then
+                pending_dirs=("${pending_dirs[@]}")
+                pending_mtimes=("${pending_mtimes[@]}")
+            fi
+        done
 
         # Get stale versions (everything after keep_count)
         local -a stale_dirs=("${sorted_dirs[@]:$keep_count}")
@@ -836,28 +994,76 @@ clean_xcode_device_support() {
             else
                 # Remove old versions
                 local removed_count=0
+                local removed_size_kb=0
+                local stop_reason=""
                 for stale_entry in "${stale_dirs[@]}"; do
+                    process_state=0
+                    _xcode_xctest_devices_process_running || process_state=$?
+                    if [[ $process_state -ne 1 ]]; then
+                        stop_reason="Xcode or build tools started"
+                        [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
+                        break
+                    fi
                     if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry"; then
                         continue
                     fi
-                    if safe_remove "$stale_entry"; then
+                    entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null || echo 0)
+                    [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
+
+                    # The size probe may consume the full disk-verification
+                    # budget. Bind authorization to the deletion boundary by
+                    # checking active Xcode tooling again after it completes.
+                    process_state=0
+                    _xcode_xctest_devices_process_running || process_state=$?
+                    if [[ $process_state -ne 1 ]]; then
+                        stop_reason="Xcode or build tools started"
+                        [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
+                        break
+                    fi
+                    if safe_remove "$stale_entry" "true" "$entry_size_kb"; then
                         removed_count=$((removed_count + 1))
+                        removed_size_kb=$((removed_size_kb + entry_size_kb))
                     fi
                 done
 
                 if [[ $removed_count -gt 0 ]]; then
+                    stale_size_human=$(bytes_to_human "$((removed_size_kb * 1024))")
                     local line_color
-                    line_color=$(cleanup_result_color_kb "$stale_size_kb")
+                    line_color=$(cleanup_result_color_kb "$removed_size_kb")
                     echo -e "  ${line_color}${ICON_SUCCESS}${NC} ${display_name} · removed ${removed_count} old versions, ${line_color}${stale_size_human}${NC}"
                     note_activity
+                fi
+                if [[ -n "$stop_reason" ]]; then
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${stop_reason})"
+                    note_activity
+                    return 0
                 fi
             fi
         fi
     fi
 
     # Clean caches/logs inside kept versions
-    safe_clean "$ds_dir"/*/Symbols/System/Library/Caches/* "$display_name symbol cache"
-    safe_clean "$ds_dir"/*.log "$display_name logs"
+    if [[ "${DRY_RUN:-false}" != "true" ]]; then
+        process_state=0
+        _xcode_xctest_devices_process_running || process_state=$?
+        if [[ $process_state -ne 1 ]]; then
+            local stop_reason="Xcode or build tools started"
+            [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${stop_reason})"
+            note_activity
+            return 0
+        fi
+    fi
+    _xcode_safe_clean_guarded \
+        _xcode_delete_guard_allows \
+        "$display_name symbol cache" \
+        "$ds_dir"/*/Symbols/System/Library/Caches/* \
+        "$display_name symbol cache" || return 0
+    _xcode_safe_clean_guarded \
+        _xcode_delete_guard_allows \
+        "$display_name logs" \
+        "$ds_dir"/*.log \
+        "$display_name logs" || return 0
 }
 
 _sim_runtime_mount_points() {
@@ -1065,13 +1271,34 @@ clean_xcode_simulator_runtime_volumes() {
     # Perform cleanup and report final result in one line
     local removed_count=0
     local removed_size_kb=0
+    local failed_count=0
+    local stop_reason=""
     local selected_path
     for selected_path in "${selected_paths[@]}"; do
         local selected_size_kb=0
         selected_size_kb=$(_sim_runtime_size_kb "$selected_path")
-        if safe_sudo_remove "$selected_path"; then
+
+        # Mount state can change while sizing or waiting for sudo. Refresh it
+        # for each candidate and stop when the path is mounted or the probe is
+        # unavailable; an old UNUSED snapshot never authorizes deletion.
+        local -a current_mount_points=()
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && current_mount_points+=("$line")
+        done < <(_sim_runtime_mount_points)
+        if [[ ${#current_mount_points[@]} -eq 0 ]]; then
+            stop_reason="mount state unknown"
+            break
+        fi
+        if _sim_runtime_is_path_in_use "$selected_path" "${current_mount_points[@]}"; then
+            stop_reason="runtime became mounted"
+            break
+        fi
+
+        if safe_sudo_remove "$selected_path" "$selected_size_kb"; then
             removed_count=$((removed_count + 1))
             removed_size_kb=$((removed_size_kb + selected_size_kb))
+        else
+            failed_count=$((failed_count + 1))
         fi
     done
 
@@ -1086,13 +1313,25 @@ clean_xcode_simulator_runtime_volumes() {
         else
             echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode runtime volumes · removed ${removed_count} (${line_color}${removed_human}${NC})"
         fi
+        if [[ $failed_count -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode runtime volumes · could not remove ${failed_count} entries"
+        fi
         note_activity
     else
-        if [[ $skipped_protected -gt 0 ]]; then
+        if [[ $failed_count -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode runtime volumes · could not remove ${failed_count} entries"
+            if [[ $skipped_protected -gt 0 ]]; then
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode runtime volumes · skipped ${skipped_protected} protected"
+            fi
+        elif [[ $skipped_protected -gt 0 ]]; then
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode runtime volumes · skipped ${skipped_protected} protected, none removed"
-        else
+        elif [[ -z "$stop_reason" ]]; then
             echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode runtime volumes · already clean"
         fi
+        note_activity
+    fi
+    if [[ -n "$stop_reason" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode runtime volumes · stopped (${stop_reason})"
         note_activity
     fi
 }
@@ -1438,13 +1677,21 @@ clean_dev_mobile() {
     clean_xcode_device_support ~/Library/Developer/Xcode/watchOS\ DeviceSupport "watchOS DeviceSupport"
     clean_xcode_device_support ~/Library/Developer/Xcode/tvOS\ DeviceSupport "tvOS DeviceSupport"
     # Simulator runtime caches.
-    safe_clean ~/Library/Developer/CoreSimulator/Profiles/Runtimes/*/Contents/Resources/RuntimeRoot/System/Library/Caches/* "Simulator runtime cache"
+    _xcode_safe_clean_guarded \
+        _coresimulator_delete_guard_allows \
+        "Simulator runtime cache" \
+        ~/Library/Developer/CoreSimulator/Profiles/Runtimes/*/Contents/Resources/RuntimeRoot/System/Library/Caches/* \
+        "Simulator runtime cache" || return 0
     safe_clean ~/Library/Caches/Google/AndroidStudio*/* "Android Studio cache"
     # safe_clean ~/Library/Caches/CocoaPods/* "CocoaPods cache"
     # safe_clean ~/.cache/flutter/* "Flutter cache"
     safe_clean ~/.android/build-cache/* "Android build cache"
     safe_clean ~/.android/cache/* "Android SDK cache"
-    safe_clean ~/Library/Developer/Xcode/UserData/IB\ Support/* "Xcode Interface Builder cache"
+    _xcode_safe_clean_guarded \
+        _xcode_delete_guard_allows \
+        "Xcode Interface Builder cache" \
+        ~/Library/Developer/Xcode/UserData/IB\ Support/* \
+        "Xcode Interface Builder cache" || return 0
     safe_clean ~/.cache/swift-package-manager/* "Swift package manager cache"
     safe_clean ~/Library/Caches/org.swift.swiftpm/* "Swift package manager library cache"
     # Expo/React Native caches (preserve state.json which contains auth tokens).

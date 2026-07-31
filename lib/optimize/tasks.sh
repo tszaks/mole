@@ -1058,42 +1058,6 @@ opt_prune_spotlight_orphan_rules() {
     fi
 }
 
-# Dock refresh (restart Dock so plist edits take effect).
-# The previous implementation also wiped every "*.db" under
-# ~/Library/Application Support/Dock, which deleted macOS's
-# desktoppicture.db and reset the user's wallpaper (#995). No .db under
-# that directory needs to be cleared for Dock to refresh, killall plus
-# touching the plist is sufficient.
-opt_dock_refresh() {
-    local dock_plist="$HOME/Library/Preferences/com.apple.dock.plist"
-    local applied=0
-    local failed=0
-
-    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
-        applied=1
-    else
-        if [[ -f "$dock_plist" ]]; then
-            if touch "$dock_plist" 2> /dev/null; then
-                applied=$((applied + 1))
-            else
-                failed=$((failed + 1))
-            fi
-        fi
-        if killall Dock 2> /dev/null; then
-            applied=$((applied + 1))
-        else
-            failed=$((failed + 1))
-        fi
-    fi
-
-    if [[ $failed -eq 0 ]]; then
-        opt_msg "Dock refreshed"
-    else
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Dock refresh incomplete ($failed operation(s) failed)"
-    fi
-    optimize_task_result_from_counts "$applied" "$failed"
-}
-
 # Prevent .DS_Store on network and USB volumes.
 # Idempotent: writes two user defaults that stop Finder from creating
 # .DS_Store files on SMB/AFP/NFS shares and removable USB volumes.

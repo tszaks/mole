@@ -641,10 +641,11 @@ uninstall_strip_version_suffix() {
 
 # Phase 1: scan every selected app, classify into running/sudo/brew/blocked
 # buckets, build pipe-encoded app_details records, accumulate the total
-# estimated size, and warn about apps that require an official uninstaller.
+# estimated size, and warn about apps that require an official uninstaller or
+# a manual Finder removal.
 # Reads:  selected_apps
-# Writes: running_apps, sudo_apps, brew_cask_apps, blocked_apps, app_details,
-#         total_estimated_size
+# Writes: running_apps, sudo_apps, brew_cask_apps, blocked_apps,
+#         manual_removal_apps, app_details, total_estimated_size
 _batch_scan_app_details() {
     # Cache current user outside loop
     local current_user=$(whoami)
@@ -732,13 +733,7 @@ _batch_scan_app_details() {
         fi
 
         local cask_name="" is_brew_cask="false"
-        local resolved_path=$(readlink "$app_path" 2> /dev/null || echo "")
-        if [[ "$resolved_path" == */Caskroom/* ]]; then
-            # Extract cask name using bash parameter expansion (faster than sed)
-            local tmp="${resolved_path#*/Caskroom/}"
-            cask_name="${tmp%%/*}"
-            [[ -n "$cask_name" ]] && is_brew_cask="true"
-        elif command -v get_brew_cask_name > /dev/null 2>&1; then
+        if command -v get_brew_cask_name > /dev/null 2>&1; then
             local detected_cask
             detected_cask=$(get_brew_cask_name "$app_path" 2> /dev/null || true)
             if [[ -n "$detected_cask" ]]; then
@@ -758,6 +753,17 @@ _batch_scan_app_details() {
             [[ "$app_owner" == "root" ]] ||
             [[ -n "$app_owner" && "$app_owner" != "$current_user" ]]; then
             needs_sudo=true
+        fi
+
+        # A privileged path-based removal below an invoking-user-mutable
+        # ancestor cannot bind the path we previewed to the object root later
+        # removes. Reject it before leftover discovery, sudo authorization, or
+        # any launch/login/process teardown. Homebrew casks stay on their
+        # package-manager path and never use this direct-app preflight.
+        if [[ "$needs_sudo" == true && "$is_brew_cask" != "true" ]] &&
+            _mole_privileged_path_has_mutable_ancestor "$app_path"; then
+            manual_removal_apps+=("$app_name")
+            continue
         fi
 
         local app_size_kb=$(get_path_size_kb "$app_path" || echo "0")
@@ -845,6 +851,14 @@ _batch_scan_app_details() {
         for blocked_detail in "${blocked_apps[@]}"; do
             IFS='|' read -r blocked_name blocked_vendor <<< "$blocked_detail"
             log_warning "$blocked_name requires the official $blocked_vendor uninstaller"
+        done
+    fi
+
+    if [[ ${#manual_removal_apps[@]} -gt 0 ]]; then
+        local manual_name
+        for manual_name in "${manual_removal_apps[@]}"; do
+            log_warning "$manual_name cannot be removed safely by Mole from this location"
+            log_info "Move it to Trash in Finder; Mole left protected containers and app data untouched"
         done
     fi
 }
@@ -1094,8 +1108,16 @@ _batch_execute_removals() {
                     fi
 
                     if [[ $cask_state -eq 1 ]]; then
-                        if ! mole_delete "$app_path" "$needs_sudo"; then
-                            reason="brew cleanup incomplete, manual removal failed"
+                        local removal_rc=0
+                        mole_delete "$app_path" "$needs_sudo" || removal_rc=$?
+                        if [[ $removal_rc -ne 0 ]]; then
+                            if [[ $removal_rc -eq $MOLE_ERR_MUTABLE_PARENT ]]; then
+                                local diagnosis
+                                diagnosis=$(diagnose_removal_failure "$removal_rc" "$app_name")
+                                IFS='|' read -r reason suggestion <<< "$diagnosis"
+                            else
+                                reason="brew cleanup incomplete, manual removal failed"
+                            fi
                         fi
                     elif [[ $cask_state -eq 0 ]]; then
                         reason="brew uninstall failed, package still installed"
@@ -1565,6 +1587,7 @@ batch_uninstall_applications() {
     local -a sudo_apps=()
     local -a brew_cask_apps=()
     local -a blocked_apps=()
+    local -a manual_removal_apps=()
     local total_estimated_size=0
     local -a app_details=()
 

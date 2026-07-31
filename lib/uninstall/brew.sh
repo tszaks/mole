@@ -84,6 +84,7 @@ _detect_cask_via_resolved_path() {
     local app_path="$1"
     local resolved
     if resolved=$(resolve_path "$app_path") && [[ -n "$resolved" ]]; then
+        [[ "$(basename "$resolved")" == "$(basename "$app_path")" ]] || return 1
         _extract_cask_token_from_path "$resolved" && return 0
     fi
     return 1
@@ -121,11 +122,14 @@ _detect_cask_via_caskroom_search() {
         HOMEBREW_NO_ENV_HINTS=1 brew list --cask 2> /dev/null | grep -qxF "${uniq[0]}" || return 1
         local info_output
         info_output=$(HOMEBREW_NO_ENV_HINTS=1 brew info --cask "${uniq[0]}" 2> /dev/null) || return 1
-        if [[ -n "$app_path" ]] &&
-            ! grep -qF "$app_path" <<< "$info_output" &&
-            ! grep -qF "/Applications/$app_bundle_name" <<< "$info_output" &&
-            ! grep -qF "$app_bundle_name" <<< "$info_output"; then
-            return 1
+        if [[ -n "$app_path" ]]; then
+            if grep -qF "$app_path" <<< "$info_output"; then
+                :
+            elif [[ "$app_path" == "/Applications/$app_bundle_name" ]] && grep -qF "$app_bundle_name" <<< "$info_output"; then
+                :
+            else
+                return 1
+            fi
         fi
         echo "${uniq[0]}"
         return 0
@@ -141,6 +145,7 @@ _detect_cask_via_symlink_check() {
 
     local target
     target=$(readlink "$app_path" 2> /dev/null) || return 1
+    [[ "$(basename "$target")" == "$(basename "$app_path")" ]] || return 1
     _extract_cask_token_from_path "$target"
 }
 
@@ -157,11 +162,15 @@ _detect_cask_via_brew_list() {
     # Verify this cask actually owns this app path or app bundle.
     local info_output
     info_output=$(HOMEBREW_NO_ENV_HINTS=1 brew info --cask "$cask_name" 2> /dev/null) || return 1
-    grep -qF "$app_path" <<< "$info_output" ||
-        grep -qF "/Applications/$app_bundle_name" <<< "$info_output" ||
-        grep -qF "$app_bundle_name" <<< "$info_output" ||
-        return 1
-    echo "$cask_name"
+    if grep -qF "$app_path" <<< "$info_output"; then
+        echo "$cask_name"
+        return 0
+    fi
+    if [[ "$app_path" == "/Applications/$app_bundle_name" ]] && grep -qF "$app_bundle_name" <<< "$info_output"; then
+        echo "$cask_name"
+        return 0
+    fi
+    return 1
 }
 
 # Get Homebrew cask name for an app

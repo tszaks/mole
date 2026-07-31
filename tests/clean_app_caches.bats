@@ -37,12 +37,20 @@ clean_xcode_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Xcode DerivedData/Documentation · skipped (Xcode or build tooling running)"* ]] || return 1
+    [[ "$output" == *"Xcode DerivedData · skipped (Xcode or build tooling running)"* ]] || return 1
     [[ "$output" != *"derived data"* ]] || return 1
     [[ "$output" != *"documentation cache"* ]]
 }
 
-@test "clean_xcode_tools cleans documentation caches but not archives when Xcode is not running" {
+@test "clean_xcode_tools preserves device logs and user documentation stores" {
+    local ios_log="$HOME/Library/Developer/Xcode/iOS Device Logs/sentinel.log"
+    local watch_log="$HOME/Library/Developer/Xcode/watchOS Device Logs/sentinel.log"
+    local doc_cache="$HOME/Library/Developer/Xcode/DocumentationCache/sentinel.doc"
+    local doc_index="$HOME/Library/Developer/Xcode/DocumentationIndex/sentinel.index"
+    mkdir -p "$(dirname "$ios_log")" "$(dirname "$watch_log")" \
+        "$(dirname "$doc_cache")" "$(dirname "$doc_index")"
+    touch "$ios_log" "$watch_log" "$doc_cache" "$doc_index"
+
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -53,12 +61,50 @@ clean_xcode_tools
 EOF
 
     [ "$status" -eq 0 ]
-    # clean_xcode_tools does not touch DerivedData (that is clean_xcode_derived_data),
-    # so assert the documentation cache this test is actually named for.
-    [[ "$output" == *"Xcode documentation cache"* ]] || return 1
+    # Xcode cache and build products are positive controls proving the cleanup
+    # body ran; diagnostics and downloaded documentation must stay review-only.
+    [[ "$output" == *"Xcode cache"* ]] || return 1
+    [[ "$output" == *"Xcode build products"* ]] || return 1
+    [[ "$output" != *"iOS device logs"* ]] || return 1
+    [[ "$output" != *"watchOS device logs"* ]] || return 1
+    [[ "$output" != *"Xcode documentation cache"* ]] || return 1
+    [[ "$output" != *"Xcode documentation index"* ]] || return 1
     [[ "$output" != *"Xcode archives"* ]] || return 1
-    [[ "$output" == *"Xcode documentation cache"* ]] || return 1
-    [[ "$output" == *"Xcode documentation index"* ]]
+    [[ -f "$ios_log" && -f "$watch_log" && -f "$doc_cache" && -f "$doc_index" ]]
+}
+
+@test "clean_xcode_tools skips Xcode paths while xcodebuild is active" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+pgrep() { [[ "$2" == "xcodebuild" ]]; }
+safe_clean() {
+    case "${!#}" in
+        "Xcode cache" | "Xcode build products") echo "UNEXPECTED_XCODE_CLEAN:${!#}" ;;
+    esac
+}
+clean_xcode_tools
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"Xcode cache/build products · skipped (Xcode or build tooling running)"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_XCODE_CLEAN"* ]]
+}
+
+@test "clean_xcode_tools fails closed when process state is unknown" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+pgrep() { return 2; }
+safe_clean() { echo "UNEXPECTED_CLEAN:${!#}"; }
+clean_xcode_tools
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"process state unknown"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN"* ]]
 }
 
 @test "clean_xcode_tools does not duplicate unavailable simulator cleanup" {

@@ -41,9 +41,38 @@ else
     readonly PURPLE="${ESC}[0;35m"
     readonly PURPLE_BOLD="${ESC}[1;35m"
     readonly RED="${ESC}[0;31m"
-    readonly GRAY="${ESC}[0;90m"
+    readonly GRAY="${ESC}[0;38;5;244m"
     readonly NC="${ESC}[0m"
 fi
+
+# Probe several process patterns without collapsing pgrep errors into "not
+# running". Arguments are selector/pattern pairs, for example:
+#   mole_pgrep_any -x Xcode -f com.apple.dt.XCTest
+# Returns 0 when any pattern matches, 1 only when every probe reports no match,
+# and 2 when no pattern matches but at least one probe could not be completed.
+mole_pgrep_any() {
+    if [[ $# -eq 0 || $(($# % 2)) -ne 0 ]] || ! command -v pgrep > /dev/null 2>&1; then
+        return 2
+    fi
+
+    local aggregate_rc=1
+    local selector pattern probe_rc
+    while [[ $# -gt 0 ]]; do
+        selector="$1"
+        pattern="$2"
+        shift 2
+
+        probe_rc=0
+        if pgrep "$selector" "$pattern" > /dev/null 2>&1; then
+            return 0
+        else
+            probe_rc=$?
+        fi
+        [[ $probe_rc -eq 1 ]] || aggregate_rc=2
+    done
+
+    return "$aggregate_rc"
+}
 
 # ============================================================================
 # Icon Definitions

@@ -163,6 +163,42 @@ EOF
     rm -rf "$base"
 }
 
+@test "safe_clean_guarded rechecks after parallel size probes before deletion" {
+    local base="$HOME/safe_clean_guarded"
+    mkdir -p "$base/a" "$base/b" "$base/c" "$base/d"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+get_cleanup_path_size_kb() { touch "$base/process-started"; echo 1; }
+delete_guard() { [[ ! -e "$base/process-started" ]]; }
+safe_remove() { echo "UNEXPECTED_REMOVE:\$1"; /bin/rm -rf "\$1"; }
+
+rc=0
+safe_clean_guarded delete_guard \
+    "$base/a" "$base/b" "$base/c" "$base/d" \
+    "Guarded cache" || rc=\$?
+[[ \$rc -eq 75 ]] || { echo "WRONG_RC:\$rc"; exit 1; }
+for path in "$base/a" "$base/b" "$base/c" "$base/d"; do
+    [[ -d "\$path" ]] || { echo "WRONG: removed \$path"; exit 1; }
+done
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
 @test "mo clean --dry-run skips system cleanup in non-interactive mode" {
     set_mock_sudo_uncached
     run_clean_dry_run

@@ -52,6 +52,11 @@ save_whitelist_patterns() {
     if [[ ${#patterns[@]} -gt 0 ]]; then
         local -a unique_patterns=()
         for pattern in "${patterns[@]}"; do
+            # Optimize also accepts path patterns for diagnostic exclusions, so
+            # migrate only task IDs that this release explicitly retired.
+            if [[ "$mode" == "optimize" && "$pattern" == "dock_refresh" ]]; then
+                continue
+            fi
             local duplicate="false"
             if [[ ${#unique_patterns[@]} -gt 0 ]]; then
                 for existing in "${unique_patterns[@]}"; do
@@ -228,6 +233,11 @@ load_whitelist() {
     if [[ ${#patterns[@]} -gt 0 ]]; then
         local -a unique_patterns=()
         for pattern in "${patterns[@]}"; do
+            # Preserve custom diagnostic path patterns; only this retired task
+            # ID is known to be stale after #1300.
+            if [[ "$mode" == "optimize" && "$pattern" == "dock_refresh" ]]; then
+                continue
+            fi
             local duplicate="false"
             if [[ ${#unique_patterns[@]} -gt 0 ]]; then
                 for existing in "${unique_patterns[@]}"; do
@@ -240,12 +250,21 @@ load_whitelist() {
             [[ "$duplicate" == "true" ]] && continue
             unique_patterns+=("$pattern")
         done
-        CURRENT_WHITELIST_PATTERNS=("${unique_patterns[@]}")
-        WHITELIST_PATTERNS=("${unique_patterns[@]}")
+        if [[ ${#unique_patterns[@]} -gt 0 ]]; then
+            CURRENT_WHITELIST_PATTERNS=("${unique_patterns[@]}")
+            WHITELIST_PATTERNS=("${unique_patterns[@]}")
+        else
+            CURRENT_WHITELIST_PATTERNS=()
+            WHITELIST_PATTERNS=()
+        fi
 
         # Migrate legacy optimize config to the new path automatically
         if [[ "$mode" == "optimize" && "$using_legacy" == "true" && "$config_file" != "$WHITELIST_CONFIG_OPTIMIZE" ]]; then
-            save_whitelist_patterns "$mode" "${CURRENT_WHITELIST_PATTERNS[@]}"
+            if [[ ${#CURRENT_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+                save_whitelist_patterns "$mode" "${CURRENT_WHITELIST_PATTERNS[@]}"
+            else
+                save_whitelist_patterns "$mode"
+            fi
         fi
     else
         CURRENT_WHITELIST_PATTERNS=()

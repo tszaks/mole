@@ -875,8 +875,15 @@ classify_cleanup_risk() {
     echo "MEDIUM|User data files"
 }
 
+# Internal implementation shared by the normal and process-guarded cleanup
+# entry points. The first argument is an optional callback that must return 0
+# immediately before each deletion sink; callers use it to bind a process-state
+# check to the path that was just sized.
 # shellcheck disable=SC2329
-safe_clean() {
+_safe_clean_impl() {
+    local delete_guard="$1"
+    shift
+
     if [[ $# -eq 0 ]]; then
         return 0
     fi
@@ -926,6 +933,7 @@ safe_clean() {
     local total_count=0
     local skipped_count=0
     local removal_failed_count=0
+    local delete_guard_stopped=0
     local permission_start=${MOLE_PERMISSION_DENIED_COUNT:-0}
 
     local show_scan_feedback=false
@@ -1157,7 +1165,10 @@ safe_clean() {
                     read -r size count < "$result_file" 2> /dev/null || true
                     local removed=0
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        if safe_remove "$path" true "$size"; then
+                        if [[ -n "$delete_guard" ]] && ! "$delete_guard" "$path"; then
+                            delete_guard_stopped=1
+                            break
+                        elif safe_remove "$path" true "$size"; then
                             removed=1
                         fi
                     else
@@ -1202,7 +1213,10 @@ safe_clean() {
 
                 local removed=0
                 if [[ "$DRY_RUN" != "true" ]]; then
-                    if safe_remove "$path" true "$size_kb"; then
+                    if [[ -n "$delete_guard" ]] && ! "$delete_guard" "$path"; then
+                        delete_guard_stopped=1
+                        break
+                    elif safe_remove "$path" true "$size_kb"; then
                         removed=1
                     fi
                 else
@@ -1289,7 +1303,26 @@ safe_clean() {
         note_activity
     fi
 
+    # 75 is internal to safe_clean_guarded. Normal safe_clean calls never set a
+    # guard and retain the existing always-zero cleanup contract.
+    [[ $delete_guard_stopped -eq 1 ]] && return 75
     return 0
+}
+
+# shellcheck disable=SC2329
+safe_clean() {
+    _safe_clean_impl "" "$@"
+}
+
+# Run safe_clean with a callback rechecked after sizing and immediately before
+# every safe_remove call. Returns 75 when the callback stops the batch after
+# preserving any removals already completed.
+# shellcheck disable=SC2329
+safe_clean_guarded() {
+    local delete_guard="$1"
+    shift
+    declare -f "$delete_guard" > /dev/null 2>&1 || return 2
+    _safe_clean_impl "$delete_guard" "$@"
 }
 
 start_cleanup() {

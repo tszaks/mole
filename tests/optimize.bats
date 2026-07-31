@@ -467,18 +467,6 @@ EOF
 	[ "$status" -eq 1 ]
 }
 
-@test "opt_dock_refresh reports refresh" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-execute_optimization dock_refresh
-EOF
-
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"Dock refreshed"* ]]
-}
-
 @test "opt_prevent_network_dsstore dry-run reports enabled" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -679,14 +667,14 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-opt_dock_refresh() { echo "dock"; optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"; }
+opt_cache_refresh() { echo "cache"; optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_APPLIED"; }
 optimize_outcomes_reset
-execute_optimization dock_refresh
+execute_optimization cache_refresh
 [[ "$(optimize_outcome_count applied)" == "1" ]] || exit 1
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"dock"* ]]
+	[[ "$output" == *"cache"* ]]
 }
 
 @test "execute_optimization rejects unknown action" {
@@ -1405,16 +1393,16 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-is_whitelisted() { [[ "$1" == "dock_refresh" ]]; }
-opt_dock_refresh() { echo "UNEXPECTED_DOCK"; }
+is_whitelisted() { [[ "$1" == "cache_refresh" ]]; }
+opt_cache_refresh() { echo "UNEXPECTED_CACHE"; }
 optimize_outcomes_reset
-execute_optimization dock_refresh
+execute_optimization cache_refresh
 [[ "$(optimize_outcome_count skipped)" == "1" ]] || exit 1
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Skipped (whitelisted): Dock Refresh"* ]] || return 1
-	[[ "$output" != *"UNEXPECTED_DOCK"* ]]
+	[[ "$output" == *"Skipped (whitelisted): Finder Cache Refresh"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_CACHE"* ]]
 }
 
 @test "optimize whitelist is loaded before system health checks" {
@@ -1826,26 +1814,6 @@ EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"no_vpn"* ]]
-}
-
-@test "opt_dock_refresh preserves desktoppicture.db and other db files (#995)" {
-	local dock_support="$HOME/Library/Application Support/Dock"
-	mkdir -p "$dock_support"
-	: > "$dock_support/desktoppicture.db"
-	: > "$dock_support/another.db"
-
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/optimize/tasks.sh"
-killall() { return 0; }
-export -f killall
-execute_optimization dock_refresh
-EOF
-
-	[ "$status" -eq 0 ]
-	[ -f "$HOME/Library/Application Support/Dock/desktoppicture.db" ]
-	[ -f "$HOME/Library/Application Support/Dock/another.db" ]
 }
 
 @test "opt_diag_parse_image_mount_pairs handles multiple blocks" {

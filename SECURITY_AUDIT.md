@@ -269,7 +269,7 @@ Relevant timeout behavior includes:
 
 Optimize tasks are maintenance actions rather than bulk deletion, but they still touch user-visible state, so they are bounded conservatively:
 
-- Dock Refresh no longer deletes any `*.db` under `~/Library/Application Support/Dock`. The previous implementation wiped `desktoppicture.db` and reset the user's wallpaper (#995); refreshing the Dock now relies on `killall` plus touching the plist instead.
+- Optimize never restarts Dock or deletes any `*.db` under `~/Library/Application Support/Dock`. Earlier implementations reset the user's wallpaper or disrupted the desktop session; Dock repair is no longer an automatic maintenance task (#995, #1300).
 - Spotlight orphan rule cleanup operates only in the user domain through `defaults`, runs under a dry-run guard, removes only entries whose app is confirmed no longer installed (`bundle_has_installed_app`), requires a well-formed reverse-DNS bundle ID, and never touches `System.*` or `com.apple.*` rules.
 - Font Cache Rebuild (`atsutil databases -remove`) was removed because clearing the font cache could corrupt font rendering with no reliable benefit.
 

@@ -29,6 +29,25 @@ EOF
 	[ "$status" -eq 0 ] || return 1
 }
 
+@test "default optimize catalog never restarts Dock (#1300)" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/optimize/catalog.sh"
+
+optimize_catalog_handler_for system_maintenance >/dev/null
+if optimize_catalog_handler_for dock_refresh >/dev/null 2>&1; then
+    echo "Dock refresh is still registered"
+    exit 1
+fi
+if grep -nE 'killall[[:space:]]+Dock' "$PROJECT_ROOT/lib/optimize/tasks.sh"; then
+    echo "Optimize still terminates Dock"
+    exit 1
+fi
+EOF
+
+    [[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}
+
 @test "optimize catalog preserves the complete public task contract" {
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -42,7 +61,6 @@ fix_broken_configs|opt_fix_broken_configs|Broken Config Repair|Broken Config Rep
 network_optimization|opt_network_optimization|Network Cache Refresh|Network Cache Refresh|Optimize DNS cache & restart mDNSResponder|true
 sqlite_vacuum|opt_sqlite_vacuum|Database Optimization|Database Optimization|Compress SQLite databases for Mail, Safari & Messages (skips if apps are running)|true
 launch_services_rebuild|opt_launch_services_rebuild|LaunchServices Repair|LaunchServices Repair|Repair "Open with" menu & file associations|true
-dock_refresh|opt_dock_refresh|Dock Refresh|Dock Refresh|Fix broken icons and visual glitches in the Dock|true
 prevent_network_dsstore|opt_prevent_network_dsstore|Prevent Finder .DS_Store|Prevent Finder .DS_Store|Set a persistent Finder preference to stop writing .DS_Store on SMB/AFP/NFS and USB volumes|true
 legacy_overrides_audit|opt_legacy_overrides_audit|Legacy Overrides|Legacy Overrides|Remove hidden App Nap and disk-image verification overrides left by old tweak tools|true
 network_stack_optimize|opt_network_stack_optimize|Network Stack Refresh|Network Stack Refresh|Flush routing table and ARP cache to resolve network issues|true
@@ -84,8 +102,8 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/optimize/catalog.sh"
 
-[[ "$(optimize_catalog_handler_for dock_refresh)" == "opt_dock_refresh" ]] || exit 1
-[[ "$(optimize_catalog_health_name_for dock_refresh)" == "Dock Refresh" ]] || exit 1
+[[ "$(optimize_catalog_handler_for cache_refresh)" == "opt_cache_refresh" ]] || exit 1
+[[ "$(optimize_catalog_health_name_for cache_refresh)" == "Finder Cache Refresh" ]] || exit 1
 if optimize_catalog_health_name_for unknown_action; then
     exit 1
 fi
@@ -105,7 +123,7 @@ contract_hash=$(
         shasum -a 256 |
         awk '{print $1}'
 )
-expected_hash="b8f6437492514511196d347db3c094dcd6a997ab137a63be00624cd9f4da09d7"
+expected_hash="8896e6dedcab9ab76accb1ea7502c59b711da912473923b089451222ddc61c2c"
 if [[ "$contract_hash" != "$expected_hash" ]]; then
     echo "health optimization contract hash: expected $expected_hash, got $contract_hash"
     exit 1
@@ -121,7 +139,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
 
 contract_hash=$(get_optimize_whitelist_items | shasum -a 256 | awk '{print $1}')
-expected_hash="42d16255249d38e10df905e15295a4da178b59c590deeee25d599dfe0f1ef03f"
+expected_hash="04376c036db32e504cac07b054532446465c2fd83a19c0e05a7710fa87f92078"
 if [[ "$contract_hash" != "$expected_hash" ]]; then
     echo "optimize whitelist contract hash: expected $expected_hash, got $contract_hash"
     exit 1
@@ -182,7 +200,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
 
-[[ ${#MOLE_OPTIMIZE_ACTIONS[@]} -eq 22 ]] || exit 1
+[[ ${#MOLE_OPTIMIZE_ACTIONS[@]} -eq 21 ]] || exit 1
 for handler in "${MOLE_OPTIMIZE_HANDLERS[@]}"; do
     if ! declare -F "$handler" >/dev/null; then
         echo "missing handler: $handler"

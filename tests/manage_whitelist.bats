@@ -103,6 +103,48 @@ setup() {
     [ "$status" -ne 0 ]
 }
 
+@test "optimize whitelist ignores and does not resave removed task ids" {
+    local optimize_path="$HOME/.config/mole/whitelist_optimize"
+    mkdir -p "$(dirname "$optimize_path")"
+    printf 'dock_refresh\ncache_refresh\n' > "$optimize_path"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+load_whitelist optimize
+printf 'loaded:%s\n' "${CURRENT_WHITELIST_PATTERNS[@]}"
+save_whitelist_patterns optimize dock_refresh cache_refresh
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"loaded:cache_refresh"* ]] || return 1
+    [[ "$output" != *"loaded:dock_refresh"* ]] || return 1
+    grep -qFx 'cache_refresh' "$optimize_path"
+    run grep -qFx 'dock_refresh' "$optimize_path"
+    [ "$status" -eq 1 ]
+}
+
+@test "legacy optimize whitelist with only removed task ids migrates safely on Bash 3.2" {
+    local legacy_path="$HOME/.config/mole/whitelist_checks"
+    local optimize_path="$HOME/.config/mole/whitelist_optimize"
+    mkdir -p "$(dirname "$legacy_path")"
+    printf 'dock_refresh\n' > "$legacy_path"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+load_whitelist optimize
+[[ ${#CURRENT_WHITELIST_PATTERNS[@]} -eq 0 ]]
+printf 'survived\n'
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"survived"* ]] || return 1
+    [[ -f "$optimize_path" ]] || return 1
+    run grep -qFx 'dock_refresh' "$optimize_path"
+    [ "$status" -eq 1 ]
+}
+
 @test "whitelist inventory exposes LM Studio app cache" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

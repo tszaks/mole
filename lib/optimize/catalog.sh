@@ -49,9 +49,6 @@ _optimize_catalog_register sqlite_vacuum opt_sqlite_vacuum \
 _optimize_catalog_register launch_services_rebuild opt_launch_services_rebuild \
     "LaunchServices Repair" "LaunchServices Repair" \
     'Repair "Open with" menu & file associations' true
-_optimize_catalog_register dock_refresh opt_dock_refresh \
-    "Dock Refresh" "Dock Refresh" \
-    "Fix broken icons and visual glitches in the Dock" true
 _optimize_catalog_register prevent_network_dsstore opt_prevent_network_dsstore \
     "Prevent Finder .DS_Store" "Prevent Finder .DS_Store" \
     "Set a persistent Finder preference to stop writing .DS_Store on SMB/AFP/NFS and USB volumes" true

@@ -22,11 +22,10 @@ fi
 # shellcheck source=lib/core/app_protection_data.sh
 source "$_MOLE_CORE_DIR/app_protection_data.sh"
 
-# Return success when Xcode/build tooling is active or process ownership cannot
-# be established. Cleanup callers may proceed only after every exact probe
-# returns pgrep's reliable no-match status (1).
-xcode_build_tooling_running() {
-    command -v pgrep > /dev/null 2>&1 || return 0
+# Return 0 when Xcode/build tooling is active, 1 after reliable no-match
+# results, and 2 when process ownership cannot be established.
+xcode_build_tooling_process_state() {
+    command -v pgrep > /dev/null 2>&1 || return 2
 
     local process probe_status
     for process in Xcode xcodebuild xctest XCTRunner XCBBuildService swift-frontend; do
@@ -34,7 +33,7 @@ xcode_build_tooling_running() {
             return 0
         else
             probe_status=$?
-            [[ $probe_status -eq 1 ]] || return 0
+            [[ $probe_status -eq 1 ]] || return 2
         fi
     done
     return 1

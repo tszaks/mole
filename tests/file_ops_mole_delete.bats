@@ -311,6 +311,166 @@ EOF
     [[ "$(grep -c '^osascript:' "$trace" 2> /dev/null || true)" -eq 0 ]]
 }
 
+@test "Trash mode refuses sudo-required app below mutable Applications" {
+    local victim="$SANDBOX/RootOwned.app"
+    local trace="$SANDBOX/finder-app.log"
+    mkdir -p "$victim"
+    printf 'payload' > "$victim/data.txt"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export MOLE_DELETE_MODE=trash
+_mole_privileged_path_has_mutable_ancestor() { return 0; }
+_mole_move_path_to_user_trash() {
+    printf 'DIRECT:%s:%s\n' "\$1" "\$2" >> "$trace"
+}
+osascript() {
+    printf 'FINDER:%s\n' "\$*" >> "$trace"
+}
+set +e
+mole_delete "$victim" true
+rc=\$?
+set -e
+printf 'RC=%s\n' "\$rc"
+[[ \$rc -eq \$MOLE_ERR_MUTABLE_PARENT ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ -f "$victim/data.txt" ]] || return 1
+    [[ "$output" == *"RC=15"* ]] || return 1
+    [[ "$(grep -c '^FINDER:' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
+    [[ "$(grep -c '^DIRECT:' "$trace" 2> /dev/null || true)" -eq 0 ]] || return 1
+    [ "$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")" = "mutable-parent" ]
+}
+
+@test "Trash mode preserves mutable-parent classification when the second path probe catches a race" {
+    local victim="$SANDBOX/RacedRootOwned.app"
+    local fake_home="$SANDBOX/race-home"
+    mkdir -p "$victim" "$fake_home"
+    printf 'payload' > "$victim/data.txt"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export HOME="$fake_home"
+export MOLE_DELETE_MODE=trash
+probe_round=0
+_mole_privileged_path_has_mutable_ancestor() {
+    probe_round=\$((probe_round + 1))
+    [[ \$probe_round -ge 2 ]]
+}
+run_with_timeout() { printf '1\n'; }
+set +e
+mole_delete "$victim" true
+rc=\$?
+set -e
+printf 'RC=%s\n' "\$rc"
+[[ \$rc -eq \$MOLE_ERR_MUTABLE_PARENT ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ -f "$victim/data.txt" ]] || return 1
+    [[ "$output" == *"RC=15"* ]] || return 1
+    [[ "$output" != *"Use --permanent"* ]] || return 1
+    [ "$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")" = "mutable-parent" ]
+}
+
+@test "permanent delete refuses sudo-required app below mutable Applications" {
+    local victim="$SANDBOX/RootOwnedPermanent.app"
+    local trace="$SANDBOX/permanent-app.log"
+    mkdir -p "$victim"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_NO_AUTH
+export MOLE_DELETE_MODE=permanent
+_mole_privileged_path_has_mutable_ancestor() { return 0; }
+safe_remove() { printf 'SAFE_REMOVE\n' >> "$trace"; return 0; }
+safe_sudo_remove() { printf 'SAFE_SUDO_REMOVE\n' >> "$trace"; return 0; }
+set +e
+mole_delete "$victim" true
+rc=\$?
+set -e
+printf 'RC=%s\n' "\$rc"
+[[ \$rc -eq \$MOLE_ERR_MUTABLE_PARENT ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ -d "$victim" ]] || return 1
+    [[ "$output" == *"RC=15"* ]] || return 1
+    [[ ! -s "$trace" ]] || return 1
+    [ "$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")" = "mutable-parent" ]
+}
+
+@test "permanent delete preserves mutable-parent classification when the sink recheck catches a race" {
+    local victim="$SANDBOX/RacedPermanent.app"
+    local trace="$SANDBOX/permanent-race.log"
+    mkdir -p "$victim"
+    printf 'payload' > "$victim/data.txt"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_NO_AUTH
+export MOLE_DELETE_MODE=permanent
+probe_round=0
+_mole_privileged_path_has_mutable_ancestor() {
+    probe_round=\$((probe_round + 1))
+    [[ \$probe_round -ge 2 ]]
+}
+run_with_timeout() { printf '1\n'; }
+safe_remove() { printf 'SAFE_REMOVE\n' >> "$trace"; return 0; }
+safe_sudo_remove() { printf 'SAFE_SUDO_REMOVE\n' >> "$trace"; return 0; }
+set +e
+mole_delete "$victim" true
+rc=\$?
+set -e
+printf 'RC=%s\n' "\$rc"
+[[ \$rc -eq \$MOLE_ERR_MUTABLE_PARENT ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ -f "$victim/data.txt" ]] || return 1
+    [[ "$output" == *"RC=15"* ]] || return 1
+    [[ ! -s "$trace" ]] || return 1
+    [ "$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")" = "mutable-parent" ]
+}
+
+@test "permanent symlink delete preserves mutable-parent classification at the sink" {
+    local target="$SANDBOX/target.app"
+    local victim="$SANDBOX/RacedPermanentLink.app"
+    local trace="$SANDBOX/permanent-link-race.log"
+    mkdir -p "$target"
+    ln -s "$target" "$victim"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_NO_AUTH
+export MOLE_DELETE_MODE=permanent
+probe_round=0
+_mole_privileged_path_has_mutable_ancestor() {
+    probe_round=\$((probe_round + 1))
+    [[ \$probe_round -ge 2 ]]
+}
+run_with_timeout() { printf '1\n'; }
+safe_remove_symlink() { printf 'SAFE_REMOVE_SYMLINK\n' >> "$trace"; return 0; }
+set +e
+mole_delete "$victim" true
+rc=\$?
+set -e
+printf 'RC=%s\n' "\$rc"
+[[ \$rc -eq \$MOLE_ERR_MUTABLE_PARENT ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ -L "$victim" ]] || return 1
+    [[ "$output" == *"RC=15"* ]] || return 1
+    [[ ! -s "$trace" ]] || return 1
+    [ "$(awk -F'\t' 'END { print $4 }' "$MOLE_DELETE_LOG")" = "mutable-parent" ]
+}
+
 @test "normal app data uses direct Trash with a unique name and mode 0700" {
     local fake_home="$SANDBOX/home"
     local victim="$fake_home/Library/Containers/com.microsoft.Word"
@@ -408,7 +568,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ -d "$victim" ]] || return 1
-    [[ "$output" == *"App Data or Full Disk Access"* ]] || return 1
+    [[ "$output" == *"App Management, App Data, or Full Disk Access"* ]] || return 1
     [[ "$output" != *"Touch ID"* ]] || return 1
     [[ "$output" == *"RC=14"* ]] || return 1
     [[ ! -s "$trace" ]] || return 1
@@ -491,10 +651,23 @@ diagnose_removal_failure "\$MOLE_ERR_PRIVACY_DENIED" "Microsoft Word"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"macOS privacy permission denied"* ]] || return 1
-    [[ "$output" == *"App Data or Full Disk Access"* ]] || return 1
+    [[ "$output" == *"macOS could not authorize Trash access"* ]] || return 1
+    [[ "$output" == *"App Management, App Data, or Full Disk Access"* ]] || return 1
     [[ "$output" != *"touchid"* ]] || return 1
     [[ "$output" != *"Touch ID"* ]]
+}
+
+@test "mutable-parent diagnosis recommends manual Trash without promising container cleanup" {
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+diagnose_removal_failure "\$MOLE_ERR_MUTABLE_PARENT" "Microsoft Word"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"cannot safely use elevated deletion"* ]] || return 1
+    [[ "$output" == *"Move the app to Trash in Finder"* ]] || return 1
+    [[ "$output" == *"protected containers and app data untouched"* ]] || return 1
+    [[ "$output" != *"mo clean"* ]] || return 1
 }
 
 @test "unrelated removal diagnostics do not probe Touch ID" {
@@ -868,6 +1041,38 @@ EOF
     [ "$output" = "0" ] || return 1
     # Generous ceiling: 1s timeout + escalation grace, never 30s.
     [ "$elapsed" -lt 10 ] || return 1
+}
+
+@test "safe_sudo_remove accepts a precomputed size without another du probe" {
+    local victim="$SANDBOX/precomputed-sudo"
+    local fake_bin="$SANDBOX/precomputed-bin"
+    local trace="$SANDBOX/precomputed-sudo.log"
+    mkdir -p "$victim" "$fake_bin"
+    printf 'payload' > "$victim/data.txt"
+
+    cat > "$fake_bin/sudo" <<'SH'
+#!/bin/bash
+printf '%s\n' "$*" >> "$MOLE_TEST_TRACE"
+if [[ "${1:-}" == "-n" ]]; then
+    shift
+fi
+"$@"
+SH
+    chmod +x "$fake_bin/sudo"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_NO_AUTH MOLE_TEST_MODE
+export PATH="$fake_bin:\$PATH"
+export MOLE_TEST_TRACE="$trace"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+safe_sudo_remove "$victim" 7
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ ! -e "$victim" ]] || return 1
+    [[ "$(grep -c -- 'rm -rf' "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
+    [[ "$(grep -c -- 'du -skP' "$trace" 2> /dev/null || true)" -eq 0 ]]
 }
 
 # The stage-root preparation is the part with a concurrency contract, and the

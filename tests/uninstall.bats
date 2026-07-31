@@ -342,6 +342,85 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "batch uninstall rejects privileged removal below a mutable parent before side effects (#1299)" {
+	mkdir -p "$HOME/Applications/RootOwned.app"
+	mkdir -p "$HOME/Library/Application Support/RootOwned"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+get_file_owner() { echo root; }
+_mole_privileged_path_has_mutable_ancestor() { return 0; }
+pgrep() { return 1; }
+find_app_files() { printf 'DISCOVERY\n' >> "$HOME/mutable-parent-side-effects.log"; return 1; }
+ensure_sudo_session() { echo "UNEXPECTED_SUDO"; return 1; }
+stop_launch_services() { echo "UNEXPECTED_LAUNCH_TEARDOWN"; return 1; }
+unregister_app_bundle() { echo "UNEXPECTED_UNREGISTER"; return 1; }
+remove_login_item() { echo "UNEXPECTED_LOGIN_ITEM"; return 1; }
+force_kill_app() { echo "UNEXPECTED_KILL"; return 1; }
+mole_delete() { echo "UNEXPECTED_DELETE"; return 1; }
+
+selected_apps=("0|$HOME/Applications/RootOwned.app|RootOwned|com.example.RootOwned|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+rc=0
+batch_uninstall_applications || rc=$?
+[[ $rc -eq 1 ]] || { echo "WRONG_RC:$rc"; exit 1; }
+[[ -d "$HOME/Applications/RootOwned.app" ]] || { echo "WRONG: bundle removed"; exit 1; }
+[[ -d "$HOME/Library/Application Support/RootOwned" ]] || { echo "WRONG: app data removed"; exit 1; }
+[[ ! -e "$HOME/mutable-parent-side-effects.log" ]] || { echo "WRONG: discovery ran"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"cannot be removed safely by Mole from this location"* ]] || return 1
+	[[ "$output" == *"Move it to Trash in Finder"* ]] || return 1
+	[[ "$output" == *"protected containers and app data untouched"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_"* ]]
+}
+
+@test "a foreign Caskroom-like symlink never selects a Homebrew cask (#1299)" {
+	local fake_target="$HOME/foreign/Caskroom/real-cask/1.0/Fake.app"
+	mkdir -p "$HOME/Applications" "$fake_target"
+	ln -s "$fake_target" "$HOME/Applications/Fake.app"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { echo root; }
+_mole_privileged_path_has_mutable_ancestor() { return 0; }
+pgrep() { return 1; }
+find_app_files() { printf 'DISCOVERY\n' >> "$HOME/foreign-cask-side-effects.log"; return 1; }
+brew_uninstall_cask() { echo "UNEXPECTED_BREW:$*"; return 0; }
+mole_delete() { echo "UNEXPECTED_DELETE:$*"; return 0; }
+
+selected_apps=("0|$HOME/Applications/Fake.app|Fake|com.example.Fake|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+rc=0
+batch_uninstall_applications || rc=$?
+[[ $rc -eq 1 ]] || { echo "WRONG_RC:$rc"; exit 1; }
+[[ -L "$HOME/Applications/Fake.app" ]] || { echo "WRONG: symlink removed"; exit 1; }
+[[ ! -e "$HOME/foreign-cask-side-effects.log" ]] || { echo "WRONG: discovery ran"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"cannot be removed safely by Mole from this location"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_"* ]]
+}
+
 @test "uninstall_bundle_id_has_surviving_sibling detects unselected same-bundle install" {
 	mkdir -p "$HOME/Applications/Shared.app" "$HOME/Applications/Shared-beta.app"
 

@@ -126,6 +126,259 @@ EOF
 	[[ "$output" == *"survived"* ]]
 }
 
+@test "clean_xcode_device_support skips while Xcode tooling is active" {
+	local ds_dir="$HOME/ActiveDeviceSupport"
+	mkdir -p "$ds_dir/17.0" "$ds_dir/17.1" "$ds_dir/17.2"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { [[ "$*" == *"xcodebuild"* ]]; }
+safe_clean() { echo "UNEXPECTED_CLEAN:$*"; }
+clean_xcode_device_support "$HOME/ActiveDeviceSupport" "iOS DeviceSupport"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"iOS DeviceSupport · skipped (Xcode or build tooling running)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_CLEAN"* ]] || return 1
+}
+
+@test "clean_xcode_device_support preserves every version when metadata is unreadable" {
+	local ds_dir="$HOME/UnreadableDeviceSupport"
+	mkdir -p "$ds_dir/17.0" "$ds_dir/17.1" "$ds_dir/17.2"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DEVICE_SUPPORT_KEEP=2 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 1; }
+stat() { return 9; }
+safe_clean() { echo "UNEXPECTED_CLEAN:$*"; }
+clean_xcode_device_support "$HOME/UnreadableDeviceSupport" "iOS DeviceSupport"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"iOS DeviceSupport · skipped (metadata unavailable)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_CLEAN"* ]] || return 1
+}
+
+@test "clean_xcode_device_support keeps two newest versions and removes only older versions" {
+	local ds_dir="$HOME/RetainedDeviceSupport"
+	mkdir -p "$ds_dir/17.0" "$ds_dir/17.1" "$ds_dir/17.2"
+	touch -t 202601010000 "$ds_dir/17.0"
+	touch -t 202602010000 "$ds_dir/17.1"
+	touch -t 202603010000 "$ds_dir/17.2"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DEVICE_SUPPORT_KEEP=2 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 1; }
+safe_remove() { command rm -rf "$1"; }
+safe_clean() { :; }
+clean_xcode_device_support "$HOME/RetainedDeviceSupport" "iOS DeviceSupport"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ ! -e "$ds_dir/17.0" ]] || return 1
+	[[ -d "$ds_dir/17.1" && -d "$ds_dir/17.2" ]]
+}
+
+@test "clean_xcode_device_support keeps newline-containing paths byte-exact" {
+	local ds_dir="$HOME/NewlineDeviceSupport"
+	local newline_a="$ds_dir/Current"$'\n'"A"
+	local newline_b="$ds_dir/Current"$'\n'"B"
+	mkdir -p "$ds_dir/Current" "$newline_a" "$newline_b" "$ds_dir/Old"
+	touch -t 202601010000 "$ds_dir/Old"
+	touch -t 202602010000 "$newline_b"
+	touch -t 202603010000 "$newline_a"
+	touch -t 202604010000 "$ds_dir/Current"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DEVICE_SUPPORT_KEEP=2 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 1; }
+safe_remove() { command rm -rf "$1"; }
+safe_clean() { :; }
+clean_xcode_device_support "$HOME/NewlineDeviceSupport" "iOS DeviceSupport"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ -d "$ds_dir/Current" && -d "$newline_a" ]] || return 1
+	[[ ! -e "$newline_b" && ! -e "$ds_dir/Old" ]]
+}
+
+@test "clean_xcode_device_support fails closed when process state is unknown" {
+	local ds_dir="$HOME/UnknownProcessDeviceSupport"
+	mkdir -p "$ds_dir/17.0" "$ds_dir/17.1" "$ds_dir/17.2"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 2; }
+safe_remove() { echo "UNEXPECTED_REMOVE:$*"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:$*"; }
+clean_xcode_device_support "$HOME/UnknownProcessDeviceSupport" "iOS DeviceSupport"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"iOS DeviceSupport · skipped (process state unknown)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_"* ]] || return 1
+	[[ -d "$ds_dir/17.0" && -d "$ds_dir/17.1" && -d "$ds_dir/17.2" ]]
+}
+
+@test "clean_xcode_device_support rechecks tooling before destructive work" {
+	local ds_dir="$HOME/RacingDeviceSupport"
+	mkdir -p "$ds_dir/17.0" "$ds_dir/17.1" "$ds_dir/17.2"
+	touch -t 202601010000 "$ds_dir/17.0"
+	touch -t 202602010000 "$ds_dir/17.1"
+	touch -t 202603010000 "$ds_dir/17.2"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DEVICE_SUPPORT_KEEP=2 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+probe_round=0
+_xcode_xctest_devices_process_running() {
+    probe_round=$((probe_round + 1))
+    [[ $probe_round -ge 2 ]]
+}
+safe_remove() { echo "UNEXPECTED_REMOVE:$*"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:$*"; }
+clean_xcode_device_support "$HOME/RacingDeviceSupport" "iOS DeviceSupport"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"iOS DeviceSupport · stopped (Xcode or build tools started)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_"* ]] || return 1
+	[[ -d "$ds_dir/17.0" && -d "$ds_dir/17.1" && -d "$ds_dir/17.2" ]]
+}
+
+@test "clean_xcode_device_support reports completed removals before a tooling race stops it" {
+	local ds_dir="$HOME/PartialDeviceSupport"
+	mkdir -p "$ds_dir/17.0" "$ds_dir/17.1" "$ds_dir/17.2" "$ds_dir/17.3"
+	touch -t 202601010000 "$ds_dir/17.0"
+	touch -t 202602010000 "$ds_dir/17.1"
+	touch -t 202603010000 "$ds_dir/17.2"
+	touch -t 202604010000 "$ds_dir/17.3"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DEVICE_SUPPORT_KEEP=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+cleanup_result_color_kb() { echo ""; }
+bytes_to_human() { echo "$1 bytes"; }
+get_path_size_kb() { echo 1; }
+should_protect_path() { return 1; }
+is_path_whitelisted() { return 1; }
+safe_remove() { command rm -rf "$1"; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN"; }
+
+probe_round=0
+_xcode_xctest_devices_process_running() {
+    probe_round=$((probe_round + 1))
+    if [[ $probe_round -le 3 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+clean_xcode_device_support "$HOME/PartialDeviceSupport" "iOS DeviceSupport"
+remaining=$(command find "$HOME/PartialDeviceSupport" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+[[ "$remaining" -eq 3 ]] || { echo "WRONG_REMAINING:$remaining"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"iOS DeviceSupport · removed 1 old versions"* ]] || return 1
+	[[ "$output" == *"iOS DeviceSupport · stopped (Xcode or build tools started)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+}
+
+@test "clean_xcode_device_support rechecks tooling after the destructive size probe" {
+	local ds_dir="$HOME/PostSizeDeviceSupport"
+	mkdir -p "$ds_dir/17.0" "$ds_dir/17.1" "$ds_dir/17.2"
+	touch -t 202601010000 "$ds_dir/17.0"
+	touch -t 202602010000 "$ds_dir/17.1"
+	touch -t 202603010000 "$ds_dir/17.2"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DEVICE_SUPPORT_KEEP=2 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+should_protect_path() { return 1; }
+is_path_whitelisted() { return 1; }
+safe_remove() { echo "UNEXPECTED_REMOVE:$1"; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN"; }
+
+get_path_size_kb() {
+    printf 'size\n' >> "$HOME/device-size-probes"
+    size_round=$(wc -l < "$HOME/device-size-probes" | tr -d ' ')
+    [[ $size_round -ge 2 ]] && touch "$HOME/xcode-started"
+    echo 1
+}
+_xcode_xctest_devices_process_running() {
+    [[ -e "$HOME/xcode-started" ]] && return 0
+    return 1
+}
+
+rm -f "$HOME/xcode-started" "$HOME/device-size-probes"
+clean_xcode_device_support "$HOME/PostSizeDeviceSupport" "iOS DeviceSupport"
+[[ -d "$HOME/PostSizeDeviceSupport/17.0" ]] || { echo "WRONG: old version removed"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"iOS DeviceSupport · stopped (Xcode or build tools started)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_"* ]]
+}
+
+@test "clean_xcode_device_support passes its measured size to the real deletion sink" {
+	local ds_dir="$HOME/DeviceSupportRealSink"
+	mkdir -p "$ds_dir/17.0" "$ds_dir/17.1" "$ds_dir/17.2"
+	touch -t 202601010000 "$ds_dir/17.0"
+	touch -t 202602010000 "$ds_dir/17.1"
+	touch -t 202603010000 "$ds_dir/17.2"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DEVICE_SUPPORT_KEEP=2 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+should_protect_path() { return 1; }
+is_path_whitelisted() { return 1; }
+safe_clean() { :; }
+get_path_size_kb() {
+    printf 'size\n' >> "$HOME/device-real-size-probes"
+    local round
+    round=$(wc -l < "$HOME/device-real-size-probes" | tr -d ' ')
+    [[ $round -ge 3 ]] && touch "$HOME/xcode-started"
+    echo 1
+}
+_xcode_xctest_devices_process_running() {
+    [[ -e "$HOME/xcode-started" ]] && return 0
+    return 1
+}
+
+rm -f "$HOME/xcode-started" "$HOME/device-real-size-probes"
+clean_xcode_device_support "$HOME/DeviceSupportRealSink" "iOS DeviceSupport"
+[[ ! -e "$HOME/DeviceSupportRealSink/17.0" ]] || { echo "WRONG: old version remains"; exit 1; }
+[[ ! -e "$HOME/xcode-started" ]] || { echo "WRONG: deletion sink repeated size probe"; exit 1; }
+[[ "$(wc -l < "$HOME/device-real-size-probes" | tr -d ' ')" -eq 2 ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
 @test "clean_xcode_documentation_cache keeps newest DeveloperDocumentation index" {
 	local doc_root="$HOME/DocumentationCache"
 	mkdir -p "$doc_root"
@@ -195,8 +448,120 @@ clean_xcode_documentation_cache
 EOF
 
 	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
-	[[ "$output" == *"Xcode or build tooling running"* ]] || return 1
+	[[ "$output" == *"Xcode documentation cache · skipped (process state unknown)"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
+}
+
+@test "clean_xcode_documentation_cache rechecks tooling after sudo authorization" {
+	local doc_root="$HOME/DocumentationCacheSudoRace"
+	mkdir -p "$doc_root"
+	touch "$doc_root/DeveloperDocumentation.index" "$doc_root/DeveloperDocumentation-16.0.index"
+	touch -t 202602010000 "$doc_root/DeveloperDocumentation.index"
+	touch -t 202601010000 "$doc_root/DeveloperDocumentation-16.0.index"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DOCUMENTATION_CACHE_DIR="$doc_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+has_sudo_session() { return 1; }
+ensure_sudo_session() { touch "$HOME/xcode-started"; return 0; }
+_sim_runtime_size_kb() { echo 1; }
+_xcode_xctest_devices_process_running() {
+    [[ -e "$HOME/xcode-started" ]] && return 0
+    return 1
+}
+safe_sudo_remove() { echo "UNEXPECTED_REMOVE:$1"; return 0; }
+
+rm -f "$HOME/xcode-started"
+clean_xcode_documentation_cache
+[[ -e "$MOLE_XCODE_DOCUMENTATION_CACHE_DIR/DeveloperDocumentation-16.0.index" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode documentation cache · stopped (Xcode or build tools started)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "clean_xcode_documentation_cache reports a stop after partial removal" {
+	local doc_root="$HOME/DocumentationCachePartialRace"
+	mkdir -p "$doc_root"
+	touch "$doc_root/DeveloperDocumentation.index" "$doc_root/DeveloperDocumentation-16.0.index" "$doc_root/DeveloperDocumentation-15.0.index"
+	touch -t 202603010000 "$doc_root/DeveloperDocumentation.index"
+	touch -t 202602010000 "$doc_root/DeveloperDocumentation-16.0.index"
+	touch -t 202601010000 "$doc_root/DeveloperDocumentation-15.0.index"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DOCUMENTATION_CACHE_DIR="$doc_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+has_sudo_session() { return 0; }
+_sim_runtime_size_kb() { echo 1; }
+_xcode_xctest_devices_process_running() {
+    [[ -e "$HOME/xcode-started" ]] && return 0
+    return 1
+}
+safe_sudo_remove() {
+    command rm -rf "$1"
+    touch "$HOME/xcode-started"
+}
+
+rm -f "$HOME/xcode-started"
+clean_xcode_documentation_cache
+remaining=$(command find "$MOLE_XCODE_DOCUMENTATION_CACHE_DIR" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+[[ "$remaining" -eq 2 ]] || { echo "WRONG_REMAINING:$remaining"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode documentation cache · removed 1 old indexes"* ]] || return 1
+	[[ "$output" == *"Xcode documentation cache · stopped (Xcode or build tools started)"* ]]
+}
+
+@test "clean_xcode_documentation_cache does not report clean after a protected item and stop" {
+	local doc_root="$HOME/DocumentationCacheProtectedRace"
+	mkdir -p "$doc_root"
+	touch "$doc_root/DeveloperDocumentation.index" "$doc_root/DeveloperDocumentation-16.0.index" "$doc_root/DeveloperDocumentation-15.0.index"
+	touch -t 202603010000 "$doc_root/DeveloperDocumentation.index"
+	touch -t 202602010000 "$doc_root/DeveloperDocumentation-16.0.index"
+	touch -t 202601010000 "$doc_root/DeveloperDocumentation-15.0.index"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DOCUMENTATION_CACHE_DIR="$doc_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+should_protect_path() {
+    if [[ "$1" == *"DeveloperDocumentation-16.0.index" ]]; then
+        touch "$HOME/xcode-started"
+        return 0
+    fi
+    return 1
+}
+has_sudo_session() { return 0; }
+_sim_runtime_size_kb() { echo 1; }
+_xcode_xctest_devices_process_running() {
+    [[ -e "$HOME/xcode-started" ]] && return 0
+    return 1
+}
+safe_sudo_remove() { echo "UNEXPECTED_REMOVE:$1"; return 0; }
+
+rm -f "$HOME/xcode-started"
+clean_xcode_documentation_cache
+remaining=$(command find "$MOLE_XCODE_DOCUMENTATION_CACHE_DIR" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+[[ "$remaining" -eq 3 ]] || { echo "WRONG_REMAINING:$remaining"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode documentation cache · skipped 1 protected items"* ]] || return 1
+	[[ "$output" == *"Xcode documentation cache · stopped (Xcode or build tools started)"* ]] || return 1
+	[[ "$output" != *"already clean"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
 @test "clean_xcode_device_support skips all deletion paths while build tooling owns it" {
@@ -284,7 +649,7 @@ clean_xcode_system_coresimulator_caches
 EOF
 
 	[ "$status" -eq 0 ] || return 1
-	[[ "$output" == *"Xcode Simulator system cache · skipped (process status unknown)"* ]] || return 1
+	[[ "$output" == *"Xcode Simulator system cache · skipped (process state unknown)"* ]] || return 1
 	[[ "$output" == *"DEBUG:CoreSimulator process check failed: Xcode (exit=2)"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]] || return 1
 }
@@ -319,6 +684,95 @@ EOF
 	[[ "$output" == *"matched:CoreSimulatorService"* ]] || return 1
 	[[ "$output" == *"matched:simdiskimaged"* ]] || return 1
 	[[ "$output" == *"matched:com.apple.CoreSimulator"* ]] || return 1
+}
+
+@test "clean_xcode_system_coresimulator_caches reports completed removals before a process race stops it" {
+	local cache_root="$HOME/PartialSystemCoreSimulatorCaches"
+	mkdir -p "$cache_root/first" "$cache_root/second"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+cleanup_result_color_kb() { echo ""; }
+bytes_to_human() { echo "$1 bytes"; }
+get_path_size_kb() { echo 1; }
+safe_sudo_remove() { command rm -rf "$1"; }
+
+probe_round=0
+_coresimulator_cache_process_running() {
+    probe_round=$((probe_round + 1))
+    if [[ $probe_round -le 3 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+clean_xcode_system_coresimulator_caches
+remaining=$(command find "$MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+[[ "$remaining" -eq 1 ]] || { echo "WRONG_REMAINING:$remaining"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode Simulator system cache · removed 1"* ]] || return 1
+	[[ "$output" == *"Xcode Simulator system cache · stopped (CoreSimulator started)"* ]]
+}
+
+@test "clean_xcode_system_coresimulator_caches rechecks after the size probe" {
+	local cache_root="$HOME/PostSizeSystemCoreSimulatorCaches"
+	mkdir -p "$cache_root/entry"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+get_path_size_kb() { touch "$HOME/simulator-started"; echo 1; }
+safe_sudo_remove() { echo "UNEXPECTED_REMOVE:$1"; }
+_coresimulator_cache_process_running() {
+    [[ -e "$HOME/simulator-started" ]] && return 0
+    return 1
+}
+
+rm -f "$HOME/simulator-started"
+clean_xcode_system_coresimulator_caches
+[[ -d "$MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR/entry" ]] || { echo "WRONG: cache removed"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode Simulator system cache · stopped (CoreSimulator started)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "clean_xcode_system_coresimulator_caches reports deletion failures" {
+	local cache_root="$HOME/FailedSystemCoreSimulatorCaches"
+	mkdir -p "$cache_root/entry"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+get_path_size_kb() { echo 1; }
+_coresimulator_cache_process_running() { return 1; }
+safe_sudo_remove() { return 1; }
+clean_xcode_system_coresimulator_caches
+[[ -d "$MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR/entry" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode Simulator system cache · could not remove 1 entries"* ]] || return 1
+	[[ "$output" != *"already clean"* ]]
 }
 
 @test "clean_xcode_xctest_devices targets only exact XCTestDevices directory" {
@@ -359,6 +813,31 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Xcode or XCTest running"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+}
+
+@test "clean_xcode_xctest_devices rechecks after safe_clean sizing" {
+	local xctest_root="$HOME/PostSizeXCTestDevices"
+	mkdir -p "$xctest_root/device"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+		MOLE_XCODE_XCTEST_DEVICES_DIR="$xctest_root" MOLE_TEST_NO_AUTH=1 \
+		/bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+note_activity() { :; }
+get_cleanup_path_size_kb() { touch "$HOME/xctest-started"; echo 1; }
+pgrep() { [[ -e "$HOME/xctest-started" ]]; }
+safe_remove() { echo "UNEXPECTED_REMOVE:$1"; command rm -rf "$1"; }
+
+rm -f "$HOME/xctest-started"
+clean_xcode_xctest_devices
+[[ -d "$MOLE_XCODE_XCTEST_DEVICES_DIR/device" ]] || { echo "WRONG: XCTestDevices removed"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode XCTestDevices · stopped (Xcode or build tools started)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
 @test "clean_xcode_xctest_devices dry-run keeps XCTestDevices directory" {
@@ -784,6 +1263,104 @@ EOF
 	[[ "$control" == *"REMOVE:"* ]] || { echo "control run removed nothing, so the guarded run proves nothing"; return 1; }
 }
 
+@test "clean_xcode_simulator_runtime_volumes rechecks mounts after sizing" {
+	local volumes_root="$HOME/sim-volumes-race"
+	mkdir -p "$volumes_root/runtime-a"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT="$volumes_root" MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT="$HOME/none" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+note_activity() { :; }
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+_sim_runtime_mount_points() {
+    printf 'probe\n' >> "$HOME/mount-probes"
+    local round
+    round=$(wc -l < "$HOME/mount-probes" | tr -d ' ')
+    if [[ $round -eq 1 ]]; then
+        printf '%s\n' "/"
+    else
+        printf '%s\n' "$MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT/runtime-a"
+    fi
+}
+_sim_runtime_size_kb() { echo 1; }
+safe_sudo_remove() { echo "UNEXPECTED_REMOVE:$1"; return 0; }
+
+rm -f "$HOME/mount-probes"
+clean_xcode_simulator_runtime_volumes
+[[ -d "$MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT/runtime-a" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode runtime volumes · stopped (runtime became mounted)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "clean_xcode_simulator_runtime_volumes reports deletion failures" {
+	local volumes_root="$HOME/sim-volumes-failed"
+	mkdir -p "$volumes_root/runtime-a"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT="$volumes_root" MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT="$HOME/none" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+note_activity() { :; }
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+_sim_runtime_mount_points() { printf '%s\n' "/"; }
+_sim_runtime_size_kb() { echo 1; }
+safe_sudo_remove() { return 1; }
+clean_xcode_simulator_runtime_volumes
+[[ -d "$MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT/runtime-a" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode runtime volumes · could not remove 1 entries"* ]] || return 1
+	[[ "$output" != *"already clean"* ]]
+}
+
+@test "clean_xcode_simulator_runtime_volumes reports a mount stop after an earlier failure" {
+	local volumes_root="$HOME/sim-volumes-failure-stop"
+	mkdir -p "$volumes_root/runtime-a" "$volumes_root/runtime-b"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT="$volumes_root" MOLE_XCODE_SIM_RUNTIME_CRYPTEX_ROOT="$HOME/none" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+note_activity() { :; }
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+_sim_runtime_mount_points() {
+    printf 'probe\n' >> "$HOME/mount-failure-stop-probes"
+    local round
+    round=$(wc -l < "$HOME/mount-failure-stop-probes" | tr -d ' ')
+    if [[ $round -le 2 ]]; then
+        printf '%s\n' "/"
+    else
+        printf '%s\n' "$MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT/runtime-b"
+    fi
+}
+_sim_runtime_size_kb() { echo 1; }
+safe_sudo_remove() { return 1; }
+
+rm -f "$HOME/mount-failure-stop-probes"
+clean_xcode_simulator_runtime_volumes
+[[ -d "$MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT/runtime-a" ]] || exit 1
+[[ -d "$MOLE_XCODE_SIM_RUNTIME_VOLUMES_ROOT/runtime-b" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode runtime volumes · could not remove 1 entries"* ]] || return 1
+	[[ "$output" == *"Xcode runtime volumes · stopped (runtime became mounted)"* ]]
+}
+
 @test "clean_dev_mobile continues cleanup when simctl is unavailable" {
 	local tmp_bin
 	tmp_bin="$HOME/simctl-unavailable-bin"
@@ -812,6 +1389,7 @@ clean_xcode_simulator_runtime_volumes() { :; }
 clean_xcode_xctest_devices() { :; }
 clean_xcode_device_support() { echo "DEVICE_SUPPORT:$2"; }
 safe_clean() { echo "SAFE_CLEAN:$2"; }
+safe_clean_guarded() { echo "SAFE_CLEAN_GUARDED:$1:${*: -1}"; }
 note_activity() { :; }
 debug_log() { :; }
 
@@ -821,6 +1399,8 @@ EOF
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"simctl could not be resolved"* ]] || return 1
 	[[ "$output" == *"DEVICE_SUPPORT:iOS DeviceSupport"* ]] || return 1
+	[[ "$output" == *"SAFE_CLEAN_GUARDED:_coresimulator_delete_guard_allows:Simulator runtime cache"* ]] || return 1
+	[[ "$output" == *"SAFE_CLEAN_GUARDED:_xcode_delete_guard_allows:Xcode Interface Builder cache"* ]] || return 1
 	[[ "$output" == *"SAFE_CLEAN:Android SDK cache"* ]] || return 1
 }
 

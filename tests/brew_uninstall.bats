@@ -87,8 +87,8 @@ EOF
     [[ "$result" == "not_found" ]]
 }
 
-@test "brew list fallback requires brew info to mention the app" {
-    mkdir -p "$HOME/Applications/Owned.app" "$HOME/Applications/Other.app"
+@test "brew detection requires brew info to mention the exact selected app path" {
+    mkdir -p "$HOME/Applications/Owned.app" "$HOME/Applications/Other.app" "$HOME/Applications/SameName.app"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -98,10 +98,16 @@ source "$PROJECT_ROOT/lib/uninstall/brew.sh"
 brew() {
     case "$*" in
         "list --cask")
-            printf '%s\n' "owned"
+            printf '%s\n' "owned" "samename" "standard"
             ;;
         "info --cask owned")
-            printf '%s\n' "app \"/Applications/Owned.app\""
+            printf 'app "%s"\n' "$HOME/Applications/Owned.app"
+            ;;
+        "info --cask samename")
+            printf '%s\n' 'app "/Applications/SameName.app"'
+            ;;
+        "info --cask standard")
+            printf '%s\n' 'Standard.app (App)'
             ;;
         *)
             return 1
@@ -113,9 +119,29 @@ export -f brew
 owned=$(_detect_cask_via_brew_list "$HOME/Applications/Owned.app" "Owned.app")
 [[ "$owned" == "owned" ]] || exit 1
 ! _detect_cask_via_brew_list "$HOME/Applications/Other.app" "Other.app"
+! _detect_cask_via_brew_list "$HOME/Applications/SameName.app" "SameName.app"
+! get_brew_cask_name "$HOME/Applications/SameName.app"
+standard=$(_detect_cask_via_brew_list "/Applications/Standard.app" "Standard.app")
+[[ "$standard" == "standard" ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]
+}
+
+@test "Caskroom symlink detection rejects a mismatched app bundle name" {
+    mkdir -p "$HOME/Applications"
+    ln -s "/opt/homebrew/Caskroom/real-cask/1.0/Real.app" "$HOME/Applications/Fake.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/brew.sh"
+resolve_path() { printf '%s\n' "/opt/homebrew/Caskroom/real-cask/1.0/Real.app"; }
+! _detect_cask_via_resolved_path "$HOME/Applications/Fake.app"
+! _detect_cask_via_symlink_check "$HOME/Applications/Fake.app"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "batch_uninstall_applications uses brew uninstall for casks (mocked)" {
@@ -464,6 +490,60 @@ grep -q "SAFE_REMOVE:$HOME/Applications/BrewCleanup.app" "$HOME/remove.log"
 EOF
 
     [ "$status" -eq 0 ]
+}
+
+@test "brew fallback preserves mutable-parent diagnosis after its cask record disappears" {
+    local app_bundle="$HOME/Applications/BrewManual.app"
+    local leftover="$HOME/Library/Application Support/BrewManual"
+    mkdir -p "$app_bundle" "$leftover"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+get_file_owner() { echo root; }
+get_path_size_kb() { echo "100"; }
+bytes_to_human() { echo "$1"; }
+drain_pending_input() { :; }
+print_summary_block() { printf '%s\n' "$@"; }
+force_kill_app() { return 0; }
+remove_apps_from_dock() { :; }
+stop_launch_services() { :; }
+unregister_app_bundle() { :; }
+remove_login_item() { :; }
+find_app_files() { return 0; }
+find_app_system_files() { return 0; }
+get_diagnostic_report_paths_for_app() { return 0; }
+calculate_total_size() { echo "0"; }
+has_sensitive_data() { return 1; }
+decode_file_list() { return 0; }
+remove_file_list() { printf 'LEFTOVER_DELETE\n' >> "$HOME/brew-manual-side-effects.log"; return 1; }
+run_with_timeout() { shift; "$@"; }
+ensure_sudo_session() { return 0; }
+
+get_brew_cask_name() { echo "brew-manual-cask"; return 0; }
+brew_uninstall_cask() { return 1; }
+is_brew_cask_installed() { return 1; }
+_mole_privileged_path_has_mutable_ancestor() { return 0; }
+mole_delete() { return "$MOLE_ERR_MUTABLE_PARENT"; }
+
+selected_apps=("0|$HOME/Applications/BrewManual.app|BrewManual|com.example.brewmanual|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ -d "$app_bundle" ]] || return 1
+    [[ -d "$leftover" ]] || return 1
+    [[ ! -e "$HOME/brew-manual-side-effects.log" ]] || return 1
+    [[ "$output" == *"Mole cannot safely use elevated deletion below a user-writable parent"* ]] || return 1
+    [[ "$output" == *"Move the app to Trash in Finder"* ]] || return 1
 }
 
 @test "batch_uninstall_applications skips brew sudo pre-auth in dry-run mode" {

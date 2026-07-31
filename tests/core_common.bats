@@ -246,41 +246,45 @@ EOF
     [ "$result" = "unprotected" ]
 }
 
-@test "xcode_build_tooling_running recognizes command-line build owners" {
+@test "xcode_build_tooling_process_state recognizes command-line build owners" {
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 pgrep() {
     [[ "$1" == "-x" && "$2" == "xcodebuild" ]]
 }
-xcode_build_tooling_running
+xcode_build_tooling_process_state
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "xcode_build_tooling_running fails closed on probe errors and missing pgrep" {
+@test "xcode_build_tooling_process_state reports unknown on probe errors and missing pgrep" {
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 pgrep() { return 2; }
-xcode_build_tooling_running || exit 1
+process_state=0
+xcode_build_tooling_process_state || process_state=$?
+[[ "$process_state" -eq 2 ]] || exit 2
 unset -f pgrep
 PATH=/nonexistent
-xcode_build_tooling_running || exit 1
+process_state=0
+xcode_build_tooling_process_state || process_state=$?
+[[ "$process_state" -eq 2 ]] || exit 3
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "xcode_build_tooling_running permits cleanup only after reliable no-match results" {
+@test "xcode_build_tooling_process_state reports reliable no-match" {
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 pgrep() { return 1; }
-if xcode_build_tooling_running; then
-    exit 1
-fi
+process_state=0
+xcode_build_tooling_process_state || process_state=$?
+[[ "$process_state" -eq 1 ]]
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -400,7 +404,46 @@ EOF
     [ "${color_lines[0]}" = $'\033[0;31m1.00GB\033[0m' ]
     [ "${color_lines[1]}" = $'\033[0;33m5.0MB\033[0m' ]
     [ "${color_lines[2]}" = $'\033[0;32m180KB\033[0m' ]
-    [ "${color_lines[3]}" = $'\033[0;90m0B\033[0m' ]
+    [ "${color_lines[3]}" = $'\033[0;38;5;244m0B\033[0m' ]
+}
+
+@test "muted text avoids theme-defined ANSI bright black" {
+    run grep -R -nF '0;90m' \
+        "$PROJECT_ROOT/lib" \
+        "$PROJECT_ROOT/bin" \
+        "$PROJECT_ROOT/mole" \
+        "$PROJECT_ROOT/cmd/analyze"
+
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+}
+
+@test "mole_pgrep_any distinguishes active, inactive, and unknown probes" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+pgrep() {
+    case "$2" in
+        active) return 0 ;;
+        missing) return 1 ;;
+        broken) return 2 ;;
+    esac
+    return 1
+}
+
+mole_pgrep_any -x missing -f active
+set +e
+mole_pgrep_any -x missing -f absent
+inactive_rc=$?
+mole_pgrep_any -x missing -f broken
+unknown_rc=$?
+set -e
+printf 'inactive=%s unknown=%s\n' "$inactive_rc" "$unknown_rc"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"inactive=1 unknown=2"* ]]
 }
 
 @test "create_temp_file and create_temp_dir are tracked and cleaned" {

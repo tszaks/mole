@@ -16,6 +16,7 @@ readonly MOLE_ERR_AUTH_FAILED=11
 readonly MOLE_ERR_READONLY_FS=12
 readonly MOLE_ERR_PROTECTED_PATH=13
 readonly MOLE_ERR_PRIVACY_DENIED=14
+readonly MOLE_ERR_MUTABLE_PARENT=15
 
 # Ensure dependencies are loaded
 _MOLE_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -594,6 +595,7 @@ _mole_privileged_path_has_mutable_ancestor() {
 # Safe sudo removal with symlink and parent-component protection
 safe_sudo_remove() {
     local path="$1"
+    local precomputed_size_kb="${2:-}"
 
     if ! validate_path_for_deletion "$path"; then
         if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$path"; then
@@ -631,7 +633,7 @@ safe_sudo_remove() {
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
-        _record_file_ops_dry_run_target "$path"
+        _record_file_ops_dry_run_target "$path" "$precomputed_size_kb"
     fi
 
     if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
@@ -652,8 +654,14 @@ safe_sudo_remove() {
             local file_age=""
 
             if sudo -n test -e "$path" 2> /dev/null; then
-                local size_kb
-                size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+                local size_kb=0
+                if [[ -n "$precomputed_size_kb" ]]; then
+                    if [[ "$precomputed_size_kb" =~ ^[0-9]+$ ]]; then
+                        size_kb="$precomputed_size_kb"
+                    fi
+                else
+                    size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+                fi
                 if [[ "$size_kb" -gt 0 ]]; then
                     file_size=$(bytes_to_human "$((size_kb * 1024))")
                 fi
@@ -682,11 +690,15 @@ safe_sudo_remove() {
     local size_kb=0
     local size_human=""
     if oplog_enabled; then
-        if sudo -n test -e "$path" 2> /dev/null; then
-            size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
-            if [[ "$size_kb" =~ ^[0-9]+$ ]] && [[ "$size_kb" -gt 0 ]]; then
-                size_human=$(bytes_to_human "$((size_kb * 1024))" 2> /dev/null || echo "${size_kb}KB")
+        if [[ -n "$precomputed_size_kb" ]]; then
+            if [[ "$precomputed_size_kb" =~ ^[0-9]+$ ]]; then
+                size_kb="$precomputed_size_kb"
             fi
+        elif sudo -n test -e "$path" 2> /dev/null; then
+            size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+        fi
+        if [[ "$size_kb" =~ ^[0-9]+$ ]] && [[ "$size_kb" -gt 0 ]]; then
+            size_human=$(bytes_to_human "$((size_kb * 1024))" 2> /dev/null || echo "${size_kb}KB")
         fi
     fi
 
@@ -742,7 +754,7 @@ safe_sudo_remove() {
 #   MOLE_DELETE_LOG       Override the log file path (default:
 #                         ~/Library/Logs/mole/deletions.log)
 #
-# Returns 0 on success, 1 on failure. Always appends a tab-separated line to
+# Returns 0 on success and a nonzero MOLE_ERR_* code on failure. Always appends a tab-separated line to
 # the deletions log: <iso_ts>\t<mode>\t<size_kb>\t<status>\t<path>.
 # size_kb is "unknown" when du could not measure the path (permission denied,
 # disappeared mid-call); never silently coerced to 0KB so post-hoc forensics
@@ -784,14 +796,14 @@ mole_delete() {
     fi
 
     if [[ "$needs_sudo" == "true" ]] && _mole_privileged_path_has_mutable_ancestor "$path"; then
-        if [[ ${EUID:-0} -ne 0 ]]; then
-            debug_log "Downgrading privileged delete below mutable parent: $path"
-            needs_sudo=false
-        else
-            _mole_delete_log "$mode" "unknown" "mutable-parent" "$path"
-            debug_log "Refusing privileged delete below mutable parent: $path"
-            return 1
-        fi
+        # Neither sudo rm/mv nor Finder authorization is safe here: both receive
+        # a pathname that a non-root invoking user can replace after validation.
+        # Finder also fails for some package-installed apps even after its native
+        # authorization dialog (#1266). Keep both Trash and permanent modes
+        # fail-closed and direct the user to perform the app move themselves.
+        _mole_delete_log "$mode" "unknown" "mutable-parent" "$path"
+        debug_log "Refusing privileged delete below mutable parent: $path"
+        return "$MOLE_ERR_MUTABLE_PARENT"
     fi
 
     # Capture size before the delete so the log line is still useful when the
@@ -850,10 +862,16 @@ mole_delete() {
             if [[ -z "${_MOLE_PRIVACY_DENIED_WARNED:-}" ]]; then
                 _MOLE_PRIVACY_DENIED_WARNED=1
                 export _MOLE_PRIVACY_DENIED_WARNED
-                printf 'Error: macOS denied Trash access. Grant App Data or Full Disk Access to your terminal in System Settings, then retry.\n' >&2
+                printf 'Error: macOS could not authorize Trash access. Review App Management, App Data, or Full Disk Access for your terminal in System Settings, then retry.\n' >&2
             fi
             debug_log "macOS privacy permission denied while moving to Trash: $path"
             return "$MOLE_ERR_PRIVACY_DENIED"
+        fi
+        if [[ $trash_rc -eq $MOLE_ERR_MUTABLE_PARENT ]]; then
+            _mole_delete_log "trash" "$size_kb" "mutable-parent" "$path"
+            log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "mutable-parent"
+            debug_log "Trash move stopped because a mutable parent was detected: $path"
+            return "$MOLE_ERR_MUTABLE_PARENT"
         fi
         _mole_delete_log "trash" "$size_kb" "trash-failed" "$path"
         log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "trash-failed"
@@ -870,16 +888,25 @@ mole_delete() {
     # validation, sudo handling, and existing log_operation calls remain
     # unchanged for callers that have always gone through rm -rf.
     local rc=0
-    if [[ -L "$path" ]]; then
+    if [[ "$needs_sudo" == "true" ]] && _mole_privileged_path_has_mutable_ancestor "$path"; then
+        # Recheck at the permanent-delete sink. The parent may have become
+        # mutable while size accounting was running. This check covers both
+        # regular paths and symlinks before either helper can downgrade.
+        rc=$MOLE_ERR_MUTABLE_PARENT
+    elif [[ -L "$path" ]]; then
         safe_remove_symlink "$path" "$needs_sudo" || rc=$?
     elif [[ "$needs_sudo" == "true" ]]; then
-        safe_sudo_remove "$path" || rc=$?
+        safe_sudo_remove "$path" "$size_kb" || rc=$?
     else
         safe_remove "$path" "true" || rc=$?
     fi
 
     local status_label="ok"
-    [[ $rc -ne 0 ]] && status_label="error"
+    if [[ $rc -eq $MOLE_ERR_MUTABLE_PARENT ]]; then
+        status_label="mutable-parent"
+    elif [[ $rc -ne 0 ]]; then
+        status_label="error"
+    fi
     _mole_delete_log "$mode" "$size_kb" "$status_label" "$path"
     return "$rc"
 }
@@ -1045,13 +1072,8 @@ _mole_move_path_to_user_trash() {
     fi
 
     if [[ "$needs_sudo" == "true" ]] && _mole_privileged_path_has_mutable_ancestor "$path"; then
-        if [[ ${EUID:-0} -ne 0 ]]; then
-            debug_log "Downgrading Trash move below mutable parent: $path"
-            needs_sudo=false
-        else
-            debug_log "Refusing privileged Trash move below mutable parent: $path"
-            return 1
-        fi
+        debug_log "Refusing direct privileged Trash move below mutable parent: $path"
+        return "$MOLE_ERR_MUTABLE_PARENT"
     fi
 
     local trash_dir="${user_home%/}/.Trash"
@@ -1640,8 +1662,12 @@ diagnose_removal_failure() {
             reason="protected by Mole safety rules"
             ;;
         "$MOLE_ERR_PRIVACY_DENIED")
-            reason="macOS privacy permission denied"
-            suggestion="Grant App Data or Full Disk Access to your terminal in System Settings"
+            reason="macOS could not authorize Trash access"
+            suggestion="Review App Management, App Data, or Full Disk Access for your terminal in System Settings"
+            ;;
+        "$MOLE_ERR_MUTABLE_PARENT")
+            reason="Mole cannot safely use elevated deletion below a user-writable parent"
+            suggestion="Move the app to Trash in Finder; Mole will leave protected containers and app data untouched"
             ;;
         *)
             reason="permission denied"

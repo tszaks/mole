@@ -1,6 +1,72 @@
 #!/bin/bash
 # User GUI Applications Cleanup Module (desktop apps, media, utilities).
 set -euo pipefail
+
+_xcode_cleanup_process_state() {
+    xcode_build_tooling_process_state
+}
+
+_simulator_cleanup_process_state() {
+    mole_pgrep_any \
+        -x "Xcode" \
+        -x "Simulator" \
+        -x "CoreSimulatorService" \
+        -x "simdiskimaged" \
+        -f "com.apple.CoreSimulator"
+}
+
+_xcode_cleanup_skip_reason() {
+    if [[ "$1" -eq 0 ]]; then
+        printf 'Xcode or build tooling running\n'
+    else
+        printf 'process state unknown\n'
+    fi
+}
+
+_xcode_app_cache_delete_guard_allows() {
+    local process_state=0
+    _xcode_cleanup_process_state || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_APP_CACHE_GUARD_REASON=$(_xcode_cleanup_skip_reason "$process_state")
+    return 1
+}
+
+_simulator_app_cache_delete_guard_allows() {
+    local process_state=0
+    _simulator_cleanup_process_state || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_APP_CACHE_GUARD_REASON="Simulator or CoreSimulator running"
+    [[ $process_state -eq 2 ]] && _MOLE_APP_CACHE_GUARD_REASON="process state unknown"
+    return 1
+}
+
+_app_cache_safe_clean_guarded() {
+    local delete_guard="$1"
+    local display_name="$2"
+    shift 2
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        safe_clean "$@"
+        return $?
+    fi
+
+    local _MOLE_APP_CACHE_GUARD_REASON="process state changed"
+    local guarded_rc=0
+    safe_clean_guarded "$delete_guard" "$@" || guarded_rc=$?
+    if [[ $guarded_rc -eq 75 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_APP_CACHE_GUARD_REASON})"
+        note_activity
+        return 1
+    fi
+    return "$guarded_rc"
+}
+
 # Xcode DerivedData cleanup with project count and size reporting.
 # Fully regenerated on next build, safe to remove.
 clean_xcode_derived_data() {
@@ -8,9 +74,11 @@ clean_xcode_derived_data() {
 
     [[ -d "$dd_dir" ]] || return 0
 
-    # Skip while Xcode or command-line build tooling owns DerivedData.
-    if xcode_build_tooling_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped (Xcode or build tooling running)"
+    # Only a conclusive "no matching process" result authorizes cleanup.
+    local xcode_state=0
+    _xcode_cleanup_process_state || xcode_state=$?
+    if [[ $xcode_state -ne 1 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped ($(_xcode_cleanup_skip_reason "$xcode_state"))"
         note_activity
         return 0
     fi
@@ -41,53 +109,105 @@ clean_xcode_derived_data() {
 
     # Remove all project build dirs using safe_remove.
     local removed=0
+    local removed_size_kb=0
+    local stopped_reason=""
     for dir in "${projects[@]}"; do
-        if safe_remove "$dir" "true"; then
+        xcode_state=0
+        _xcode_cleanup_process_state || xcode_state=$?
+        if [[ $xcode_state -ne 1 ]]; then
+            stopped_reason=$(_xcode_cleanup_skip_reason "$xcode_state")
+            break
+        fi
+
+        local dir_size_kb=0
+        dir_size_kb=$(get_path_size_kb "$dir" 2> /dev/null || echo 0)
+        [[ "$dir_size_kb" =~ ^[0-9]+$ ]] || dir_size_kb=0
+
+        # Sizing is timeout-bounded but can still take long enough for a build
+        # to start. Recheck at the deletion boundary, not only before du.
+        xcode_state=0
+        _xcode_cleanup_process_state || xcode_state=$?
+        if [[ $xcode_state -ne 1 ]]; then
+            stopped_reason=$(_xcode_cleanup_skip_reason "$xcode_state")
+            break
+        fi
+        if safe_remove "$dir" "true" "$dir_size_kb"; then
             removed=$((removed + 1))
+            removed_size_kb=$((removed_size_kb + dir_size_kb))
         fi
     done
 
     if [[ $removed -gt 0 ]]; then
+        project_label="projects"
+        [[ $removed -eq 1 ]] && project_label="project"
+        size_human=$(bytes_to_human "$((removed_size_kb * 1024))")
         local line_color
-        line_color=$(cleanup_result_color_kb "$size_kb" 2> /dev/null || echo "$GREEN")
-        echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode DerivedData · ${project_count} ${project_label}, ${line_color}${size_human}${NC}"
+        line_color=$(cleanup_result_color_kb "$removed_size_kb" 2> /dev/null || echo "$GREEN")
+        echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode DerivedData · ${removed} ${project_label}, ${line_color}${size_human}${NC}"
         files_cleaned=$((${files_cleaned:-0} + removed))
-        total_size_cleaned=$((${total_size_cleaned:-0} + size_kb))
+        total_size_cleaned=$((${total_size_cleaned:-0} + removed_size_kb))
         total_items=$((${total_items:-0} + removed))
+        note_activity
+    fi
+    if [[ -n "$stopped_reason" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · stopped (${stopped_reason})"
         note_activity
     fi
 }
 # Xcode and iOS tooling.
 clean_xcode_tools() {
-    # Skip DerivedData/documentation while Xcode build tooling is active or its
-    # ownership cannot be established.
-    local xcode_building=false
-    if xcode_build_tooling_running; then
-        xcode_building=true
-    fi
-    # Skip Simulator caches/temp files while Simulator is running to avoid crashes.
-    local simulator_running=false
-    if pgrep -x "Simulator" > /dev/null 2>&1; then
-        simulator_running=true
-    fi
-    if [[ "$simulator_running" == "false" ]]; then
-        safe_clean ~/Library/Developer/CoreSimulator/Caches/* "Simulator cache"
-        safe_clean ~/Library/Developer/CoreSimulator/Devices/*/data/tmp/* "Simulator temp files"
-        safe_clean ~/Library/Logs/CoreSimulator/* "CoreSimulator logs"
+    # Probe errors are unknown, never permission to clean active tool state.
+    local simulator_state=0
+    _simulator_cleanup_process_state || simulator_state=$?
+    if [[ $simulator_state -eq 1 ]]; then
+        _app_cache_safe_clean_guarded \
+            _simulator_app_cache_delete_guard_allows \
+            "Simulator caches" \
+            ~/Library/Developer/CoreSimulator/Caches/* \
+            "Simulator cache" || return 0
+        _app_cache_safe_clean_guarded \
+            _simulator_app_cache_delete_guard_allows \
+            "Simulator temp files" \
+            ~/Library/Developer/CoreSimulator/Devices/*/data/tmp/* \
+            "Simulator temp files" || return 0
+        _app_cache_safe_clean_guarded \
+            _simulator_app_cache_delete_guard_allows \
+            "CoreSimulator logs" \
+            ~/Library/Logs/CoreSimulator/* \
+            "CoreSimulator logs" || return 0
     else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Simulator caches · skipped (Simulator running)"
+        local simulator_reason="Simulator or CoreSimulator running"
+        [[ $simulator_state -eq 2 ]] && simulator_reason="process state unknown"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Simulator caches · skipped (${simulator_reason})"
         note_activity
     fi
-    safe_clean ~/Library/Caches/com.apple.dt.Xcode/* "Xcode cache"
-    safe_clean ~/Library/Developer/Xcode/iOS\ Device\ Logs/* "iOS device logs"
-    safe_clean ~/Library/Developer/Xcode/watchOS\ Device\ Logs/* "watchOS device logs"
-    safe_clean ~/Library/Developer/Xcode/Products/* "Xcode build products"
-    if [[ "$xcode_building" == "false" ]]; then
+    local xcode_state=0
+    _xcode_cleanup_process_state || xcode_state=$?
+    if [[ $xcode_state -eq 1 ]]; then
+        _app_cache_safe_clean_guarded \
+            _xcode_app_cache_delete_guard_allows \
+            "Xcode cache" \
+            ~/Library/Caches/com.apple.dt.Xcode/* \
+            "Xcode cache" || return 0
+
+        xcode_state=0
+        _xcode_cleanup_process_state || xcode_state=$?
+        if [[ $xcode_state -ne 1 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode build products/DerivedData · stopped ($(_xcode_cleanup_skip_reason "$xcode_state"))"
+            note_activity
+            return 0
+        fi
+        _app_cache_safe_clean_guarded \
+            _xcode_app_cache_delete_guard_allows \
+            "Xcode build products" \
+            ~/Library/Developer/Xcode/Products/* \
+            "Xcode build products" || return 0
         clean_xcode_derived_data
-        safe_clean ~/Library/Developer/Xcode/DocumentationCache/* "Xcode documentation cache"
-        safe_clean ~/Library/Developer/Xcode/DocumentationIndex/* "Xcode documentation index"
     else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData/Documentation · skipped (Xcode or build tooling running)"
+        local xcode_reason
+        xcode_reason=$(_xcode_cleanup_skip_reason "$xcode_state")
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode cache/build products · skipped (${xcode_reason})"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped (${xcode_reason})"
         note_activity
     fi
 }

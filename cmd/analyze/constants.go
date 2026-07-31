@@ -295,7 +295,7 @@ var spinnerFrames = []string{"|", "/", "-", "\\", "|", "/", "-", "\\"}
 const (
 	colorPurple     = "\033[0;35m"
 	colorPurpleBold = "\033[1;35m"
-	colorGray       = "\033[0;90m"
+	colorGray       = "\033[0;38;5;244m"
 	colorRed        = "\033[0;31m"
 	colorYellow     = "\033[0;33m"
 	colorGreen      = "\033[0;32m"
