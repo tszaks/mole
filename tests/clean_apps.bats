@@ -244,6 +244,44 @@ EOF
     [[ "$output" == *"REGISTRY_CLEANUP_OK"* ]] || return 1
 }
 
+@test "clean_orphaned_app_data fails closed when the installed app scan fails" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+
+scan_installed_apps() {
+    : > "$1"
+    return 1
+}
+mdfind() { return 0; }
+run_with_timeout() { shift; "$@"; }
+get_path_size_kb() { printf '1\n'; }
+safe_clean() {
+    : > "$HOME/safe-clean-called"
+    return 0
+}
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+
+set +e
+clean_orphaned_app_data
+rc=$?
+set -e
+
+[[ $rc -eq 0 ]] || exit 1
+[[ ! -e "$HOME/safe-clean-called" ]] || exit 1
+printf 'SCAN_FAILURE_CLOSED\n'
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipped: Unable to scan installed applications"* ]] || return 1
+    [[ "$output" == *"SCAN_FAILURE_CLOSED"* ]]
+}
+
 @test "is_bundle_orphaned returns true for old uninstalled bundle" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORPHAN_AGE_THRESHOLD=30 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

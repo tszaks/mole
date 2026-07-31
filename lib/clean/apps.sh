@@ -338,8 +338,20 @@ clean_orphaned_app_data() {
         return 0
     fi
     start_section_spinner "Scanning installed apps..."
-    local installed_bundles=$(create_temp_file)
-    scan_installed_apps "$installed_bundles"
+    local installed_bundles=""
+    local scan_status=0
+    installed_bundles=$(create_temp_file)
+    scan_status=$?
+    if [[ $scan_status -eq 0 && -n "$installed_bundles" ]]; then
+        scan_installed_apps "$installed_bundles"
+        scan_status=$?
+    fi
+    if [[ $scan_status -ne 0 || -z "$installed_bundles" ]]; then
+        stop_section_spinner
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: Unable to scan installed applications"
+        note_activity
+        return 0
+    fi
     stop_section_spinner
     local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')
     debug_log "Found $app_count active/installed apps"
