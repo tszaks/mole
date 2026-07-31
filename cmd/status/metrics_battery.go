@@ -149,7 +149,9 @@ func mergeBatteryHealthData(health string, cycles int, capacity int, ioregCycles
 	if ioregCycles > 0 {
 		cycles = ioregCycles
 	}
-	if ioregCapacity > 0 {
+	// system_profiler publishes the same Maximum Capacity value users see in
+	// macOS. IORegistry ratios are estimates and only fill a missing value.
+	if capacity <= 0 && ioregCapacity > 0 {
 		capacity = ioregCapacity
 	}
 	return health, cycles, capacity
@@ -230,20 +232,13 @@ func getAppleSmartBatteryHealthData() (cycles int, capacity int) {
 }
 
 func parseAppleSmartBatteryHealth(out string) (cycles int, capacity int) {
-	var normalizedCapacity, design, nominal, rawMax int
+	var design, nominal, rawMax int
 	for line := range strings.Lines(out) {
 		line = strings.TrimSpace(line)
 		if cycles == 0 {
 			if raw, found := ioRegValueForKey(line, "CycleCount"); found {
 				if value, err := strconv.Atoi(raw); err == nil && value > 0 && value < 100000 {
 					cycles = value
-				}
-			}
-		}
-		if normalizedCapacity == 0 {
-			if raw, found := ioRegValueForKey(line, "MaxCapacity"); found {
-				if value, err := strconv.Atoi(raw); err == nil && value > 0 && value <= 100 {
-					normalizedCapacity = value
 				}
 			}
 		}
@@ -269,23 +264,21 @@ func parseAppleSmartBatteryHealth(out string) (cycles int, capacity int) {
 			}
 		}
 	}
-	if normalizedCapacity > 0 {
-		return cycles, normalizedCapacity
-	}
 	return cycles, batteryHealthPercent(design, nominal, rawMax)
 }
 
-// batteryHealthPercent is the fallback estimate when ioreg does not expose a
-// normalized MaxCapacity percentage. NominalChargeCapacity is preferred over
-// AppleRawMaxCapacity, the ratio is rounded half-away-from-zero, and the result
-// is clamped to [0, 100].
+// batteryHealthPercent estimates health only when system_profiler does not
+// publish Maximum Capacity. AppleRawMaxCapacity is preferred because
+// NominalChargeCapacity includes a buffer and can read high. MaxCapacity is
+// intentionally ignored: on Apple Silicon it is the denominator of the current
+// charge percentage and is normally 100, not a battery-health measurement.
 func batteryHealthPercent(design, nominal, rawMax int) int {
 	if design <= 0 {
 		return 0
 	}
-	capacity := nominal
+	capacity := rawMax
 	if capacity == 0 {
-		capacity = rawMax
+		capacity = nominal
 	}
 	if capacity <= 0 {
 		return 0
