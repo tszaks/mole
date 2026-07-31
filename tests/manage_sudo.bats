@@ -16,21 +16,15 @@ setup() {
 
     printf 'auth sufficient pam_tid.so\n' > "$pam_sudo"
     printf 'auth include pam_opendirectory.so\n' > "$pam_sudo_local"
+    export MOLE_PAM_SUDO_FILE="$pam_sudo"
+    export MOLE_PAM_SUDO_LOCAL_FILE="$pam_sudo_local"
 
-    run env \
-        MOLE_PAM_SUDO_FILE="$pam_sudo" \
-        MOLE_PAM_SUDO_LOCAL_FILE="$pam_sudo_local" \
-        /bin/bash --noprofile --norc -c \
-        'source "$PROJECT_ROOT/lib/core/common.sh"; check_touchid_support'
+    run check_touchid_support
     [ "$status" -eq 0 ]
 
     printf 'auth include pam_opendirectory.so\n' > "$pam_sudo"
 
-    run env \
-        MOLE_PAM_SUDO_FILE="$pam_sudo" \
-        MOLE_PAM_SUDO_LOCAL_FILE="$pam_sudo_local" \
-        /bin/bash --noprofile --norc -c \
-        'source "$PROJECT_ROOT/lib/core/common.sh"; check_touchid_support'
+    run check_touchid_support
     [ "$status" -eq 1 ]
 }
 
