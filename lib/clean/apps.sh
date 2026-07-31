@@ -170,8 +170,14 @@ scan_installed_apps() {
         debug_log "Failed to scan one or more installed application directories"
         return 1
     fi
-    cat "$scan_tmp_dir"/*.txt >> "$installed_bundles" 2> /dev/null || true
-    sort -u "$installed_bundles" -o "$installed_bundles"
+    if ! cat "$scan_tmp_dir"/*.txt >> "$installed_bundles" 2> /dev/null; then
+        debug_log "Failed to aggregate installed application scan results"
+        return 1
+    fi
+    if ! sort -u "$installed_bundles" -o "$installed_bundles"; then
+        debug_log "Failed to normalize installed application scan results"
+        return 1
+    fi
     ensure_user_dir "$(dirname "$cache_file")"
     cp "$installed_bundles" "$cache_file" 2> /dev/null || true
     local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')

@@ -184,6 +184,52 @@ EOF
     [[ "$output" == *"com.example.Ordered"* ]]
 }
 
+@test "scan_installed_apps fails closed when scan result aggregation fails" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+stub_dir="$HOME/stub-bin-aggregation"
+mkdir -p "$stub_dir" "$HOME/Applications"
+cat > "$stub_dir/find" <<'SH'
+#!/bin/sh
+exit 0
+SH
+cat > "$stub_dir/lsappinfo" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod +x "$stub_dir/find" "$stub_dir/lsappinfo"
+export PATH="$stub_dir:$PATH"
+
+aggregate_failure_seen="$HOME/aggregate-failure-seen"
+cat() {
+    local input
+    for input in "$@"; do
+        case "$input" in
+            */apps_*.txt)
+                : > "$aggregate_failure_seen"
+                return 73
+                ;;
+        esac
+    done
+    command cat "$@"
+}
+debug_log() { :; }
+
+scan_status=0
+scan_installed_apps "$HOME/installed.txt" || scan_status=$?
+[[ -e "$aggregate_failure_seen" ]] || exit 1
+[[ $scan_status -ne 0 ]] || exit 1
+printf 'AGGREGATION_FAILED_CLOSED\n'
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"AGGREGATION_FAILED_CLOSED"* ]] || return 1
+}
+
 @test "scan_installed_apps leaves tracked scratch cleanup to the temp registry (#1313)" {
     local scan_home="$HOME/registry-scan"
     rm -rf "$scan_home"
