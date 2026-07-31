@@ -102,29 +102,34 @@ scan_installed_apps() {
         # Setapp applications
         "$HOME/Library/Application Support/Setapp/Applications"
     )
-    # Temp dir avoids write contention across parallel scans.
-    local scan_tmp_dir=$(create_temp_dir)
-    local pids=()
+    # Temp dir avoids write contention across parallel scans. The temp registry
+    # owns cleanup because safe_remove intentionally rejects root's private tree.
+    local scan_tmp_dir
+    if ! scan_tmp_dir=$(create_temp_dir); then
+        debug_log "Failed to create installed application scan temp directory"
+        return 1
+    fi
+    local app_scan_pids=()
+    local auxiliary_pids=()
     local dir_idx=0
     for app_dir in "${app_dirs[@]}"; do
         [[ -d "$app_dir" ]] || continue
         (
-            local -a app_paths=()
+            local app_paths
+            if ! app_paths=$(command find "$app_dir" -maxdepth 3 -type d -name '*.app' 2> /dev/null); then
+                exit 1
+            fi
             while IFS= read -r app_path; do
-                [[ -n "$app_path" ]] && app_paths+=("$app_path")
-            done < <(command find "$app_dir" -maxdepth 3 -type d -name '*.app' 2> /dev/null)
-            local count=0
-            for app_path in "${app_paths[@]:-}"; do
+                [[ -n "$app_path" ]] || continue
                 local plist_path="$app_path/Contents/Info.plist"
                 [[ ! -f "$plist_path" ]] && continue
                 local bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist_path" 2> /dev/null || echo "")
                 if [[ -n "$bundle_id" && "$bundle_id" != "missing value" ]]; then
                     echo "$bundle_id"
-                    count=$((count + 1))
                 fi
-            done
+            done <<< "$app_paths"
         ) > "$scan_tmp_dir/apps_${dir_idx}.txt" &
-        pids+=($!)
+        app_scan_pids+=($!)
         dir_idx=$((dir_idx + 1))
     done
     # Collect running apps and LaunchAgents to avoid false orphan cleanup.
@@ -139,22 +144,33 @@ scan_installed_apps() {
             run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" lsappinfo list 2> /dev/null | grep -o '"CFBundleIdentifier"="[^"]*"' | cut -d'"' -f4 >> "$scan_tmp_dir/running.txt" 2> /dev/null || true
         fi
     ) < /dev/null &
-    pids+=($!)
+    auxiliary_pids+=($!)
     (
         run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find ~/Library/LaunchAgents /Library/LaunchAgents \
             -name "*.plist" -type f 2> /dev/null |
             xargs -I {} basename {} .plist > "$scan_tmp_dir/agents.txt" 2> /dev/null || true
     ) < /dev/null &
-    pids+=($!)
-    debug_log "Waiting for ${#pids[@]} background processes: ${pids[*]}"
-    if [[ ${#pids[@]} -gt 0 ]]; then
-        for pid in "${pids[@]}"; do
+    auxiliary_pids+=($!)
+    debug_log "Waiting for $((${#app_scan_pids[@]} + ${#auxiliary_pids[@]})) background processes"
+    local app_scan_failed=0
+    if [[ ${#app_scan_pids[@]} -gt 0 ]]; then
+        for pid in "${app_scan_pids[@]}"; do
+            if ! wait "$pid" 2> /dev/null; then
+                app_scan_failed=1
+            fi
+        done
+    fi
+    if [[ ${#auxiliary_pids[@]} -gt 0 ]]; then
+        for pid in "${auxiliary_pids[@]}"; do
             wait "$pid" 2> /dev/null || true
         done
     fi
     debug_log "All background processes completed"
+    if [[ $app_scan_failed -ne 0 ]]; then
+        debug_log "Failed to scan one or more installed application directories"
+        return 1
+    fi
     cat "$scan_tmp_dir"/*.txt >> "$installed_bundles" 2> /dev/null || true
-    safe_remove "$scan_tmp_dir" true
     sort -u "$installed_bundles" -o "$installed_bundles"
     ensure_user_dir "$(dirname "$cache_file")"
     cp "$installed_bundles" "$cache_file" 2> /dev/null || true
@@ -334,8 +350,20 @@ clean_orphaned_app_data() {
         return 0
     fi
     start_section_spinner "Scanning installed apps..."
-    local installed_bundles=$(create_temp_file)
-    scan_installed_apps "$installed_bundles"
+    local installed_bundles=""
+    local scan_status=0
+    installed_bundles=$(create_temp_file)
+    scan_status=$?
+    if [[ $scan_status -eq 0 && -n "$installed_bundles" ]]; then
+        scan_installed_apps "$installed_bundles"
+        scan_status=$?
+    fi
+    if [[ $scan_status -ne 0 || -z "$installed_bundles" ]]; then
+        stop_section_spinner
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: Unable to scan installed applications"
+        note_activity
+        return 0
+    fi
     stop_section_spinner
     local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')
     debug_log "Found $app_count active/installed apps"

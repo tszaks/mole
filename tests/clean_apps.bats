@@ -184,6 +184,176 @@ EOF
     [[ "$output" == *"com.example.Ordered"* ]]
 }
 
+@test "scan_installed_apps leaves tracked scratch cleanup to the temp registry (#1313)" {
+    local scan_home="$HOME/registry-scan"
+    rm -rf "$scan_home"
+    mkdir -p "$scan_home"
+
+    run env HOME="$scan_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+mkdir -p "$HOME/mole-tmp"
+export TMPDIR="$HOME/mole-tmp"
+
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+
+stub_dir="$HOME/stub-bin-registry"
+mkdir -p "$stub_dir"
+cat > "$stub_dir/find" <<'SH'
+#!/bin/sh
+exit 0
+SH
+cat > "$stub_dir/lsappinfo" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod +x "$stub_dir/find" "$stub_dir/lsappinfo"
+export PATH="$stub_dir:$PATH"
+
+remove_calls="$HOME/safe-remove-calls"
+: > "$remove_calls"
+safe_remove() {
+    printf '%s\n' "$1" >> "$remove_calls"
+    return 1
+}
+debug_log() {
+    printf 'DEBUG:%s\n' "$*"
+}
+
+scan_installed_apps "$HOME/installed.txt"
+
+[[ -s "$MOLE_TEMP_REGISTRY_FILE" ]] || exit 1
+scan_tmp_dir=$(head -n 1 "$MOLE_TEMP_REGISTRY_FILE")
+[[ -d "$scan_tmp_dir" ]] || exit 1
+[[ ! -s "$remove_calls" ]] || exit 1
+
+outside_file="$HOME/outside-temp-root"
+touch "$outside_file"
+cleanup_temp_files
+
+[[ ! -e "$scan_tmp_dir" ]] || exit 1
+[[ -e "$outside_file" ]] || exit 1
+printf 'REGISTRY_CLEANUP_OK\n'
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"DEBUG:Scanned 0 unique applications"* ]] || return 1
+    [[ "$output" == *"REGISTRY_CLEANUP_OK"* ]] || return 1
+}
+
+@test "clean_orphaned_app_data fails closed when the installed app scan fails" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+
+scan_installed_apps() {
+    : > "$1"
+    return 1
+}
+mdfind() { return 0; }
+run_with_timeout() { shift; "$@"; }
+get_path_size_kb() { printf '1\n'; }
+safe_clean() {
+    : > "$HOME/safe-clean-called"
+    return 0
+}
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+
+set +e
+clean_orphaned_app_data
+rc=$?
+set -e
+
+[[ $rc -eq 0 ]] || exit 1
+[[ ! -e "$HOME/safe-clean-called" ]] || exit 1
+printf 'SCAN_FAILURE_CLOSED\n'
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipped: Unable to scan installed applications"* ]] || return 1
+    [[ "$output" == *"SCAN_FAILURE_CLOSED"* ]]
+}
+
+@test "clean_orphaned_app_data fails closed when an app directory find fails" {
+    local scan_home="$HOME/find-failure-scan"
+    rm -rf "$scan_home"
+    mkdir -p "$scan_home"
+
+    run env HOME="$scan_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/Applications/LiveApp.app" \
+    "$HOME/Applications/Partial.app/Contents" \
+    "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+
+cat > "$HOME/Applications/Partial.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.Partial</string>
+</dict>
+</plist>
+PLIST
+
+stub_dir="$HOME/stub-bin-find-failure"
+mkdir -p "$stub_dir"
+cat > "$stub_dir/find" <<'SH'
+#!/bin/sh
+if [ "${1:-}" = "$HOME/Applications" ]; then
+    exit 64
+fi
+if [ "${1:-}" = "/Applications" ]; then
+    printf '%s\n' "$HOME/Applications/Partial.app"
+fi
+exit 0
+SH
+cat > "$stub_dir/lsappinfo" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod +x "$stub_dir/find" "$stub_dir/lsappinfo"
+export PATH="$stub_dir:$PATH"
+
+mdfind() { return 0; }
+run_with_timeout() { shift; "$@"; }
+get_path_size_kb() { printf '1\n'; }
+safe_clean() {
+    : > "$HOME/safe-clean-called"
+    return 0
+}
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+
+set +e
+clean_orphaned_app_data
+rc=$?
+set -e
+
+[[ $rc -eq 0 ]] || exit 1
+[[ ! -e "$HOME/safe-clean-called" ]] || exit 1
+[[ ! -e "$HOME/.cache/mole/installed_apps_cache" ]] || exit 1
+printf 'APP_DIRECTORY_SCAN_FAILURE_CLOSED\n'
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipped: Unable to scan installed applications"* ]] || return 1
+    [[ "$output" == *"APP_DIRECTORY_SCAN_FAILURE_CLOSED"* ]]
+}
+
 @test "is_bundle_orphaned returns true for old uninstalled bundle" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORPHAN_AGE_THRESHOLD=30 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
