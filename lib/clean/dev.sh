@@ -615,8 +615,12 @@ clean_xcode_documentation_cache() {
 
 _MOLE_XCODE_PROCESS_MATCH=""
 
-# Return 0 when a matching process is running, 1 when none match, and 2 when
-# pgrep cannot establish a reliable answer. Callers must fail closed on 2.
+# Return 0 when a foreground owner is active, 1 when none is present, and 2
+# when the process state cannot be established. Short-lived build and simulator
+# tools stay guarded because they can mutate these caches before a device is
+# fully booted. CoreSimulatorService and simdiskimaged are
+# launchd-managed services that can remain alive after Simulator exits, so
+# their existence alone is not evidence that a simulator is active (#1319).
 _coresimulator_cache_process_running() {
     local match_mode match_pattern match_label probe_status
     _MOLE_XCODE_PROCESS_MATCH=""
@@ -637,12 +641,60 @@ _coresimulator_cache_process_running() {
     done << 'EOF'
 -x|Xcode|Xcode
 -x|Simulator|Simulator
--x|CoreSimulatorService|CoreSimulatorService
--x|simdiskimaged|simdiskimaged
--f|com.apple.CoreSimulator|com.apple.CoreSimulator
+-x|xcodebuild|xcodebuild
+-x|xctest|xctest
+-x|XCTRunner|XCTRunner
+-x|simctl|simctl
 EOF
 
     return 1
+}
+
+# Return 0 when simctl reports a booted device, 1 for a valid empty result, and
+# 2 when the active state cannot be established. Unknown must fail closed
+# before system CoreSimulator or XCTest data is removed.
+_coresimulator_booted_device_state() {
+    if [[ "$_MOLE_SIMCTL_RESOLUTION_STATUS" != "ready" ]]; then
+        if ! command -v xcrun > /dev/null 2>&1 || ! _resolve_simctl_developer_dir; then
+            debug_log "Unable to resolve simctl for booted-device check"
+            return 2
+        fi
+    fi
+
+    local booted_output=""
+    local probe_status=0
+    booted_output=$(_run_simctl "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" list devices booted -j 2> /dev/null) || probe_status=$?
+    if [[ $probe_status -ne 0 ]]; then
+        debug_log "Booted simulator probe failed (exit=$probe_status)"
+        return 2
+    fi
+    if [[ "$booted_output" != *'"devices"'* ]]; then
+        debug_log "Booted simulator probe returned an unexpected response"
+        return 2
+    fi
+    if [[ "$booted_output" == *'"udid"'* ]]; then
+        _MOLE_XCODE_PROCESS_MATCH="booted simulator"
+        debug_log "CoreSimulator active state detected: booted simulator"
+        return 0
+    fi
+
+    return 1
+}
+
+_coresimulator_activity_state() {
+    local state=0
+    _coresimulator_cache_process_running || state=$?
+    [[ $state -eq 1 ]] || return "$state"
+
+    state=0
+    _coresimulator_booted_device_state || state=$?
+    [[ $state -eq 1 ]] || return "$state"
+
+    # The structured probe can take several seconds. Close that window before
+    # authorizing deletion in case simctl or xcodebuild started meanwhile.
+    state=0
+    _coresimulator_cache_process_running || state=$?
+    return "$state"
 }
 
 _xcode_xctest_devices_process_running() {
@@ -698,12 +750,38 @@ _xcode_delete_guard_allows() {
 
 _coresimulator_delete_guard_allows() {
     local process_state=0
-    _coresimulator_cache_process_running || process_state=$?
+    _coresimulator_activity_state || process_state=$?
     if [[ $process_state -eq 1 ]]; then
         return 0
     fi
 
     _MOLE_XCODE_DELETE_GUARD_REASON="CoreSimulator started"
+    [[ $process_state -eq 2 ]] && _MOLE_XCODE_DELETE_GUARD_REASON="process state unknown"
+    return 1
+}
+
+_xctest_devices_activity_state() {
+    local state=0
+    _xcode_xctest_devices_process_running || state=$?
+    [[ $state -eq 1 ]] || return "$state"
+
+    state=0
+    _coresimulator_booted_device_state || state=$?
+    [[ $state -eq 1 ]] || return "$state"
+
+    state=0
+    _xcode_xctest_devices_process_running || state=$?
+    return "$state"
+}
+
+_xctest_devices_delete_guard_allows() {
+    local process_state=0
+    _xctest_devices_activity_state || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_XCODE_DELETE_GUARD_REASON="Xcode, XCTest, or Simulator started"
     [[ $process_state -eq 2 ]] && _MOLE_XCODE_DELETE_GUARD_REASON="process state unknown"
     return 1
 }
@@ -737,7 +815,7 @@ clean_xcode_xctest_devices() {
     [[ -d "$xctest_devices_dir" ]] || return 0
 
     local process_state=0
-    _xcode_xctest_devices_process_running || process_state=$?
+    _xctest_devices_activity_state || process_state=$?
     if [[ $process_state -ne 1 ]]; then
         local skip_reason="Xcode or XCTest running"
         [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
@@ -747,7 +825,7 @@ clean_xcode_xctest_devices() {
     fi
 
     _xcode_safe_clean_guarded \
-        _xcode_delete_guard_allows \
+        _xctest_devices_delete_guard_allows \
         "Xcode XCTestDevices" \
         "$xctest_devices_dir" \
         "Xcode XCTestDevices test data" || true
@@ -758,7 +836,7 @@ clean_xcode_system_coresimulator_caches() {
     [[ -d "$cache_root" ]] || return 0
 
     local process_state=0
-    _coresimulator_cache_process_running || process_state=$?
+    _coresimulator_activity_state || process_state=$?
     if [[ $process_state -ne 1 ]]; then
         local skip_reason="CoreSimulator running"
         [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
@@ -815,7 +893,7 @@ clean_xcode_system_coresimulator_caches() {
     local stop_reason=""
     for entry in "${cache_entries[@]}"; do
         process_state=0
-        _coresimulator_cache_process_running || process_state=$?
+        _coresimulator_activity_state || process_state=$?
         if [[ $process_state -ne 1 ]]; then
             stop_reason="CoreSimulator started"
             [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
@@ -832,7 +910,7 @@ clean_xcode_system_coresimulator_caches() {
         # A bounded size probe can still overlap Simulator startup. Recheck
         # immediately before the privileged deletion sink.
         process_state=0
-        _coresimulator_cache_process_running || process_state=$?
+        _coresimulator_activity_state || process_state=$?
         if [[ $process_state -ne 1 ]]; then
             stop_reason="CoreSimulator started"
             [[ $process_state -eq 2 ]] && stop_reason="process state unknown"

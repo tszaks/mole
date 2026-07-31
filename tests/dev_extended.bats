@@ -396,6 +396,7 @@ note_activity() { :; }
 # whether the developer happens to have Xcode open. The sibling case mocks the
 # running side; this one has to mock the not-running side.
 pgrep() { return 1; }
+_coresimulator_booted_device_state() { return 1; }
 has_sudo_session() { return 0; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
@@ -596,6 +597,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 note_activity() { :; }
 pgrep() { return 1; }
+_coresimulator_booted_device_state() { return 1; }
 has_sudo_session() { return 0; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
@@ -672,18 +674,157 @@ while IFS='|' read -r EXPECTED_MODE EXPECTED_PATTERN expected_label; do
 done <<'CASES'
 -x|Xcode|Xcode
 -x|Simulator|Simulator
--x|CoreSimulatorService|CoreSimulatorService
--x|simdiskimaged|simdiskimaged
--f|com.apple.CoreSimulator|com.apple.CoreSimulator
+-x|xcodebuild|xcodebuild
+-x|xctest|xctest
+-x|XCTRunner|XCTRunner
+-x|simctl|simctl
 CASES
 EOF
 
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"matched:Xcode"* ]] || return 1
 	[[ "$output" == *"matched:Simulator"* ]] || return 1
-	[[ "$output" == *"matched:CoreSimulatorService"* ]] || return 1
-	[[ "$output" == *"matched:simdiskimaged"* ]] || return 1
-	[[ "$output" == *"matched:com.apple.CoreSimulator"* ]] || return 1
+	[[ "$output" == *"matched:xcodebuild"* ]] || return 1
+	[[ "$output" == *"matched:simctl"* ]] || return 1
+}
+
+@test "persistent services and generic compilers do not block cleanup without a booted device (#1319)" {
+	local cache_root="$HOME/SystemCoreSimulatorCachesPersistentServices"
+	mkdir -p "$cache_root/dyld"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() {
+    case "$2" in
+        CoreSimulatorService | simdiskimaged | com.apple.CoreSimulator | XCBBuildService | swift-frontend) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+_coresimulator_booted_device_state() { return 1; }
+has_sudo_session() { return 0; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+get_path_size_kb() { echo 1; }
+safe_sudo_remove() { echo "REMOVE:$1"; }
+clean_xcode_system_coresimulator_caches
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"REMOVE:$cache_root/dyld"* ]] || return 1
+	[[ "$output" != *"skipped (CoreSimulator running)"* ]] || return 1
+}
+
+@test "foreground simulator tooling blocks cleanup before a device is booted (#1319)" {
+	local cache_root="$HOME/SystemCoreSimulatorCachesForegroundTooling"
+	mkdir -p "$cache_root/dyld"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+_coresimulator_booted_device_state() { return 1; }
+safe_sudo_remove() { echo "UNEXPECTED_SAFE_SUDO_REMOVE"; }
+
+for ACTIVE_PROCESS in simctl xcodebuild; do
+    pgrep() { [[ "$1" == "-x" && "$2" == "$ACTIVE_PROCESS" ]]; }
+    clean_xcode_system_coresimulator_caches
+    printf 'BLOCKED:%s\n' "$ACTIVE_PROCESS"
+done
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"BLOCKED:simctl"* ]] || return 1
+	[[ "$output" == *"BLOCKED:xcodebuild"* ]] || return 1
+	[[ "$(grep -c 'skipped (CoreSimulator running)' <<< "$output")" -eq 2 ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]] || return 1
+}
+
+@test "booted or unknown simulator state blocks system cache cleanup (#1319)" {
+	local cache_root="$HOME/SystemCoreSimulatorCachesBootedState"
+	mkdir -p "$cache_root/dyld"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR="$cache_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 1; }
+safe_sudo_remove() { echo "UNEXPECTED_SAFE_SUDO_REMOVE"; }
+
+for SIMULATOR_STATE in 0 2; do
+    _coresimulator_booted_device_state() { return "$SIMULATOR_STATE"; }
+    clean_xcode_system_coresimulator_caches
+done
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"skipped (CoreSimulator running)"* ]] || return 1
+	[[ "$output" == *"skipped (process state unknown)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]] || return 1
+}
+
+@test "booted simulator probe distinguishes active empty and unknown states (#1319)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+debug_log() { :; }
+_MOLE_SIMCTL_RESOLUTION_STATUS="ready"
+_run_simctl() {
+    case "$PROBE_CASE" in
+        active) printf '%s\n' '{"devices":{"runtime":[{"udid":"ABC"}]}}' ;;
+        empty) printf '%s\n' '{"devices":{}}' ;;
+        malformed) printf '%s\n' 'not-json' ;;
+        failed) return 124 ;;
+    esac
+}
+
+set +e
+PROBE_CASE=active; _coresimulator_booted_device_state; active_rc=$?
+PROBE_CASE=empty; _coresimulator_booted_device_state; empty_rc=$?
+PROBE_CASE=malformed; _coresimulator_booted_device_state; malformed_rc=$?
+PROBE_CASE=failed; _coresimulator_booted_device_state; failed_rc=$?
+set -e
+printf 'active=%s empty=%s malformed=%s failed=%s\n' "$active_rc" "$empty_rc" "$malformed_rc" "$failed_rc"
+[[ "$active_rc" -eq 0 && "$empty_rc" -eq 1 && "$malformed_rc" -eq 2 && "$failed_rc" -eq 2 ]]
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"active=0 empty=1 malformed=2 failed=2"* ]] || return 1
+}
+
+@test "simulator activity checks recheck foreground owners after the booted probe (#1319)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+debug_log() { :; }
+pgrep() {
+    [[ -e "$HOME/foreground-started" && "$1" == "-x" && "$2" == "xcodebuild" ]]
+}
+_coresimulator_booted_device_state() {
+    touch "$HOME/foreground-started"
+    return 1
+}
+
+rm -f "$HOME/foreground-started"
+set +e
+_coresimulator_activity_state
+coresimulator_rc=$?
+rm -f "$HOME/foreground-started"
+_xctest_devices_activity_state
+xctest_rc=$?
+set -e
+printf 'coresimulator=%s xctest=%s\n' "$coresimulator_rc" "$xctest_rc"
+[[ "$coresimulator_rc" -eq 0 && "$xctest_rc" -eq 0 ]]
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"coresimulator=0 xctest=0"* ]] || return 1
 }
 
 @test "clean_xcode_system_coresimulator_caches reports completed removals before a process race stops it" {
@@ -701,16 +842,15 @@ should_protect_path() { return 1; }
 cleanup_result_color_kb() { echo ""; }
 bytes_to_human() { echo "$1 bytes"; }
 get_path_size_kb() { echo 1; }
-safe_sudo_remove() { command rm -rf "$1"; }
-
-probe_round=0
-_coresimulator_cache_process_running() {
-    probe_round=$((probe_round + 1))
-    if [[ $probe_round -le 3 ]]; then
-        return 1
-    fi
-    return 0
+simulator_started=false
+safe_sudo_remove() {
+    command rm -rf "$1"
+    simulator_started=true
 }
+_coresimulator_cache_process_running() {
+    [[ "$simulator_started" == "true" ]]
+}
+_coresimulator_booted_device_state() { return 1; }
 
 clean_xcode_system_coresimulator_caches
 remaining=$(command find "$MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
@@ -740,6 +880,7 @@ _coresimulator_cache_process_running() {
     [[ -e "$HOME/simulator-started" ]] && return 0
     return 1
 }
+_coresimulator_booted_device_state() { return 1; }
 
 rm -f "$HOME/simulator-started"
 clean_xcode_system_coresimulator_caches
@@ -765,6 +906,7 @@ is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
 get_path_size_kb() { echo 1; }
 _coresimulator_cache_process_running() { return 1; }
+_coresimulator_booted_device_state() { return 1; }
 safe_sudo_remove() { return 1; }
 clean_xcode_system_coresimulator_caches
 [[ -d "$MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR/entry" ]] || exit 1
@@ -785,6 +927,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 note_activity() { :; }
 pgrep() { return 1; }
+_coresimulator_booted_device_state() { return 1; }
 safe_clean() { printf 'SAFE:%s|%s\n' "$1" "$2"; }
 clean_xcode_xctest_devices
 EOF
@@ -815,6 +958,30 @@ EOF
 	[[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
 }
 
+@test "clean_xcode_xctest_devices fails closed for booted or unknown simulator state (#1319)" {
+	local xctest_root="$HOME/Library/Developer/XCTestDevices"
+	mkdir -p "$xctest_root"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 1; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN"; }
+
+for SIMULATOR_STATE in 0 2; do
+    _coresimulator_booted_device_state() { return "$SIMULATOR_STATE"; }
+    clean_xcode_xctest_devices
+done
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Xcode XCTestDevices · skipped (Xcode or XCTest running)"* ]] || return 1
+	[[ "$output" == *"Xcode XCTestDevices · skipped (process state unknown)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]] || return 1
+}
+
 @test "clean_xcode_xctest_devices rechecks after safe_clean sizing" {
 	local xctest_root="$HOME/PostSizeXCTestDevices"
 	mkdir -p "$xctest_root/device"
@@ -828,6 +995,7 @@ DRY_RUN=false
 note_activity() { :; }
 get_cleanup_path_size_kb() { touch "$HOME/xctest-started"; echo 1; }
 pgrep() { [[ -e "$HOME/xctest-started" ]]; }
+_coresimulator_booted_device_state() { return 1; }
 safe_remove() { echo "UNEXPECTED_REMOVE:$1"; command rm -rf "$1"; }
 
 rm -f "$HOME/xctest-started"
@@ -836,7 +1004,7 @@ clean_xcode_xctest_devices
 EOF
 
 	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
-	[[ "$output" == *"Xcode XCTestDevices · stopped (Xcode or build tools started)"* ]] || return 1
+	[[ "$output" == *"Xcode XCTestDevices · stopped (Xcode, XCTest, or Simulator started)"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
@@ -851,6 +1019,7 @@ source "$PROJECT_ROOT/bin/clean.sh"
 DRY_RUN=true
 MOLE_DRY_RUN=1
 pgrep() { return 1; }
+_coresimulator_booted_device_state() { return 1; }
 clean_xcode_xctest_devices
 [[ -d "$HOME/Library/Developer/XCTestDevices" ]] && echo "STILL_EXISTS"
 EOF
@@ -871,6 +1040,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 WHITELIST_PATTERNS=("$HOME/Library/Developer/XCTestDevices")
 pgrep() { return 1; }
+_coresimulator_booted_device_state() { return 1; }
 clean_xcode_xctest_devices
 [[ -d "$HOME/Library/Developer/XCTestDevices" ]] && echo "STILL_EXISTS"
 printf 'WHITELIST_SKIPPED:%s\n' "$whitelist_skipped_count"
