@@ -101,7 +101,7 @@ EOF
     [ "$status" -eq 0 ] || return 1
 }
 
-@test "clean_xcode_derived_data skips when Xcode is running" {
+@test "clean_xcode_derived_data skips when xcodebuild is running" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -113,7 +113,7 @@ note_activity() { :; }
 is_path_whitelisted() { return 1; }
 DRY_RUN=false
 
-pgrep() { return 0; }
+    pgrep() { [[ "$1" == "-x" && "$2" == "xcodebuild" ]]; }
 export -f pgrep
 
 dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
@@ -124,7 +124,47 @@ clean_xcode_derived_data
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Xcode DerivedData · skipped (Xcode running)"* ]]
+    [[ "$output" == *"Xcode DerivedData · skipped (Xcode or build tooling running)"* ]] || return 1
+}
+
+@test "clean_xcode_derived_data keeps build output when pgrep fails" {
+    run env HOME="$HOME/probe-error" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+note_activity() { :; }
+pgrep() { return 2; }
+safe_remove() { echo "UNEXPECTED_REMOVE:$1"; return 0; }
+
+dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
+mkdir -p "$dd_dir/OwnedProject"
+touch "$dd_dir/OwnedProject/build.o"
+clean_xcode_derived_data
+[[ -f "$dd_dir/OwnedProject/build.o" ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"skipped (Xcode or build tooling running)"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "clean_xcode_derived_data keeps build output when pgrep is unavailable" {
+    run env HOME="$HOME/probe-missing" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+note_activity() { :; }
+
+dd_dir="$HOME/Library/Developer/Xcode/DerivedData"
+mkdir -p "$dd_dir/OwnedProject"
+touch "$dd_dir/OwnedProject/build.o"
+PATH=/nonexistent
+clean_xcode_derived_data
+[[ -f "$dd_dir/OwnedProject/build.o" ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"skipped (Xcode or build tooling running)"* ]]
 }
 
 @test "clean_xcode_derived_data handles empty DerivedData" {

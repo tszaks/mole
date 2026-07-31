@@ -476,10 +476,7 @@ opt_quarantine_cleanup() {
     # Check if database has any entries worth cleaning.
     local row_count=""
     local count_status=0
-    set +e
-    row_count=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sqlite3 "$quarantine_db" "SELECT COUNT(*) FROM LSQuarantineEvent;" 2> /dev/null)
-    count_status=$?
-    set -e
+    row_count=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sqlite3 "$quarantine_db" "SELECT COUNT(*) FROM LSQuarantineEvent;" 2> /dev/null) || count_status=$?
 
     if [[ $count_status -ne 0 || ! "$row_count" =~ ^[0-9]+$ ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect quarantine database"
@@ -494,10 +491,7 @@ opt_quarantine_cleanup() {
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         local exit_code=0
-        set +e
-        run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" sqlite3 "$quarantine_db" "DELETE FROM LSQuarantineEvent; VACUUM;" 2> /dev/null
-        exit_code=$?
-        set -e
+        run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" sqlite3 "$quarantine_db" "DELETE FROM LSQuarantineEvent; VACUUM;" 2> /dev/null || exit_code=$?
 
         if [[ $exit_code -eq 0 ]]; then
             opt_msg "Quarantine history cleared ($row_count entries)"
@@ -522,24 +516,37 @@ opt_sqlite_vacuum() {
         debug_risk_level "LOW" "Only optimizes databases, does not delete data"
     fi
 
-    if ! command -v sqlite3 > /dev/null 2>&1; then
-        echo -e "  ${GRAY}-${NC} Database optimization already optimal, sqlite3 unavailable"
+    if ! command -v pgrep > /dev/null 2>&1; then
+        echo -e "  ${GRAY}-${NC} Database optimization unavailable, process probe unavailable"
         optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
         return 0
     fi
 
     local -a busy_apps=()
     local -a check_apps=("Mail" "Safari" "Messages")
-    local app
+    local app probe_status
     for app in "${check_apps[@]}"; do
         if pgrep -x "$app" > /dev/null 2>&1; then
             busy_apps+=("$app")
+        else
+            probe_status=$?
+            if [[ $probe_status -ne 1 ]]; then
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect active apps before database optimization"
+                optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
+                return 0
+            fi
         fi
     done
 
     if [[ ${#busy_apps[@]} -gt 0 ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Close these apps before database optimization: ${busy_apps[*]}"
         optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_SKIPPED"
+        return 0
+    fi
+
+    if ! command -v sqlite3 > /dev/null 2>&1; then
+        echo -e "  ${GRAY}-${NC} Database optimization already optimal, sqlite3 unavailable"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
         return 0
     fi
 
@@ -585,10 +592,7 @@ opt_sqlite_vacuum() {
             # Skip if freelist is tiny (already compact).
             local page_info=""
             local page_status=0
-            set +e
-            page_info=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sqlite3 "$db_file" "PRAGMA page_count; PRAGMA freelist_count;" 2> /dev/null)
-            page_status=$?
-            set -e
+            page_info=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sqlite3 "$db_file" "PRAGMA page_count; PRAGMA freelist_count;" 2> /dev/null) || page_status=$?
             if [[ $page_status -ne 0 ]]; then
                 failed=$((failed + 1))
                 continue
@@ -610,10 +614,8 @@ opt_sqlite_vacuum() {
             # Verify integrity before VACUUM.
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
                 local integrity_check=""
-                set +e
-                integrity_check=$(run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" sqlite3 "$db_file" "PRAGMA integrity_check;" 2> /dev/null)
-                local integrity_status=$?
-                set -e
+                local integrity_status=0
+                integrity_check=$(run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" sqlite3 "$db_file" "PRAGMA integrity_check;" 2> /dev/null) || integrity_status=$?
 
                 if [[ $integrity_status -ne 0 || "$integrity_check" != "ok" ]]; then
                     failed=$((failed + 1))
@@ -623,10 +625,7 @@ opt_sqlite_vacuum() {
 
             local exit_code=0
             if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-                set +e
-                run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" sqlite3 "$db_file" "VACUUM;" 2> /dev/null
-                exit_code=$?
-                set -e
+                run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" sqlite3 "$db_file" "VACUUM;" 2> /dev/null || exit_code=$?
 
                 if [[ $exit_code -eq 0 ]]; then
                     vacuumed=$((vacuumed + 1))
@@ -694,15 +693,12 @@ opt_launch_services_rebuild() {
         local success=0
 
         if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
-            set +e
             "$lsregister" -gc > /dev/null 2>&1 || true
-            "$lsregister" -r -f -domain local -domain user -domain system > /dev/null 2>&1
-            success=$?
+            "$lsregister" -r -f -domain local -domain user -domain system > /dev/null 2>&1 || success=$?
             if [[ $success -ne 0 ]]; then
-                "$lsregister" -r -f -domain local -domain user > /dev/null 2>&1
-                success=$?
+                success=0
+                "$lsregister" -r -f -domain local -domain user > /dev/null 2>&1 || success=$?
             fi
-            set -e
         else
             success=0
         fi
@@ -896,10 +892,7 @@ opt_disk_permissions_repair() {
 opt_spotlight_index_optimize() {
     local spotlight_status=""
     local spotlight_status_code=0
-    set +e
-    spotlight_status=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" mdutil -s / 2> /dev/null)
-    spotlight_status_code=$?
-    set -e
+    spotlight_status=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" mdutil -s / 2> /dev/null) || spotlight_status_code=$?
 
     if [[ $spotlight_status_code -ne 0 ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect Spotlight index (exit=$spotlight_status_code)"
@@ -940,10 +933,8 @@ opt_spotlight_index_optimize() {
             test_start=$(get_epoch_seconds)
             # A timeout counts as slow: an mdfind that cannot answer within
             # the probe ceiling is exactly the sluggishness being measured.
-            set +e
-            run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemFSName == 'Applications'" > /dev/null 2>&1
-            probe_status=$?
-            set -e
+            probe_status=0
+            run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemFSName == 'Applications'" > /dev/null 2>&1 || probe_status=$?
             test_end=$(get_epoch_seconds)
             test_duration=$((test_end - test_start))
             if [[ $probe_status -eq 124 ]]; then
@@ -1468,10 +1459,7 @@ opt_disk_verify() {
     fi
     local output=""
     local verify_status=0
-    set +e
-    output=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" diskutil verifyVolume / 2>&1)
-    verify_status=$?
-    set -e
+    output=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" diskutil verifyVolume / 2>&1) || verify_status=$?
     if [[ -t 1 ]]; then
         stop_inline_spinner
     fi
@@ -1517,10 +1505,7 @@ opt_coreduet_cleanup() {
 
     if [[ ${#knowledge_files[@]} -gt 0 ]]; then
         local size_status=0
-        set +e
-        total_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skcP "${knowledge_files[@]}" 2> /dev/null | awk 'END {print $1 + 0}')
-        size_status=$?
-        set -e
+        total_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skcP "${knowledge_files[@]}" 2> /dev/null | awk 'END {print $1 + 0}') || size_status=$?
         if [[ $size_status -ne 0 || ! "$total_size" =~ ^[0-9]+$ ]]; then
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect Knowledge database size"
             optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
@@ -1759,10 +1744,7 @@ opt_login_items_audit() {
 
     local items_output=""
     local snapshot_status=0
-    set +e
-    items_output=$(_login_items_snapshot 2> /dev/null)
-    snapshot_status=$?
-    set -e
+    items_output=$(_login_items_snapshot 2> /dev/null) || snapshot_status=$?
 
     if [[ $snapshot_status -ne 0 ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to inspect login items"

@@ -175,8 +175,49 @@ clean_xcode_documentation_cache
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"Xcode documentation cache · skipped (Xcode running)"* ]] || return 1
+	[[ "$output" == *"Xcode documentation cache · skipped (Xcode or build tooling running)"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
+}
+
+@test "clean_xcode_documentation_cache skips when the process probe fails" {
+	local doc_root="$HOME/DocumentationCacheProbeError"
+	mkdir -p "$doc_root"
+	touch "$doc_root/DeveloperDocumentation.index" "$doc_root/DeveloperDocumentation-16.0.index"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_XCODE_DOCUMENTATION_CACHE_DIR="$doc_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { return 2; }
+safe_sudo_remove() { echo "UNEXPECTED_SAFE_SUDO_REMOVE"; }
+clean_xcode_documentation_cache
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Xcode or build tooling running"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SAFE_SUDO_REMOVE"* ]]
+}
+
+@test "clean_xcode_device_support skips all deletion paths while build tooling owns it" {
+	local ds_dir="$HOME/OwnedDeviceSupport"
+	mkdir -p "$ds_dir/17.0/Symbols/System/Library/Caches" "$ds_dir/17.1" "$ds_dir/17.2"
+	touch "$ds_dir/17.0/Symbols/System/Library/Caches/cache" "$ds_dir/device.log"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+pgrep() { [[ "$1" == "-x" && "$2" == "swift-frontend" ]]; }
+safe_remove() { echo "UNEXPECTED_SAFE_REMOVE:$1"; return 0; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN:$1"; return 0; }
+clean_xcode_device_support "$HOME/OwnedDeviceSupport" "iOS DeviceSupport"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"iOS DeviceSupport · skipped (Xcode or build tooling running)"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SAFE_"* ]]
 }
 
 @test "clean_xcode_system_coresimulator_caches removes only direct cache children" {
@@ -620,7 +661,7 @@ EOF
 	[[ "$output" != *"Library/Caches/Homebrew/bootsnap"* ]]
 }
 
-@test "clean_dev_misc does not touch Claude Code state" {
+@test "clean_dev_misc protects Claude Code and OpenCode recovery state" {
 	mkdir -p "$HOME/.claude/projects/project-a/memory"
 	mkdir -p "$HOME/.claude/plugins/cache/plugin-a"
 	mkdir -p "$HOME/.claude/plugins/marketplaces"
@@ -628,6 +669,10 @@ EOF
 	mkdir -p "$HOME/.claude/tmp"
 	mkdir -p "$HOME/.claude/session-env"
 	mkdir -p "$HOME/.claude/shell-snapshots"
+	mkdir -p "$HOME/.local/share/opencode/snapshot/project"
+	mkdir -p "$HOME/.local/share/opencode/log"
+	mkdir -p "$HOME/.cache/opencode"
+	mkdir -p "$HOME/Library/Application Support/Claude/pending-uploads"
 
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -646,6 +691,10 @@ EOF
 	[[ "$output" != *"$HOME/.claude/paste-cache"* ]] || return 1
 	[[ "$output" != *"$HOME/.claude/tmp"* ]] || return 1
 	[[ "$output" != *"$HOME/.claude/session-env"* ]] || return 1
+	[[ "$output" != *"$HOME/.local/share/opencode/snapshot"* ]] || return 1
+	[[ "$output" != *"$HOME/.local/share/opencode/log"* ]] || return 1
+	[[ "$output" != *"$HOME/Library/Application Support/Claude/pending-uploads"* ]] || return 1
+	[[ "$output" == *"$HOME/.cache/opencode"* ]] || return 1
 	[[ "$output" != *"$HOME/.claude/shell-snapshots"* ]]
 }
 

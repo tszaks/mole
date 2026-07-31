@@ -27,7 +27,7 @@ teardown_file() {
 }
 
 @test "clean_ds_store_tree reports dry-run summary" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true NO_COLOR= /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
@@ -50,7 +50,7 @@ EOF
 }
 
 @test "clean_ds_store_tree uses green for successful cleanups" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false NO_COLOR= /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
@@ -78,15 +78,156 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
 mkdir -p "$HOME/.cache/mole"
-echo "com.example.App" > "$HOME/.cache/mole/installed_apps_cache"
+printf '%s\n%s\n' "com.example.App" "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" > "$HOME/.cache/mole/installed_apps_cache"
 get_file_mtime() { date +%s; }
 debug_log() { :; }
+create_temp_dir() { echo "UNEXPECTED_SCAN"; return 1; }
 scan_installed_apps "$HOME/installed.txt"
 cat "$HOME/installed.txt"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"com.example.App"* ]]
+    [[ "$output" == "com.example.App" ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SCAN"* ]] || return 1
+    [[ "$output" != *"mole-installed-apps-cache"* ]]
+}
+
+@test "scan_installed_apps fails closed when a complete cache cannot reach scan output" {
+    run env HOME="$HOME/cache-output-failure" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/.cache/mole" "$HOME/installed-output"
+printf '%s\n%s\n' "com.example.App" "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" > "$HOME/.cache/mole/installed_apps_cache"
+get_file_mtime() { date +%s; }
+debug_log() { :; }
+scan_status=0
+scan_installed_apps "$HOME/installed-output" || scan_status=$?
+[[ $scan_status -ne 0 ]]
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "scan_installed_apps rejects an unmarked cache and finds the installed app" {
+    run env HOME="$HOME/unmarked-cache" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/.cache/mole" "$HOME/Applications/Present.app/Contents"
+printf '%s\n' "com.example.Missing" > "$HOME/.cache/mole/installed_apps_cache"
+cat > "$HOME/Applications/Present.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.Present</string>
+</dict></plist>
+PLIST
+get_file_mtime() { date +%s; }
+debug_log() { :; }
+scan_installed_apps "$HOME/installed.txt"
+grep -Fx "com.example.Present" "$HOME/installed.txt"
+if grep -Fx "com.example.Missing" "$HOME/installed.txt"; then
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"com.example.Present"* ]] || return 1
+    [[ "$output" != *"com.example.Missing"* ]]
+}
+
+@test "scan_installed_apps rejects a cache timestamp from the future" {
+    run env HOME="$HOME/future-cache" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/.cache/mole" "$HOME/Applications/FuturePresent.app/Contents"
+printf '%s\n%s\n' "com.example.FutureStale" "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" > "$HOME/.cache/mole/installed_apps_cache"
+cat > "$HOME/Applications/FuturePresent.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.FuturePresent</string>
+</dict></plist>
+PLIST
+get_file_mtime() { echo $(( $(date +%s) + 60 )); }
+debug_log() { :; }
+scan_installed_apps "$HOME/installed.txt"
+grep -Fx "com.example.FuturePresent" "$HOME/installed.txt"
+if grep -Fx "com.example.FutureStale" "$HOME/installed.txt"; then
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"com.example.FuturePresent"* ]] || return 1
+    [[ "$output" != *"com.example.FutureStale"* ]]
+}
+
+@test "scan_installed_apps ignores same-directory staging files" {
+    run env HOME="$HOME/staged-cache" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/.cache/mole" "$HOME/Applications/StagePresent.app/Contents"
+printf '%s\n%s\n' "com.example.PartialStage" "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" > "$HOME/.cache/mole/installed_apps_cache.tmp.interrupted"
+cat > "$HOME/Applications/StagePresent.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.StagePresent</string>
+</dict></plist>
+PLIST
+debug_log() { :; }
+scan_installed_apps "$HOME/installed.txt"
+grep -Fx "com.example.StagePresent" "$HOME/installed.txt"
+if grep -Fx "com.example.PartialStage" "$HOME/installed.txt"; then
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"com.example.StagePresent"* ]] || return 1
+    [[ "$output" != *"com.example.PartialStage"* ]]
+}
+
+@test "scan_installed_apps keeps the previous complete cache when publish fails" {
+    run env HOME="$HOME/publish-failure" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+cache_file="$HOME/.cache/mole/installed_apps_cache"
+mkdir -p "$(dirname "$cache_file")" "$HOME/Applications/CurrentScan.app/Contents"
+printf '%s\n%s\n' "com.example.Previous" "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" > "$cache_file"
+cat > "$HOME/Applications/CurrentScan.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.CurrentScan</string>
+</dict></plist>
+PLIST
+get_file_mtime() { echo 0; }
+debug_log() { :; }
+mv() { return 73; }
+
+scan_installed_apps "$HOME/installed.txt"
+grep -Fx "com.example.CurrentScan" "$HOME/installed.txt"
+grep -Fx "com.example.Previous" "$cache_file"
+[[ "$(tail -n 1 "$cache_file")" == "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" ]]
+if find "$(dirname "$cache_file")" -maxdepth 1 -name 'installed_apps_cache.tmp.*' -print -quit | grep -q .; then
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"com.example.CurrentScan"* ]] || return 1
+    [[ "$output" == *"com.example.Previous"* ]]
 }
 
 @test "scan_installed_apps filters missing value from osascript output" {

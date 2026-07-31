@@ -8,9 +8,9 @@ clean_xcode_derived_data() {
 
     [[ -d "$dd_dir" ]] || return 0
 
-    # Skip while Xcode is running to avoid build failures.
-    if pgrep -x "Xcode" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped (Xcode running)"
+    # Skip while Xcode or command-line build tooling owns DerivedData.
+    if xcode_build_tooling_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped (Xcode or build tooling running)"
         note_activity
         return 0
     fi
@@ -59,10 +59,11 @@ clean_xcode_derived_data() {
 }
 # Xcode and iOS tooling.
 clean_xcode_tools() {
-    # Skip DerivedData/Archives while Xcode is running.
-    local xcode_running=false
-    if pgrep -x "Xcode" > /dev/null 2>&1; then
-        xcode_running=true
+    # Skip DerivedData/documentation while Xcode build tooling is active or its
+    # ownership cannot be established.
+    local xcode_building=false
+    if xcode_build_tooling_running; then
+        xcode_building=true
     fi
     # Skip Simulator caches/temp files while Simulator is running to avoid crashes.
     local simulator_running=false
@@ -81,12 +82,12 @@ clean_xcode_tools() {
     safe_clean ~/Library/Developer/Xcode/iOS\ Device\ Logs/* "iOS device logs"
     safe_clean ~/Library/Developer/Xcode/watchOS\ Device\ Logs/* "watchOS device logs"
     safe_clean ~/Library/Developer/Xcode/Products/* "Xcode build products"
-    if [[ "$xcode_running" == "false" ]]; then
+    if [[ "$xcode_building" == "false" ]]; then
         clean_xcode_derived_data
         safe_clean ~/Library/Developer/Xcode/DocumentationCache/* "Xcode documentation cache"
         safe_clean ~/Library/Developer/Xcode/DocumentationIndex/* "Xcode documentation index"
     else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData/Documentation · skipped (Xcode running)"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData/Documentation · skipped (Xcode or build tooling running)"
         note_activity
     fi
 }

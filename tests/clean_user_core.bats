@@ -203,7 +203,7 @@ EOF
     [[ "$output" == *"SPIN_START:Scanning app caches..."* ]]
 }
 
-@test "clean_support_app_data targets crash, idle assets, and messages preview caches only" {
+@test "clean_support_app_data targets crash reports and messages preview caches only" {
     local support_home="$HOME/support-cache-home-1"
     run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -225,7 +225,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"FIND:$support_home/Library/Application Support/CrashReporter:30:f"* ]] || return 1
-    [[ "$output" == *"FIND:$support_home/Library/Application Support/com.apple.idleassetsd:30:f"* ]] || return 1
+    [[ "$output" != *"com.apple.idleassetsd"* ]] || return 1
     [[ "$output" != *"Aerial wallpaper videos"* ]] || return 1
     [[ "$output" == *"Messages sticker cache"* ]] || return 1
     [[ "$output" == *"Messages preview attachment cache"* ]] || return 1

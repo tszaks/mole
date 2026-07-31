@@ -495,8 +495,8 @@ clean_xcode_documentation_cache() {
     local doc_cache_root="${MOLE_XCODE_DOCUMENTATION_CACHE_DIR:-/Library/Developer/Xcode/DocumentationCache}"
     [[ -d "$doc_cache_root" ]] || return 0
 
-    if pgrep -x "Xcode" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (Xcode running)"
+    if xcode_build_tooling_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (Xcode or build tooling running)"
         note_activity
         return 0
     fi
@@ -774,6 +774,12 @@ clean_xcode_device_support() {
     [[ "$keep_count" =~ ^[0-9]+$ ]] || keep_count=2
 
     [[ -d "$ds_dir" ]] || return 0
+
+    if xcode_build_tooling_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (Xcode or build tooling running)"
+        note_activity
+        return 0
+    fi
 
     # Collect version directories (each is a platform version like "17.5 (21F79)")
     local -a version_dirs=()
@@ -1881,13 +1887,103 @@ clean_dev_api_tools() {
 }
 
 codex_desktop_running() {
-    command -v pgrep > /dev/null 2>&1 || return 1
+    command -v pgrep > /dev/null 2>&1 || return 0
 
-    pgrep -x "ChatGPT" > /dev/null 2>&1 && return 0
-    pgrep -f "/ChatGPT.app/" > /dev/null 2>&1 && return 0
-    pgrep -x "Codex" > /dev/null 2>&1 && return 0
-    pgrep -f "/Codex.app/" > /dev/null 2>&1 && return 0
+    local mode pattern probe_status
+    while IFS='|' read -r mode pattern; do
+        if pgrep "$mode" "$pattern" > /dev/null 2>&1; then
+            return 0
+        else
+            probe_status=$?
+            [[ $probe_status -eq 1 ]] || return 0
+        fi
+    done << 'EOF'
+-x|Codex
+-x|ChatGPT
+-f|/Codex.app/
+-f|/ChatGPT.app/
+EOF
     return 1
+}
+
+codex_desktop_cache_physical_path() {
+    local candidate="$1"
+    local cache_root="$HOME/Library/Caches/Codex"
+    local home_prefix="${HOME%/}/"
+
+    case "$candidate" in
+        "$cache_root" | "$cache_root"/*) ;;
+        *) return 1 ;;
+    esac
+    [[ -d "$candidate" ]] || return 1
+
+    # Reject every symlink component below HOME before resolving paths. This is
+    # deliberately local to Codex: global deletion validation still permits
+    # legitimate platform aliases such as /tmp -> /private/tmp.
+    local relative="${candidate#"$home_prefix"}"
+    local old_ifs="$IFS"
+    local -a components=()
+    IFS='/' read -r -a components <<< "$relative"
+    IFS="$old_ifs"
+    [[ ${#components[@]} -gt 0 ]] || return 1
+
+    local probe="$HOME"
+    local component
+    for component in "${components[@]}"; do
+        [[ -n "$component" ]] || return 1
+        probe="$probe/$component"
+        [[ -L "$probe" ]] && return 1
+    done
+
+    local physical_root=""
+    local physical_candidate=""
+    physical_root=$(cd -P "$cache_root" 2> /dev/null && pwd -P) || return 1
+    physical_candidate=$(cd -P "$candidate" 2> /dev/null && pwd -P) || return 1
+    case "$physical_candidate" in
+        "$physical_root" | "$physical_root"/*)
+            printf '%s\n' "$physical_candidate"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+clean_codex_desktop_caches() {
+    local cache_root="$HOME/Library/Caches/Codex"
+    [[ -d "$cache_root" ]] || return 0
+
+    if codex_desktop_running; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop caches · skipped (Codex active or process state unknown)"
+        note_activity
+        return 0
+    fi
+
+    if ! codex_desktop_cache_physical_path "$cache_root" > /dev/null; then
+        debug_log "Codex Desktop caches skipped: unsafe cache root"
+        return 0
+    fi
+
+    # Measured on ChatGPT 26.727.40816: these six Chromium leaves reclaimed
+    # 313,860 KiB. Local Storage, IndexedDB, cookies, sessions, preferences, and
+    # every Application Support sibling are deliberate non-targets because they
+    # can hold durable state rather than rebuildable cache data.
+    local -a profiles=(
+        "$cache_root/Default"
+        "$cache_root/Default/Partitions/codex-browser-app"
+        "$cache_root/codex-browser-app"
+    )
+    local -a leaves=("Cache" "Code Cache")
+    local profile leaf physical_leaf
+    for profile in "${profiles[@]}"; do
+        for leaf in "${leaves[@]}"; do
+            physical_leaf=""
+            if physical_leaf=$(codex_desktop_cache_physical_path "$profile/$leaf"); then
+                safe_clean "$physical_leaf"/* "Codex Desktop $leaf"
+            else
+                debug_log "Codex Desktop cache leaf skipped: $profile/$leaf"
+            fi
+        done
+    done
 }
 
 codex_sparkle_updater_running() {
@@ -2198,7 +2294,6 @@ clean_dev_misc() {
         safe_clean ~/Library/Application\ Support/Claude/DawnGraphiteCache/* "Claude Dawn cache"
         safe_clean ~/Library/Application\ Support/Claude/DawnWebGPUCache/* "Claude WebGPU cache"
         safe_clean ~/Library/Application\ Support/Claude/sentry/* "Claude sentry cache"
-        safe_clean ~/Library/Application\ Support/Claude/pending-uploads/* "Claude pending uploads"
     fi
     # Qoder (VS Code fork, Electron)
     if [[ -d ~/Library/Application\ Support/Qoder ]]; then
@@ -2215,11 +2310,11 @@ clean_dev_misc() {
     safe_clean ~/.cache/prisma/* "Prisma cache"
     # OpenCode AI tool cache
     safe_clean ~/.cache/opencode/* "OpenCode cache"
-    # OpenCode CLI session state (~/.cache side above covers Electron cache)
-    if [[ -d ~/.local/share/opencode ]]; then
-        safe_clean ~/.local/share/opencode/snapshot/* "OpenCode snapshots"
-        safe_clean ~/.local/share/opencode/log/* "OpenCode logs"
-    fi
+    # OpenCode snapshots back restore/revert, while diagnostic JSONL logs can
+    # contain prompts and transcript events. Neither is default-cleanable.
+    # Codex Chromium runtime caches are separate from its protected Application
+    # Support profile and are restricted to measured fixed leaves.
+    clean_codex_desktop_caches
     # Codex Desktop runtimes contain active Node/Python dependencies.
     clean_codex_runtimes
     # Sparkle uses random first-level directories for each update installation.

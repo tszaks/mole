@@ -299,3 +299,15 @@ EOF
 	[[ "$output" != *"Network routing table refreshed"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_SUDO"* ]] || return 1
 }
+
+@test "optimize tasks never toggle the caller errexit option" {
+	run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+tasks_file="$PROJECT_ROOT/lib/optimize/tasks.sh"
+if grep -nE '^[[:space:]]*set [+-]e([[:space:]]|$)' "$tasks_file"; then
+    exit 1
+fi
+EOF
+
+	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
+}

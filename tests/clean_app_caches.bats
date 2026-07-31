@@ -31,13 +31,13 @@ teardown_file() {
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
-pgrep() { return 0; }
+    pgrep() { [[ "$1" == "-x" && "$2" == "xcodebuild" ]]; }
 safe_clean() { echo "$2"; }
 clean_xcode_tools
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Xcode DerivedData/Documentation · skipped (Xcode running)"* ]] || return 1
+    [[ "$output" == *"Xcode DerivedData/Documentation · skipped (Xcode or build tooling running)"* ]] || return 1
     [[ "$output" != *"derived data"* ]] || return 1
     [[ "$output" != *"documentation cache"* ]]
 }

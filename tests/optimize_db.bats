@@ -117,3 +117,87 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"busy or locked"* ]]
 }
+
+@test "SQLite optimization is unavailable when pgrep is missing" {
+	run env HOME="$HOME/sqlite-no-pgrep" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+sqlite3() { echo "UNEXPECTED_SQLITE"; return 0; }
+PATH=/nonexistent
+
+execute_optimization sqlite_vacuum
+[[ "$(optimize_outcome_count unavailable)" == "1" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"process probe unavailable"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SQLITE"* ]]
+}
+
+@test "SQLite optimization fails closed when pgrep errors" {
+	run env HOME="$HOME/sqlite-pgrep-error" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+pgrep() { return 2; }
+sqlite3() { echo "UNEXPECTED_SQLITE"; return 0; }
+
+execute_optimization sqlite_vacuum
+[[ "$(optimize_outcome_count failed)" == "1" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Failed to inspect active apps"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SQLITE"* ]]
+}
+
+@test "SQLite optimization skips while an owning app is running" {
+	run env HOME="$HOME/sqlite-busy" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+pgrep() {
+    [[ "$1" == "-x" && "$2" == "Mail" ]]
+}
+sqlite3() { echo "UNEXPECTED_SQLITE"; return 0; }
+
+execute_optimization sqlite_vacuum
+[[ "$(optimize_outcome_count skipped)" == "1" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Close these apps before database optimization: Mail"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SQLITE"* ]]
+}
+
+@test "SQLite optimization proceeds after reliable no-match process probes" {
+	run env HOME="$HOME/sqlite-clear" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+db="$HOME/Library/Messages/chat.db"
+mkdir -p "$(dirname "$db")"
+touch "$db"
+pgrep() { return 1; }
+sqlite3() { :; }
+file() { echo "SQLite 3.x database"; }
+get_file_size() { echo 1024; }
+should_protect_path() { return 1; }
+run_with_timeout() {
+    case "$4" in
+        "PRAGMA page_count; PRAGMA freelist_count;") printf '100\n10\n' ;;
+        "PRAGMA integrity_check;") echo "ok" ;;
+        "VACUUM;") echo "VACUUM_CALLED" ;;
+        *) return 64 ;;
+    esac
+}
+
+execute_optimization sqlite_vacuum
+[[ "$(optimize_outcome_count applied)" == "1" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"VACUUM_CALLED"* ]] || return 1
+	[[ "$output" == *"Optimized 1 databases"* ]]
+}

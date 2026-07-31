@@ -695,20 +695,11 @@ clean_support_app_data() {
         safe_find_delete "$crash_reporter_dir" "*" "$support_age_days" "f" || true
     fi
 
-    # Keep recent wallpaper assets to avoid large re-downloads.
-    local idle_assets_dir="$HOME/Library/Application Support/com.apple.idleassetsd"
-    if [[ -d "$idle_assets_dir" && ! -L "$idle_assets_dir" ]]; then
-        safe_find_delete "$idle_assets_dir" "*" "$support_age_days" "f" || true
-    fi
-
-    # Clean system-level idle/aerial screensaver videos (macOS re-downloads as needed).
-    local sys_idle_assets_dir="/Library/Application Support/com.apple.idleassetsd/Customer"
-    # Skip sudo operations during tests to avoid password prompts
-    if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
-        if sudo -n test -d "$sys_idle_assets_dir" 2> /dev/null; then
-            safe_sudo_find_delete "$sys_idle_assets_dir" "*" "$support_age_days" "f" || true
-        fi
-    fi
+    # Do not sweep com.apple.idleassetsd here. It stores the aerial screen saver
+    # and dynamic wallpaper videos selected in System Settings. Those files are
+    # written at download time rather than touched while in use, so age cannot
+    # distinguish an active wallpaper from stale data. The shared path guard
+    # protects these assets alongside com.apple.wallpaper (#1118).
 
     # Do not touch Messages attachments, only preview/sticker caches.
     safe_clean ~/Library/Messages/StickerCache/* "Messages sticker cache"

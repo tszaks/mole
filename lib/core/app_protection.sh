@@ -22,6 +22,24 @@ fi
 # shellcheck source=lib/core/app_protection_data.sh
 source "$_MOLE_CORE_DIR/app_protection_data.sh"
 
+# Return success when Xcode/build tooling is active or process ownership cannot
+# be established. Cleanup callers may proceed only after every exact probe
+# returns pgrep's reliable no-match status (1).
+xcode_build_tooling_running() {
+    command -v pgrep > /dev/null 2>&1 || return 0
+
+    local process probe_status
+    for process in Xcode xcodebuild xctest XCTRunner XCBBuildService swift-frontend; do
+        if pgrep -x "$process" > /dev/null 2>&1; then
+            return 0
+        else
+            probe_status=$?
+            [[ $probe_status -eq 1 ]] || return 0
+        fi
+    done
+    return 1
+}
+
 # Centralized check for critical system components (case-insensitive)
 is_critical_system_component() {
     local token="$1"
@@ -311,6 +329,21 @@ should_protect_path() {
     [[ -z "$path" ]] && return 1
 
     local _container_cache_path=false
+    local _known_rebuildable_cache_path=false
+
+    # Codex Desktop keeps durable state under Application Support, but these
+    # exact Chromium cache leaves under Library/Caches are rebuildable. Only
+    # their children are eligible; the profile and leaf directories stay.
+    case "$path" in
+        "$HOME/Library/Caches/Codex/Default/Cache/"* | \
+            "$HOME/Library/Caches/Codex/Default/Code Cache/"* | \
+            "$HOME/Library/Caches/Codex/Default/Partitions/codex-browser-app/Cache/"* | \
+            "$HOME/Library/Caches/Codex/Default/Partitions/codex-browser-app/Code Cache/"* | \
+            "$HOME/Library/Caches/Codex/codex-browser-app/Cache/"* | \
+            "$HOME/Library/Caches/Codex/codex-browser-app/Code Cache/"*)
+            _known_rebuildable_cache_path=true
+            ;;
+    esac
 
     if is_orbstack_runtime_path "$path"; then
         return 0
@@ -465,6 +498,13 @@ should_protect_path() {
             */Library/Caches/com.apple.siriactionsd.ShortcutsSandboxCache | */Library/Caches/com.apple.siriactionsd.ShortcutsSandboxCache/*)
             return 0
             ;;
+        # Wallpaper and aerial screen saver assets are user-selected content.
+        # Their download-time mtime does not indicate whether they are active,
+        # and deleting them forces a large re-download and selection reset.
+        */Library/Application\ Support/com.apple.idleassetsd | */Library/Application\ Support/com.apple.idleassetsd/* | \
+            */Library/Application\ Support/com.apple.wallpaper | */Library/Application\ Support/com.apple.wallpaper/*)
+            return 0
+            ;;
         # CoreAudio and audio subsystem caches (issue #553)
         # Cleaning these can cause audio output loss on Intel Macs
         *com.apple.coreaudio* | *com.apple.audio.* | *coreaudiod*)
@@ -476,7 +516,7 @@ should_protect_path() {
     # This catches things like /Users/tw93/Library/Caches/Claude when pattern is *Claude*
     # Skip for container cache/tmp paths: bundle ID was already checked in step 3,
     # and critical containers are caught by steps 1/4/5.
-    if [[ "$_container_cache_path" != "true" ]]; then
+    if [[ "$_container_cache_path" != "true" && "$_known_rebuildable_cache_path" != "true" ]]; then
         if [[ "${MOLE_UNINSTALL_MODE:-0}" == "1" ]]; then
             # Uninstall mode: first check if it's an uninstallable Apple app
             for pattern in "${APPLE_UNINSTALLABLE_APPS[@]}"; do

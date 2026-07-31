@@ -27,7 +27,8 @@ setup() {
         echo "FATAL: HOME is not a test temp dir: $HOME"
         exit 1
     }
-    rm -rf "$HOME/.codex" "$HOME/.gemini" "$HOME/.claude" "$HOME/Library/Application Support/Claude"
+    rm -rf "$HOME/.codex" "$HOME/.gemini" "$HOME/.claude" \
+        "$HOME/Library/Application Support/Claude" "$HOME/Library/Caches/Codex"
 }
 
 assert_run_success() {
@@ -118,6 +119,186 @@ EOF
     assert_run_success
     assert_output_contains "Codex CLI state · skipped (Codex running)"
     assert_output_not_contains "SAFE_CLEAN:"
+}
+
+@test "clean_codex_desktop_caches removes only measured fixed cache leaves through the real sink" {
+    run env HOME="$HOME/codex-cache-positive" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+cache_root="$HOME/Library/Caches/Codex"
+support_root="$HOME/Library/Application Support/Codex"
+mkdir -p \
+    "$cache_root/Default/Cache" \
+    "$cache_root/Default/Code Cache" \
+    "$cache_root/Default/Partitions/codex-browser-app/Cache" \
+    "$cache_root/Default/Partitions/codex-browser-app/Code Cache" \
+    "$cache_root/codex-browser-app/Cache" \
+    "$cache_root/codex-browser-app/Code Cache" \
+    "$cache_root/Default/Local Storage" \
+    "$support_root/Default/Cache"
+touch \
+    "$cache_root/Default/Cache/default-cache.bin" \
+    "$cache_root/Default/Code Cache/default-code.bin" \
+    "$cache_root/Default/Partitions/codex-browser-app/Cache/partition-cache.bin" \
+    "$cache_root/Default/Partitions/codex-browser-app/Code Cache/partition-code.bin" \
+    "$cache_root/codex-browser-app/Cache/browser-cache.bin" \
+    "$cache_root/codex-browser-app/Code Cache/browser-code.bin" \
+    "$cache_root/Default/Local Storage/state.bin" \
+    "$support_root/Default/Cache/durable-state.bin"
+
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { return 1; }
+DRY_RUN=false
+MOLE_DRY_RUN=0
+clean_codex_desktop_caches
+
+for removed in \
+    "$cache_root/Default/Cache/default-cache.bin" \
+    "$cache_root/Default/Code Cache/default-code.bin" \
+    "$cache_root/Default/Partitions/codex-browser-app/Cache/partition-cache.bin" \
+    "$cache_root/Default/Partitions/codex-browser-app/Code Cache/partition-code.bin" \
+    "$cache_root/codex-browser-app/Cache/browser-cache.bin" \
+    "$cache_root/codex-browser-app/Code Cache/browser-code.bin"; do
+    [[ ! -e "$removed" ]] || { echo "STILL_PRESENT:$removed"; exit 1; }
+done
+[[ -f "$cache_root/Default/Local Storage/state.bin" ]] || exit 1
+[[ -f "$support_root/Default/Cache/durable-state.bin" ]] || exit 1
+echo "EXACT_LEAVES_CLEANED"
+EOF
+
+    assert_run_success
+    assert_output_contains "EXACT_LEAVES_CLEANED"
+    assert_output_not_contains "STILL_PRESENT:"
+}
+
+@test "clean_codex_desktop_caches skips while ChatGPT owns the Codex app cache" {
+    run env HOME="$HOME/codex-cache-running" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+target="$HOME/Library/Caches/Codex/Default/Cache/owned.bin"
+mkdir -p "$(dirname "$target")"
+touch "$target"
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { [[ "$1" == "-x" && "$2" == "ChatGPT" ]]; }
+clean_codex_desktop_caches
+[[ -f "$target" ]] || exit 1
+EOF
+
+    assert_run_success
+    assert_output_contains "Codex active or process state unknown"
+}
+
+@test "clean_codex_desktop_caches skips when its process probe fails" {
+    run env HOME="$HOME/codex-cache-probe-error" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+target="$HOME/Library/Caches/Codex/Default/Cache/owned.bin"
+mkdir -p "$(dirname "$target")"
+touch "$target"
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { return 2; }
+clean_codex_desktop_caches
+[[ -f "$target" ]] || exit 1
+EOF
+
+    assert_run_success
+    assert_output_contains "Codex active or process state unknown"
+}
+
+@test "clean_codex_desktop_caches skips when pgrep is unavailable" {
+    run env HOME="$HOME/codex-cache-probe-missing" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+target="$HOME/Library/Caches/Codex/Default/Cache/owned.bin"
+mkdir -p "$(dirname "$target")"
+touch "$target"
+source "$PROJECT_ROOT/bin/clean.sh"
+PATH=/nonexistent
+clean_codex_desktop_caches
+[[ -f "$target" ]] || exit 1
+EOF
+
+    assert_run_success
+    assert_output_contains "Codex active or process state unknown"
+}
+
+@test "clean_codex_desktop_caches rejects symlinked Library and Caches ancestors" {
+    run env HOME="$HOME/codex-cache-ancestor-links" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+for component in Library Caches; do
+    case_home="$HOME/$component-case"
+    outside="$case_home/outside"
+    if [[ "$component" == "Library" ]]; then
+        target="$outside/Caches/Codex/Default/Cache/external.bin"
+        mkdir -p "$(dirname "$target")" "$case_home"
+        ln -s "$outside" "$case_home/Library"
+    else
+        target="$outside/Codex/Default/Cache/external.bin"
+        mkdir -p "$(dirname "$target")" "$case_home/Library"
+        ln -s "$outside" "$case_home/Library/Caches"
+    fi
+    touch "$target"
+    CASE_HOME="$case_home" TARGET="$target" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+HOME="$CASE_HOME"
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { return 1; }
+clean_codex_desktop_caches
+[[ -f "$TARGET" ]] || exit 1
+INNER
+done
+EOF
+
+    assert_run_success
+}
+
+@test "clean_codex_desktop_caches rejects a symlinked Codex root" {
+    run env HOME="$HOME/codex-cache-root-link" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+outside="$HOME/outside-codex"
+target="$outside/Default/Cache/external.bin"
+mkdir -p "$(dirname "$target")" "$HOME/Library/Caches"
+touch "$target"
+ln -s "$outside" "$HOME/Library/Caches/Codex"
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { return 1; }
+clean_codex_desktop_caches
+[[ -f "$target" ]] || exit 1
+EOF
+
+    assert_run_success
+}
+
+@test "clean_codex_desktop_caches rejects a symlinked fixed profile" {
+    run env HOME="$HOME/codex-cache-profile-link" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+cache_root="$HOME/Library/Caches/Codex"
+outside="$HOME/outside-profile"
+target="$outside/Cache/external.bin"
+mkdir -p "$(dirname "$target")" "$cache_root"
+touch "$target"
+ln -s "$outside" "$cache_root/codex-browser-app"
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { return 1; }
+clean_codex_desktop_caches
+[[ -f "$target" ]] || exit 1
+EOF
+
+    assert_run_success
+}
+
+@test "clean_codex_desktop_caches rejects a symlinked cache leaf" {
+    run env HOME="$HOME/codex-cache-leaf-link" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+profile="$HOME/Library/Caches/Codex/Default"
+outside="$HOME/outside-leaf"
+target="$outside/external.bin"
+mkdir -p "$profile" "$outside"
+touch "$target"
+ln -s "$outside" "$profile/Cache"
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { return 1; }
+clean_codex_desktop_caches
+[[ -f "$target" ]] || exit 1
+EOF
+
+    assert_run_success
 }
 
 @test "clean_antigravity_caches cleans antigravity browser caches" {
@@ -226,6 +407,7 @@ safe_find_delete() { :; }
 clean_service_worker_cache() { :; }
 clean_codex_runtimes() { :; }
 clean_codex_desktop_staging() { echo "CODEX_STAGING_CALLED"; }
+clean_codex_desktop_caches() { echo "CODEX_CACHE_CALLED"; }
 note_activity() { :; }
 clean_codex_cli() { echo "CODEX_CLI_CALLED"; }
 clean_antigravity_caches() { echo "ANTIGRAVITY_CALLED"; }
@@ -234,6 +416,7 @@ EOF
 
     assert_run_success
     assert_output_contains "CODEX_CLI_CALLED"
+    assert_output_contains "CODEX_CACHE_CALLED"
     assert_output_contains "CODEX_STAGING_CALLED"
     assert_output_contains "ANTIGRAVITY_CALLED"
 }

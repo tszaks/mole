@@ -229,6 +229,63 @@ EOF
     [ "$result" = "protected" ]
 }
 
+@test "should_protect_path protects wallpaper and aerial assets" {
+    local path result
+    for path in \
+        "$HOME/Library/Application Support/com.apple.idleassetsd" \
+        "$HOME/Library/Application Support/com.apple.idleassetsd/Customer/video.mov" \
+        "/Library/Application Support/com.apple.idleassetsd/Customer/video.mov" \
+        "$HOME/Library/Application Support/com.apple.wallpaper/aerials/video.mov" \
+        "$HOME/Library/Application Support/com.apple.wallpaper/aerials/thumbnails/video.png"; do
+        result=$(HOME="$HOME" TARGET_PATH="$path" /bin/bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo protected || echo unprotected')
+        [ "$result" = "protected" ] || return 1
+    done
+
+    path="$HOME/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/rebuildable.bin"
+    result=$(HOME="$HOME" TARGET_PATH="$path" /bin/bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; should_protect_path "$TARGET_PATH" && echo protected || echo unprotected')
+    [ "$result" = "unprotected" ]
+}
+
+@test "xcode_build_tooling_running recognizes command-line build owners" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+pgrep() {
+    [[ "$1" == "-x" && "$2" == "xcodebuild" ]]
+}
+xcode_build_tooling_running
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "xcode_build_tooling_running fails closed on probe errors and missing pgrep" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+pgrep() { return 2; }
+xcode_build_tooling_running || exit 1
+unset -f pgrep
+PATH=/nonexistent
+xcode_build_tooling_running || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "xcode_build_tooling_running permits cleanup only after reliable no-match results" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+pgrep() { return 1; }
+if xcode_build_tooling_running; then
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
 @test "rotate_log_once only checks log size once per session" {
     local log_file="$HOME/Library/Logs/mole/mole.log"
     mkdir -p "$(dirname "$log_file")"

@@ -4,6 +4,7 @@ set -euo pipefail
 
 readonly ORPHAN_AGE_THRESHOLD=${ORPHAN_AGE_THRESHOLD:-${MOLE_ORPHAN_AGE_DAYS:-30}}
 readonly CLAUDE_VM_ORPHAN_AGE_THRESHOLD=${MOLE_CLAUDE_VM_ORPHAN_AGE_DAYS:-7}
+readonly INSTALLED_APPS_CACHE_COMPLETE_MARKER="# mole-installed-apps-cache:v2:complete"
 # Args: $1=target_dir, $2=label
 clean_ds_store_tree() {
     local target="$1"
@@ -66,22 +67,73 @@ clean_ds_store_tree() {
         note_activity
     fi
 }
+publish_installed_apps_cache() {
+    local installed_bundles="$1"
+    local cache_file="$2"
+    local cache_dir
+    cache_dir=$(dirname "$cache_file")
+
+    ensure_user_dir "$cache_dir"
+    [[ -d "$cache_dir" ]] || return 1
+
+    # The staging file must share the cache filesystem so rename is atomic.
+    local cache_stage=""
+    if ! cache_stage=$(mktemp "${cache_file}.tmp.XXXXXX" 2> /dev/null); then
+        return 1
+    fi
+    if ! command cat "$installed_bundles" > "$cache_stage" 2> /dev/null; then
+        command rm -f "$cache_stage" 2> /dev/null || true # SAFE: This function created the same-directory cache staging file.
+        return 1
+    fi
+    if ! printf '%s\n' "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" >> "$cache_stage"; then
+        command rm -f "$cache_stage" 2> /dev/null || true # SAFE: This function created the same-directory cache staging file.
+        return 1
+    fi
+    if ! mv -f "$cache_stage" "$cache_file" 2> /dev/null; then
+        command rm -f "$cache_stage" 2> /dev/null || true # SAFE: This function created the same-directory cache staging file.
+        return 1
+    fi
+    ensure_user_file "$cache_file"
+    return 0
+}
+
 # Orphaned app data (30+ days inactive). Env: ORPHAN_AGE_THRESHOLD, DRY_RUN
 # Usage: scan_installed_apps "output_file"
 scan_installed_apps() {
     local installed_bundles="$1"
-    # Cache installed app scan briefly to speed repeated runs.
+    # Cache installed app scans briefly. Only a current-schema file with the
+    # completeness footer can authorize orphan decisions.
     local cache_file="$HOME/.cache/mole/installed_apps_cache"
     local cache_age_seconds=300 # 5 minutes
     if [[ -f "$cache_file" ]]; then
-        local cache_mtime=$(get_file_mtime "$cache_file")
-        local current_time
+        local cache_mtime=""
+        local current_time=""
+        local age=""
+        cache_mtime=$(get_file_mtime "$cache_file" 2> /dev/null || true)
         current_time=$(get_epoch_seconds)
-        local age=$((current_time - cache_mtime))
-        if [[ $age -lt $cache_age_seconds ]]; then
+        if [[ "$cache_mtime" =~ ^[0-9]+$ && "$current_time" =~ ^[0-9]+$ ]]; then
+            age=$((current_time - cache_mtime))
+        fi
+        if [[ "$age" =~ ^[0-9]+$ && $age -ge 0 && $age -lt $cache_age_seconds ]]; then
             debug_log "Using cached app list, age: ${age}s"
             if [[ -r "$cache_file" ]] && [[ -s "$cache_file" ]]; then
-                if cat "$cache_file" > "$installed_bundles" 2> /dev/null; then
+                local cache_footer=""
+                local cached_bundles=""
+                cache_footer=$(tail -n 1 "$cache_file" 2> /dev/null || true)
+                if [[ "$cache_footer" != "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" ]]; then
+                    debug_log "Warning: Installed app cache is incomplete or from an older schema, rebuilding"
+                elif cached_bundles=$(sed '$d' "$cache_file" 2> /dev/null); then
+                    if [[ -n "$cached_bundles" ]]; then
+                        if ! printf '%s\n' "$cached_bundles" > "$installed_bundles"; then
+                            debug_log "Failed to copy installed application cache into scan output"
+                            return 1
+                        fi
+                    else
+                        if ! : > "$installed_bundles"; then
+                            debug_log "Failed to initialize installed application scan output from cache"
+                            return 1
+                        fi
+                    fi
                     return 0
                 else
                     debug_log "Warning: Failed to read cache, rebuilding"
@@ -92,6 +144,10 @@ scan_installed_apps() {
         fi
     fi
     debug_log "Scanning installed applications, cache expired or missing"
+    if ! : > "$installed_bundles"; then
+        debug_log "Failed to initialize installed application scan output"
+        return 1
+    fi
     local -a app_dirs=(
         "/Applications"
         "/System/Applications"
@@ -178,8 +234,11 @@ scan_installed_apps() {
         debug_log "Failed to normalize installed application scan results"
         return 1
     fi
-    ensure_user_dir "$(dirname "$cache_file")"
-    cp "$installed_bundles" "$cache_file" 2> /dev/null || true
+    local cache_publish_status=0
+    publish_installed_apps_cache "$installed_bundles" "$cache_file" || cache_publish_status=$?
+    if [[ $cache_publish_status -ne 0 ]]; then
+        debug_log "Warning: Failed to publish installed application cache; using current scan"
+    fi
     local app_count=$(wc -l < "$installed_bundles" 2> /dev/null | tr -d ' ')
     debug_log "Scanned $app_count unique applications"
 }

@@ -367,6 +367,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+pgrep() { return 1; }
 export PATH="/nonexistent"
 execute_optimization sqlite_vacuum
 EOF
