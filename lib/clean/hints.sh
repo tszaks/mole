@@ -606,7 +606,7 @@ show_user_launch_agent_hint_notice() {
     [[ -d "$launch_agents_dir" ]] || return 0
 
     local max_hits=3
-    local -a labels=()
+    local -a sources=()
     local -a reasons=()
     local -a targets=()
     local plist
@@ -650,23 +650,23 @@ show_user_launch_agent_hint_notice() {
         fi
 
         if [[ -n "$reason" ]]; then
-            labels+=("$filename")
+            sources+=("${plist/#$HOME/~}")
             reasons+=("$reason")
             targets+=("$target")
-            if [[ ${#labels[@]} -ge $max_hits ]]; then
+            if [[ ${#sources[@]} -ge $max_hits ]]; then
                 break
             fi
         fi
     done < <(find "$launch_agents_dir" -maxdepth 1 -name "*.plist" -print0 2> /dev/null)
 
     stop_section_spinner
-    [[ ${#labels[@]} -eq 0 ]] && return 0
+    [[ ${#sources[@]} -eq 0 ]] && return 0
 
     note_activity
 
     local i
-    for i in "${!labels[@]}"; do
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Stale login item · ${labels[$i]} · ${GRAY}${reasons[$i]}: ${targets[$i]}${NC}"
+    for i in "${!sources[@]}"; do
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Stale login item · ${sources[$i]} · ${GRAY}${reasons[$i]}: ${targets[$i]} · review before removing${NC}"
     done
 }
 

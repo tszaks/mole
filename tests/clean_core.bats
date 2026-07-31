@@ -479,7 +479,8 @@ PLIST
     run env HOME="$HOME" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 \
         PATH="$MOCK_TOOLCHAIN_BIN:$PATH" "$PROJECT_ROOT/mole" clean --dry-run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Stale login item · com.example.stale.plist"* ]] || return 1
+    [[ "$output" == *"Stale login item · ~/Library/LaunchAgents/com.example.stale.plist"* ]] || return 1
+    [[ "$output" == *"review before removing"* ]] || return 1
     [ -f "$HOME/Library/LaunchAgents/com.example.stale.plist" ]
 }
 

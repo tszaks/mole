@@ -250,8 +250,9 @@ show_user_launch_agent_hint_notice
 EOT4
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Stale login item · com.example.stale.plist"* ]] || return 1
-    [[ "$output" == *"Missing app/helper target"* ]] || return 1
+	[[ "$output" == *"Stale login item · ~/Library/LaunchAgents/com.example.stale.plist"* ]] || return 1
+	[[ "$output" == *"Missing app/helper target"* ]] || return 1
+	[[ "$output" == *"review before removing"* ]] || return 1
 }
 
 @test "show_user_launch_agent_hint_notice trusts an existing executable Program target (#1262)" {
@@ -298,7 +299,7 @@ show_user_launch_agent_hint_notice
 EOT4A
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Stale login item · com.google.GoogleUpdater.wake.plist"* ]] || return 1
+	[[ "$output" == *"Stale login item · ~/Library/LaunchAgents/com.google.GoogleUpdater.wake.plist"* ]] || return 1
     [[ "$output" == *"Program target is not executable"* ]] || return 1
     [[ "$output" == *"Missing app/helper target"* ]] || return 1
 }
@@ -332,7 +333,7 @@ show_user_launch_agent_hint_notice
 EOT4B
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Stale login item · com.example.program-precedence.plist"* ]] || return 1
+	[[ "$output" == *"Stale login item · ~/Library/LaunchAgents/com.example.program-precedence.plist"* ]] || return 1
     [[ "$output" == *"Missing app/helper target"* ]] || return 1
 }
 
