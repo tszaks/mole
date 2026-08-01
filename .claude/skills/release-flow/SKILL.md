@@ -1,6 +1,6 @@
 ---
 name: release-flow
-description: "Mole CLI release runbook: distribution channels, pre-flight checklist, capital-V tag publish, curated notes handoff, and release-only pitfalls. Read before any release-flavored task in this repo."
+description: "Mole CLI release runbook for distribution channels, pre-flight checks, capital-V tags, artifacts, and curated-note handoff. Use when assessing or executing a Mole release. Not for release-note copy alone or ordinary code review."
 ---
 
 # Mole CLI Release Flow
@@ -57,4 +57,4 @@ Format rules (impact ordering, command existence checks, icon semantics, no em d
 - **Old clients fetch `install.sh` from the release tag, not from main**: a self-updating Mole downloads `raw.githubusercontent.com/tw93/mole/V<tag>/install.sh`, and tag content is immutable. An installer/updater bug therefore reaches existing stable users only through a new tag; fixing main changes Nightly but does not repair an already published stable updater.
 - **Pulling and re-releasing a version**: `gh release delete V<old> --cleanup-tag` removes the release and remote tag. Delete the local tag, close the superseded Homebrew core PR with a one-line supersede comment before pushing the replacement tag (an open PR for the same formula can block `brew bump-formula-pr`), then bump `VERSION` and `SECURITY_AUDIT.md`, commit `release: V<new>`, tag, and run the normal publish flow. The Homebrew core PR regenerates on the new tag.
 
-Shell and bats pitfalls (bash 3.2 arrays, heredoc `read -n1`, mock bypasses, CI runner quirks) stay in `AGENTS.md` under "Shell and Test Pitfalls"; re-read that section when release work touches shell code or tests.
+When release work touches Shell code or tests, read `.claude/skills/bugs/references/shell-and-test-pitfalls.md` for Bash 3.2 arrays, heredoc input, mock bypasses, and CI-runner quirks.

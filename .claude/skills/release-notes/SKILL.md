@@ -1,6 +1,6 @@
 ---
 name: release-notes
-description: Publish curated release notes for a Mole `V<version>` tag. Encodes the compact bilingual format, the gh release edit (not create) flow, reporter/contributor thanks, and the six-reaction set. User-only because publishing is a side effect that touches the public release page.
+description: Publish curated release notes for an existing Mole `V<version>` tag, including bilingual format, `gh release edit`, contributor thanks, and reactions. Use only when explicitly asked to edit or publish Mole release notes. Not for release readiness, tagging, or code review.
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: bugs
-description: "Mole's own defect catalog, mined from 656 fix commits: the eleven bug shapes that actually recur in this repo, the grep probe that surfaces each, and the guard that keeps it from coming back. Read before reviewing a diff, auditing an area, debugging a report, or accepting a contributed PR in this repo."
+description: "Mole's project-specific defect catalog: eleven recurring bug shapes, grep probes, and regression guards. Use when reviewing, auditing, debugging, or accepting a contributed PR in Mole. Not for generic review workflow or unrelated repositories."
 ---
 
 # Mole bug patterns
@@ -103,7 +103,7 @@ done
 
 ### 5. bash 3.2, errexit, pipefail semantics
 
-macOS ships bash 3.2.57 and the shipped code runs under `set -u`. Sixteen fixes are pure shell semantics. The cumulative list lives in `AGENTS.md` under "Shell and Test Pitfalls"; read it rather than duplicating it here. The two highest-frequency shapes:
+macOS ships bash 3.2.57 and the shipped code runs under `set -u`. Sixteen fixes are pure shell semantics. Read [references/shell-and-test-pitfalls.md](references/shell-and-test-pitfalls.md) before changing Shell code, Bats tests, install/update flows, timeout wrappers, TTY handling, plist fixtures, or macOS-specific CI behavior. The two highest-frequency shapes:
 
 - **Empty array expansion under nounset.** `"${arr[@]}"` on an empty array aborts. When it aborts inside a scan, the spinner subshell is orphaned and the user sees "scanning forever" (`893b4e6f`, `2c06cb91`). Guard with `[[ ${#arr[@]} -gt 0 ]]`.
 - **`fn || handler` disables errexit inside `fn` for its whole body**, converting every unchecked failure into a no-op. That is how eight consecutive failed copies still reported a successful install. Safety-critical steps use explicit `if ! cmd; then return 1; fi`.

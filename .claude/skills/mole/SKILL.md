@@ -1,6 +1,6 @@
 ---
 name: mole
-description: "Drive the Mole CLI (`mo`) safely from an agent: which command answers which question, the machine-readable surfaces (analyze --json, history --json, the dry-run path list), and the rules that keep an automated run from deleting something the user wanted. Read before running any `mo` command on a user's Mac."
+description: "Drive the installed Mole CLI (`mo`) safely, including machine-readable status, analysis, history, and dry-run surfaces. Use before running `mo` on a user's Mac. Not for editing or reviewing Mole source code."
 ---
 
 # Using Mole from an agent
