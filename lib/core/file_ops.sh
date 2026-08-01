@@ -622,7 +622,7 @@ _mole_privileged_path_has_mutable_ancestor() {
                 # Under `sudo mo`, the shell's -w probe reflects root rather
                 # than the invoking user. Drop authority for the ACL check so
                 # immutable system parents do not become false positives.
-                sudo -n -u "#$invoking_uid" /usr/bin/test -w "$probe" 2> /dev/null && return 0
+                sudo -n -u "#$invoking_uid" /bin/test -w "$probe" 2> /dev/null && return 0
             else
                 return 0
             fi

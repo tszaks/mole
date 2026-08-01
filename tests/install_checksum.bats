@@ -28,7 +28,7 @@ setup() {
 	fi
 	rm -rf "${HOME:?}"/*
 	mkdir -p "$HOME/source" "$HOME/config/bin" "$HOME/install"
-	cat > "$HOME/source/mole" <<'MOLE'
+	cat > "$HOME/source/mole" << 'MOLE'
 VERSION="1.2.3"
 MOLE
 }
@@ -40,7 +40,7 @@ load_installer_binary_helpers() {
 export -f load_installer_binary_helpers
 
 @test "download_binary installs release asset only after checksum verification" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -93,7 +93,7 @@ EOF
 }
 
 @test "download_binary retries transient asset and checksum failures" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -159,7 +159,7 @@ EOF
 }
 
 @test "download_binary aborts on checksum mismatch without downgrading to a source build" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -227,7 +227,7 @@ EOF
 }
 
 @test "download_binary preserves the installed helper when verification and rebuild fail (#1193)" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -282,7 +282,7 @@ EOF
 }
 
 @test "download_binary aborts when SHA256SUMS has no matching asset entry" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -343,7 +343,7 @@ EOF
 }
 
 @test "download_binary aborts when SHA256SUMS cannot be downloaded" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -401,7 +401,7 @@ EOF
 }
 
 @test "download_binary verifies fallback release asset against fallback checksums" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -452,7 +452,7 @@ EOF
 }
 
 @test "download_binary aborts on fallback-tag checksum mismatch without a source build" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -516,7 +516,6 @@ EOF
 	[[ "$output" == *"aborting instead of falling back"* ]] || return 1
 }
 
-
 @test "install_files fails closed when sudo is unavailable, even under || caller (#update-incident)" {
 	# Old moles invoke `install_files || {...}`, which disables errexit inside
 	# the function. Uncached `sudo -n` then failed on every copy while the
@@ -524,7 +523,7 @@ EOF
 	# ("Updated to latest version, 1.45.0" while fetching V1.47.0).
 	# MOLE_TEST_NO_AUTH must not leak in: it would take the blocked-in-test-mode
 	# branch instead of the real ensure_sudo_ready gate. sudo is a function mock.
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=0 MOLE_TEST_MODE=0 /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=0 MOLE_TEST_MODE=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 eval "$(sed -n '/^needs_sudo() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
@@ -567,7 +566,7 @@ EOF
 }
 
 @test "verify_installation rejects a stale entry script after an update (#update-incident)" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -uo pipefail
 
 eval "$(sed -n '/^get_source_version() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
@@ -601,11 +600,204 @@ EOF
 	[[ "$output" == *"1.45.0"* && "$output" == *"1.47.0"* ]] || return 1
 }
 
+@test "installer bounds installed binary version and help probes" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+INSTALL_DIR="$HOME/install/bin"
+CONFIG_DIR="$HOME/install/config"
+fake_bin="$HOME/fake-bin"
+trace="$HOME/probe.trace"
+mkdir -p "$INSTALL_DIR" "$CONFIG_DIR/lib/core" "$fake_bin"
+: > "$CONFIG_DIR/lib/core/common.sh"
+
+cat > "$INSTALL_DIR/mole" <<'MOLE'
+#!/bin/bash
+VERSION="9.9.9"
+sleep 3
+MOLE
+chmod +x "$INSTALL_DIR/mole"
+
+cat > "$fake_bin/gtimeout" <<'TIMEOUT'
+#!/bin/bash
+printf '%s|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" "$5" >> "$PROBE_TRACE"
+exit 124
+TIMEOUT
+chmod +x "$fake_bin/gtimeout"
+
+export PATH="$fake_bin:/usr/bin:/bin"
+export PROBE_TRACE="$trace"
+eval "$(sed -n '/^run_install_probe_with_timeout() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^get_installed_version() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^verify_installation() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+get_source_version() { printf '9.9.9\n'; }
+log_error() { printf 'ERROR:%s\n' "$*"; }
+log_warning() { printf 'WARNING:%s\n' "$*"; }
+
+[[ "$(get_installed_version)" == "9.9.9" ]] || exit 1
+if verify_installation; then
+	echo "UNEXPECTED_HELP_PROBE_SUCCESS"
+	exit 1
+fi
+grep -qF -- "-k|1|5|$INSTALL_DIR/mole|--version" "$trace"
+grep -qF -- "-k|1|5|$INSTALL_DIR/mole|--help" "$trace"
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"UNEXPECTED_HELP_PROBE_SUCCESS"* ]]
+}
+
+@test "installer shell fallback stops TERM-ignoring verification probes" {
+	local timeout_cmd="timeout"
+	command -v timeout > /dev/null 2>&1 || timeout_cmd="gtimeout"
+	command -v "$timeout_cmd" > /dev/null 2>&1 || skip "timeout command unavailable"
+
+	run "$timeout_cmd" 3 env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+eval "$(sed -n '/^run_install_probe_with_timeout() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+run_install_probe_with_timeout 1 /bin/bash -c 'exit 0' || {
+	echo "UNEXPECTED_FAST_PROBE_FAILURE"
+	exit 1
+}
+if run_install_probe_with_timeout 0.1 /bin/bash -c 'trap "" TERM; sleep 5 & wait'; then
+	echo "UNEXPECTED_PROBE_SUCCESS"
+	exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"UNEXPECTED_FAST_PROBE_FAILURE"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_PROBE_SUCCESS"* ]]
+}
+
+@test "standalone installer serializes writers with the stable install lock" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+INSTALL_DIR="$HOME/install/bin"
+INSTALL_LOCK_PATH=""
+INSTALL_LOCK_CONTROL=""
+INSTALL_LOCK_HOLDER_PID=""
+mkdir -p "$INSTALL_DIR"
+
+acl_rule="everyone allow list,add_file,search,add_subdirectory,delete_child,file_inherit,directory_inherit"
+/bin/chmod +a "$acl_rule" "$INSTALL_DIR"
+/bin/mkdir -m 0700 "$INSTALL_DIR/acl-probe"
+/bin/ls -lde "$INSTALL_DIR/acl-probe" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'
+/bin/rmdir "$INSTALL_DIR/acl-probe"
+
+eval "$(sed -n '/^safe_rm() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^needs_sudo() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^ensure_sudo_ready() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^maybe_sudo() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^install_lock_has_unsafe_ancestor() {/,/^get_remote_main_commit_hash() {/p' "$PROJECT_ROOT/install.sh" | sed '$d')"
+log_error() { printf 'ERROR:%s\n' "$*"; }
+
+if acquire_install_lock; then
+	echo "UNEXPECTED_WRITABLE_PARENT_ACL_ACCEPTED"
+	exit 1
+fi
+/bin/chmod -N "$INSTALL_DIR"
+acl_rule="everyone deny writeattr,file_inherit,directory_inherit"
+/bin/chmod +a "$acl_rule" "$INSTALL_DIR"
+acquire_install_lock
+lock_path="$INSTALL_DIR/.mole-update.lock/kernel.lock"
+[[ "$INSTALL_LOCK_PATH" == "$lock_path" ]] || exit 1
+if /bin/ls -lde "$INSTALL_DIR/.mole-update.lock" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
+	echo "UNEXPECTED_INHERITED_INSTALL_LOCK_ACL"
+	exit 1
+fi
+if acquire_install_lock; then
+	echo "UNEXPECTED_CONCURRENT_INSTALL_LOCK"
+	exit 1
+fi
+release_install_lock
+[[ -f "$lock_path" ]] || exit 1
+
+/usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sleep 0.3 &
+external_holder=$!
+/bin/sleep 0.05
+if acquire_install_lock; then
+	echo "UNEXPECTED_EXTERNAL_LOCK_BYPASS"
+	exit 1
+fi
+wait "$external_holder"
+acquire_install_lock
+release_install_lock
+[[ -f "$lock_path" ]] || exit 1
+
+victim="$HOME/lock-symlink-victim"
+printf 'DO-NOT-TOUCH\n' > "$victim"
+/bin/rm -f "$lock_path"
+ln -s "$victim" "$lock_path"
+if acquire_install_lock; then
+	echo "UNEXPECTED_LOCK_SYMLINK_FOLLOW"
+	exit 1
+fi
+[[ "$(cat "$victim")" == "DO-NOT-TOUCH" ]] || exit 1
+unlink "$lock_path"
+mkfifo "$lock_path"
+if acquire_install_lock; then
+	echo "UNEXPECTED_LOCK_FIFO_OPEN"
+	exit 1
+fi
+unlink "$lock_path"
+acquire_install_lock
+release_install_lock
+! compgen -G "$INSTALL_DIR/.mole-update.lock/control.*" > /dev/null
+
+declare -f acquire_install_lock | grep -q '/usr/bin/lockf'
+! grep -q 'trap cleanup_tmp EXIT' "$PROJECT_ROOT/install.sh"
+grep -q "trap 'cleanup_installer' EXIT" "$PROJECT_ROOT/install.sh"
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"UNEXPECTED_CONCURRENT_INSTALL_LOCK"* ]]
+	[[ "$output" != *"UNEXPECTED_EXTERNAL_LOCK_BYPASS"* ]]
+	[[ "$output" != *"UNEXPECTED_LOCK_SYMLINK_FOLLOW"* ]]
+	[[ "$output" != *"UNEXPECTED_LOCK_FIFO_OPEN"* ]]
+	[[ "$output" != *"UNEXPECTED_INHERITED_INSTALL_LOCK_ACL"* ]]
+	[[ "$output" != *"UNEXPECTED_WRITABLE_PARENT_ACL_ACCEPTED"* ]]
+}
+
+@test "standalone installer normalizes a relative prefix before lock validation" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+cd "$HOME"
+INSTALL_DIR="relative/bin"
+mkdir -p "$INSTALL_DIR"
+
+eval "$(sed -n '/^safe_rm() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^install_lock_has_unsafe_ancestor() {/,/^install_lock_process_start() {/p' "$PROJECT_ROOT/install.sh" | sed '$d')"
+eval "$(sed -n '/^normalize_install_dir() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+
+normalize_install_dir
+[[ "$INSTALL_DIR" == "$(pwd -P)/relative/bin" ]] || exit 1
+if install_lock_has_unsafe_ancestor false; then
+    echo "UNEXPECTED_RELATIVE_PREFIX_REJECTED_AFTER_NORMALIZATION"
+    exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"UNEXPECTED_RELATIVE_PREFIX_REJECTED_AFTER_NORMALIZATION"* ]]
+}
+
 @test "write_install_channel_metadata succeeds for stable channel with empty commit hash" {
 	# Regression: the previous `[[ -n "$h" ]] && printf` form returned 1
 	# whenever the commit hash was empty (always the case on stable), making
 	# the block redirect look like an I/O failure and tripping the warning.
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CONFIG_DIR="$HOME/config"
 mkdir -p "$CONFIG_DIR"
@@ -620,11 +812,17 @@ grep -q '^CHANNEL=stable$' "$CONFIG_DIR/install_channel" || { echo "WRONG: chann
 grep -q '^COMMIT_HASH=' "$CONFIG_DIR/install_channel" && { echo "WRONG: commit hash leaked"; exit 1; }
 
 # Nightly path with a commit hash should still work.
-if ! write_install_channel_metadata "nightly" "deadbeef"; then
+if ! write_install_channel_metadata "nightly" "deadbeef" "heal-123-456-789"; then
 	echo "WRONG: nightly write failed"; exit 1
 fi
 grep -q '^CHANNEL=nightly$' "$CONFIG_DIR/install_channel" || { echo "WRONG: nightly channel"; exit 1; }
 grep -q '^COMMIT_HASH=deadbeef$' "$CONFIG_DIR/install_channel" || { echo "WRONG: nightly commit"; exit 1; }
+grep -q '^INSTALL_RECEIPT=heal-123-456-789$' "$CONFIG_DIR/install_channel" || { echo "WRONG: install receipt missing"; exit 1; }
+
+if write_install_channel_metadata "nightly" "badcafe" $'heal-valid\nCOMMIT_HASH=forged'; then
+	echo "WRONG: malformed receipt accepted"; exit 1
+fi
+grep -q '^COMMIT_HASH=deadbeef$' "$CONFIG_DIR/install_channel" || { echo "WRONG: rejected receipt changed metadata"; exit 1; }
 
 # No leftover temp files.
 if ls "$CONFIG_DIR"/install_channel.?????? 2>/dev/null | grep -q .; then
@@ -635,8 +833,26 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "main source archives are pinned when a commit is known" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+eval "$(sed -n '/^source_archive_url()/,/^}/p' "$PROJECT_ROOT/install.sh")"
+
+commit="0123456789abcdef0123456789abcdef01234567"
+[[ "$(source_archive_url main "$commit")" == "https://github.com/tw93/mole/archive/$commit.tar.gz" ]] || exit 1
+[[ "$(source_archive_url main "")" == "https://github.com/tw93/mole/archive/refs/heads/main.tar.gz" ]] || exit 1
+[[ "$(source_archive_url dev "")" == "https://github.com/tw93/mole/archive/refs/heads/dev.tar.gz" ]] || exit 1
+[[ "$(source_archive_url V1.2.3 "")" == "https://github.com/tw93/mole/archive/refs/tags/V1.2.3.tar.gz" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+}
+
 @test "verify_release_attestation maps gh availability and result to 2/0/1" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 eval "$(sed -n '/^verify_release_attestation()/,/^}/p' "$PROJECT_ROOT/install.sh")"
@@ -676,7 +892,7 @@ EOF
 }
 
 @test "verify_release_asset_checksum enforces attestation policy gate" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 eval "$(sed -n '/^extract_release_checksum()/,/^}/p' "$PROJECT_ROOT/install.sh")"

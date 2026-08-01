@@ -69,7 +69,7 @@ Protection that lives at the call site instead of in the funnel will be missing 
 - `should_protect_path` ran only inside the real-clean branch, so `--dry-run` promised to remove files the real run silently skipped (`cfe14601`).
 - The user whitelist was consulted per caller, so `clean_user_caches` simply forgot it. The fix hoisted the check into `safe_find_delete` and `safe_sudo_find_delete` next to the existing protection gate, so future callers get it for free (`5498edd1`).
 - A Raycast v2 exclusion existed in one place but not in the `find` predicates that actually ran (`452e194d`).
-- `_safe_clean_impl` ran its delete guard only on the real branch, so dry-run previewed (and counted) items an active-process guard would refuse at the same moment. The fix consults the guard once before any preview registration (`3f42ad39`).
+- `_safe_clean_impl` ran its delete guard only on the real branch, so dry-run previewed (and counted) items an active-process guard would refuse at the same moment. The guard must run after protected, whitelisted, compiled-cache, and missing targets are filtered, but before any preview registration; otherwise dry-run can report a stopped cleanup whose real candidate set is empty (`3f42ad39`).
 
 The method: enumerate every caller of each protection helper, then every deletion site, and diff the two lists. The gap is the bug. Then check dry-run and real paths compute the same verdict, and prefer moving the guard into `validate_path_for_deletion` / `should_protect_path` over adding a fourth call site.
 
@@ -78,6 +78,8 @@ The method: enumerate every caller of each protection helper, then every deletio
 `du`, `mdfind`, `find`, `xcrun simctl`, and `brew` have no internal bound, and the caller usually pipes them into a command substitution that just waits. One stalled SMB mount wedges the whole scan.
 
 Every production `du -s` site should route through the timeout wrapper. `tests/core_timeout.bats` pins that with a source-invariant test; copy the shape for any new unbounded command.
+
+Installed-binary verification is the same class: every post-update `mo --version` or `"$mole_path" --version` probe must use `run_with_timeout` with `MOLE_TIMEOUT_QUICK_DETECT_SEC`, and standalone `install.sh` must use its bounded local wrapper for both `--version` and `--help`. A broken executable is exactly when a verification probe is most likely to hang. The update entrypoint also stays single-flight per install directory; otherwise one process can verify another process's metadata or binary generation. Standalone install and self-heal verification share the same target-adjacent `/usr/bin/lockf`; keep the kernel lock held by a parent-liveness-bound process instead of replacing it with a check-then-remove shell sequence.
 
 Two subtler variants:
 

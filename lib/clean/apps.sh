@@ -262,9 +262,11 @@ scan_installed_apps() {
         # without --debug. Workers append before exiting nonzero.
         MOLE_APP_SCAN_FAILURE_DETAIL=""
         if [[ -s "$scan_tmp_dir/scan_failures.list" ]]; then
-            MOLE_APP_SCAN_FAILURE_DETAIL=$(head -1 "$scan_tmp_dir/scan_failures.list")
+            local raw_failure_detail=""
+            raw_failure_detail=$(head -1 "$scan_tmp_dir/scan_failures.list")
+            MOLE_APP_SCAN_FAILURE_DETAIL=$(mole_terminal_safe_text "${raw_failure_detail##*/}")
         fi
-        debug_log "Failed to scan one or more installed application directories${MOLE_APP_SCAN_FAILURE_DETAIL:+: $MOLE_APP_SCAN_FAILURE_DETAIL}"
+        debug_log "Failed to scan one or more installed application directories"
         return 1
     fi
     if ! cat "$scan_tmp_dir"/*.txt >> "$installed_bundles" 2> /dev/null; then
@@ -473,7 +475,8 @@ clean_orphaned_app_data() {
         stop_section_spinner
         local scan_detail="${MOLE_APP_SCAN_FAILURE_DETAIL:-}"
         if [[ -n "$scan_detail" ]]; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: Unable to scan installed applications (${scan_detail##*/})"
+            printf '  %b Skipped: Unable to scan installed applications (%s)\n' \
+                "${GRAY}${ICON_WARNING}${NC}" "$scan_detail"
         else
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: Unable to scan installed applications"
         fi

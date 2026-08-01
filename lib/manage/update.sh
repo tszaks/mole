@@ -45,6 +45,254 @@ curl_download_with_retry() {
     done
 }
 
+_update_lock_path() {
+    local install_dir="$1"
+    printf '%s/.mole-update.lock/kernel.lock\n' "$install_dir"
+}
+
+_update_lock_process_start() {
+    local pid="$1"
+    LC_ALL=C /bin/ps -p "$pid" -o lstart= 2> /dev/null |
+        /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | /usr/bin/head -1
+}
+
+_update_lock_current_shell_pid() {
+    local variable_name="$1"
+    local pid_file current_pid=""
+    pid_file=$(/usr/bin/mktemp /tmp/mole-update-pid.XXXXXX) || return 1
+    if ! /bin/sh -c 'printf "%s\n" "$PPID" > "$1"' sh "$pid_file"; then
+        /bin/rm -f "$pid_file" 2> /dev/null || true # SAFE: exact mktemp-created PID probe file.
+        return 1
+    fi
+    IFS= read -r current_pid < "$pid_file" || true
+    /bin/rm -f "$pid_file" 2> /dev/null || true # SAFE: exact mktemp-created PID probe file.
+    [[ "$current_pid" =~ ^[0-9]+$ ]] || return 1
+    printf -v "$variable_name" '%s' "$current_pid"
+}
+
+_update_lock_mode_for_install_dir() {
+    local install_dir="$1"
+    local use_sudo=false
+    [[ -d "$install_dir" && ! -L "$install_dir" ]] || return 1
+
+    if [[ ${EUID:-0} -eq 0 ]]; then
+        use_sudo=false
+    elif [[ -w "$install_dir" ]]; then
+        use_sudo=false
+    else
+        use_sudo=true
+    fi
+    _update_lock_path_has_unsafe_ancestor "$install_dir" "$use_sudo" && return 1
+    printf '%s\n' "$use_sudo"
+}
+
+_update_lock_path_has_unsafe_ancestor() {
+    local probe="$1"
+    local use_sudo="$2"
+    local current_uid owner_uid mode acl_listing
+    current_uid=$(id -u 2> /dev/null || true)
+    [[ "$current_uid" =~ ^[0-9]+$ ]] || return 0
+
+    while true; do
+        [[ ! -L "$probe" ]] || return 0
+        owner_uid=$(/usr/bin/stat -f%u "$probe" 2> /dev/null || true)
+        mode=$(/usr/bin/stat -f%Lp "$probe" 2> /dev/null || true)
+        [[ "$owner_uid" =~ ^[0-9]+$ && "$mode" =~ ^[0-7]+$ ]] || return 0
+        if [[ "$use_sudo" == "true" || ${EUID:-0} -eq 0 ]]; then
+            [[ "$owner_uid" -eq 0 ]] || return 0
+        elif [[ "$owner_uid" -ne 0 && "$owner_uid" -ne "$current_uid" ]]; then
+            return 0
+        fi
+        (((8#$mode & 0022) == 0)) || return 0
+        acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
+        if printf '%s\n' "$acl_listing" |
+            /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
+            return 0
+        fi
+        [[ "$probe" == "/" ]] && break
+        local parent_probe="${probe%/*}"
+        [[ "$parent_probe" != "$probe" ]] || return 0
+        probe="$parent_probe"
+        [[ -n "$probe" ]] || probe="/"
+    done
+    return 1
+}
+
+_update_lock_prepare_dir() {
+    local lock_path="$1"
+    local use_sudo="$2"
+    local lock_dir expected_uid owner_uid mode acl_listing
+    lock_dir=$(dirname "$lock_path")
+    expected_uid=$(id -u 2> /dev/null || true)
+    [[ "$expected_uid" =~ ^[0-9]+$ ]] || return 1
+
+    if [[ ! -e "$lock_dir" && ! -L "$lock_dir" ]]; then
+        if [[ "$use_sudo" == "true" ]]; then
+            _update_lock_sudo mkdir -m 0700 "$lock_dir" 2> /dev/null || return 1
+        else
+            mkdir -m 0700 "$lock_dir" 2> /dev/null || return 1
+        fi
+    fi
+    [[ -d "$lock_dir" && ! -L "$lock_dir" ]] || return 1
+    # macOS preserves inherited ACLs across mkdir -m 0700. Clear them before
+    # opening the kernel lock and verify that no non-mode ACL entry remains.
+    if [[ "$use_sudo" == "true" ]]; then
+        _update_lock_sudo /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
+        acl_listing=$(_update_lock_sudo /bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
+    else
+        /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
+        acl_listing=$(/bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
+    fi
+    if printf '%s\n' "$acl_listing" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
+        return 1
+    fi
+    if [[ "$use_sudo" == "true" ]]; then
+        expected_uid=0
+    fi
+    if [[ "$use_sudo" == "true" ]]; then
+        owner_uid=$(_update_lock_sudo /usr/bin/stat -f%u "$lock_dir" 2> /dev/null || true)
+        mode=$(_update_lock_sudo /usr/bin/stat -f%Lp "$lock_dir" 2> /dev/null || true)
+    else
+        owner_uid=$(/usr/bin/stat -f%u "$lock_dir" 2> /dev/null || true)
+        mode=$(/usr/bin/stat -f%Lp "$lock_dir" 2> /dev/null || true)
+    fi
+    [[ "$owner_uid" == "$expected_uid" && "$mode" =~ ^[0-7]+$ ]] || return 1
+    (((8#$mode & 0077) == 0)) || return 1
+}
+
+_update_lock_sudo() {
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        return 1
+    fi
+    sudo -n "$@"
+}
+
+_update_lock_read_owner() {
+    local lock_path="$1"
+    local use_sudo="$2"
+    if [[ "$use_sudo" == "true" ]]; then
+        _update_lock_sudo /bin/test -f "$lock_path" 2> /dev/null || return 1
+        ! _update_lock_sudo /bin/test -L "$lock_path" 2> /dev/null || return 1
+        _update_lock_sudo cat "$lock_path" 2> /dev/null
+    else
+        [[ -f "$lock_path" && ! -L "$lock_path" ]] || return 1
+        cat "$lock_path" 2> /dev/null
+    fi
+}
+
+_update_lock_remove_control() {
+    local control_path="$1"
+    local use_sudo="$2"
+    local lock_path="$3"
+    local control_prefix control_suffix
+    [[ -n "$control_path" ]] || return 0
+    control_prefix="$(dirname "$lock_path")/control."
+    [[ "$control_path" == "$control_prefix"* ]] || return 1
+    control_suffix="${control_path#"$control_prefix"}"
+    [[ -n "$control_suffix" && "$control_suffix" != */* ]] || return 1
+    if [[ "$use_sudo" == "true" ]]; then
+        _update_lock_sudo /bin/test -f "$control_path" 2> /dev/null || return 1
+        ! _update_lock_sudo /bin/test -L "$control_path" 2> /dev/null || return 1
+        _update_lock_sudo /bin/rm -f "$control_path" 2> /dev/null # SAFE: exact mktemp-created update lock control file.
+    else
+        [[ -f "$control_path" && ! -L "$control_path" ]] || return 1
+        command rm -f "$control_path" 2> /dev/null # SAFE: exact mktemp-created update lock control file.
+    fi
+}
+
+_update_acquire_lock() {
+    local lock_path="$1"
+    local use_sudo="${2:-false}"
+    local control_path holder_pid owner_pid owner_start token owner_value="" attempt=0
+    _update_lock_prepare_dir "$lock_path" "$use_sudo" || return 1
+    if [[ "$use_sudo" == "true" ]]; then
+        if _update_lock_sudo /bin/test -e "$lock_path" 2> /dev/null ||
+            _update_lock_sudo /bin/test -L "$lock_path" 2> /dev/null; then
+            _update_lock_sudo /bin/test -f "$lock_path" 2> /dev/null || return 1
+            ! _update_lock_sudo /bin/test -L "$lock_path" 2> /dev/null || return 1
+        fi
+    elif [[ -e "$lock_path" || -L "$lock_path" ]]; then
+        [[ -f "$lock_path" && ! -L "$lock_path" ]] || return 1
+    fi
+    [[ -x /usr/bin/lockf ]] || return 1
+    _update_lock_current_shell_pid owner_pid || return 1
+    owner_start=$(_update_lock_process_start "$owner_pid")
+    [[ -n "$owner_start" ]] || return 1
+    if [[ "$use_sudo" == "true" ]]; then
+        control_path=$(_update_lock_sudo /usr/bin/mktemp "$(dirname "$lock_path")/control.XXXXXX") || return 1
+    else
+        control_path=$(/usr/bin/mktemp "$(dirname "$lock_path")/control.XXXXXX") || return 1
+    fi
+    token="$owner_pid|$owner_start|${control_path##*.}"
+
+    # shellcheck disable=SC2016 # The lock-holder shell expands these values.
+    if [[ "$use_sudo" == "true" ]]; then
+        _update_lock_sudo /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c '
+            token="$1"; owner_pid="$2"; owner_start="$3"; lock_path="$4"; control_path="$5"
+            [ -f "$control_path" ] || exit 1
+            printf "%s\n" "$token" > "$lock_path" || exit 1
+            while [ -f "$control_path" ]; do
+                kill -0 "$owner_pid" 2>/dev/null || break
+                current_start=$(LC_ALL=C /bin/ps -p "$owner_pid" -o lstart= 2>/dev/null |
+                    /usr/bin/sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" | /usr/bin/head -1)
+                [ "$current_start" = "$owner_start" ] || break
+                /bin/sleep 0.1
+            done
+            /bin/rm -f "$control_path" # SAFE: exact mktemp-created update lock control file.
+        ' sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" &
+    else
+        /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c '
+            token="$1"; owner_pid="$2"; owner_start="$3"; lock_path="$4"; control_path="$5"
+            [ -f "$control_path" ] || exit 1
+            printf "%s\n" "$token" > "$lock_path" || exit 1
+            while [ -f "$control_path" ]; do
+                kill -0 "$owner_pid" 2>/dev/null || break
+                current_start=$(LC_ALL=C /bin/ps -p "$owner_pid" -o lstart= 2>/dev/null |
+                    /usr/bin/sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" | /usr/bin/head -1)
+                [ "$current_start" = "$owner_start" ] || break
+                /bin/sleep 0.1
+            done
+            /bin/rm -f "$control_path" # SAFE: exact mktemp-created update lock control file.
+        ' sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" &
+    fi
+    holder_pid=$!
+
+    while [[ "$attempt" -lt 100 ]]; do
+        if ! kill -0 "$holder_pid" 2> /dev/null; then
+            wait "$holder_pid" 2> /dev/null || true
+            _update_lock_remove_control "$control_path" "$use_sudo" "$lock_path" || true
+            return 1
+        fi
+        owner_value=$(_update_lock_read_owner "$lock_path" "$use_sudo" || true)
+        if [[ "$owner_value" == "$token" ]]; then
+            UPDATE_LOCK_CONTROL="$control_path"
+            UPDATE_LOCK_HOLDER_PID="$holder_pid"
+            UPDATE_LOCK_ACQUIRED=true
+            return 0
+        fi
+        /bin/sleep 0.05
+        attempt=$((attempt + 1))
+    done
+
+    _update_lock_remove_control "$control_path" "$use_sudo" "$lock_path" || true
+    wait "$holder_pid" 2> /dev/null || true
+    return 1
+}
+
+_update_release_lock() {
+    local lock_path="${1:-}"
+    local use_sudo="${2:-false}"
+    local control_path="${3:-}"
+    local holder_pid="${4:-}"
+    local acquired="${5:-false}"
+    [[ "$acquired" == "true" ]] || return 0
+    _update_lock_remove_control "$control_path" "$use_sudo" "$lock_path" || true
+    [[ "$holder_pid" =~ ^[0-9]+$ ]] && wait "$holder_pid" 2> /dev/null || true
+    UPDATE_LOCK_CONTROL=""
+    UPDATE_LOCK_HOLDER_PID=""
+    UPDATE_LOCK_ACQUIRED=false
+}
+
 # Last-resort self-heal for a failed staged install. The staged path runs
 # through local bootstrap code (temp file, registry, exec) that is frozen on
 # the user's machine, which is exactly what a broken installed version cannot
@@ -60,6 +308,12 @@ _update_self_heal_reinstall() {
     local mole_path="$5"
     local success_label="$6"
     local expected_commit="${7:-}"
+    local install_commit=""
+    local install_receipt="heal-$(date +%s)-$$-${RANDOM:-0}"
+
+    if [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]; then
+        install_commit="$expected_commit"
+    fi
 
     echo "Retrying with a direct reinstall from GitHub..."
 
@@ -70,6 +324,7 @@ _update_self_heal_reinstall() {
             curl -fsSL --connect-timeout 10 --max-time 60 \
                 "https://raw.githubusercontent.com/tw93/mole/main/install.sh" |
                 MOLE_ASSUME_SUDO_AUTH="$assume_sudo" MOLE_VERSION="$update_ref" \
+                    MOLE_INSTALL_COMMIT="$install_commit" MOLE_INSTALL_RECEIPT="$install_receipt" \
                     bash -s -- --prefix "$install_dir" --config "$config_dir" 2>&1
         ) || {
             [[ -n "$heal_output" ]] && printf '%s\n' "$heal_output" | tail -5 >&2
@@ -81,6 +336,7 @@ _update_self_heal_reinstall() {
             wget --timeout=10 --tries=3 -qO- \
                 "https://raw.githubusercontent.com/tw93/mole/main/install.sh" |
                 MOLE_ASSUME_SUDO_AUTH="$assume_sudo" MOLE_VERSION="$update_ref" \
+                    MOLE_INSTALL_COMMIT="$install_commit" MOLE_INSTALL_RECEIPT="$install_receipt" \
                     bash -s -- --prefix "$install_dir" --config "$config_dir" 2>&1
         ) || {
             [[ -n "$heal_output" ]] && printf '%s\n' "$heal_output" | tail -5 >&2
@@ -90,35 +346,51 @@ _update_self_heal_reinstall() {
         return 1
     fi
 
+    local verification_lock
+    local lock_uses_sudo
+    lock_uses_sudo=$(_update_lock_mode_for_install_dir "$install_dir") || return 1
+    verification_lock=$(_update_lock_path "$install_dir")
+    _update_acquire_lock "$verification_lock" "$lock_uses_sudo" || return 1
+
+    local verification_status=0
     if [[ "$update_ref" == "main" ]]; then
         local installed_commit=""
+        local installed_receipt=""
         installed_commit=$(MOLE_CONFIG_DIR="$config_dir" get_install_commit 2> /dev/null || true)
-        # The registry commit is written only after install_files and
-        # verify_installation succeed, and the probe below confirms the
-        # installed binary answers. Installer stdout is never trusted.
-        if [[ ! "$installed_commit" =~ ^[0-9a-f]{7,40}$ ]] ||
-            ! "$mole_path" --version > /dev/null 2>&1; then
-            return 1
+        installed_receipt=$(MOLE_CONFIG_DIR="$config_dir" get_install_receipt 2> /dev/null || true)
+        # The per-attempt receipt binds metadata to this exact installer run;
+        # an older valid commit can no longer make a partial reinstall pass.
+        if [[ "$installed_receipt" != "$install_receipt" ]] ||
+            ! run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$mole_path" --version > /dev/null 2>&1; then
+            verification_status=1
         fi
-        # A known remote HEAD must match; fail closed on a stale reinstall.
-        # An unknown remote HEAD (API rate limit, offline) is not a failure:
-        # the reinstall itself is already verified above.
-        if [[ "$expected_commit" =~ ^[0-9a-f]{40}$ &&
-            "${installed_commit:0:7}" != "${expected_commit:0:7}" ]]; then
-            return 1
+        if [[ "$verification_status" -eq 0 && -n "$install_commit" ]]; then
+            if [[ ! "$installed_commit" =~ ^[0-9a-f]{7,40}$ ||
+                "${installed_commit:0:7}" != "${install_commit:0:7}" ]]; then
+                verification_status=1
+            fi
         fi
-        printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_commit:0:7}"
-        return 0
+        if [[ "$verification_status" -eq 0 && "$installed_commit" =~ ^[0-9a-f]{7,40}$ ]]; then
+            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_commit:0:7}"
+        elif [[ "$verification_status" -eq 0 ]]; then
+            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}"
+        fi
+    else
+        # Claim stable success only when the installed binary reports the target
+        # version. Trusting installer output would repeat the V1.47.1 false success.
+        local installed_version=""
+        installed_version=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            "$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || true)
+        if [[ "$installed_version" != "${update_ref#V}" ]]; then
+            verification_status=1
+        else
+            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_version}"
+        fi
     fi
 
-    # Claim stable success only when the installed binary reports the target
-    # version. Trusting installer output would repeat the V1.47.1 false success.
-    local installed_version=""
-    installed_version=$("$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}')
-    if [[ "$installed_version" != "${update_ref#V}" ]]; then
-        return 1
-    fi
-    printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_version}"
+    _update_release_lock "$verification_lock" "$lock_uses_sudo" \
+        "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+    return "$verification_status"
 }
 
 _update_print_manual_reinstall() {
@@ -334,6 +606,16 @@ get_install_commit() {
     fi
 }
 
+get_install_receipt() {
+    local channel_file="${MOLE_CONFIG_DIR:-$HOME/.config/mole}/install_channel"
+    if [[ ! -f "$channel_file" ]]; then
+        channel_file="$SCRIPT_DIR/install_channel"
+    fi
+    if [[ -f "$channel_file" ]]; then
+        sed -n 's/^INSTALL_RECEIPT=\(.*\)$/\1/p' "$channel_file" | head -1
+    fi
+}
+
 get_latest_commit_from_github() {
     local response=""
     local sha=""
@@ -532,17 +814,25 @@ show_help() {
 }
 
 # Update flow (Homebrew or installer).
-update_mole() {
+update_mole() (
     local force_update="${1:-false}"
     local nightly_update="${2:-false}"
     local update_interrupted=false
     local sudo_keepalive_pid=""
+    local UPDATE_LOCK_CONTROL=""
+    local UPDATE_LOCK_HOLDER_PID=""
+    local UPDATE_LOCK_ACQUIRED=false
 
     # Cleanup function for sudo keepalive
     _update_cleanup() {
         [[ -n "$sudo_keepalive_pid" ]] && _stop_sudo_keepalive "$sudo_keepalive_pid" || true
+        if [[ -n "${verification_lock:-}" && "$UPDATE_LOCK_ACQUIRED" == "true" ]]; then
+            _update_release_lock "$verification_lock" "${lock_uses_sudo:-false}" \
+                "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+        fi
     }
     trap '_update_cleanup; update_interrupted=true; echo ""; exit 130' INT TERM
+    trap '_update_cleanup' EXIT
 
     if is_homebrew_install; then
         if [[ "$nightly_update" == "true" ]]; then
@@ -567,7 +857,6 @@ update_mole() {
         log_error "Unable to resolve current Mole install directory"
         exit 1
     fi
-
     local latest=""
     local latest_commit=""
     local download_label="Downloading latest version..."
@@ -756,7 +1045,8 @@ update_mole() {
                 new_version=$(printf '%s\n' "$output" | sed -n 's/.*version[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' | head -1)
             fi
             if [[ -z "$new_version" ]]; then
-                new_version=$("$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || echo "")
+                new_version=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                    "$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || true)
             fi
             if [[ -z "$new_version" ]]; then
                 new_version="$fallback_version"
@@ -775,7 +1065,9 @@ update_mole() {
     fi
 
     if [[ "$nightly_update" == "true" ]]; then
-        if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="main" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+        if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="main" \
+            MOLE_INSTALL_COMMIT="$latest_commit" \
+            "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -827,5 +1119,5 @@ update_mole() {
 
     # Cleanup and reset trap
     _update_cleanup
-    trap - INT TERM
-}
+    trap - INT TERM EXIT
+)

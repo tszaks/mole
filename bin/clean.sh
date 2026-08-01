@@ -928,15 +928,6 @@ _safe_clean_impl() {
         return 0
     fi
 
-    # Preview must not list entries the real run would refuse right now: the
-    # guard verdict is computed once here, before any dry-run registration, so
-    # dry-run and real cleanup render the same stopped row for the same
-    # machine state. Real mode keeps its per-path checks at the deletion
-    # boundary below.
-    if [[ "${DRY_RUN:-false}" == "true" && -n "$delete_guard" ]] && ! "$delete_guard" "${targets[0]}"; then
-        return 75
-    fi
-
     local removed_any=0
     local total_size_kb=0
     local total_count=0
@@ -982,12 +973,30 @@ _safe_clean_impl() {
         [[ "$skip" == "true" ]] && continue
 
         if [[ -e "$path" ]]; then
-            if [[ "$DRY_RUN" == "true" ]]; then
-                register_dry_run_cleanup_target "$path" || continue
-            fi
             existing_paths+=("$path")
         fi
     done
+
+    # Preview must use the same eligible candidate set as a real cleanup.
+    # Only then may the process-state guard decide whether either mode stops.
+    if [[ "${DRY_RUN:-false}" == "true" && -n "$delete_guard" && ${#existing_paths[@]} -gt 0 ]] &&
+        ! "$delete_guard" "${existing_paths[0]}"; then
+        return 75
+    fi
+
+    if [[ "$DRY_RUN" == "true" && ${#existing_paths[@]} -gt 0 ]]; then
+        local -a registered_paths=()
+        for path in "${existing_paths[@]}"; do
+            if register_dry_run_cleanup_target "$path"; then
+                registered_paths+=("$path")
+            fi
+        done
+        if [[ ${#registered_paths[@]} -gt 0 ]]; then
+            existing_paths=("${registered_paths[@]}")
+        else
+            existing_paths=()
+        fi
+    fi
 
     debug_timer_end "$description: path scan" _perf_scan_start
 

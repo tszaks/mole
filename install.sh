@@ -127,6 +127,12 @@ safe_rm() {
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="$HOME/.config/mole"
 SOURCE_DIR=""
+SOURCE_COMMIT_HASH=""
+INSTALL_LOCK_PATH=""
+INSTALL_LOCK_CONTROL=""
+INSTALL_LOCK_HOLDER_PID=""
+INSTALL_LOCK_USE_SUDO=false
+INSTALL_SOURCE_TMP=""
 
 ACTION="install"
 
@@ -172,6 +178,298 @@ maybe_sudo() {
     fi
 }
 
+# Keep verification of a newly installed executable bounded. The installer
+# cannot source lib/core/timeout.sh until after it has installed the source
+# tree, so use a small standalone wrapper for --version/--help probes.
+run_install_probe_with_timeout() {
+    local duration="${1:-5}"
+    shift || true
+    [[ $# -gt 0 ]] || return 125
+    [[ "$duration" =~ ^[0-9]+(\.[0-9]+)?$ ]] || duration=5
+
+    local candidate timeout_bin=""
+    for candidate in gtimeout timeout; do
+        if command -v "$candidate" > /dev/null 2>&1; then
+            timeout_bin=$(command -v "$candidate")
+            break
+        fi
+    done
+    if [[ -n "$timeout_bin" ]]; then
+        "$timeout_bin" -k 1 "$duration" "$@"
+        return $?
+    fi
+
+    # Stock macOS has no timeout utility, but it does ship Perl. Supervise the
+    # probe from outside its process group so a shell wrapper and every child
+    # holding inherited output descriptors are terminated at the deadline.
+    local perl_bin=""
+    perl_bin=$(command -v perl 2> /dev/null || true)
+    [[ -n "$perl_bin" ]] || return 125
+    # shellcheck disable=SC2016 # Perl source is intentionally single-quoted.
+    "$perl_bin" -MPOSIX=:sys_wait_h,setpgid -MTime::HiRes=time,sleep -e '
+        my ($duration, @command) = @ARGV;
+        exit 125 unless @command;
+        my $pid = fork();
+        exit 125 unless defined $pid;
+        if ($pid == 0) {
+            my $setpgid_status = POSIX::setpgid(0, 0);
+            exit 126 unless defined $setpgid_status && $setpgid_status == 0;
+            exec { $command[0] } @command;
+            exit 127;
+        }
+        POSIX::setpgid($pid, $pid);
+        my $deadline = time() + $duration;
+        while (time() < $deadline) {
+            my $result = waitpid($pid, WNOHANG);
+            if ($result == $pid) {
+                exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+            }
+            sleep(0.02);
+        }
+        kill "TERM", -$pid;
+        my $grace = time() + 1;
+        while (time() < $grace) {
+            my $result = waitpid($pid, WNOHANG);
+            exit 124 if $result == $pid;
+            sleep(0.02);
+        }
+        kill "KILL", -$pid;
+        waitpid($pid, 0);
+        exit 124;
+    ' "$duration" "$@"
+}
+
+install_lock_has_unsafe_ancestor() {
+    local use_sudo="$1"
+    local probe="$INSTALL_DIR"
+    local current_uid owner_uid mode acl_listing
+    current_uid=$(id -u 2> /dev/null || true)
+    [[ "$current_uid" =~ ^[0-9]+$ ]] || return 0
+
+    while true; do
+        [[ ! -L "$probe" ]] || return 0
+        owner_uid=$(/usr/bin/stat -f%u "$probe" 2> /dev/null || true)
+        mode=$(/usr/bin/stat -f%Lp "$probe" 2> /dev/null || true)
+        [[ "$owner_uid" =~ ^[0-9]+$ && "$mode" =~ ^[0-7]+$ ]] || return 0
+        if [[ "$use_sudo" == "true" || ${EUID:-0} -eq 0 ]]; then
+            [[ "$owner_uid" -eq 0 ]] || return 0
+        elif [[ "$owner_uid" -ne 0 && "$owner_uid" -ne "$current_uid" ]]; then
+            return 0
+        fi
+        (((8#$mode & 0022) == 0)) || return 0
+        acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
+        if printf '%s\n' "$acl_listing" |
+            /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
+            return 0
+        fi
+        [[ "$probe" == "/" ]] && break
+        local parent_probe="${probe%/*}"
+        [[ "$parent_probe" != "$probe" ]] || return 0
+        probe="$parent_probe"
+        [[ -n "$probe" ]] || probe="/"
+    done
+    return 1
+}
+
+install_lock_process_start() {
+    local pid="$1"
+    LC_ALL=C /bin/ps -p "$pid" -o lstart= 2> /dev/null |
+        /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | /usr/bin/head -1
+}
+
+install_lock_command() {
+    local use_sudo="$1"
+    shift
+    if [[ "$use_sudo" != "true" ]]; then
+        "$@"
+        return
+    fi
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        return 1
+    fi
+    if [[ "${MOLE_ASSUME_SUDO_AUTH:-0}" == "1" ]]; then
+        sudo -n "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+install_lock_current_shell_pid() {
+    local variable_name="$1"
+    local pid_file current_pid=""
+    pid_file=$(/usr/bin/mktemp /tmp/mole-install-pid.XXXXXX) || return 1
+    if ! /bin/sh -c 'printf "%s\n" "$PPID" > "$1"' sh "$pid_file"; then
+        safe_rm "$pid_file"
+        return 1
+    fi
+    IFS= read -r current_pid < "$pid_file" || true
+    safe_rm "$pid_file"
+    [[ "$current_pid" =~ ^[0-9]+$ ]] || return 1
+    printf -v "$variable_name" '%s' "$current_pid"
+}
+
+install_lock_prepare_dir() {
+    local use_sudo="$1"
+    local lock_dir="$INSTALL_DIR/.mole-update.lock"
+    local expected_uid owner_uid mode acl_listing
+    expected_uid=$(id -u 2> /dev/null || true)
+    [[ "$expected_uid" =~ ^[0-9]+$ ]] || return 1
+
+    if [[ ! -e "$lock_dir" && ! -L "$lock_dir" ]]; then
+        install_lock_command "$use_sudo" mkdir -m 0700 "$lock_dir" 2> /dev/null || return 1
+    fi
+    [[ -d "$lock_dir" && ! -L "$lock_dir" ]] || return 1
+    # macOS applies inherited ACLs even when mkdir requests mode 0700. Remove
+    # them before touching the lock file, then verify that no ACL entry remains.
+    # Once this succeeds, only the expected owner can mutate directory entries.
+    install_lock_command "$use_sudo" /bin/chmod -N "$lock_dir" 2> /dev/null || return 1
+    acl_listing=$(install_lock_command "$use_sudo" /bin/ls -lde "$lock_dir" 2> /dev/null) || return 1
+    if printf '%s\n' "$acl_listing" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
+        return 1
+    fi
+    owner_uid=$(install_lock_command "$use_sudo" /usr/bin/stat -f%u "$lock_dir" 2> /dev/null || true)
+    mode=$(install_lock_command "$use_sudo" /usr/bin/stat -f%Lp "$lock_dir" 2> /dev/null || true)
+    if [[ "$use_sudo" == "true" ]]; then
+        expected_uid=0
+    fi
+    [[ "$owner_uid" == "$expected_uid" && "$mode" =~ ^[0-7]+$ ]] || return 1
+    (((8#$mode & 0077) == 0)) || return 1
+}
+
+install_lock_read_owner() {
+    local lock_path="$1"
+    local use_sudo="$2"
+    install_lock_command "$use_sudo" /bin/test -f "$lock_path" 2> /dev/null || return 1
+    ! install_lock_command "$use_sudo" /bin/test -L "$lock_path" 2> /dev/null || return 1
+    install_lock_command "$use_sudo" cat "$lock_path" 2> /dev/null
+}
+
+install_lock_remove_control() {
+    local control_path="$1"
+    local use_sudo="$2"
+    local control_prefix="$INSTALL_DIR/.mole-update.lock/control."
+    local control_suffix
+    [[ -n "$control_path" ]] || return 0
+    [[ "$control_path" == "$control_prefix"* ]] || return 1
+    control_suffix="${control_path#"$control_prefix"}"
+    [[ -n "$control_suffix" && "$control_suffix" != */* ]] || return 1
+    install_lock_command "$use_sudo" /bin/test -f "$control_path" 2> /dev/null || return 1
+    ! install_lock_command "$use_sudo" /bin/test -L "$control_path" 2> /dev/null || return 1
+    install_lock_command "$use_sudo" /bin/rm -f "$control_path" 2> /dev/null # SAFE: exact mktemp-created install lock control file.
+}
+
+acquire_install_lock() {
+    local lock_path="$INSTALL_DIR/.mole-update.lock/kernel.lock"
+    local control_path holder_pid owner_pid owner_start token owner_value="" attempt=0
+    local use_sudo=false
+    if [[ ${EUID:-0} -ne 0 && ! -w "$INSTALL_DIR" ]]; then
+        use_sudo=true
+    fi
+    install_lock_has_unsafe_ancestor "$use_sudo" && return 1
+    install_lock_prepare_dir "$use_sudo" || return 1
+    if install_lock_command "$use_sudo" /bin/test -e "$lock_path" 2> /dev/null ||
+        install_lock_command "$use_sudo" /bin/test -L "$lock_path" 2> /dev/null; then
+        install_lock_command "$use_sudo" /bin/test -f "$lock_path" 2> /dev/null || return 1
+        ! install_lock_command "$use_sudo" /bin/test -L "$lock_path" 2> /dev/null || return 1
+    fi
+    [[ -x /usr/bin/lockf ]] || return 1
+    install_lock_current_shell_pid owner_pid || return 1
+    owner_start=$(install_lock_process_start "$owner_pid")
+    [[ -n "$owner_start" ]] || return 1
+    control_path=$(install_lock_command "$use_sudo" /usr/bin/mktemp "$INSTALL_DIR/.mole-update.lock/control.XXXXXX") || return 1
+    token="$owner_pid|$owner_start|${control_path##*.}"
+
+    # shellcheck disable=SC2016 # The lock-holder shell expands these values.
+    install_lock_command "$use_sudo" /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c '
+        token="$1"
+        owner_pid="$2"
+        owner_start="$3"
+        lock_path="$4"
+        control_path="$5"
+        current_start=""
+        if [ ! -f "$control_path" ]; then
+            exit 1
+        fi
+        printf "%s\n" "$token" > "$lock_path" || exit 1
+        while [ -f "$control_path" ]; do
+            kill -0 "$owner_pid" 2>/dev/null || break
+            current_start=$(LC_ALL=C /bin/ps -p "$owner_pid" -o lstart= 2>/dev/null |
+                /usr/bin/sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" | /usr/bin/head -1)
+            [ "$current_start" = "$owner_start" ] || break
+            /bin/sleep 0.1
+        done
+        /bin/rm -f "$control_path" # SAFE: exact mktemp-created install lock control file.
+    ' sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" &
+    holder_pid=$!
+
+    while [[ "$attempt" -lt 100 ]]; do
+        if ! kill -0 "$holder_pid" 2> /dev/null; then
+            wait "$holder_pid" 2> /dev/null || true
+            install_lock_remove_control "$control_path" "$use_sudo" || true
+            return 1
+        fi
+        owner_value=$(install_lock_read_owner "$lock_path" "$use_sudo" || true)
+        if [[ "$owner_value" == "$token" ]]; then
+            INSTALL_LOCK_PATH="$lock_path"
+            INSTALL_LOCK_CONTROL="$control_path"
+            INSTALL_LOCK_HOLDER_PID="$holder_pid"
+            INSTALL_LOCK_USE_SUDO="$use_sudo"
+            return 0
+        fi
+        /bin/sleep 0.05
+        attempt=$((attempt + 1))
+    done
+
+    install_lock_remove_control "$control_path" "$use_sudo" || true
+    wait "$holder_pid" 2> /dev/null || true
+    return 1
+}
+
+release_install_lock() {
+    [[ -n "$INSTALL_LOCK_CONTROL" ]] &&
+        install_lock_remove_control "$INSTALL_LOCK_CONTROL" "$INSTALL_LOCK_USE_SUDO" || true
+    [[ -n "$INSTALL_LOCK_HOLDER_PID" ]] && wait "$INSTALL_LOCK_HOLDER_PID" 2> /dev/null || true
+    INSTALL_LOCK_PATH=""
+    INSTALL_LOCK_CONTROL=""
+    INSTALL_LOCK_HOLDER_PID=""
+    INSTALL_LOCK_USE_SUDO=false
+}
+
+cleanup_installer() {
+    stop_line_spinner 2> /dev/null || true
+    release_install_lock
+    if [[ -n "$INSTALL_SOURCE_TMP" ]]; then
+        safe_rm "$INSTALL_SOURCE_TMP"
+        INSTALL_SOURCE_TMP=""
+    fi
+}
+
+get_remote_main_commit_hash() {
+    command -v curl > /dev/null 2>&1 || return 1
+
+    local response=""
+    local commit_hash=""
+    response=$(curl -fsSL --connect-timeout 3 --max-time 5 \
+        "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null || true)
+    commit_hash=$(printf '%s\n' "$response" |
+        sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([a-f0-9]\{40\}\)".*/\1/p' | head -1)
+    [[ "$commit_hash" =~ ^[0-9a-f]{40}$ ]] || return 1
+    printf '%s\n' "$commit_hash"
+}
+
+source_archive_url() {
+    local branch="$1"
+    local source_commit="${2:-}"
+
+    if [[ "$branch" == "main" && "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+        printf 'https://github.com/tw93/mole/archive/%s.tar.gz\n' "$source_commit"
+    elif [[ "$branch" == "main" || "$branch" == "dev" ]]; then
+        printf 'https://github.com/tw93/mole/archive/refs/heads/%s.tar.gz\n' "$branch"
+    else
+        printf 'https://github.com/tw93/mole/archive/refs/tags/%s.tar.gz\n' "$branch"
+    fi
+}
+
 resolve_source_dir() {
     if [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR" && -f "$SOURCE_DIR/mole" ]]; then
         return 0
@@ -193,16 +491,7 @@ resolve_source_dir() {
 
     local tmp
     tmp="$(mktemp -d)"
-
-    # Safe cleanup function for temporary directory
-    cleanup_tmp() {
-        stop_line_spinner 2> /dev/null || true
-        if [[ -z "${tmp:-}" ]]; then
-            return 0
-        fi
-        safe_rm "$tmp"
-    }
-    trap cleanup_tmp EXIT
+    INSTALL_SOURCE_TMP="$tmp"
 
     local branch="${MOLE_VERSION:-}"
     if [[ -z "$branch" ]]; then
@@ -221,13 +510,22 @@ resolve_source_dir() {
     if [[ "$branch" != "main" && "$branch" != "dev" ]]; then
         branch="$(normalize_release_tag "$branch")"
     fi
-    local url="https://github.com/tw93/mole/archive/refs/heads/main.tar.gz"
-
-    if [[ "$branch" == "dev" ]]; then
-        url="https://github.com/tw93/mole/archive/refs/heads/dev.tar.gz"
-    elif [[ "$branch" != "main" ]]; then
-        url="https://github.com/tw93/mole/archive/refs/tags/${branch}.tar.gz"
+    local source_commit=""
+    if [[ "$branch" == "main" ]]; then
+        source_commit="${MOLE_INSTALL_COMMIT:-}"
+        if [[ -n "$source_commit" && ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            log_error "Invalid pinned source commit"
+            exit 1
+        fi
+        if [[ -z "$source_commit" ]]; then
+            source_commit=$(get_remote_main_commit_hash || true)
+        fi
+        if [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            SOURCE_COMMIT_HASH="$source_commit"
+        fi
     fi
+    local url
+    url=$(source_archive_url "$branch" "$source_commit")
 
     start_line_spinner "Fetching Mole source, ${branch}..."
     if command -v curl > /dev/null 2>&1; then
@@ -256,14 +554,28 @@ resolve_source_dir() {
 
     start_line_spinner "Cloning Mole source..."
     if command -v git > /dev/null 2>&1; then
-        local git_args=("--depth=1")
-        if [[ "$branch" != "main" ]]; then
-            git_args+=("--branch" "$branch")
+        local clone_succeeded=false
+        if [[ -n "$source_commit" ]]; then
+            if git init -q "$tmp/mole" > /dev/null 2>&1 &&
+                git -C "$tmp/mole" remote add origin https://github.com/tw93/mole.git > /dev/null 2>&1 &&
+                git -C "$tmp/mole" fetch -q --depth=1 origin "$source_commit" > /dev/null 2>&1 &&
+                git -C "$tmp/mole" checkout -q --detach FETCH_HEAD > /dev/null 2>&1; then
+                clone_succeeded=true
+            fi
+        else
+            local git_args=("--depth=1")
+            if [[ "$branch" != "main" ]]; then
+                git_args+=("--branch" "$branch")
+            fi
+            if git clone "${git_args[@]}" https://github.com/tw93/mole.git "$tmp/mole" > /dev/null 2>&1; then
+                clone_succeeded=true
+            fi
         fi
 
-        if git clone "${git_args[@]}" https://github.com/tw93/mole.git "$tmp/mole" > /dev/null 2>&1; then
+        if [[ "$clone_succeeded" == "true" ]]; then
             stop_line_spinner
             SOURCE_DIR="$tmp/mole"
+            SOURCE_COMMIT_HASH=$(git -C "$SOURCE_DIR" rev-parse HEAD 2> /dev/null || true)
             return 0
         fi
     fi
@@ -282,14 +594,15 @@ get_source_version() {
 }
 
 get_source_commit_hash() {
+    if [[ "$SOURCE_COMMIT_HASH" =~ ^[0-9a-f]{7,40}$ ]]; then
+        printf '%s\n' "$SOURCE_COMMIT_HASH"
+        return 0
+    fi
     # Try to get from local git repo first
     if [[ -d "$SOURCE_DIR/.git" ]]; then
         git -C "$SOURCE_DIR" rev-parse --short HEAD 2> /dev/null && return
     fi
-    # Fallback to GitHub API
-    curl -fsSL --connect-timeout 3 \
-        "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null |
-        sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([a-f0-9]\{7\}\).*/\1/p' | head -1
+    return 1
 }
 
 get_latest_release_tag() {
@@ -447,7 +760,8 @@ get_installed_version() {
     local binary="$INSTALL_DIR/mole"
     if [[ -x "$binary" ]]; then
         local version
-        version=$("$binary" --version 2> /dev/null | awk '/Mole version/ {print $NF; exit}')
+        version=$(run_install_probe_with_timeout 5 "$binary" --version 2> /dev/null |
+            awk '/Mole version/ {print $NF; exit}' || true)
         if [[ -n "$version" ]]; then
             echo "$version"
         else
@@ -479,7 +793,12 @@ resolve_install_channel() {
 write_install_channel_metadata() {
     local channel="$1"
     local commit_hash="${2:-}"
+    local install_receipt="${3:-}"
     local metadata_file="$CONFIG_DIR/install_channel"
+
+    if [[ -n "$install_receipt" && ! "$install_receipt" =~ ^heal-[0-9]+-[0-9]+-[0-9]+$ ]]; then
+        return 1
+    fi
 
     mkdir -p "$CONFIG_DIR" 2> /dev/null || return 1
     local tmp_file
@@ -492,6 +811,9 @@ write_install_channel_metadata() {
         printf 'CHANNEL=%s\n' "$channel"
         if [[ -n "$commit_hash" ]]; then
             printf 'COMMIT_HASH=%s\n' "$commit_hash"
+        fi
+        if [[ -n "$install_receipt" ]]; then
+            printf 'INSTALL_RECEIPT=%s\n' "$install_receipt"
         fi
     } > "$tmp_file" || {
         rm -f "$tmp_file" 2> /dev/null || true
@@ -594,6 +916,16 @@ parse_args() {
                 ;;
         esac
     done
+}
+
+normalize_install_dir() {
+    case "$INSTALL_DIR" in
+        /*) return 0 ;;
+    esac
+
+    local physical_cwd
+    physical_cwd=$(pwd -P 2> /dev/null) || return 1
+    INSTALL_DIR="$physical_cwd/$INSTALL_DIR"
 }
 
 # Environment checks and directory setup
@@ -970,10 +1302,11 @@ verify_installation() {
             exit 1
         fi
 
-        if "$INSTALL_DIR/mole" --help > /dev/null 2>&1; then
+        if run_install_probe_with_timeout 5 "$INSTALL_DIR/mole" --help > /dev/null 2>&1; then
             return 0
         else
-            log_warning "Mole command installed but may not be working properly"
+            log_error "Installed Mole did not answer the bounded help probe"
+            return 1
         fi
     else
         log_error "Installation verification failed"
@@ -1051,6 +1384,10 @@ perform_install() {
 
     check_requirements
     create_directories
+    acquire_install_lock || {
+        log_error "Another Mole installation or update is already writing to $INSTALL_DIR"
+        exit 1
+    }
     install_files
     verify_installation
     setup_path
@@ -1065,9 +1402,9 @@ perform_install() {
     local install_channel commit_hash=""
     install_channel="$(resolve_install_channel)"
     if [[ "$install_channel" == "nightly" ]]; then
-        commit_hash=$(get_source_commit_hash)
+        commit_hash=$(get_source_commit_hash || true)
     fi
-    if ! write_install_channel_metadata "$install_channel" "$commit_hash"; then
+    if ! write_install_channel_metadata "$install_channel" "$commit_hash" "${MOLE_INSTALL_RECEIPT:-}"; then
         log_warning "Could not write install channel metadata"
     fi
 
@@ -1134,6 +1471,11 @@ perform_update() {
         log_error "Failed to create directories"
         exit 1
     }
+    acquire_install_lock || {
+        VERBOSE=$old_verbose
+        log_error "Another Mole installation or update is already writing to $INSTALL_DIR"
+        exit 1
+    }
     install_files || {
         VERBOSE=$old_verbose
         log_error "Failed to install files"
@@ -1157,9 +1499,9 @@ perform_update() {
     local install_channel commit_hash=""
     install_channel="$(resolve_install_channel)"
     if [[ "$install_channel" == "nightly" ]]; then
-        commit_hash=$(get_source_commit_hash)
+        commit_hash=$(get_source_commit_hash || true)
     fi
-    if ! write_install_channel_metadata "$install_channel" "$commit_hash"; then
+    if ! write_install_channel_metadata "$install_channel" "$commit_hash" "${MOLE_INSTALL_RECEIPT:-}"; then
         log_warning "Could not write install channel metadata"
     fi
 
@@ -1167,6 +1509,13 @@ perform_update() {
 }
 
 parse_args "$@"
+normalize_install_dir || {
+    log_error "Could not resolve the installation directory: $INSTALL_DIR"
+    exit 1
+}
+
+trap 'cleanup_installer' EXIT
+trap 'cleanup_installer; exit 130' INT TERM
 
 case "$ACTION" in
     update)

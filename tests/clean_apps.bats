@@ -682,6 +682,55 @@ EOF
     [[ "$output" == *"ERREXIT_SCAN_FAILURE_CLOSED"* ]]
 }
 
+@test "clean_orphaned_app_data renders hostile unreadable bundle names as inert text" {
+    local scan_home="$HOME/control-name-scan"
+    rm -rf "$scan_home"
+    mkdir -p "$scan_home"
+
+    run env HOME="$scan_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 NO_COLOR=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+bad_name=$'Bad\\033[2J-\033[2J.app'
+mkdir -p "$HOME/Applications/$bad_name/Contents" \
+    "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+
+stub_dir="$HOME/stub-bin-control-name"
+mkdir -p "$stub_dir"
+cat > "$stub_dir/find" <<'SH'
+#!/bin/sh
+if [ "${1:-}" = "$HOME/Applications" ]; then
+    printf '%s\n' "$HOME/Applications/$BAD_APP_NAME"
+fi
+exit 0
+SH
+cat > "$stub_dir/lsappinfo" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod +x "$stub_dir/find" "$stub_dir/lsappinfo"
+export BAD_APP_NAME="$bad_name"
+export PATH="$stub_dir:$PATH"
+
+mdfind() { return 0; }
+run_with_timeout() { shift; "$@"; }
+get_path_size_kb() { printf '1\n'; }
+safe_clean() { echo "UNEXPECTED_CLEAN"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+debug_log() { printf 'DEBUG:%s\n' "$*"; }
+
+clean_orphaned_app_data
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *'Bad\033[2J-'* ]] || return 1
+    [[ "$output" != *$'\033[2J'* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN"* ]]
+}
+
 @test "is_bundle_orphaned returns true for old uninstalled bundle" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORPHAN_AGE_THRESHOLD=30 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

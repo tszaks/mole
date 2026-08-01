@@ -20,6 +20,49 @@ Options:
 EOF
 }
 
+check_diagnostic_guidance() {
+    local file
+    local status=0
+
+    for file in "$@"; do
+        [[ -f "$file" ]] || continue
+        if ! awk '
+        function inspect_block() {
+            normalized = block
+            gsub(/\$[\047"]/, "", normalized)
+            gsub(/[\047"]/, "", normalized)
+            while (match(normalized, /\\[[:alnum:]_]/)) {
+                normalized = substr(normalized, 1, RSTART - 1) \
+                    substr(normalized, RSTART + 1, 1) \
+                    substr(normalized, RSTART + 2)
+            }
+            if (normalized ~ /Mole-Diagnose[.]command/ &&
+                normalized ~ /\|[[:space:]]*([^|;&[:space:]]+[[:space:]]+)*([^|;&[:space:]]*\/)?(ba|z|da|k)?sh([^[:alnum:]_]|$)/) {
+                printf "%s:%d: unsafe diagnostic pipe-to-shell guidance\n", FILENAME, block_start
+                found = 1
+            }
+            block = ""
+        }
+        /^[[:space:]]*$/ {
+            inspect_block()
+            next
+        }
+        {
+            if (block == "") block_start = FNR
+            block = block " " $0
+        }
+        END {
+            inspect_block()
+            exit found ? 1 : 0
+        }
+        ' "$file"; then
+            status=1
+        fi
+    done
+
+    return "$status"
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --format)
@@ -186,8 +229,9 @@ find lib -name "*.sh" | while read -r script; do
 done
 echo -e "${GREEN}${ICON_SUCCESS} Syntax check passed${NC}\n"
 
-if grep -nE 'Mole-Diagnose\.command[^|]*\|[[:space:]]*((sudo|env)[[:space:]]+)*((ba|z|da)?sh)([[:space:]]|$)' \
-    AGENTS.md README.md .claude/skills/*/SKILL.md; then
+diagnostic_guidance_files=(AGENTS.md README.md .claude/skills/*/SKILL.md)
+if ! diagnostic_guidance_output=$(check_diagnostic_guidance "${diagnostic_guidance_files[@]}"); then
+    [[ -n "$diagnostic_guidance_output" ]] && printf '%s\n' "$diagnostic_guidance_output"
     echo -e "${RED}${ICON_ERROR} Diagnostic instructions must download for review before execution${NC}\n"
     exit 1
 fi

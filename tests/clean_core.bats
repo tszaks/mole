@@ -228,10 +228,51 @@ safe_clean_guarded delete_guard \
 [[ \$rc -eq 75 ]] || { echo "WRONG_RC:\$rc"; exit 1; }
 EOF
 
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
     [[ "$output" != *"UNEXPECTED_REGISTER"* ]] || return 1
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]] || return 1
     [[ "$output" != *"would clean"* ]]
+}
+
+@test "safe_clean_guarded filters ineligible targets before the dry-run guard" {
+    local base="$HOME/safe_clean_guarded_filtered"
+    mkdir -p "$base/protected" "$base/whitelisted"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=true
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+should_protect_path() { [[ "\$1" == "$base/protected" ]]; }
+is_path_whitelisted() { [[ "\$1" == "$base/whitelisted" ]]; }
+holds_compiled_model_cache() { return 1; }
+delete_guard() { echo "UNEXPECTED_GUARD:\$1"; return 1; }
+register_dry_run_cleanup_target() { echo "UNEXPECTED_REGISTER:\$1"; }
+safe_remove() { echo "UNEXPECTED_REMOVE:\$1"; }
+
+rc=0
+safe_clean_guarded delete_guard \
+    "$base/missing" "$base/protected" "$base/whitelisted" \
+    "Filtered guarded cache" || rc=\$?
+[[ \$rc -eq 0 ]] || { echo "WRONG_RC:\$rc"; exit 1; }
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_GUARD"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REGISTER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
 @test "mo clean --dry-run skips system cleanup in non-interactive mode" {

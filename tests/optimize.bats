@@ -1384,6 +1384,47 @@ EOF
 	[[ "$double" == *"Detached 2 mounted images"* ]] || return 1
 }
 
+@test "opt_diag_offer_detach_candidates renders image paths without terminal escapes" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" NO_COLOR=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/diagnostics.sh"
+image_path=$'/Users/test/Bad\\033[2J-\033[2J.dmg'
+mount_path=$'/Volumes/Bad\\033[H-\033[H'
+MOLE_DRY_RUN=1 opt_diag_offer_detach_candidates "${image_path}"$'\t'"${mount_path}"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *'Bad\033[2J-'* ]] || return 1
+	[[ "$output" == *'/Volumes/Bad\033[H-'* ]] || return 1
+	[[ "$output" != *$'\033[2J'* ]] || return 1
+	[[ "$output" != *$'\033[H'* ]]
+}
+
+@test "opt_diag_detach_candidates renders result paths without terminal escapes" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" NO_COLOR=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/diagnostics.sh"
+run_with_timeout() {
+	shift
+	shift
+	shift
+	[[ "$1" == *Success* ]]
+}
+success_mount=$'/Volumes/Success\\033[2J-\033[2J'
+failed_mount=$'/Volumes/Failed\\033[H-\033[H'
+candidates="/tmp/one.dmg"$'\t'"$success_mount"$'\n'"/tmp/two.dmg"$'\t'"$failed_mount"
+opt_diag_detach_candidates "$candidates"
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *'Detached /Volumes/Success\033[2J-'* ]] || return 1
+	[[ "$output" == *'Failed to detach /Volumes/Failed\033[H-'* ]] || return 1
+	[[ "$output" != *$'\033[2J'* ]] || return 1
+	[[ "$output" != *$'\033[H'* ]]
+}
+
 @test "opt_periodic_maintenance skips when periodic command missing" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

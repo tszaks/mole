@@ -380,14 +380,20 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 else
     # Skip if Homebrew mole is installed (install.sh will refuse to overwrite)
     install_test_home=""
+    install_test_prefix=""
     if command -v brew > /dev/null 2>&1 && brew list mole &> /dev/null; then
         printf "${GREEN}${ICON_SUCCESS} Installation test skipped, Homebrew${NC}\n"
     else
-        install_test_home="$(mktemp -d /tmp/mole-test-home.XXXXXX 2> /dev/null || true)"
+        install_test_home="$(mktemp -d "$PROJECT_ROOT/tests/tmp-install-home.XXXXXX" 2> /dev/null || true)"
         if [[ -z "$install_test_home" ]]; then
-            install_test_home="/tmp/mole-test-home"
+            install_test_home="$PROJECT_ROOT/tests/tmp-install-home"
             mkdir -p "$install_test_home"
         fi
+    fi
+    if [[ -z "$install_test_home" ]]; then
+        :
+    else
+        install_test_prefix="$install_test_home/mole-bin"
     fi
     if [[ -z "$install_test_home" ]]; then
         :
@@ -395,8 +401,8 @@ else
         XDG_CONFIG_HOME="$install_test_home/.config" \
         XDG_CACHE_HOME="$install_test_home/.cache" \
         MO_NO_OPLOG=1 \
-        ./install.sh --prefix /tmp/mole-test > /dev/null 2>&1; then
-        if [[ -f "/tmp/mole-test/mole" ]]; then
+        ./install.sh --prefix "$install_test_prefix" > /dev/null 2>&1; then
+        if [[ -f "$install_test_prefix/mole" ]]; then
             printf "${GREEN}${ICON_SUCCESS} Installation test passed${NC}\n"
         else
             printf "${RED}${ICON_ERROR} Installation test failed${NC}\n"
@@ -406,7 +412,9 @@ else
         printf "${RED}${ICON_ERROR} Installation test failed${NC}\n"
         ((FAILED++))
     fi
-    MO_NO_OPLOG=1 safe_remove "/tmp/mole-test" true || true
+    if [[ -n "$install_test_prefix" ]]; then
+        MO_NO_OPLOG=1 safe_remove "$install_test_prefix" true || true
+    fi
     if [[ -n "$install_test_home" ]]; then
         MO_NO_OPLOG=1 safe_remove "$install_test_home" true || true
     fi

@@ -1839,16 +1839,18 @@ if [[ "${DEVELOPER_DIR:-}" == "$CANDIDATE_DEVELOPER_DIR" ]]; then
 fi
 exit 1
 XEOF
-    cat > "$tmp_bin/xcode-select" <<XEOF
+    cat > "$tmp_bin/xcode-select" << XEOF
 #!/bin/bash
 printf '$selected\n'
 XEOF
     chmod +x "$tmp_bin/xcrun" "$tmp_bin/xcode-select"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" \
+    # GitHub's macOS image exports DEVELOPER_DIR. This case exercises the
+    # xcode-select branch, so inherited toolchain state must not change it.
+    run env -u DEVELOPER_DIR HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$tmp_bin:$PATH" \
         CANDIDATE_DEVELOPER_DIR="$candidate" \
         SIMCTL_CALL_LOG="$HOME/simctl-selected-invalid.log" \
-        /bin/bash --noprofile --norc <<'EOF'
+        /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"

@@ -46,7 +46,7 @@ make_homebrew_shadow() {
 	ln -sf "$cellar_mole" "$bin_dir/mole"
 	ln -sf "$cellar_mole" "$bin_dir/mo"
 
-	cat > "$bin_dir/brew" <<'SCRIPT'
+	cat > "$bin_dir/brew" << 'SCRIPT'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$BREW_LOG"
 case "${1:-}" in
@@ -74,7 +74,7 @@ SCRIPT
 make_update_curl_stub() {
 	local bin_dir="$1"
 	local latest_version="$2"
-	cat > "$bin_dir/curl" <<SCRIPT
+	cat > "$bin_dir/curl" << SCRIPT
 #!/usr/bin/env bash
 out=""
 url=""
@@ -109,7 +109,7 @@ if [[ -n "\$out" ]]; then
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
 printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
-if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
+	if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
 	printf '%s\n' "\${MOLE_ASSUME_SUDO_AUTH:-}" > "\$INSTALLER_SUDO_AUTH_LOG"
 fi
 echo "Updated to latest version, \${MOLE_VERSION#V}"
@@ -130,7 +130,7 @@ SCRIPT
 make_nightly_update_curl_stub() {
 	local bin_dir="$1"
 	local latest_commit="$2"
-	cat > "$bin_dir/curl" <<SCRIPT
+	cat > "$bin_dir/curl" << SCRIPT
 #!/usr/bin/env bash
 out=""
 url=""
@@ -154,9 +154,12 @@ done
 if [[ -n "\$out" ]]; then
 	cat > "\$out" <<'INSTALLER'
 #!/usr/bin/env bash
-printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
-printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
-if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
+	printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
+	printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
+	if [[ -n "\${INSTALLER_COMMIT_LOG:-}" ]]; then
+		printf '%s\n' "\${MOLE_INSTALL_COMMIT:-}" > "\$INSTALLER_COMMIT_LOG"
+	fi
+	if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
 	printf '%s\n' "\${MOLE_ASSUME_SUDO_AUTH:-}" > "\$INSTALLER_SUDO_AUTH_LOG"
 fi
 echo "Updated to latest version, \${MOLE_VERSION#V}"
@@ -256,7 +259,7 @@ SCRIPT
 	# Every request fails the way a flaky local proxy fails. Version discovery
 	# runs inside `latest=$(...)`, so before the fix the nonzero pipeline tripped
 	# errexit and killed `mo update` with an empty screen and no diagnosis.
-	cat > "$fake_bin/curl" <<'SCRIPT'
+	cat > "$fake_bin/curl" << 'SCRIPT'
 #!/usr/bin/env bash
 printf 'x\n' >> "$CURL_ATTEMPT_LOG"
 exit 28
@@ -288,7 +291,7 @@ SCRIPT
 
 	mkdir -p "$fake_bin"
 	make_manual_mole_install "$manual_bin" "$manual_config" "0.0.1"
-	cat > "$fake_bin/curl" <<'SCRIPT'
+	cat > "$fake_bin/curl" << 'SCRIPT'
 #!/usr/bin/env bash
 printf 'x\n' >> "$CURL_ATTEMPT_LOG"
 exit 28
@@ -407,6 +410,7 @@ SCRIPT
 	local fake_bin="$TEST_ROOT/fake-bin"
 	local installer_args_log="$TEST_ROOT/installer.args"
 	local installer_version_log="$TEST_ROOT/installer.version"
+	local installer_commit_log="$TEST_ROOT/installer.commit"
 	local curl_url_log="$TEST_ROOT/curl.urls"
 	local latest_commit="e31d46faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -422,12 +426,14 @@ SCRIPT
 		CURL_URL_LOG="$curl_url_log" \
 		INSTALLER_ARGS_LOG="$installer_args_log" \
 		INSTALLER_VERSION_LOG="$installer_version_log" \
+		INSTALLER_COMMIT_LOG="$installer_commit_log" \
 		"$manual_bin/mo" update --nightly --force
 
 	[ "$status" -eq 0 ]
 	[ -f "$installer_args_log" ]
 	grep -q -- "--prefix" "$installer_args_log"
 	[ "$(cat "$installer_version_log")" = "main" ]
+	[ "$(cat "$installer_commit_log")" = "$latest_commit" ] || return 1
 	grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"
 }
 
@@ -447,7 +453,7 @@ SCRIPT
 	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
 	make_update_curl_stub "$fake_bin" "$current_version"
 	chmod a-w "$manual_bin/mole"
-	cat > "$fake_bin/sudo" <<'SCRIPT'
+	cat > "$fake_bin/sudo" << 'SCRIPT'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SUDO_LOG"
 exit 0
@@ -478,7 +484,7 @@ SCRIPT
 }
 
 @test "installer sudo reuse uses non-interactive sudo checks" {
-	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'EOF'
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 
 INSTALL_DIR="$HOME/install"
@@ -529,6 +535,40 @@ EOF
 	[ "$status" -eq 0 ]
 	grep -q '^update$' "$brew_log"
 	grep -q '^upgrade mole$' "$brew_log"
+}
+
+@test "Homebrew update bounds fallback installed-binary version probes" {
+	run env HOME="$HOME/bounded-homebrew-version" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+mkdir -p "$HOME"
+source "$PROJECT_ROOT/lib/core/common.sh"
+trace="$HOME/timeout.trace"
+
+run_with_timeout() {
+	local timeout="$1"
+	shift
+	printf '%s|%s\n' "$timeout" "$*" >> "$trace"
+	case "$*" in
+		"brew upgrade mole") printf 'already installed\n' ;;
+		"mo --version") printf 'Mole version 9.9.9\n' ;;
+	esac
+}
+mo() {
+	printf 'UNEXPECTED_DIRECT_MO\n'
+	return 1
+}
+export -f mo
+
+update_via_homebrew "1.0.0"
+grep -qFx "$MOLE_TIMEOUT_QUICK_DETECT_SEC|mo --version" "$trace"
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"Already on latest version, 9.9.9"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_DIRECT_MO"* ]]
 }
 
 @test "mo update preserves actionable Homebrew diagnostics on failure (#1247)" {
@@ -605,7 +645,7 @@ make_self_heal_curl_stub() {
 	local bin_dir="$1"
 	local latest_version="$2"
 	local heal_mode="$3"
-	cat > "$bin_dir/curl" <<SCRIPT
+	cat > "$bin_dir/curl" << SCRIPT
 #!/usr/bin/env bash
 out=""
 url=""
@@ -744,7 +784,7 @@ SCRIPT
 make_nightly_self_heal_curl_stub() {
 	local bin_dir="$1"
 	local latest_commit="$2"
-	cat > "$bin_dir/curl" <<SCRIPT
+	cat > "$bin_dir/curl" << SCRIPT
 #!/usr/bin/env bash
 out=""
 url=""
@@ -798,6 +838,10 @@ done
 mkdir -p "\$config"
 printf 'CHANNEL=nightly\nCOMMIT_HASH=%s\n' "\${LATEST_COMMIT:0:7}" > "\$config/install_channel"
 printf '%s|%s|%s\n' "\${MOLE_VERSION:-}" "\$prefix" "\$config" > "\$HEAL_LOG"
+[[ "\${MOLE_INSTALL_COMMIT:-}" == "$latest_commit" ]] || exit 1
+[[ "\${MOLE_INSTALL_RECEIPT:-}" == heal-* ]] || exit 1
+printf 'CHANNEL=nightly\nCOMMIT_HASH=%s\nINSTALL_RECEIPT=%s\n' \
+	"\${MOLE_INSTALL_COMMIT:0:7}" "\$MOLE_INSTALL_RECEIPT" > "\$config/install_channel"
 HEAL
 	exit 0
 fi
@@ -825,7 +869,10 @@ SCRIPT
 		HEAL_LOG="$heal_log" \
 		"$manual_bin/mo" update --nightly
 
-	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
 	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
 	[[ "$output" == *"Updated to nightly build (main), abc1234"* ]] || return 1
 	[ "$(cat "$heal_log")" = "main|$manual_bin|$manual_config" ] || return 1
@@ -833,8 +880,102 @@ SCRIPT
 	grep -qFx 'COMMIT_HASH=abc1234' "$manual_config/install_channel"
 }
 
+@test "update lock rejects a live holder and reacquires after release" {
+	run env HOME="$HOME/update-lock" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+mkdir -p "$HOME"
+source "$PROJECT_ROOT/lib/core/common.sh"
+VERSION="0.0.1"
+SCRIPT_DIR="$HOME/config"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+mkdir -p "$HOME/install/bin"
+acl_rule="everyone allow list,add_file,search,add_subdirectory,delete_child,file_inherit,directory_inherit"
+/bin/chmod +a "$acl_rule" "$HOME/install/bin"
+/bin/mkdir -m 0700 "$HOME/install/bin/acl-probe"
+/bin/ls -lde "$HOME/install/bin/acl-probe" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'
+/bin/rmdir "$HOME/install/bin/acl-probe"
+if _update_lock_mode_for_install_dir "$HOME/install/bin" > /dev/null; then
+	echo "UNEXPECTED_WRITABLE_UPDATE_PARENT_ACL_ACCEPTED"
+	exit 1
+fi
+/bin/chmod -N "$HOME/install/bin"
+acl_rule="everyone deny writeattr,file_inherit,directory_inherit"
+/bin/chmod +a "$acl_rule" "$HOME/install/bin"
+[[ "$(_update_lock_mode_for_install_dir "$HOME/install/bin")" == "false" ]] || exit 1
+lock_path=$(_update_lock_path "$HOME/install/bin")
+_update_acquire_lock "$lock_path"
+if /bin/ls -lde "$(dirname "$lock_path")" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'; then
+	echo "UNEXPECTED_INHERITED_UPDATE_LOCK_ACL"
+	exit 1
+fi
+if _update_acquire_lock "$lock_path"; then
+	echo "UNEXPECTED_CONCURRENT_LOCK"
+	exit 1
+fi
+_update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+[[ -f "$lock_path" ]] || exit 1
+
+/usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sleep 0.3 &
+external_holder=$!
+/bin/sleep 0.05
+if _update_acquire_lock "$lock_path"; then
+	echo "UNEXPECTED_EXTERNAL_LOCK_BYPASS"
+	exit 1
+fi
+wait "$external_holder"
+_update_acquire_lock "$lock_path"
+_update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+[[ -f "$lock_path" ]] || exit 1
+
+victim="$HOME/update-lock-victim"
+printf 'DO-NOT-TOUCH\n' > "$victim"
+/bin/rm -f "$lock_path"
+ln -s "$victim" "$lock_path"
+if _update_acquire_lock "$lock_path"; then
+	echo "UNEXPECTED_UPDATE_LOCK_SYMLINK_FOLLOW"
+	exit 1
+fi
+[[ "$(cat "$victim")" == "DO-NOT-TOUCH" ]] || exit 1
+unlink "$lock_path"
+
+(
+	actual_pid=""
+	_update_lock_current_shell_pid actual_pid
+	[[ "$actual_pid" =~ ^[0-9]+$ && "$actual_pid" != "$$" ]] || exit 1
+	_update_acquire_lock "$lock_path"
+	case "$(cat "$lock_path")" in
+		"$actual_pid|"*) ;;
+		*) exit 1 ;;
+	esac
+	_update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+)
+
+! compgen -G "$HOME/install/bin/.mole-update.lock/control.*" > /dev/null
+
+declare -f _update_acquire_lock | grep -q '/usr/bin/lockf'
+declare -f update_mole | grep -q 'local UPDATE_LOCK_CONTROL=""'
+if _update_lock_remove_control "/tmp/not-a-mole-control" false "$lock_path"; then
+	echo "UNEXPECTED_AMBIENT_CONTROL_REMOVAL"
+	exit 1
+fi
+declare -f _update_self_heal_reinstall | grep -q '_update_acquire_lock'
+INNER
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"UNEXPECTED_CONCURRENT_LOCK"* ]]
+	[[ "$output" != *"UNEXPECTED_EXTERNAL_LOCK_BYPASS"* ]]
+	[[ "$output" != *"UNEXPECTED_UPDATE_LOCK_SYMLINK_FOLLOW"* ]]
+	[[ "$output" != *"UNEXPECTED_AMBIENT_CONTROL_REMOVAL"* ]]
+	[[ "$output" != *"UNEXPECTED_INHERITED_UPDATE_LOCK_ACL"* ]]
+	[[ "$output" != *"UNEXPECTED_WRITABLE_UPDATE_PARENT_ACL_ACCEPTED"* ]]
+}
+
 @test "nightly commit lookup and self-heal fall back to wget" {
-	run env HOME="$HOME/wget-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME/wget-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 mkdir -p "$HOME/config" "$HOME/bin"
 printf '#!/bin/bash\necho "Mole version 0.0.1"\n' > "$HOME/bin/mole"
@@ -845,6 +986,7 @@ SCRIPT_DIR="$HOME/config"
 source "$PROJECT_ROOT/lib/manage/update.sh"
 
 expected_commit="def5678bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+export expected_commit
 command() {
 	if [[ "$1" == "-v" && "$2" == "curl" ]]; then
 		return 1
@@ -869,7 +1011,9 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 mkdir -p "$config"
-printf 'CHANNEL=nightly\nCOMMIT_HASH=def5678\n' > "$config/install_channel"
+[[ "${MOLE_INSTALL_COMMIT:-}" == "$expected_commit" ]] || exit 1
+[[ "${MOLE_INSTALL_RECEIPT:-}" == heal-* ]] || exit 1
+printf 'CHANNEL=nightly\nCOMMIT_HASH=def5678\nINSTALL_RECEIPT=%s\n' "$MOLE_INSTALL_RECEIPT" > "$config/install_channel"
 INSTALLER
 }
 
@@ -877,16 +1021,20 @@ INSTALLER
 _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" "$expected_commit"
 INNER
 
-	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
 	[[ "$output" == *"Updated to nightly build (main), def5678"* ]]
 }
 
-@test "nightly self-heal succeeds when the latest commit is unknown" {
-	run env HOME="$HOME/unknown-head-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+@test "nightly self-heal accepts a fresh receipt without reusing a stale commit when HEAD is unknown" {
+	run env HOME="$HOME/unknown-head-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 mkdir -p "$HOME/config" "$HOME/bin"
 printf '#!/bin/bash\necho "Mole version 0.0.1"\n' > "$HOME/bin/mole"
 chmod +x "$HOME/bin/mole"
+printf 'CHANNEL=nightly\nCOMMIT_HASH=deadbee\nINSTALL_RECEIPT=old-receipt\n' > "$HOME/config/install_channel"
 source "$PROJECT_ROOT/lib/core/common.sh"
 VERSION="0.0.1"
 SCRIPT_DIR="$HOME/config"
@@ -906,7 +1054,9 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 mkdir -p "$config"
-printf 'CHANNEL=nightly\nCOMMIT_HASH=fee1bad\n' > "$config/install_channel"
+[[ -z "${MOLE_INSTALL_COMMIT:-}" ]] || exit 1
+[[ "${MOLE_INSTALL_RECEIPT:-}" == heal-* ]] || exit 1
+printf 'CHANNEL=nightly\nINSTALL_RECEIPT=%s\n' "$MOLE_INSTALL_RECEIPT" > "$config/install_channel"
 INSTALLER
 }
 
@@ -915,12 +1065,89 @@ INSTALLER
 _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""
 INNER
 
-	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
-	[[ "$output" == *"Updated to nightly build (main), fee1bad"* ]]
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"Updated to nightly build (main)"* ]] || return 1
+	[[ "$output" != *"deadbee"* ]] || return 1
+	run grep -q '^COMMIT_HASH=' "$HOME/unknown-head-self-heal/config/install_channel"
+	[ "$status" -eq 1 ]
+}
+
+@test "nightly self-heal rejects stale metadata when this install writes no receipt" {
+	run env HOME="$HOME/stale-receipt-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+mkdir -p "$HOME/config" "$HOME/bin"
+printf '#!/bin/bash\necho "Mole version 0.0.1"\n' > "$HOME/bin/mole"
+chmod +x "$HOME/bin/mole"
+printf 'CHANNEL=nightly\nCOMMIT_HASH=deadbee\nINSTALL_RECEIPT=old-receipt\n' > "$HOME/config/install_channel"
+source "$PROJECT_ROOT/lib/core/common.sh"
+VERSION="0.0.1"
+SCRIPT_DIR="$HOME/config"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+curl() {
+	printf '%s\n' '#!/usr/bin/env bash' 'exit 0'
+}
+
+if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""; then
+	exit 1
+fi
+exit 0
+INNER
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"Updated to nightly build (main)"* ]]
+}
+
+@test "nightly self-heal bounds the installed binary version probe" {
+	local timeout_cmd="timeout"
+	command -v timeout > /dev/null 2>&1 || timeout_cmd="gtimeout"
+	command -v "$timeout_cmd" > /dev/null 2>&1 || skip "timeout command unavailable"
+
+	run "$timeout_cmd" 1 env HOME="$HOME/bounded-version-self-heal" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TIMEOUT_QUICK_DETECT_SEC=0.1 /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+mkdir -p "$HOME/config" "$HOME/bin"
+printf '#!/bin/bash\nsleep 5\n' > "$HOME/bin/mole"
+chmod +x "$HOME/bin/mole"
+source "$PROJECT_ROOT/lib/core/common.sh"
+VERSION="0.0.1"
+SCRIPT_DIR="$HOME/config"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+curl() {
+	cat <<'INSTALLER'
+#!/usr/bin/env bash
+config=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--config) config="$2"; shift 2 ;;
+		*) shift ;;
+	esac
+done
+mkdir -p "$config"
+printf 'CHANNEL=nightly\nCOMMIT_HASH=fee1bad\nINSTALL_RECEIPT=%s\n' "$MOLE_INSTALL_RECEIPT" > "$config/install_channel"
+INSTALLER
+}
+
+if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""; then
+	exit 1
+fi
+exit 0
+INNER
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
 }
 
 @test "nightly self-heal fails when the installed binary does not answer" {
-	run env HOME="$HOME/dead-binary-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME/dead-binary-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 mkdir -p "$HOME/config" "$HOME/bin"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -954,6 +1181,9 @@ fi
 exit 0
 INNER
 
-	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
 	[[ "$output" != *"Updated to nightly build (main)"* ]]
 }
