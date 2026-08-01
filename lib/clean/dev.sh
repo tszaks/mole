@@ -793,13 +793,18 @@ _xcode_safe_clean_guarded() {
     local delete_guard="$1"
     local display_name="$2"
     shift 2
+    local _MOLE_XCODE_DELETE_GUARD_REASON="process state changed"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        if ! "$delete_guard"; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
+            note_activity
+            return 1
+        fi
         safe_clean "$@"
         return $?
     fi
 
-    local _MOLE_XCODE_DELETE_GUARD_REASON="process state changed"
     local guarded_rc=0
     safe_clean_guarded "$delete_guard" "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
@@ -2273,6 +2278,40 @@ codex_desktop_cache_physical_path() {
     return 1
 }
 
+_codex_desktop_cache_delete_guard_allows() {
+    if ! codex_desktop_running; then
+        return 0
+    fi
+
+    _MOLE_CODEX_CACHE_GUARD_REASON="Codex active or process state unknown"
+    return 1
+}
+
+_codex_desktop_safe_clean_guarded() {
+    local display_name="$1"
+    shift
+    local _MOLE_CODEX_CACHE_GUARD_REASON="process state changed"
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        if ! _codex_desktop_cache_delete_guard_allows; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
+            note_activity
+            return 1
+        fi
+        safe_clean "$@"
+        return $?
+    fi
+
+    local guarded_rc=0
+    safe_clean_guarded _codex_desktop_cache_delete_guard_allows "$@" || guarded_rc=$?
+    if [[ $guarded_rc -eq 75 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
+        note_activity
+        return 1
+    fi
+    return "$guarded_rc"
+}
+
 clean_codex_desktop_caches() {
     local cache_root="$HOME/Library/Caches/Codex"
     [[ -d "$cache_root" ]] || return 0
@@ -2303,7 +2342,10 @@ clean_codex_desktop_caches() {
         for leaf in "${leaves[@]}"; do
             physical_leaf=""
             if physical_leaf=$(codex_desktop_cache_physical_path "$profile/$leaf"); then
-                safe_clean "$physical_leaf"/* "Codex Desktop $leaf"
+                _codex_desktop_safe_clean_guarded \
+                    "Codex Desktop caches" \
+                    "$physical_leaf"/* \
+                    "Codex Desktop $leaf" || return 0
             else
                 debug_log "Codex Desktop cache leaf skipped: $profile/$leaf"
             fi

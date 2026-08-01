@@ -160,7 +160,7 @@ $ mo optimize
 System: 5/32 GB RAM | 333/460 GB Disk (72%) | Uptime 6d
 
   ✓ Inspect and repair supported system maintenance items
-  ✓ Refresh eligible Finder, Dock, network, and database state
+  ✓ Refresh eligible Finder, network, and database state
   ✓ Skip tasks that are unnecessary, unsafe now, or unavailable
 
 ====================================================================

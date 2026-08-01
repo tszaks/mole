@@ -159,25 +159,33 @@ announce_action() {
 }
 
 cleanup_all() {
+    local exit_status="${1:-0}"
     stop_inline_spinner 2> /dev/null || true
     stop_sudo_session
     cleanup_temp_files
     # Log session end
     local applied=0
+    local failed=0
     if declare -F optimize_outcome_count > /dev/null; then
         applied=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_APPLIED")
+        failed=$(optimize_outcome_count "$MOLE_OPTIMIZE_OUTCOME_FAILED")
         local failed_action
         while IFS= read -r failed_action; do
             [[ -n "$failed_action" ]] || continue
             log_operation "optimize" "TASK_FAILED" "$failed_action" "task outcome"
         done < <(optimize_failed_actions)
     fi
+    if [[ "$exit_status" -ne 0 && "$failed" -eq 0 ]]; then
+        local failure_action="session"
+        [[ "$exit_status" -eq 130 ]] && failure_action="interrupted"
+        log_operation "optimize" "TASK_FAILED" "$failure_action" "exit status $exit_status"
+    fi
     log_operation_session_end "optimize" "$applied" "0"
 }
 
 handle_interrupt() {
     trap - EXIT
-    cleanup_all
+    cleanup_all 130
     exit 130
 }
 
@@ -212,7 +220,7 @@ main() {
 
     log_operation_session_start "optimize"
 
-    trap cleanup_all EXIT
+    trap 'cleanup_all "$?"' EXIT
     trap handle_interrupt INT TERM
 
     if [[ -t 1 ]]; then

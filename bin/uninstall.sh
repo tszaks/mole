@@ -522,13 +522,14 @@ uninstall_print_app_paths_with_mtime() {
 }
 
 uninstall_app_inventory_fingerprint() {
-    local app_dir app_path app_mtime pkg_app_path
+    local app_dir app_path app_mtime info_mtime pkg_app_path
 
     {
         while IFS= read -r pkg_app_path; do
             [[ -n "$pkg_app_path" && -d "$pkg_app_path" ]] || continue
             app_mtime=$(get_file_mtime "$pkg_app_path")
-            printf '%s|%s\n' "$pkg_app_path" "${app_mtime:-0}"
+            info_mtime=$(get_file_mtime "$pkg_app_path/Contents/Info.plist")
+            printf '%s|%s|%s\n' "$pkg_app_path" "${app_mtime:-0}" "${info_mtime:-0}"
         done < <(pkg_receipt_nonstandard_app_paths)
 
         while IFS= read -r app_dir; do
@@ -536,7 +537,8 @@ uninstall_app_inventory_fingerprint() {
             while IFS=$'\t' read -r app_mtime app_path; do
                 [[ -n "$app_path" ]] || continue
                 uninstall_should_skip_app_path "$app_path" && continue
-                printf '%s|%s\n' "$app_path" "${app_mtime:-0}"
+                info_mtime=$(get_file_mtime "$app_path/Contents/Info.plist")
+                printf '%s|%s|%s\n' "$app_path" "${app_mtime:-0}" "${info_mtime:-0}"
             done < <(uninstall_print_app_paths_with_mtime "$app_dir")
         done < <(uninstall_print_app_search_dirs)
     } | LC_ALL=C sort -u
@@ -550,12 +552,25 @@ uninstall_inventory_can_reuse_cached_apps() {
     local cached_inventory="$1"
     local current_inventory="$2"
     local additions=""
+    local removals=""
 
     [[ -n "$cached_inventory" && -n "$current_inventory" ]] || return 1
     additions=$(LC_ALL=C comm -13 \
         <(printf '%s\n' "$cached_inventory") \
         <(printf '%s\n' "$current_inventory")) || return 1
-    [[ -z "$additions" ]]
+    [[ -z "$additions" ]] || return 1
+
+    removals=$(LC_ALL=C comm -23 \
+        <(printf '%s\n' "$cached_inventory") \
+        <(printf '%s\n' "$current_inventory")) || return 1
+    local removed_row removed_path
+    while IFS= read -r removed_row; do
+        [[ -n "$removed_row" ]] || continue
+        removed_path="${removed_row%|*}"
+        removed_path="${removed_path%|*}"
+        [[ ! -e "$removed_path" ]] || return 1
+    done <<< "$removals"
+    return 0
 }
 
 # Internal helpers for scan_applications. They read and write locals

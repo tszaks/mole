@@ -4,6 +4,13 @@
 
 set -euo pipefail
 
+optimize_whitelist_pattern_is_retired() {
+    case "$1" in
+        dock_refresh | memory_pressure_relief) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Get script directory and source dependencies
 _MOLE_MANAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_MOLE_MANAGE_DIR/../core/common.sh"
@@ -54,7 +61,7 @@ save_whitelist_patterns() {
         for pattern in "${patterns[@]}"; do
             # Optimize also accepts path patterns for diagnostic exclusions, so
             # migrate only task IDs that this release explicitly retired.
-            if [[ "$mode" == "optimize" && "$pattern" == "dock_refresh" ]]; then
+            if [[ "$mode" == "optimize" ]] && optimize_whitelist_pattern_is_retired "$pattern"; then
                 continue
             fi
             local duplicate="false"
@@ -233,9 +240,9 @@ load_whitelist() {
     if [[ ${#patterns[@]} -gt 0 ]]; then
         local -a unique_patterns=()
         for pattern in "${patterns[@]}"; do
-            # Preserve custom diagnostic path patterns; only this retired task
-            # ID is known to be stale after #1300.
-            if [[ "$mode" == "optimize" && "$pattern" == "dock_refresh" ]]; then
+            # Preserve custom diagnostic path patterns; only explicit retired
+            # task IDs are migrated away.
+            if [[ "$mode" == "optimize" ]] && optimize_whitelist_pattern_is_retired "$pattern"; then
                 continue
             fi
             local duplicate="false"

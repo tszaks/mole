@@ -2427,28 +2427,105 @@ INNER
 }
 
 @test "inventory cache reuse accepts removals only and rejects stale changes (#1315)" {
-	run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+	run env HOME="$HOME/inventory-reuse" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 eval "$(sed -n '/^uninstall_inventory_can_reuse_cached_apps()/,/^}/p' "$PROJECT_ROOT/bin/uninstall.sh")"
 
-old=$(printf '/Applications/First.app|1\n/Applications/Second.app|1\n')
-removed=$(printf '/Applications/Second.app|1\n')
-changed=$(printf '/Applications/Second.app|2\n')
-added=$(printf '/Applications/Second.app|1\n/Applications/Third.app|1\n')
+mkdir -p "$HOME/Applications/First.app" "$HOME/Applications/Second.app"
+mkdir -p "$HOME/Applications/With|Pipe.app"
+old=$(printf '%s|1|1\n%s|1|1\n' "$HOME/Applications/First.app" "$HOME/Applications/Second.app")
+removed=$(printf '%s|1|1\n' "$HOME/Applications/Second.app")
+changed=$(printf '%s|2|1\n' "$HOME/Applications/Second.app")
+added=$(printf '%s|1|1\n%s|1|1\n' "$HOME/Applications/Second.app" "$HOME/Applications/Third.app")
+pipe_old=$(printf '%s|1|1\n%s|1|1\n' "$HOME/Applications/Second.app" "$HOME/Applications/With|Pipe.app")
 
-uninstall_inventory_can_reuse_cached_apps "$old" "$removed" || exit 1
-if uninstall_inventory_can_reuse_cached_apps "$old" "$changed"; then
+if uninstall_inventory_can_reuse_cached_apps "$old" "$removed"; then
+    exit 1
+fi
+if uninstall_inventory_can_reuse_cached_apps "$pipe_old" "$removed"; then
     exit 2
 fi
+rmdir "$HOME/Applications/With|Pipe.app"
+uninstall_inventory_can_reuse_cached_apps "$pipe_old" "$removed" || exit 3
+rmdir "$HOME/Applications/First.app"
+uninstall_inventory_can_reuse_cached_apps "$old" "$removed" || exit 4
+if uninstall_inventory_can_reuse_cached_apps "$old" "$changed"; then
+    exit 5
+fi
 if uninstall_inventory_can_reuse_cached_apps "$old" "$added"; then
-    exit 3
+    exit 6
 fi
 if uninstall_inventory_can_reuse_cached_apps "$old" ""; then
-    exit 4
+    exit 7
 fi
 INNER
 
 	[ "$status" -eq 0 ] || return 1
+}
+
+@test "inventory fingerprint changes when only Info.plist changes" {
+	run env HOME="$HOME/inventory-plist-mtime" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+eval "$(sed -n '/^uninstall_print_app_paths_with_mtime()/,/^}/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+eval "$(sed -n '/^uninstall_app_inventory_fingerprint()/,/^}/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+app_path="$HOME/Applications/Mutable.app"
+mkdir -p "$app_path/Contents"
+touch -t 202001010000 "$app_path/Contents/Info.plist"
+uninstall_print_app_search_dirs() { printf '%s\n' "$HOME/Applications"; }
+pkg_receipt_nonstandard_app_paths() { :; }
+uninstall_should_skip_app_path() { return 1; }
+
+before=$(uninstall_app_inventory_fingerprint)
+touch -t 202101010000 "$app_path/Contents/Info.plist"
+after=$(uninstall_app_inventory_fingerprint)
+[[ "$before" != "$after" ]] || exit 1
+INNER
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "batch scan refreshes selected app identity before leftover discovery" {
+	run env HOME="$HOME/batch-refresh-identity" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+app_path="$HOME/Applications/Current.app"
+mkdir -p "$app_path"
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+uninstall_resolve_eligible_bundle_id() { printf 'com.example.Current\n'; }
+official_uninstaller_vendor() { return 1; }
+uninstall_bundle_id_has_surviving_sibling() { return 1; }
+pgrep() { return 1; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { whoami; }
+get_path_size_kb() { printf '1\n'; }
+find_app_files() { printf '%s|%s\n' "$1" "$2" > "$HOME/discovery-identity"; }
+get_diagnostic_report_paths_for_app() { return 0; }
+find_app_system_files() { return 0; }
+calculate_total_size() { printf '0\n'; }
+has_sensitive_data() { return 1; }
+app_declares_local_network_usage() { return 1; }
+discover_login_item_helper_bundle_ids() { return 0; }
+
+selected_apps=("0|$app_path|Stale Display|com.example.Stale|0|Never")
+running_apps=()
+sudo_apps=()
+brew_cask_apps=()
+blocked_apps=()
+manual_removal_apps=()
+app_details=()
+total_estimated_size=0
+_batch_scan_app_details
+
+[[ "$(cat "$HOME/discovery-identity")" == "com.example.Current|Current" ]] || exit 1
+[[ "${app_details[0]}" == "Stale Display|$app_path|com.example.Current|"* ]] || exit 1
+INNER
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 

@@ -170,6 +170,33 @@ EOF
     assert_output_not_contains "STILL_PRESENT:"
 }
 
+@test "clean_codex_desktop_caches stops when Codex starts after the initial probe" {
+    run env HOME="$HOME/codex-cache-start-race" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+target="$HOME/Library/Caches/Codex/Default/Cache/owned.bin"
+mkdir -p "$(dirname "$target")"
+touch "$target"
+source "$PROJECT_ROOT/bin/clean.sh"
+
+probe_count=0
+pgrep() {
+    probe_count=$((probe_count + 1))
+    if [[ $probe_count -ge 5 ]]; then
+        return 0
+    fi
+    return 1
+}
+
+clean_codex_desktop_caches || true
+[[ -f "$target" ]] || exit 1
+printf 'CODEX_START_RACE_CLOSED\n'
+EOF
+
+    assert_run_success
+    assert_output_contains "CODEX_START_RACE_CLOSED"
+    assert_output_contains "Codex Desktop caches · stopped"
+}
+
 @test "clean_codex_desktop_caches skips while ChatGPT owns the Codex app cache" {
     run env HOME="$HOME/codex-cache-running" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

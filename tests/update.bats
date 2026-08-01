@@ -642,10 +642,15 @@ if [[ "\$url" == *"/main/install.sh"* ]]; then
 	cat <<'HEAL'
 #!/usr/bin/env bash
 prefix=""
+config=""
 while [[ \$# -gt 0 ]]; do
 	case "\$1" in
 		--prefix)
 			prefix="\$2"
+			shift 2
+			;;
+		--config)
+			config="\$2"
 			shift 2
 			;;
 		*)
@@ -653,7 +658,7 @@ while [[ \$# -gt 0 ]]; do
 			;;
 	esac
 done
-printf '%s %s\n' "\${MOLE_VERSION:-}" "\$prefix" >> "\$HEAL_LOG"
+printf '%s|%s|%s\n' "\${MOLE_VERSION:-}" "\$prefix" "\$config" >> "\$HEAL_LOG"
 printf '#!/bin/bash\necho "Mole version %s"\n' "\${MOLE_VERSION#V}" > "\$prefix/mole.healed"
 chmod +x "\$prefix/mole.healed"
 mv "\$prefix/mole.healed" "\$prefix/mole"
@@ -700,7 +705,7 @@ SCRIPT
 	grep -q -- "--update" "$installer_args_log" || return 1
 	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
 	[[ "$output" == *"Updated to latest version, $current_version"* ]] || return 1
-	[ "$(cat "$heal_log")" = "V$current_version $manual_bin" ]
+	[ "$(cat "$heal_log")" = "V$current_version|$manual_bin|$manual_config" ]
 }
 
 @test "mo update prints the manual reinstall command when self-heal fails too" {
@@ -731,5 +736,145 @@ SCRIPT
 	[ "$status" -ne 0 ] || return 1
 	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
 	[[ "$output" == *"Update failed"* ]] || return 1
-	[[ "$output" == *"install.sh | bash"* ]]
+	[[ "$output" == *"MOLE_VERSION=V$current_version"* ]] || return 1
+	[[ "$output" == *"--prefix $manual_bin"* ]] || return 1
+	[[ "$output" == *"--config $manual_config"* ]]
+}
+
+make_nightly_self_heal_curl_stub() {
+	local bin_dir="$1"
+	local latest_commit="$2"
+	cat > "$bin_dir/curl" <<SCRIPT
+#!/usr/bin/env bash
+out=""
+url=""
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+		-o)
+			out="\$2"
+			shift 2
+			;;
+		http*://*)
+			url="\$1"
+			shift
+			;;
+		*)
+			shift
+			;;
+	esac
+done
+
+if [[ -n "\$out" ]]; then
+	cat > "\$out" <<'INSTALLER'
+#!/usr/bin/env bash
+exit 1
+INSTALLER
+	exit 0
+fi
+
+if [[ "\$url" == *"api.github.com/repos/tw93/mole/commits/main"* ]]; then
+	printf '{"sha":"%s"}\n' "$latest_commit"
+	exit 0
+fi
+
+if [[ "\$url" == *"/main/install.sh"* ]]; then
+cat <<'HEAL'
+#!/usr/bin/env bash
+prefix=""
+config=""
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+		--prefix)
+			prefix="\$2"
+			shift 2
+			;;
+		--config)
+			config="\$2"
+			shift 2
+			;;
+		*) shift ;;
+	esac
+done
+mkdir -p "\$config"
+printf 'CHANNEL=nightly\nCOMMIT_HASH=%s\n' "\${LATEST_COMMIT:0:7}" > "\$config/install_channel"
+printf '%s|%s|%s\n' "\${MOLE_VERSION:-}" "\$prefix" "\$config" > "\$HEAL_LOG"
+HEAL
+	exit 0
+fi
+
+exit 22
+SCRIPT
+	chmod +x "$bin_dir/curl"
+}
+
+@test "mo update --nightly self-heals the selected install and verifies the main commit" {
+	local manual_bin="$TEST_ROOT/manual-nightly/bin"
+	local manual_config="$TEST_ROOT/manual-nightly/config"
+	local fake_bin="$TEST_ROOT/nightly-fake-bin"
+	local heal_log="$TEST_ROOT/nightly-heal.log"
+	local latest_commit="abc1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "0.0.1"
+	make_nightly_self_heal_curl_stub "$fake_bin" "$latest_commit"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		LATEST_COMMIT="$latest_commit" \
+		HEAL_LOG="$heal_log" \
+		"$manual_bin/mo" update --nightly
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
+	[[ "$output" == *"Updated to nightly build (main), abc1234"* ]] || return 1
+	[ "$(cat "$heal_log")" = "main|$manual_bin|$manual_config" ] || return 1
+	grep -qFx 'CHANNEL=nightly' "$manual_config/install_channel" || return 1
+	grep -qFx 'COMMIT_HASH=abc1234' "$manual_config/install_channel"
+}
+
+@test "nightly commit lookup and self-heal fall back to wget" {
+	run env HOME="$HOME/wget-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+mkdir -p "$HOME/config" "$HOME/bin"
+source "$PROJECT_ROOT/lib/core/common.sh"
+VERSION="0.0.1"
+SCRIPT_DIR="$HOME/config"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+expected_commit="def5678bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+command() {
+	if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+		return 1
+	fi
+	builtin command "$@"
+}
+wget() {
+	if [[ "$*" == *"api.github.com/repos/tw93/mole/commits/main"* ]]; then
+		printf '{"sha":"%s"}\n' "$expected_commit"
+		return 0
+	fi
+	cat <<'INSTALLER'
+#!/usr/bin/env bash
+config=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--config)
+			config="$2"
+			shift 2
+			;;
+		*) shift ;;
+	esac
+done
+mkdir -p "$config"
+printf 'CHANNEL=nightly\nCOMMIT_HASH=def5678\n' > "$config/install_channel"
+INSTALLER
+}
+
+[[ "$(get_latest_commit_from_github)" == "$expected_commit" ]] || exit 1
+_update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" "$expected_commit"
+INNER
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Updated to nightly build (main), def5678"* ]]
 }

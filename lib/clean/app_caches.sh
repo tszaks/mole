@@ -7,12 +7,17 @@ _xcode_cleanup_process_state() {
 }
 
 _simulator_cleanup_process_state() {
+    if declare -f _coresimulator_activity_state > /dev/null 2>&1; then
+        _coresimulator_activity_state
+        return $?
+    fi
+
     mole_pgrep_any \
         -x "Xcode" \
         -x "Simulator" \
-        -x "CoreSimulatorService" \
-        -x "simdiskimaged" \
-        -f "com.apple.CoreSimulator"
+        -x "xcodebuild" \
+        -x "xctest" \
+        -x "XCTRunner"
 }
 
 _xcode_cleanup_skip_reason() {
@@ -50,13 +55,18 @@ _app_cache_safe_clean_guarded() {
     local delete_guard="$1"
     local display_name="$2"
     shift 2
+    local _MOLE_APP_CACHE_GUARD_REASON="process state changed"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        if ! "$delete_guard"; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_APP_CACHE_GUARD_REASON})"
+            note_activity
+            return 1
+        fi
         safe_clean "$@"
         return $?
     fi
 
-    local _MOLE_APP_CACHE_GUARD_REASON="process state changed"
     local guarded_rc=0
     safe_clean_guarded "$delete_guard" "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then

@@ -646,6 +646,22 @@ uninstall_strip_version_suffix() {
 # Reads:  selected_apps
 # Writes: running_apps, sudo_apps, brew_cask_apps, blocked_apps,
 #         manual_removal_apps, app_details, total_estimated_size
+_batch_refresh_selected_app_bundle_id() {
+    local app_path="$1"
+    local fallback_bundle_id="$2"
+
+    [[ -d "$app_path" ]] || return 1
+    if declare -f uninstall_resolve_eligible_bundle_id > /dev/null 2>&1; then
+        uninstall_resolve_eligible_bundle_id "$app_path" "$fallback_bundle_id"
+        return $?
+    fi
+
+    # Standalone module tests do not source the inventory resolver. Keep their
+    # narrow fallback, while production always takes the eligibility path above.
+    [[ -n "$fallback_bundle_id" ]] || return 1
+    printf '%s\n' "$fallback_bundle_id"
+}
+
 _batch_scan_app_details() {
     # Cache current user outside loop
     local current_user=$(whoami)
@@ -655,6 +671,18 @@ _batch_scan_app_details() {
     for selected_app in "${selected_apps[@]}"; do
         [[ -z "$selected_app" ]] && continue
         IFS='|' read -r _ app_path app_name bundle_id _ _ <<< "$selected_app"
+
+        local current_bundle_id=""
+        if ! current_bundle_id=$(_batch_refresh_selected_app_bundle_id "$app_path" "$bundle_id"); then
+            manual_removal_apps+=("$app_name")
+            continue
+        fi
+        bundle_id="$current_bundle_id"
+
+        # Leftover matching is destructive and must use the current bundle
+        # basename, not a display name cached when the selection list opened.
+        local discovery_app_name="${app_path##*/}"
+        discovery_app_name="${discovery_app_name%.app}"
 
         local official_vendor=""
         if official_vendor=$(official_uninstaller_vendor "$bundle_id" "$app_name" "$app_path" 2> /dev/null); then
@@ -673,11 +701,8 @@ _batch_scan_app_details() {
         # or its version-suffix-stripped base does, name discovery is dropped
         # entirely so the fallback can never be broader than the primary path.
         local sibling_guard="none"
-        local discovery_app_name="$app_name"
         if uninstall_bundle_id_has_surviving_sibling "$bundle_id" "$app_path"; then
             sibling_guard="guard"
-            discovery_app_name="${app_path##*/}"
-            discovery_app_name="${discovery_app_name%.app}"
 
             local survivor_names
             survivor_names=$(uninstall_surviving_sibling_names "$bundle_id" "$app_path")

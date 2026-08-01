@@ -110,14 +110,14 @@ EOF
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "scan_installed_apps rejects an unmarked cache and finds the installed app" {
+@test "scan_installed_apps rejects the previous complete-cache schema and finds the installed app" {
     run env HOME="$HOME/unmarked-cache" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
 
 mkdir -p "$HOME/.cache/mole" "$HOME/Applications/Present.app/Contents"
-printf '%s\n' "com.example.Missing" > "$HOME/.cache/mole/installed_apps_cache"
+printf '%s\n%s\n' "com.example.Missing" "# mole-installed-apps-cache:v2:complete" > "$HOME/.cache/mole/installed_apps_cache"
 cat > "$HOME/Applications/Present.app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -132,6 +132,7 @@ grep -Fx "com.example.Present" "$HOME/installed.txt"
 if grep -Fx "com.example.Missing" "$HOME/installed.txt"; then
     exit 1
 fi
+printf 'CACHE_SCHEMA_REBUILT:com.example.Present\n'
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -161,6 +162,7 @@ grep -Fx "com.example.FuturePresent" "$HOME/installed.txt"
 if grep -Fx "com.example.FutureStale" "$HOME/installed.txt"; then
     exit 1
 fi
+printf 'FUTURE_CACHE_REBUILT:com.example.FuturePresent\n'
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -189,6 +191,7 @@ grep -Fx "com.example.StagePresent" "$HOME/installed.txt"
 if grep -Fx "com.example.PartialStage" "$HOME/installed.txt"; then
     exit 1
 fi
+printf 'STAGED_CACHE_IGNORED:com.example.StagePresent\n'
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -223,6 +226,8 @@ grep -Fx "com.example.Previous" "$cache_file"
 if find "$(dirname "$cache_file")" -maxdepth 1 -name 'installed_apps_cache.tmp.*' -print -quit | grep -q .; then
     exit 1
 fi
+printf 'PUBLISH_FAILURE_CURRENT:com.example.CurrentScan\n'
+printf 'PUBLISH_FAILURE_PREVIOUS:com.example.Previous\n'
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -230,7 +235,7 @@ EOF
     [[ "$output" == *"com.example.Previous"* ]]
 }
 
-@test "scan_installed_apps filters missing value from osascript output" {
+@test "scan_installed_apps fails closed when a discovered app has no readable bundle id" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -267,13 +272,63 @@ cat > "$HOME/Applications/GoodApp.app/Contents/Info.plist" <<'PLIST'
 PLIST
 
 debug_log() { :; }
-scan_installed_apps "$HOME/installed.txt"
-cat "$HOME/installed.txt"
+scan_status=0
+scan_installed_apps "$HOME/installed.txt" || scan_status=$?
+[[ $scan_status -ne 0 ]] || exit 1
+[[ ! -e "$HOME/.cache/mole/installed_apps_cache" ]] || exit 1
+printf 'APP_METADATA_FAILURE_CLOSED\n'
 EOF
 
-    [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"com.example.GoodApp"* ]] || return 1
-    [[ "$output" != *"missing value"* ]] || return 1
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"APP_METADATA_FAILURE_CLOSED"* ]] || return 1
+}
+
+@test "scan_installed_apps fails closed when every running-app probe fails" {
+    local scan_home="$HOME/running-probe-failure"
+    rm -rf "$scan_home"
+    mkdir -p "$scan_home"
+
+    run env HOME="$scan_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+app_path="$HOME/Applications/ProbeApp.app"
+mkdir -p "$app_path/Contents" "$HOME/stub-bin"
+cat > "$app_path/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.ProbeApp</string>
+</dict></plist>
+PLIST
+
+cat > "$HOME/stub-bin/find" <<'SH'
+#!/bin/sh
+if [ "${1:-}" = "$HOME/Applications" ]; then
+    printf '%s\n' "$HOME/Applications/ProbeApp.app"
+fi
+exit 0
+SH
+for command_name in osascript lsappinfo; do
+    cat > "$HOME/stub-bin/$command_name" <<'SH'
+#!/bin/sh
+exit 64
+SH
+done
+chmod +x "$HOME/stub-bin/find" "$HOME/stub-bin/osascript" "$HOME/stub-bin/lsappinfo"
+export PATH="$HOME/stub-bin:/usr/bin:/bin"
+
+debug_log() { :; }
+scan_status=0
+scan_installed_apps "$HOME/installed.txt" || scan_status=$?
+[[ $scan_status -ne 0 ]] || exit 1
+[[ ! -e "$HOME/.cache/mole/installed_apps_cache" ]] || exit 1
+printf 'AUXILIARY_PROBE_FAILURE_CLOSED\n'
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"AUXILIARY_PROBE_FAILURE_CLOSED"* ]] || return 1
 }
 
 @test "scan_installed_apps keeps find traversal options before predicates" {
@@ -289,6 +344,9 @@ cat > "$stub_dir/find" <<'SH'
 #!/bin/sh
 root="$1"
 shift
+case "$root" in
+    "$HOME/Library/LaunchAgents" | "/Library/LaunchAgents") exit 0 ;;
+esac
 if [ "${1:-}" != "-maxdepth" ] ||
     [ "${2:-}" != "3" ] ||
     [ "${3:-}" != "-type" ] ||
@@ -323,6 +381,34 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"com.example.Ordered"* ]]
+}
+
+@test "scan_installed_apps aggregates LaunchAgent bundle names without scratch paths" {
+    run env HOME="$HOME/agent-scan" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/Applications/AgentOwner.app/Contents" "$HOME/Library/LaunchAgents"
+cat > "$HOME/Applications/AgentOwner.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.AgentOwner</string>
+</dict></plist>
+PLIST
+touch "$HOME/Library/LaunchAgents/com.example.Agent.plist"
+debug_log() { :; }
+
+scan_installed_apps "$HOME/installed.txt"
+grep -qFx 'com.example.AgentOwner' "$HOME/installed.txt"
+grep -qFx 'com.example.Agent' "$HOME/installed.txt"
+if grep -qF '/Library/LaunchAgents/com.example.Agent.plist' "$HOME/installed.txt"; then
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "scan_installed_apps fails closed when scan result aggregation fails" {

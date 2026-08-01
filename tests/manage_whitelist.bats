@@ -106,21 +106,24 @@ setup() {
 @test "optimize whitelist ignores and does not resave removed task ids" {
     local optimize_path="$HOME/.config/mole/whitelist_optimize"
     mkdir -p "$(dirname "$optimize_path")"
-    printf 'dock_refresh\ncache_refresh\n' > "$optimize_path"
+    printf 'dock_refresh\nmemory_pressure_relief\ncache_refresh\n' > "$optimize_path"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
 load_whitelist optimize
 printf 'loaded:%s\n' "${CURRENT_WHITELIST_PATTERNS[@]}"
-save_whitelist_patterns optimize dock_refresh cache_refresh
+save_whitelist_patterns optimize dock_refresh memory_pressure_relief cache_refresh
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [[ "$output" == *"loaded:cache_refresh"* ]] || return 1
     [[ "$output" != *"loaded:dock_refresh"* ]] || return 1
+    [[ "$output" != *"loaded:memory_pressure_relief"* ]] || return 1
     grep -qFx 'cache_refresh' "$optimize_path"
     run grep -qFx 'dock_refresh' "$optimize_path"
+    [ "$status" -eq 1 ]
+    run grep -qFx 'memory_pressure_relief' "$optimize_path"
     [ "$status" -eq 1 ]
 }
 
@@ -128,7 +131,7 @@ EOF
     local legacy_path="$HOME/.config/mole/whitelist_checks"
     local optimize_path="$HOME/.config/mole/whitelist_optimize"
     mkdir -p "$(dirname "$legacy_path")"
-    printf 'dock_refresh\n' > "$legacy_path"
+    printf 'dock_refresh\nmemory_pressure_relief\n' > "$legacy_path"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

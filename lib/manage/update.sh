@@ -54,35 +54,73 @@ curl_download_with_retry() {
 # pipefail surfaces a truncated download, so a partial script runs nothing.
 _update_self_heal_reinstall() {
     local assume_sudo="$1"
-    local update_tag="$2"
+    local update_ref="$2"
     local install_dir="$3"
     local config_dir="$4"
     local mole_path="$5"
     local success_label="$6"
+    local expected_commit="${7:-}"
 
-    command -v curl > /dev/null 2>&1 || return 1
     echo "Retrying with a direct reinstall from GitHub..."
 
     local heal_output=""
-    heal_output=$(
-        set -o pipefail
-        curl -fsSL --connect-timeout 10 --max-time 60 \
-            "https://raw.githubusercontent.com/tw93/mole/main/install.sh" |
-            MOLE_ASSUME_SUDO_AUTH="$assume_sudo" MOLE_VERSION="$update_tag" \
-                bash -s -- --prefix "$install_dir" --config "$config_dir" 2>&1
-    ) || {
-        [[ -n "$heal_output" ]] && printf '%s\n' "$heal_output" | tail -5 >&2
+    if command -v curl > /dev/null 2>&1; then
+        heal_output=$(
+            set -o pipefail
+            curl -fsSL --connect-timeout 10 --max-time 60 \
+                "https://raw.githubusercontent.com/tw93/mole/main/install.sh" |
+                MOLE_ASSUME_SUDO_AUTH="$assume_sudo" MOLE_VERSION="$update_ref" \
+                    bash -s -- --prefix "$install_dir" --config "$config_dir" 2>&1
+        ) || {
+            [[ -n "$heal_output" ]] && printf '%s\n' "$heal_output" | tail -5 >&2
+            return 1
+        }
+    elif command -v wget > /dev/null 2>&1; then
+        heal_output=$(
+            set -o pipefail
+            wget --timeout=10 --tries=3 -qO- \
+                "https://raw.githubusercontent.com/tw93/mole/main/install.sh" |
+                MOLE_ASSUME_SUDO_AUTH="$assume_sudo" MOLE_VERSION="$update_ref" \
+                    bash -s -- --prefix "$install_dir" --config "$config_dir" 2>&1
+        ) || {
+            [[ -n "$heal_output" ]] && printf '%s\n' "$heal_output" | tail -5 >&2
+            return 1
+        }
+    else
         return 1
-    }
+    fi
 
-    # Claim success only when the installed binary reports the target version.
-    # Trusting installer output here would repeat the V1.47.1 false success.
+    if [[ "$update_ref" == "main" ]]; then
+        local installed_commit=""
+        installed_commit=$(MOLE_CONFIG_DIR="$config_dir" get_install_commit 2> /dev/null || true)
+        if [[ ! "$expected_commit" =~ ^[0-9a-f]{40}$ || ! "$installed_commit" =~ ^[0-9a-f]{7,40}$ ||
+            "${installed_commit:0:7}" != "${expected_commit:0:7}" ]]; then
+            return 1
+        fi
+        printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_commit:0:7}"
+        return 0
+    fi
+
+    # Claim stable success only when the installed binary reports the target
+    # version. Trusting installer output would repeat the V1.47.1 false success.
     local installed_version=""
     installed_version=$("$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}')
-    if [[ "$installed_version" != "${update_tag#V}" ]]; then
+    if [[ "$installed_version" != "${update_ref#V}" ]]; then
         return 1
     fi
     printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_version}"
+}
+
+_update_print_manual_reinstall() {
+    local update_ref="$1"
+    local install_dir="$2"
+    local config_dir="$3"
+    local quoted_ref quoted_install_dir quoted_config_dir
+    printf -v quoted_ref '%q' "$update_ref"
+    printf -v quoted_install_dir '%q' "$install_dir"
+    printf -v quoted_config_dir '%q' "$config_dir"
+    printf '%s Reinstall manually: curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | MOLE_VERSION=%s bash -s -- --prefix %s --config %s\n' \
+        "${ICON_REVIEW}" "$quoted_ref" "$quoted_install_dir" "$quoted_config_dir"
 }
 
 # Version discovery must report "unknown" by returning empty, never by failing.
@@ -287,9 +325,16 @@ get_install_commit() {
 }
 
 get_latest_commit_from_github() {
-    local sha
-    sha=$(curl -fsSL --connect-timeout 2 --max-time 3 \
-        "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null |
+    local response=""
+    local sha=""
+    if command -v curl > /dev/null 2>&1; then
+        response=$(curl -fsSL --connect-timeout 2 --max-time 3 \
+            "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null || true)
+    elif command -v wget > /dev/null 2>&1; then
+        response=$(wget --timeout=3 --tries=1 -qO- \
+            "https://api.github.com/repos/tw93/mole/commits/main" 2> /dev/null || true)
+    fi
+    sha=$(printf '%s\n' "$response" |
         grep '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/') || sha=""
     echo "$sha"
 }
@@ -514,6 +559,7 @@ update_mole() {
     fi
 
     local latest=""
+    local latest_commit=""
     local download_label="Downloading latest version..."
     local install_label="Installing update..."
     local final_success_label="latest version"
@@ -527,10 +573,10 @@ update_mole() {
         install_label="Installing nightly update..."
         final_success_label="nightly build (main)"
 
+        latest_commit=$(get_latest_commit_from_github)
         if [[ "$force_update" != "true" ]]; then
-            local installed_commit latest_commit
+            local installed_commit
             installed_commit=$(get_install_commit)
-            latest_commit=$(get_latest_commit_from_github)
 
             if [[ "$installed_commit" =~ ^[0-9a-f]{7,40}$ && "$latest_commit" =~ ^[0-9a-f]{40}$ &&
                 "${installed_commit:0:7}" == "${latest_commit:0:7}" ]]; then
@@ -723,12 +769,14 @@ update_mole() {
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
-            rm -f "$tmp_installer"
-            _update_cleanup
-            log_error "Nightly update failed"
-            echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
-            echo -e "${ICON_REVIEW} Reinstall manually: curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash"
-            exit 1
+            if ! _update_self_heal_reinstall "$installer_assume_sudo_auth" "main" "$install_dir" "$config_dir" "$mole_path" "$final_success_label" "$latest_commit"; then
+                rm -f "$tmp_installer"
+                _update_cleanup
+                log_error "Nightly update failed"
+                echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+                _update_print_manual_reinstall "main" "$install_dir" "$config_dir"
+                exit 1
+            fi
         fi
     elif [[ "$force_update" == "true" || "$switch_to_stable_channel" == "true" || "$repair_install" == "true" ]]; then
         if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
@@ -740,7 +788,7 @@ update_mole() {
                 _update_cleanup
                 log_error "Update failed"
                 echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
-                echo -e "${ICON_REVIEW} Reinstall manually: curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash"
+                _update_print_manual_reinstall "$update_tag" "$install_dir" "$config_dir"
                 exit 1
             fi
         fi
@@ -757,7 +805,7 @@ update_mole() {
                     _update_cleanup
                     log_error "Update failed"
                     echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
-                    echo -e "${ICON_REVIEW} Reinstall manually: curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash"
+                    _update_print_manual_reinstall "$update_tag" "$install_dir" "$config_dir"
                     exit 1
                 fi
             fi

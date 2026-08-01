@@ -1455,7 +1455,7 @@ EOF
 set -euo pipefail
 body=$(sed -n '/^handle_interrupt() {/,/^}/p' "$PROJECT_ROOT/bin/optimize.sh")
 trap_line=$(printf '%s\n' "$body" | awk '/trap - EXIT/ { print NR; exit }')
-cleanup_line=$(printf '%s\n' "$body" | awk '/^[[:space:]]*cleanup_all$/ { print NR; exit }')
+cleanup_line=$(printf '%s\n' "$body" | awk '/^[[:space:]]*cleanup_all 130$/ { print NR; exit }')
 [[ -n "$trap_line" && -n "$cleanup_line" && "$trap_line" -lt "$cleanup_line" ]]
 EOF
 

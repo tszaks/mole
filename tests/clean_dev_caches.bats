@@ -460,6 +460,25 @@ EOF
     [[ "$output" == *"CODEX_DESKTOP_ALIASES_OK"* ]] || return 1
 }
 
+@test "standalone Xcode guarded cleanup rechecks before safe_clean fallback" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+unset -f safe_clean_guarded 2> /dev/null || true
+deny_xcode_delete() { return 1; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN"; }
+note_activity() { :; }
+
+rc=0
+_xcode_safe_clean_guarded deny_xcode_delete "Xcode cache" "$HOME/cache" "Xcode cache" || rc=$?
+[[ $rc -ne 0 ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]] || return 1
+}
+
 @test "ChatGPT running keeps Codex runtime and update staging cleanup dormant (#1305)" {
     local case_home="$HOME/chatgpt-running-case"
     local runtime_root="$case_home/.cache/codex-runtimes"

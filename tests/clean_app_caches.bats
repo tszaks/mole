@@ -114,6 +114,42 @@ EOF
     [ -z "$output" ]
 }
 
+@test "standalone guarded app-cache cleanup rechecks before falling back to safe_clean" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+unset -f safe_clean_guarded 2> /dev/null || true
+deny_delete() { return 1; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN"; }
+note_activity() { :; }
+
+rc=0
+_app_cache_safe_clean_guarded deny_delete "Guarded cache" "$HOME/cache" "Guarded cache" || rc=$?
+[[ $rc -ne 0 ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]] || return 1
+}
+
+@test "standalone simulator probe ignores idle launchd services" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+pgrep() {
+    [[ "$1" == "-x" && ("$2" == "CoreSimulatorService" || "$2" == "simdiskimaged") ]]
+}
+
+probe_status=0
+_simulator_cleanup_process_state || probe_status=$?
+[[ $probe_status -eq 1 ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
 @test "clean_media_players protects spotify offline cache when bnk has content" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

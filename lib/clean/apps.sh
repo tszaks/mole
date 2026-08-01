@@ -4,7 +4,7 @@ set -euo pipefail
 
 readonly ORPHAN_AGE_THRESHOLD=${ORPHAN_AGE_THRESHOLD:-${MOLE_ORPHAN_AGE_DAYS:-30}}
 readonly CLAUDE_VM_ORPHAN_AGE_THRESHOLD=${MOLE_CLAUDE_VM_ORPHAN_AGE_DAYS:-7}
-readonly INSTALLED_APPS_CACHE_COMPLETE_MARKER="# mole-installed-apps-cache:v2:complete"
+readonly INSTALLED_APPS_CACHE_COMPLETE_MARKER="# mole-installed-apps-cache:v3:complete"
 # Args: $1=target_dir, $2=label
 clean_ds_store_tree() {
     local target="$1"
@@ -178,11 +178,11 @@ scan_installed_apps() {
             while IFS= read -r app_path; do
                 [[ -n "$app_path" ]] || continue
                 local plist_path="$app_path/Contents/Info.plist"
-                [[ ! -f "$plist_path" ]] && continue
-                local bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist_path" 2> /dev/null || echo "")
-                if [[ -n "$bundle_id" && "$bundle_id" != "missing value" ]]; then
-                    echo "$bundle_id"
-                fi
+                [[ -f "$plist_path" && -r "$plist_path" ]] || exit 1
+                local bundle_id=""
+                bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist_path" 2> /dev/null) || exit 1
+                [[ -n "$bundle_id" && "$bundle_id" != "missing value" ]] || exit 1
+                echo "$bundle_id"
             done <<< "$app_paths"
         ) > "$scan_tmp_dir/apps_${dir_idx}.txt" &
         app_scan_pids+=($!)
@@ -190,21 +190,48 @@ scan_installed_apps() {
     done
     # Collect running apps and LaunchAgents to avoid false orphan cleanup.
     (
+        : > "$scan_tmp_dir/running.txt"
+        local running_probe_succeeded=0
         # Skip AppleScript during tests to avoid permission dialogs
         if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
-            local running_apps=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" osascript -e 'tell application "System Events" to get bundle identifier of every application process' 2> /dev/null || echo "")
-            echo "$running_apps" | tr ',' '\n' | sed -e 's/^ *//;s/ *$//' -e '/^$/d' -e '/^missing value$/d' > "$scan_tmp_dir/running.txt"
+            local running_apps=""
+            if command -v osascript > /dev/null 2>&1 &&
+                running_apps=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" osascript -e 'tell application "System Events" to get bundle identifier of every application process' 2> /dev/null); then
+                printf '%s\n' "$running_apps" | tr ',' '\n' |
+                    sed -e 's/^ *//;s/ *$//' -e '/^$/d' -e '/^missing value$/d' > "$scan_tmp_dir/running.txt"
+                running_probe_succeeded=1
+            fi
+        else
+            running_probe_succeeded=1
         fi
         # Fallback: lsappinfo is more reliable than osascript
         if command -v lsappinfo > /dev/null 2>&1; then
-            run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" lsappinfo list 2> /dev/null | grep -o '"CFBundleIdentifier"="[^"]*"' | cut -d'"' -f4 >> "$scan_tmp_dir/running.txt" 2> /dev/null || true
+            local lsappinfo_output=""
+            if lsappinfo_output=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" lsappinfo list 2> /dev/null); then
+                printf '%s\n' "$lsappinfo_output" |
+                    sed -n 's/.*"CFBundleIdentifier"="\([^"]*\)".*/\1/p' >> "$scan_tmp_dir/running.txt"
+                running_probe_succeeded=1
+            fi
         fi
+        [[ $running_probe_succeeded -eq 1 ]] || exit 1
     ) < /dev/null &
     auxiliary_pids+=($!)
     (
-        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find ~/Library/LaunchAgents /Library/LaunchAgents \
-            -name "*.plist" -type f 2> /dev/null |
-            xargs -I {} basename {} .plist > "$scan_tmp_dir/agents.txt" 2> /dev/null || true
+        : > "$scan_tmp_dir/agents.txt"
+        local -a agent_dirs=()
+        [[ -d "$HOME/Library/LaunchAgents" ]] && agent_dirs+=("$HOME/Library/LaunchAgents")
+        [[ -d /Library/LaunchAgents ]] && agent_dirs+=("/Library/LaunchAgents")
+        [[ ${#agent_dirs[@]} -gt 0 ]] || exit 0
+
+        local agent_paths_file="$scan_tmp_dir/agent_paths.nul"
+        if ! run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find "${agent_dirs[@]}" \
+            -name "*.plist" -type f -print0 > "$agent_paths_file" 2> /dev/null; then
+            exit 1
+        fi
+        local agent_path=""
+        while IFS= read -r -d '' agent_path; do
+            basename "$agent_path" .plist
+        done < "$agent_paths_file" > "$scan_tmp_dir/agents.txt"
     ) < /dev/null &
     auxiliary_pids+=($!)
     debug_log "Waiting for $((${#app_scan_pids[@]} + ${#auxiliary_pids[@]})) background processes"
@@ -218,7 +245,9 @@ scan_installed_apps() {
     fi
     if [[ ${#auxiliary_pids[@]} -gt 0 ]]; then
         for pid in "${auxiliary_pids[@]}"; do
-            wait "$pid" 2> /dev/null || true
+            if ! wait "$pid" 2> /dev/null; then
+                app_scan_failed=1
+            fi
         done
     fi
     debug_log "All background processes completed"
