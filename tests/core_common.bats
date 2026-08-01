@@ -408,7 +408,7 @@ EOF
 }
 
 @test "muted text avoids theme-defined ANSI bright black" {
-    run grep -R -nF '0;90m' \
+	run grep -R -I -nF '0;90m' \
         "$PROJECT_ROOT/lib" \
         "$PROJECT_ROOT/bin" \
         "$PROJECT_ROOT/mole" \
