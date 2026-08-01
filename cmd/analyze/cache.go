@@ -25,11 +25,13 @@ import (
 // cacheSchemaVersion is bumped whenever directory-size semantics change so
 // stale on-disk cache entries are rejected instead of silently reused.
 // v2: analyze deduplicates hardlinked files to match `du`.
-const cacheSchemaVersion = 2
+// v3: ordinary Parallels VM storage is included instead of skipped by name.
+const cacheSchemaVersion = 3
 
 type overviewSizeSnapshot struct {
-	Size    int64     `json:"size"`
-	Updated time.Time `json:"updated"`
+	Size          int64     `json:"size"`
+	Updated       time.Time `json:"updated"`
+	SchemaVersion int       `json:"schema_version"`
 }
 
 var (
@@ -116,7 +118,7 @@ func ensureOverviewSnapshotCacheLocked() error {
 	// and each save re-serialized all of them.
 	now := time.Now()
 	for path, snapshot := range snapshots {
-		if snapshot.Size <= 0 || now.Sub(snapshot.Updated) >= overviewCacheTTL {
+		if snapshot.SchemaVersion != cacheSchemaVersion || snapshot.Size <= 0 || now.Sub(snapshot.Updated) >= overviewCacheTTL {
 			delete(snapshots, path)
 		}
 	}
@@ -175,8 +177,9 @@ func storeOverviewSize(path string, size int64) error {
 		return nil
 	}
 	overviewSnapshotCache[path] = overviewSizeSnapshot{
-		Size:    size,
-		Updated: time.Now(),
+		Size:          size,
+		Updated:       time.Now(),
+		SchemaVersion: cacheSchemaVersion,
 	}
 	evictOverviewSnapshotsLocked()
 	return persistOverviewSnapshotLocked()

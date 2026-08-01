@@ -237,7 +237,6 @@ var defaultSkipDirs = map[string]bool{
 	// Virtualization/Container mounts (NFS, network filesystems).
 	"OrbStack":        true, // OrbStack NFS mounts
 	"Colima":          true, // Colima VM mounts
-	"Parallels":       true, // Parallels Desktop VMs
 	"VMware Fusion":   true, // VMware Fusion VMs
 	"VirtualBox VMs":  true, // VirtualBox VMs
 	"Rancher Desktop": true, // Rancher Desktop mounts

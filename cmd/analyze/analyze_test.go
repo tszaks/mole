@@ -957,7 +957,7 @@ func TestStoreOverviewSizeSkipsWriteWhenValueUnchanged(t *testing.T) {
 	}
 }
 
-func TestEnsureOverviewSnapshotCacheDropsExpiredEntries(t *testing.T) {
+func TestEnsureOverviewSnapshotCacheDropsExpiredAndLegacyEntries(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	resetOverviewSnapshotForTest()
@@ -967,9 +967,10 @@ func TestEnsureOverviewSnapshotCacheDropsExpiredEntries(t *testing.T) {
 		t.Fatalf("getOverviewSizeStorePath: %v", err)
 	}
 	seeded := map[string]overviewSizeSnapshot{
-		"/fresh":   {Size: 1 << 20, Updated: time.Now().Add(-time.Hour)},
-		"/expired": {Size: 1 << 20, Updated: time.Now().Add(-overviewCacheTTL - time.Hour)},
-		"/empty":   {Size: 0, Updated: time.Now()},
+		"/fresh":   {Size: 1 << 20, Updated: time.Now().Add(-time.Hour), SchemaVersion: cacheSchemaVersion},
+		"/expired": {Size: 1 << 20, Updated: time.Now().Add(-overviewCacheTTL - time.Hour), SchemaVersion: cacheSchemaVersion},
+		"/empty":   {Size: 0, Updated: time.Now(), SchemaVersion: cacheSchemaVersion},
+		"/legacy":  {Size: 1 << 20, Updated: time.Now()},
 	}
 	data, err := json.Marshal(seeded)
 	if err != nil {
@@ -986,11 +987,12 @@ func TestEnsureOverviewSnapshotCacheDropsExpiredEntries(t *testing.T) {
 	overviewSnapshotMu.Lock()
 	_, hasExpired := overviewSnapshotCache["/expired"]
 	_, hasEmpty := overviewSnapshotCache["/empty"]
+	_, hasLegacy := overviewSnapshotCache["/legacy"]
 	_, hasFresh := overviewSnapshotCache["/fresh"]
 	overviewSnapshotMu.Unlock()
 
-	if hasExpired || hasEmpty {
-		t.Fatalf("expected expired and empty snapshots to be dropped on load")
+	if hasExpired || hasEmpty || hasLegacy {
+		t.Fatalf("expected expired, empty, and legacy snapshots to be dropped on load")
 	}
 	if !hasFresh {
 		t.Fatalf("expected fresh snapshot to survive load")
@@ -1008,8 +1010,9 @@ func TestEvictOverviewSnapshotsKeepsNewest(t *testing.T) {
 	overviewSnapshotLoaded = true
 	for i := range overviewCacheMaxEntries + 1 {
 		overviewSnapshotCache[fmt.Sprintf("/dir-%04d", i)] = overviewSizeSnapshot{
-			Size:    int64(i + 1),
-			Updated: base.Add(time.Duration(i) * time.Minute),
+			Size:          int64(i + 1),
+			Updated:       base.Add(time.Duration(i) * time.Minute),
+			SchemaVersion: cacheSchemaVersion,
 		}
 	}
 	evictOverviewSnapshotsLocked()
@@ -1298,6 +1301,82 @@ func TestScanPathConcurrentSkipsCacheForCheapSubdir(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected child entry in scan result")
+	}
+}
+
+func TestAnalyzeIncludesParallelsVMStorageButKeepsOtherVirtualizationSkips(t *testing.T) {
+	root := t.TempDir()
+	parallels := filepath.Join(root, "Parallels")
+	orbStack := filepath.Join(root, "OrbStack")
+	for _, dir := range []string{parallels, orbStack} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "disk.img"), []byte(strings.Repeat("x", 4096)), 0o644); err != nil {
+			t.Fatalf("write data in %s: %v", dir, err)
+		}
+	}
+
+	var filesScanned, dirsScanned, bytesScanned int64
+	current := &atomic.Value{}
+	current.Store("")
+	result, err := scanPathConcurrentWithOptions(root, &filesScanned, &dirsScanned, &bytesScanned, current, false, 0)
+	if err != nil {
+		t.Fatalf("scan root: %v", err)
+	}
+
+	foundParallels := false
+	for _, entry := range result.Entries {
+		switch entry.Path {
+		case parallels:
+			foundParallels = true
+			if entry.Size <= 0 {
+				t.Fatalf("expected Parallels to contribute a positive size, got %d", entry.Size)
+			}
+		case orbStack:
+			t.Fatalf("expected existing OrbStack skip to remain in place")
+		}
+	}
+	if !foundParallels {
+		t.Fatalf("expected Parallels VM storage in scan entries")
+	}
+}
+
+func TestLiveScanIncludesParallelsVMStorageButKeepsOtherVirtualizationSkips(t *testing.T) {
+	root := t.TempDir()
+	parallels := filepath.Join(root, "Parallels")
+	orbStack := filepath.Join(root, "OrbStack")
+	for _, dir := range []string{parallels, orbStack} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+
+	entries, targets, _, _, _, err := readLiveScanInitialEntries(root, nil)
+	if err != nil {
+		t.Fatalf("read live scan entries: %v", err)
+	}
+
+	foundParallelsEntry := false
+	for _, entry := range entries {
+		switch entry.Path {
+		case parallels:
+			foundParallelsEntry = true
+		case orbStack:
+			t.Fatalf("expected existing OrbStack skip to remain in live entries")
+		}
+	}
+	foundParallelsTarget := false
+	for _, target := range targets {
+		switch target.path {
+		case parallels:
+			foundParallelsTarget = true
+		case orbStack:
+			t.Fatalf("expected existing OrbStack skip to remain in live targets")
+		}
+	}
+	if !foundParallelsEntry || !foundParallelsTarget {
+		t.Fatalf("expected Parallels in both live entries and targets, entry=%v target=%v", foundParallelsEntry, foundParallelsTarget)
 	}
 }
 
