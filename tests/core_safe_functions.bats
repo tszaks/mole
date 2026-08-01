@@ -217,6 +217,19 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
+@test "validate_path_for_deletion rejects the active powerlog database family" {
+    local db="/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/CurrentBackgroundProcessingDB.BGSQL"
+    local path=""
+
+    for path in "$db" "$db-wal" "$db-shm" "${db%/*}/./${db##*/}" "${db%/*}/currentbackgroundprocessingdb.bgsql"; do
+        run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$path'"
+        [ "$status" -eq 1 ] || return 1
+    done
+
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/ArchivedBackgroundProcessingDB.BGSQL'"
+    [ "$status" -eq 0 ]
+}
+
 @test "should_protect_path applies high-risk cleanup denylist" {
     run /bin/bash -c "
         source '$PROJECT_ROOT/lib/core/common.sh'
@@ -518,6 +531,7 @@ sudo() {
             ;;
     esac
 }
+
 export -f sudo
 
 set +e
@@ -538,6 +552,56 @@ SCRIPT
     [[ "$output" == *"SUDO:-n test -L "* ]] || return 1
     [[ "$output" == *"SUDO:-n find "* ]] || return 1
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
+}
+
+@test "safe_sudo_find_delete never previews or removes active powerlog database aliases" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+active_db="/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/CurrentBackgroundProcessingDB.BGSQL"
+active_dot_alias="${active_db%/*}/./${active_db##*/}"
+active_case_alias="${active_db%/*}/currentbackgroundprocessingdb.bgsql"
+archived_db="/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/ArchivedBackgroundProcessingDB.BGSQL"
+
+should_protect_path() { return 1; }
+is_path_whitelisted() { return 1; }
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+record_dry_run_cleanup_target() { printf 'PREVIEW:%s\n' "$1"; }
+safe_sudo_remove() { printf 'REMOVE:%s\n' "$1"; }
+
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        test)
+            [[ "${2:-}" == "-d" ]]
+            ;;
+        find)
+            printf '%s\0' "$active_db" "$active_db-wal" "$active_db-shm" "$active_dot_alias" "$active_case_alias" "$archived_db"
+            ;;
+        xargs)
+            while IFS= read -r -d '' removed_path; do
+                printf 'REMOVE:%s\n' "$removed_path"
+            done
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+MOLE_DRY_RUN=1
+safe_sudo_find_delete "/private/var/db/powerlog" "*" "7" "f"
+MOLE_DRY_RUN=0
+safe_sudo_find_delete "/private/var/db/powerlog/." "*" "7" "f"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PREVIEW:/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/ArchivedBackgroundProcessingDB.BGSQL"* ]] || return 1
+    [[ "$output" == *"REMOVE:/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/ArchivedBackgroundProcessingDB.BGSQL"* ]] || return 1
+    [[ "$output" != *"CurrentBackgroundProcessingDB.BGSQL"* ]] || return 1
+    [[ "$output" != *"currentbackgroundprocessingdb.bgsql"* ]] || return 1
+    [[ "$output" != *"/./CurrentBackgroundProcessingDB.BGSQL"* ]]
 }
 
 @test "safe_sudo_find_delete batches file removals into one xargs rm" {

@@ -61,6 +61,24 @@ software_update_pending_or_unknown() {
     return 0
 }
 
+# Report the tens-of-GB runaway shape from #1283 without mutating the active
+# database. A 10 GiB threshold reserves the warning for the reported
+# tens-of-GB runaway shape; it is never permission to delete or vacuum.
+show_large_active_powerlog_notice() {
+    local warning_threshold_bytes=$((10 * 1024 * 1024 * 1024))
+    local size_bytes=""
+
+    if ! size_bytes=$(sudo -n "$STAT_BSD" -f%z "$MOLE_ACTIVE_POWERLOG_DB_PATH" 2> /dev/null); then
+        return 0
+    fi
+    [[ "$size_bytes" =~ ^[0-9]+$ ]] || return 0
+    [[ "$size_bytes" -ge "$warning_threshold_bytes" ]] || return 0
+
+    local size_human
+    size_human=$(bytes_to_human "$size_bytes")
+    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Power telemetry database · ${GREEN}${size_human}${NC} · ${GRAY}active, kept · $(format_path_link "$MOLE_ACTIVE_POWERLOG_DB_PATH")${NC}"
+}
+
 # System caches, logs, and temp files.
 clean_deep_system() {
     stop_section_spinner
@@ -300,6 +318,7 @@ clean_deep_system() {
     safe_sudo_find_delete "/private/var/db/powerlog" "*" "$MOLE_LOG_AGE_DAYS" "f" || true
     stop_section_spinner
     log_success "Power logs"
+    show_large_active_powerlog_notice
     start_section_spinner "Cleaning memory exception reports..."
     local mem_reports_dir="/private/var/db/reportmemoryexception/MemoryLimitViolations"
     local mem_cleaned=0

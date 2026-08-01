@@ -75,8 +75,43 @@ _mole_normalize_deletion_policy_path() {
         path="${path//$double_slash/$slash}"
     done
 
+    while [[ "$path" == *"/./"* ]]; do
+        path="${path//\/\.\//$slash}"
+    done
+    while [[ "$path" == */. ]]; do
+        path="${path%/.}"
+        [[ -n "$path" ]] || path="/"
+    done
+
     local trimmed="${path%/}"
     [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed" || printf '%s\n' "$path"
+}
+
+# This is a live Apple SQLite database. The main file and its WAL companions
+# must stay together while PerfPowerServices is running; unlinking or truncating
+# any member can split the active database state. Keep the exact path in one
+# place so deletion policy and the read-only System Data hint cannot drift.
+readonly MOLE_ACTIVE_POWERLOG_DB_PATH="/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/CurrentBackgroundProcessingDB.BGSQL"
+
+_mole_is_active_powerlog_database_path() {
+    local restore_nocasematch=false
+    local result=1
+
+    if ! shopt -q nocasematch; then
+        shopt -s nocasematch
+        restore_nocasematch=true
+    fi
+
+    case "$1" in
+        "$MOLE_ACTIVE_POWERLOG_DB_PATH" | \
+            "$MOLE_ACTIVE_POWERLOG_DB_PATH-wal" | \
+            "$MOLE_ACTIVE_POWERLOG_DB_PATH-shm")
+            result=0
+            ;;
+    esac
+
+    [[ "$restore_nocasematch" == "true" ]] && shopt -u nocasematch
+    return "$result"
 }
 
 _mole_path_is_same_existing_file() {
@@ -303,6 +338,14 @@ validate_path_for_deletion() {
             return 0
             ;;
     esac
+
+    # Reject the active power telemetry database before the broad powerlog
+    # allowlist below. Size and mtime are diagnostic signals, never deletion
+    # authority for a database that a KeepAlive system service can reopen.
+    if _mole_is_active_powerlog_database_path "$policy_path"; then
+        debug_log "Path validation: active powerlog database kept: $policy_path"
+        return 1
+    fi
 
     # Endpoint-security/EDR agent caches under var/folders look like ordinary
     # rebuildable caches, but deleting anything in a sensor's container trips
@@ -1495,7 +1538,19 @@ safe_sudo_find_delete() {
         if should_protect_path "$match"; then
             continue
         fi
+        # Fast-path the active family before the general validator below. The
+        # validator remains authoritative and also normalizes dot aliases so
+        # preview and real cleanup cannot diverge.
+        if _mole_is_active_powerlog_database_path "$match"; then
+            continue
+        fi
         if declare -f is_path_whitelisted > /dev/null && is_path_whitelisted "$match"; then
+            continue
+        fi
+        # Run the same final path policy before preview accounting and real
+        # removal. This keeps aliases such as /./ and case variants out of
+        # both surfaces instead of relying on a raw-string precheck.
+        if ! validate_path_for_deletion "$match"; then
             continue
         fi
         if _mole_privileged_path_has_mutable_ancestor "$match"; then
@@ -1525,9 +1580,7 @@ safe_sudo_find_delete() {
         # -type f never emits symlinks; a path that is one now was swapped
         # after find saw it, and the single-file path refuses those.
         if [[ "$type_filter" == "f" && "${MOLE_DRY_RUN:-0}" != "1" && ! -L "$match" ]]; then
-            if validate_path_for_deletion "$match"; then
-                batch_files+=("$match")
-            fi
+            batch_files+=("$match")
             continue
         fi
         safe_sudo_remove "$match" || true

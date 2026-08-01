@@ -77,9 +77,10 @@ sudo() {
     return 0
 }
 safe_sudo_find_delete() {
-    echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    echo "safe_sudo_find_delete:$1:$2:$3:$4" >> "$CALL_LOG"
     return 0
 }
+show_large_active_powerlog_notice() { echo "powerlog_notice" >> "$CALL_LOG"; }
 safe_sudo_remove() {
     echo "safe_sudo_remove:$1" >> "$CALL_LOG"
     return 0
@@ -99,7 +100,9 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"/Library/Caches"* ]] || return 1
     [[ "$output" == *"/private/tmp"* ]] || return 1
-    [[ "$output" == *"/private/var/log"* ]]
+    [[ "$output" == *"/private/var/log"* ]] || return 1
+    [[ "$output" == *"safe_sudo_find_delete:/private/var/db/powerlog:*:7:f"* ]] || return 1
+    [[ "$output" == *"powerlog_notice"* ]]
 }
 
 @test "clean_deep_system does not touch /Library/Updates when directory absent" {
@@ -1206,6 +1209,7 @@ sudo() {
     fi
     return 0
 }
+
 safe_sudo_find_delete() {
     echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
     return 0
@@ -1228,6 +1232,72 @@ EOF
     [[ "$output" == *"safe_sudo_find_delete:/private/var/db/diagnostics:*.tracev3"* ]] || return 1
     [[ "$output" == *"safe_sudo_find_delete:/private/var/db/DiagnosticPipeline:*"* ]] || return 1
     [[ "$output" == *"tracev3"* ]]
+}
+
+@test "show_large_active_powerlog_notice reports an abnormal database in real and dry-run modes" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    if [[ "${1:-}" == "$STAT_BSD" && "${2:-}" == "-f%z" && "${3:-}" == "$MOLE_ACTIVE_POWERLOG_DB_PATH" ]]; then
+        echo $((10 * 1024 * 1024 * 1024))
+        return 0
+    fi
+    return 1
+}
+bytes_to_human() { echo "10.00GB"; }
+format_path_link() { printf '%s\n' "$1"; }
+
+MOLE_DRY_RUN=0
+live_output=$(show_large_active_powerlog_notice)
+MOLE_DRY_RUN=1
+dry_output=$(show_large_active_powerlog_notice)
+
+[[ "$live_output" == "$dry_output" ]] || exit 1
+printf '%s\n' "$live_output"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Power telemetry database"* ]] || return 1
+    [[ "$output" == *"10.00GB"* ]] || return 1
+    [[ "$output" == *"CurrentBackgroundProcessingDB.BGSQL"* ]] || return 1
+    [[ "$output" == *"active, kept"* ]]
+}
+
+@test "show_large_active_powerlog_notice fails closed on small or invalid size probes" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+mock_size=""
+probe_succeeds=1
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    if [[ "$probe_succeeds" == "1" && "${1:-}" == "$STAT_BSD" && "${2:-}" == "-f%z" && "${3:-}" == "$MOLE_ACTIVE_POWERLOG_DB_PATH" ]]; then
+        printf '%s\n' "$mock_size"
+        return 0
+    fi
+    return 1
+}
+
+mock_size=$((10 * 1024 * 1024 * 1024 - 1))
+small_output=$(show_large_active_powerlog_notice)
+mock_size="not-a-size"
+invalid_output=$(show_large_active_powerlog_notice)
+probe_succeeds=0
+failed_output=$(show_large_active_powerlog_notice)
+
+[[ -z "$small_output" ]] || exit 1
+[[ -z "$invalid_output" ]] || exit 1
+[[ -z "$failed_output" ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
 }
 
 @test "clean_deep_system cleans code_sign_clone caches via safe_sudo_remove" {
