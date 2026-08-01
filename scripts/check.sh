@@ -186,4 +186,11 @@ find lib -name "*.sh" | while read -r script; do
 done
 echo -e "${GREEN}${ICON_SUCCESS} Syntax check passed${NC}\n"
 
+if grep -nE 'Mole-Diagnose\.command[^|]*\|[[:space:]]*((sudo|env)[[:space:]]+)*((ba|z|da)?sh)([[:space:]]|$)' \
+    AGENTS.md README.md .claude/skills/*/SKILL.md; then
+    echo -e "${RED}${ICON_ERROR} Diagnostic instructions must download for review before execution${NC}\n"
+    exit 1
+fi
+echo -e "${GREEN}${ICON_SUCCESS} Diagnostic install guidance passed${NC}\n"
+
 echo -e "${GREEN}=== Checks Completed ===${NC}"

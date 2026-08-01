@@ -5,22 +5,12 @@ description: "Mole's project-specific defect catalog: eleven recurring bug shape
 
 # Mole bug patterns
 
-What 2689 commits of history say about where this codebase actually breaks. Use it as the catalog; the generic sweep workflow lives in the global `bugscan` skill, root-causing a live symptom lives in `hunt`. This file is the part that is specific to Mole.
+Use this project-specific catalog after reading the current diff and code. Generic pattern sweeps belong to Waza `check` Pattern-Fix Completeness; root-causing a live symptom belongs to `hunt`.
 
-## What the history measures
+## How to use the catalog
 
-Run these to refresh the numbers before trusting them:
-
-```bash
-git log --oneline | wc -l                                    # 2689 commits
-git log --pretty=format:%s --grep='^fix' -i | wc -l          # 656 fix-flavored
-git log --pretty=format:%s --grep='^fix' -i | grep -cE '#[0-9]{3,4}'   # 159 cite an issue/PR
-```
-
-Three facts that should shape how you work here:
-
-- **Most fixes were not reported by a user.** Only about a quarter of fix commits cite an issue or PR. The rest came out of review passes, release audits, and sibling sweeps after another fix. Waiting for a report is not the operating mode.
-- **A fix ships with a guard.** 215 of the 300 most recent fix commits touch `tests/` or a `_test.go` in the same commit. A patch with no test is off-pattern for this repo.
+- **Sweep siblings without waiting for another report.** One instance of a recurring shape is evidence to inspect every same-shape call site.
+- **A fix ships with a guard.** Add a regression or source-invariant test that fails on the pre-fix code. Inspect current history only when a numerical trend matters to the decision.
 - **The dominant defect is not a crash.** It is a path deleted on weak evidence, a number that disagrees with another number computed elsewhere, or a scan that looks hung while it is merely unbounded. Nothing throws. So the productive question is never "can this crash", it is:
 
   > What does this produce when the probe is denied, the app is installed in a place the probe does not look, the machine is slow but healthy, or the cache was written by the previous release?
@@ -86,7 +76,7 @@ The method: enumerate every caller of each protection helper, then every deletio
 
 `du`, `mdfind`, `find`, `xcrun simctl`, and `brew` have no internal bound, and the caller usually pipes them into a command substitution that just waits. One stalled SMB mount wedges the whole scan.
 
-All 19 real `du -s` sites are wrapped today, and `tests/core_timeout.bats` pins that with a source-invariant test so a new sizing site cannot regress it. Copy that shape for any new unbounded command.
+Every production `du -s` site should route through the timeout wrapper. `tests/core_timeout.bats` pins that with a source-invariant test; copy the shape for any new unbounded command.
 
 Two subtler variants:
 
@@ -103,13 +93,13 @@ done
 
 ### 5. bash 3.2, errexit, pipefail semantics
 
-macOS ships bash 3.2.57 and the shipped code runs under `set -u`. Sixteen fixes are pure shell semantics. Read [references/shell-and-test-pitfalls.md](references/shell-and-test-pitfalls.md) before changing Shell code, Bats tests, install/update flows, timeout wrappers, TTY handling, plist fixtures, or macOS-specific CI behavior. The two highest-frequency shapes:
+macOS ships bash 3.2.57 and the shipped code runs under `set -u`. Read [references/shell-and-test-pitfalls.md](references/shell-and-test-pitfalls.md) before changing Shell code, Bats tests, install/update flows, timeout wrappers, TTY handling, plist fixtures, or macOS-specific CI behavior. The two highest-frequency shapes:
 
 - **Empty array expansion under nounset.** `"${arr[@]}"` on an empty array aborts. When it aborts inside a scan, the spinner subshell is orphaned and the user sees "scanning forever" (`893b4e6f`, `2c06cb91`). Guard with `[[ ${#arr[@]} -gt 0 ]]`.
 - **`fn || handler` disables errexit inside `fn` for its whole body**, converting every unchecked failure into a no-op. That is how eight consecutive failed copies still reported a successful install. Safety-critical steps use explicit `if ! cmd; then return 1; fi`.
 
 ```bash
-command grep -rn '\$\{[a-z_]*\[@\]\}' lib/ bin/ | wc -l   # 317 sites; spot-check new ones
+command grep -rn '\$\{[a-z_]*\[@\]\}' lib/ bin/ | wc -l   # spot-check new sites
 ```
 
 ### 6. TTY, stdin, and process-group theft
@@ -123,7 +113,7 @@ The method: every background subshell, `&`, or disowned worker that calls `run_w
 
 ### 7. Parsing system command output
 
-Fifty-plus commits. The output of a macOS tool is not a stable contract: it is localized, it drifts across OS releases, and its error text looks like data.
+The output of a macOS tool is not a stable contract: it is localized, it drifts across OS releases, and its error text looks like data.
 
 - Metric subprocesses inherited the user's locale, so comma-decimal locales broke process collection, then system-health rendering, then more metrics. The eventual fix forces `LC_ALL=C` for every metric subprocess rather than patching each parser (`51b352a2`, `fa05b8cc`, `4e83743b`). Note the shape: three separate reports before someone fixed the class.
 - `DTSDKBuild` ("24A335") was compared as a version string where `DTPlatformVersion` ("15.0") was meant (`f0896d03`).
@@ -148,7 +138,7 @@ The method: locate every site that computes a given total and make one of them t
 
 ### 10. Silence read as a freeze
 
-A hundred commits mention spinners, frozen terminals, or blank sections. The bug is almost never the work being slow; it is the work happening outside the spinner window.
+Silence is often mistaken for a freeze when slow work happens outside the spinner window.
 
 The spinner was stopped at the start of the removal loop, so the terminal was silent for the full removal (`8f064707`). Dotdir, login-item, System Data, and large-file scans ran for seconds with no loading state, leaving the section blank.
 
@@ -169,7 +159,7 @@ bats tests/zz_min.bats   # test 1 passes, test 2 fails
 rm tests/zz_min.bats
 ```
 
-There are currently **551** dead non-final `[[ ]]` assertions across 1119 tests, and **473** tests whose only bare gate is the final `[[ ]]`. Count them per test block, not per line: a line-level grep counts the final assertions too and overstates the problem.
+Count ineffective assertions per test block, not per line: a line-level grep includes final assertions and overstates the problem. Treat any count as a live diagnostic, not durable project truth.
 
 Four other ways a test here has passed vacuously:
 
