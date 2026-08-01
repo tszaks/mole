@@ -191,6 +191,37 @@ EOF
 	[[ "$output" == *"count=0"* ]]
 }
 
+@test "opt_fix_broken_configs debug lists only successfully repaired paths" {
+	local test_home="$HOME/fixprefs-debug-paths"
+	local repaired="$test_home/Library/Preferences/com.example.repaired.plist"
+	local failed="$test_home/Library/Preferences/com.example.failed.plist"
+	run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/maintenance.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+prefs="$HOME/Library/Preferences"
+mkdir -p "$prefs"
+touch \
+    "$prefs/com.example.repaired.plist" \
+    "$prefs/com.example.failed.plist"
+
+plutil() { return 1; }
+safe_remove() {
+    [[ "$1" != *"failed.plist" ]]
+}
+
+execute_optimization fix_broken_configs
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Repaired 1 corrupted preference files"* ]] || return 1
+	[[ "$output" == *"Removed corrupted preference:"* ]] || return 1
+	[[ "$output" == *"$repaired"* ]] || return 1
+	[[ "$output" != *"$failed"* ]] || return 1
+}
+
 @test "fix_broken_preferences does not count protected Adobe plists" {
 	local test_home="$HOME/fixprefs-protected"
 	run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" MO_DEBUG=1 /bin/bash --noprofile --norc <<'EOF'
