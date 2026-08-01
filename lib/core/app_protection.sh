@@ -1318,9 +1318,27 @@ find_app_files() {
             -print0 2> /dev/null)
     fi
 
-    # Output results
+    # Preserve discovery order while collapsing exact duplicates. A leftover
+    # can be found first through a bundle-id prefix and again through an
+    # embedded extension id; it should be previewed and removed only once.
     if [[ ${#files_to_clean[@]} -gt 0 ]]; then
-        printf '%s\n' "${files_to_clean[@]}"
+        local -a unique_files_to_clean=()
+        local candidate_path=""
+        local seen_path=""
+        local duplicate_path=false
+        for candidate_path in "${files_to_clean[@]}"; do
+            duplicate_path=false
+            if [[ ${#unique_files_to_clean[@]} -gt 0 ]]; then
+                for seen_path in "${unique_files_to_clean[@]}"; do
+                    if [[ "$candidate_path" == "$seen_path" ]]; then
+                        duplicate_path=true
+                        break
+                    fi
+                done
+            fi
+            [[ "$duplicate_path" == "true" ]] || unique_files_to_clean+=("$candidate_path")
+        done
+        printf '%s\n' "${unique_files_to_clean[@]}"
     fi
     return 0
 }

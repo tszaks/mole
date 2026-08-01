@@ -746,12 +746,18 @@ _batch_scan_app_details() {
             brew_cask_apps+=("$app_name")
         fi
 
-        # Check if sudo is needed
+        # A Trash rename is authorized by the source and destination parents,
+        # not by the app bundle's owner. Do not elevate solely because a
+        # package-installed app is root-owned when its parent is user-writable;
+        # file_ops can retry a TCC-blocked rename through unprivileged Finder.
+        # Permanent removal still treats foreign ownership as requiring sudo.
         local needs_sudo=false
         local app_owner=$(get_file_owner "$app_path")
+        local delete_mode="${MOLE_DELETE_MODE:-permanent}"
         if [[ ! -w "$(dirname "$app_path")" ]] ||
-            [[ "$app_owner" == "root" ]] ||
-            [[ -n "$app_owner" && "$app_owner" != "$current_user" ]]; then
+            { [[ "$delete_mode" != "trash" ]] &&
+                { [[ "$app_owner" == "root" ]] ||
+                    [[ -n "$app_owner" && "$app_owner" != "$current_user" ]]; }; }; then
             needs_sudo=true
         fi
 

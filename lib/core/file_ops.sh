@@ -936,13 +936,18 @@ _mole_path_is_immediate_child_of() {
     [[ -n "$child" && "$child" != */* ]]
 }
 
+_mole_path_is_application_bundle() {
+    local path="${1%/}"
+    _mole_path_is_immediate_child_of "$path" "/Applications" &&
+        [[ "${path##*/}" == *.app ]]
+}
+
 # Finder and third-party Trash helpers can fail on app bundles and TCC-managed
 # app data even after authentication. Route only these exact one-level targets
 # through the direct, recoverable Trash mover.
 _mole_path_requires_direct_trash() {
     local path="${1%/}"
-    if _mole_path_is_immediate_child_of "$path" "/Applications" &&
-        [[ "${path##*/}" == *.app ]]; then
+    if _mole_path_is_application_bundle "$path"; then
         return 0
     fi
 
@@ -952,6 +957,33 @@ _mole_path_requires_direct_trash() {
     _mole_path_is_immediate_child_of "$path" "$user_home/Library/Group Containers" && return 0
     _mole_path_is_immediate_child_of "$path" "$user_home/Library/Application Scripts" && return 0
     return 1
+}
+
+# Finder's Trash API can move package-installed app bundles that macOS App
+# Management blocks from a direct mv. Run it only as the invoking user and only
+# for an exact one-level /Applications/*.app target selected above.
+_mole_move_app_to_trash_via_finder() {
+    local path="$1"
+    local finder_rc=0
+
+    _mole_path_is_application_bundle "$path" || return 1
+
+    run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT' || finder_rc=$?
+on run argv
+    set p to POSIX file (item 1 of argv)
+    tell application "Finder"
+        delete p
+    end tell
+end run
+APPLESCRIPT
+
+    if [[ $finder_rc -ne 0 ]] || [[ -e "$path" || -L "$path" ]]; then
+        debug_log "Finder failed to move application to Trash: $path"
+        return 1
+    fi
+
+    debug_log "Finder moved application to Trash: $path"
+    return 0
 }
 
 # Move a path to the macOS Trash. Test harnesses set MOLE_TEST_TRASH_DIR to
@@ -972,9 +1004,20 @@ _mole_move_to_trash() {
         return 1
     fi
 
-    if [[ "$needs_sudo" == "true" ]] || _mole_path_requires_direct_trash "$path"; then
+    if [[ "$needs_sudo" == "true" ]]; then
         _mole_move_path_to_user_trash "$path" "$needs_sudo"
         return $?
+    fi
+
+    if _mole_path_requires_direct_trash "$path"; then
+        local direct_rc=0
+        _mole_move_path_to_user_trash "$path" false || direct_rc=$?
+        if [[ $direct_rc -eq $MOLE_ERR_PRIVACY_DENIED ]] &&
+            _mole_path_is_application_bundle "$path"; then
+            debug_log "Direct Trash move was denied; retrying application through Finder: $path"
+            _mole_move_app_to_trash_via_finder "$path" && return 0
+        fi
+        return "$direct_rc"
     fi
 
     # Prefer the `trash` CLI (Homebrew formula) for normal user-owned paths.

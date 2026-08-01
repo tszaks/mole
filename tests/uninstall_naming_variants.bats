@@ -156,6 +156,32 @@ EOF
     [[ "$output" != *"unbound variable"* ]]
 }
 
+@test "find_app_files emits embedded extension leftovers once" {
+    local app="$HOME/Applications/Developer.app"
+    local widget="$app/Contents/PlugIns/Developer Widget.appex/Contents"
+    local app_scripts="$HOME/Library/Application Scripts/developer.apple.wwdc-Release.Developer-Widget"
+    local container="$HOME/Library/Containers/developer.apple.wwdc-Release.Developer-Widget"
+    mkdir -p "$widget" "$app_scripts" "$container"
+    cat > "$widget/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>developer.apple.wwdc-Release.Developer-Widget</string>
+</dict></plist>
+PLIST
+
+    result=$(
+        HOME="$HOME" APP="$app" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+find_app_files "developer.apple.wwdc-Release" "Developer" "$APP"
+EOF
+    )
+
+    [ "$(printf '%s\n' "$result" | awk -v path="$app_scripts" '$0 == path { count++ } END { print count + 0 }')" -eq 1 ] || return 1
+    [ "$(printf '%s\n' "$result" | awk -v path="$container" '$0 == path { count++ } END { print count + 0 }')" -eq 1 ]
+}
+
 @test "find_app_files detects vendor-nested Application Support directories" {
     mkdir -p "$HOME/Library/Application Support/Avid/Sibelius"
     mkdir -p "$HOME/Library/Application Support/OtherVendor/Sibelius"

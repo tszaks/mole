@@ -342,7 +342,47 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
-@test "batch uninstall rejects privileged removal below a mutable parent before side effects (#1299)" {
+@test "batch uninstall routes a root-owned app through unprivileged Trash when its parent is writable (#1331)" {
+	mkdir -p "$HOME/Applications/RootOwned.app"
+	local trace="$HOME/root-owned-trash.log"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+export MOLE_DELETE_MODE=trash
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+get_file_owner() { echo root; }
+pgrep() { return 1; }
+find_app_files() { return 0; }
+find_app_system_files() { return 0; }
+ensure_sudo_session() { echo "UNEXPECTED_SUDO"; return 1; }
+stop_launch_services() { :; }
+unregister_app_bundle() { :; }
+remove_login_item() { :; }
+force_kill_app() { return 0; }
+mole_delete() {
+	printf 'DELETE:%s:%s\n' "$1" "${2:-false}" >> "$HOME/root-owned-trash.log"
+	return 0
+}
+
+selected_apps=("0|$HOME/Applications/RootOwned.app|RootOwned|com.example.RootOwned|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+
+printf '\n' | batch_uninstall_applications
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$(grep -c "^DELETE:$HOME/Applications/RootOwned.app:false$" "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SUDO"* ]] || return 1
+	[[ "$output" != *"cannot be removed safely by Mole"* ]]
+}
+
+@test "batch uninstall rejects privileged permanent removal below a mutable parent before side effects (#1299)" {
 	mkdir -p "$HOME/Applications/RootOwned.app"
 	mkdir -p "$HOME/Library/Application Support/RootOwned"
 
@@ -350,6 +390,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+export MOLE_DELETE_MODE=permanent
 
 start_inline_spinner() { :; }
 stop_inline_spinner() { :; }

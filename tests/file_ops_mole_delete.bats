@@ -311,6 +311,30 @@ EOF
     [[ "$(grep -c '^osascript:' "$trace" 2> /dev/null || true)" -eq 0 ]]
 }
 
+@test "application Trash falls back to Finder after a direct TCC denial" {
+    local trace="$SANDBOX/app-finder-fallback.log"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+unset MOLE_TEST_TRASH_DIR
+unset MOLE_TEST_NO_AUTH
+export MOLE_DELETE_MODE=trash
+_mole_move_path_to_user_trash() {
+    printf 'direct:%s:%s\n' "\$1" "\$2" >> "$trace"
+    return "\$MOLE_ERR_PRIVACY_DENIED"
+}
+_mole_move_app_to_trash_via_finder() {
+    printf 'finder:%s\n' "\$1" >> "$trace"
+    return 0
+}
+_mole_move_to_trash "/Applications/Developer.app" false
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$(grep -c '^direct:/Applications/Developer.app:false$' "$trace" 2> /dev/null || true)" -eq 1 ]] || return 1
+    [[ "$(grep -c '^finder:/Applications/Developer.app$' "$trace" 2> /dev/null || true)" -eq 1 ]]
+}
+
 @test "Trash mode refuses sudo-required app below mutable Applications" {
     local victim="$SANDBOX/RootOwned.app"
     local trace="$SANDBOX/finder-app.log"
