@@ -504,7 +504,7 @@ clean_homebrew
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"cleaned"* ]]
+    [[ -z "$output" ]]
 }
 
 @test "clean_homebrew runs cleanup with timeout stubs" {
@@ -1235,7 +1235,7 @@ EOF
 }
 
 @test "show_large_active_powerlog_notice reports an abnormal database in real and dry-run modes" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"
@@ -1268,7 +1268,7 @@ EOF
 }
 
 @test "show_large_active_powerlog_notice fails closed on small or invalid size probes" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/system.sh"

@@ -371,6 +371,48 @@ EOF
     [ -f "$test_file" ]
 }
 
+@test "safe_remove refuses a compiled model cache created during size probing" {
+    local target_dir="$TEST_DIR/compiled-model-race"
+    mkdir -p "$target_dir"
+    touch "$target_dir/data"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+oplog_enabled() { return 0; }
+get_path_size_kb() {
+    mkdir -p "$1/com.apple.e5rt.e5bundlecache"
+    echo 1
+}
+rm() { echo "UNEXPECTED_REMOVE:$*"; return 99; }
+safe_remove "$TARGET_DIR" true && rc=0 || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ -d "$TARGET_DIR/com.apple.e5rt.e5bundlecache" ]]
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=1"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "safe_remove dry-run refuses an existing compiled model cache" {
+    local target_dir="$TEST_DIR/compiled-model-dry-run"
+    mkdir -p "$target_dir/com.apple.e5rt.e5bundlecache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+MOLE_DRY_RUN=1
+record_dry_run_cleanup_target() { echo "UNEXPECTED_REGISTER:$1"; }
+safe_remove "$TARGET_DIR" true && rc=0 || rc=$?
+printf 'RC=%s\n' "$rc"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=1"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REGISTER"* ]]
+}
+
 @test "safe_remove in silent mode suppresses error output" {
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '/System/test' true 2>&1"
     [ "$status" -eq 1 ]
@@ -443,6 +485,60 @@ SCRIPT
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
+}
+
+@test "safe_sudo_remove refuses a compiled model cache created during size probing" {
+    local target_dir="$TEST_DIR/compiled-model-sudo-race"
+    mkdir -p "$target_dir"
+    touch "$target_dir/data"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+oplog_enabled() { return 0; }
+run_with_timeout() {
+    mkdir -p "$TARGET_DIR/com.apple.e5rt.e5bundlecache"
+    printf '1 %s\n' "$TARGET_DIR"
+}
+sudo() {
+    if [[ "${1:-}" == "-n" && "${2:-}" == "test" ]]; then
+        shift 2
+        command test "$@"
+        return $?
+    fi
+    echo "UNEXPECTED_SUDO:$*"
+    return 99
+}
+safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ -d "$TARGET_DIR/com.apple.e5rt.e5bundlecache" ]]
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=13"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SUDO"* ]]
+}
+
+@test "safe_sudo_remove dry-run refuses an existing compiled model cache" {
+    local target_dir="$TEST_DIR/compiled-model-sudo-dry-run"
+    mkdir -p "$target_dir/com.apple.e5rt.e5bundlecache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        MOLE_TEST_MODE=1 MOLE_TEST_NO_AUTH=1 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+MOLE_DRY_RUN=1
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+record_dry_run_cleanup_target() { echo "UNEXPECTED_REGISTER:$1"; }
+safe_sudo_remove "$TARGET_DIR" && rc=0 || rc=$?
+printf 'RC=%s\n' "$rc"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=13"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REGISTER"* ]]
 }
 
 @test "safe_sudo_remove returns auth failure when noninteractive sudo expires" {

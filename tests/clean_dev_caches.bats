@@ -23,7 +23,7 @@ teardown_file() {
 }
 
 @test "clean_dev_npm prunes pnpm store without deleting orphaned global store" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -55,7 +55,7 @@ EOF
 }
 
 @test "clean_dev_npm cleans default npm residual directories" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -82,8 +82,119 @@ EOF
     [[ "$output" == *"npm prebuilds|$HOME/.npm/_prebuilds/*"* ]]
 }
 
+@test "clean_dev_jvm never enters daemon cleanup while Gradle is running" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+gradle_daemon_running() { return 0; }
+safe_clean() { echo "SAFE_CLEAN:${!#}"; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"SAFE_CLEAN:Gradle daemon"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Gradle workers"* ]]
+}
+
+@test "clean_dev_jvm fails closed when the Gradle process probe errors" {
+    mkdir -p "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+    touch "$HOME/.gradle/daemon/candidate"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 2; }
+safe_clean() { echo "SAFE_CLEAN:${!#}"; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Gradle daemon/workers · skipped (process state unknown)"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Gradle daemon"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Gradle workers"* ]]
+}
+
+@test "clean_dev_jvm ignores empty Gradle daemon roots while active" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+rm -rf "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+mkdir -p "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+gradle_daemon_running() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:${!#}"; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Gradle daemon"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Gradle workers"* ]] || return 1
+    [[ "$output" != *"process state unknown"* ]]
+}
+
+@test "clean_dev_jvm ignores broken-symlink-only Gradle roots while active" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+rm -rf "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+mkdir -p "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+ln -s "$HOME/missing-gradle-daemon" "$HOME/.gradle/daemon/broken"
+ln -s "$HOME/missing-gradle-worker" "$HOME/.gradle/workers/broken"
+mkdir -p "$HOME/.gradle/daemon/compiled/com.apple.e5rt.e5bundlecache"
+gradle_daemon_running() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:${!#}"; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Gradle daemon"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Gradle workers"* ]]
+}
+
+@test "clean_dev_jvm ignores active whitelist-only Gradle daemon entries" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+rm -rf "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+mkdir -p "$HOME/.gradle/daemon"
+target="$HOME/.gradle/daemon/whitelisted"
+touch "$target"
+is_path_whitelisted() { [[ "$1" == "$target" ]]; }
+gradle_daemon_running() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { :; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER:Gradle"* ]]
+}
+
 @test "clean_conda_metadata_caches honors package cache whitelist before conda clean" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -102,7 +213,7 @@ EOF
 }
 
 @test "clean_dev_npm cleans custom npm cache path when detected" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -131,7 +242,7 @@ EOF
 }
 
 @test "clean_dev_npm falls back to default cache when npm path is invalid" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -157,7 +268,7 @@ EOF
 }
 
 @test "clean_dev_npm treats default cache path with trailing slash as same path" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -183,7 +294,7 @@ EOF
 }
 
 @test "clean_dev_npm cleans default bun cache when bun is unavailable" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -206,7 +317,7 @@ EOF
 }
 
 @test "clean_dev_npm uses bun cache command for default bun cache path" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -242,7 +353,7 @@ EOF
 }
 
 @test "clean_dev_npm cleans orphaned default bun cache when custom path is configured" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -277,7 +388,7 @@ EOF
 }
 
 @test "clean_dev_npm treats default bun cache path with trailing slash as same path" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -312,7 +423,7 @@ EOF
 }
 
 @test "clean_dev_npm falls back to filesystem cleanup when bun cache command fails" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -347,7 +458,7 @@ EOF
 }
 
 @test "clean_dev_docker skips daemon-managed cleanup by default" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -361,13 +472,13 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Docker unused data · skipped (review: docker system df)"* ]] || return 1
+    [[ "$output" == *"Docker unused data · review with docker system df"* ]] || return 1
     [[ "$output" == *"Docker BuildX cache"* ]] || return 1
     [[ "$output" != *"docker called"* ]]
 }
 
 @test "clean_dev_docker keeps BuildX cache cleanup" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -389,7 +500,7 @@ EOF
     mkdir -p "$orb_data"
     touch "$orb_data/data.img.raw" "$orb_data/swap.img"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -402,14 +513,14 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"OrbStack container data · skipped (4M, review: docker system df)"* ]] || return 1
+    [[ "$output" == *"OrbStack container data · 4M · review with docker system df"* ]] || return 1
     [[ "$output" == *"Docker BuildX cache|$HOME/.docker/buildx/cache/*"* ]] || return 1
     [[ "$output" != *"data.img.raw"* ]] || return 1
     [[ "$output" != *"swap.img"* ]]
 }
 
 @test "clean_dev_docker no longer depends on whitelist to avoid prune" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -428,14 +539,14 @@ clean_dev_docker
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Docker unused data · skipped (review: docker system df)"* ]] || return 1
+    [[ "$output" == *"Docker unused data · review with docker system df"* ]] || return 1
     [[ "$output" != *"whitelisted"* ]] || return 1
     [[ "$output" != *"mo clean --whitelist"* ]] || return 1
     [[ "$output" != *"docker called"* ]]
 }
 
 @test "codex_desktop_running recognizes current and legacy app aliases (#1305)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -461,7 +572,7 @@ EOF
 }
 
 @test "standalone Xcode guarded cleanup rechecks before safe_clean fallback" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -475,7 +586,10 @@ _xcode_safe_clean_guarded deny_xcode_delete "Xcode cache" "$HOME/cache" "Xcode c
 [[ $rc -ne 0 ]] || exit 1
 EOF
 
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
     [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]] || return 1
 }
 
@@ -487,7 +601,7 @@ EOF
     mkdir -p "$runtime_root/incomplete-install" "$staging_root/stale"
     touch -t 202001010000 "$staging_root/stale"
 
-    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -505,8 +619,8 @@ clean_codex_desktop_staging
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Codex runtimes · skipped (Codex running)"* ]] || return 1
-    [[ "$output" == *"Codex Desktop update staging · skipped (Codex running)"* ]] || return 1
+    [[ "$output" != *"Codex runtimes · skipped"* ]] || return 1
+    [[ "$output" != *"Codex Desktop update staging · skipped"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
 }
 
@@ -515,7 +629,7 @@ EOF
     touch "$HOME/.cache/codex-runtimes/codex-primary-runtime/runtime.json"
     touch "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -539,7 +653,7 @@ EOF
     touch "$HOME/.cache/codex-runtimes/codex-primary-runtime/runtime.json"
     touch "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -563,7 +677,7 @@ EOF
     touch "$HOME/.cache/codex-runtimes/codex-primary-runtime/runtime.json"
     touch "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -577,14 +691,60 @@ clean_codex_runtimes
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Codex runtimes · skipped (Codex running)"* ]] || return 1
+    [[ "$output" != *"Codex runtimes · skipped"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]]
+}
+
+@test "clean_codex_runtimes skips incomplete runtimes while lowercase Codex CLI is running" {
+    mkdir -p "$HOME/.cache/codex-runtimes/incomplete-old"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { [[ "$*" == "-x codex" ]]; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN:$2|$1"; }
+defer_cleanup_family() { echo "DEFER:$1"; }
+note_activity() { :; }
+clean_codex_runtimes
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"DEFER:Codex"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+}
+
+@test "clean_codex_runtimes does not defer compiled-model-only stale runtimes" {
+    local case_home="$HOME/codex-compiled-only"
+    local runtime_dir="$case_home/.cache/codex-runtimes/incomplete-old"
+    mkdir -p "$runtime_dir/com.apple.e5rt.e5bundlecache"
+
+    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:$1"; }
+clean_codex_runtimes
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN"* ]]
 }
 
 @test "clean_codex_runtimes respects whitelist" {
     mkdir -p "$HOME/.cache/codex-runtimes/incomplete-old"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -605,7 +765,7 @@ EOF
 @test "clean_codex_runtimes respects child runtime whitelist" {
     mkdir -p "$HOME/.cache/codex-runtimes/incomplete-old"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -624,6 +784,33 @@ EOF
     [[ "$output" != *"SAFE_CLEAN:"* ]]
 }
 
+@test "empty Codex cache leaves and fresh staging do not register active cleanup" {
+    local case_home="$HOME/codex-empty-active"
+    local cache_root="$case_home/Library/Caches/Codex/Default/Cache"
+    local staging_root="$case_home/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+    mkdir -p "$cache_root" "$staging_root/fresh"
+
+    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN:$2|$1"; }
+is_path_whitelisted() { return 1; }
+note_activity() { :; }
+clean_codex_desktop_caches
+clean_codex_desktop_staging
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+}
+
 @test "clean_codex_desktop_staging selects only stale first-level installation directories" {
     local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
     rm -rf "$staging_root"
@@ -633,7 +820,7 @@ EOF
     # Sparkle directory, not its nested app, is the retention boundary.
     touch -t 202001010000 "$staging_root/fresh/Codex.app"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -654,13 +841,99 @@ EOF
     [[ "$output" != *"$HOME/Library/Logs/com.openai.codex"* ]] || return 1
 }
 
+@test "clean_codex_desktop_staging rejects a symlinked staging ancestor" {
+    local case_home="$HOME/codex-staging-ancestor-link"
+    local sparkle_parent="$case_home/Library/Caches/com.openai.codex"
+    local outside="$case_home/Documents/StagingVictim"
+    local outside_entry="$outside/Installation/stale"
+    mkdir -p "$sparkle_parent" "$outside_entry"
+    touch "$outside_entry/OUTSIDE_SENTINEL"
+    touch -t 202001010000 "$outside_entry"
+    ln -s "$outside" "$sparkle_parent/org.sparkle-project.Sparkle"
+
+    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { return 1; }
+codex_sparkle_staging_has_open_files() { return 1; }
+safe_remove() { echo "UNEXPECTED_DELETE:$1"; return 0; }
+clean_codex_desktop_staging
+[[ -f "$HOME/Documents/StagingVictim/Installation/stale/OUTSIDE_SENTINEL" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DELETE"* ]]
+}
+
+@test "clean_codex_desktop_staging rechecks physical containment after sizing" {
+    local case_home="$HOME/codex-staging-containment-race"
+    local sparkle_parent="$case_home/Library/Caches/com.openai.codex"
+    local sparkle_root="$sparkle_parent/org.sparkle-project.Sparkle"
+    local staging_entry="$sparkle_root/Installation/stale"
+    local outside="$case_home/Documents/StagingVictim"
+    mkdir -p "$staging_entry" "$outside/Installation/stale"
+    touch "$staging_entry/owned" "$outside/Installation/stale/OUTSIDE_SENTINEL"
+    touch -t 202001010000 "$staging_entry" "$outside/Installation/stale"
+
+    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+pgrep() { return 1; }
+codex_sparkle_staging_has_open_files() { return 1; }
+get_cleanup_path_size_kb() {
+    if [[ ! -e "$HOME/switched-staging-root" ]]; then
+        : > "$HOME/switched-staging-root"
+        mv "$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle" "$HOME/original-sparkle"
+        ln -s "$HOME/Documents/StagingVictim" "$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle"
+    fi
+    echo 1
+}
+safe_remove() { echo "UNEXPECTED_DELETE:$1"; return 0; }
+clean_codex_desktop_staging
+[[ -f "$HOME/Documents/StagingVictim/Installation/stale/OUTSIDE_SENTINEL" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DELETE"* ]]
+}
+
+@test "clean_codex_desktop_staging does not defer compiled-model-only candidates" {
+    local case_home="$HOME/codex-staging-compiled-only"
+    local stale="$case_home/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation/stale"
+    mkdir -p "$stale/com.apple.e5rt.e5bundlecache"
+    touch -t 202001010000 "$stale"
+
+    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+codex_desktop_process_state() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:$1"; }
+clean_codex_desktop_staging
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN"* ]]
+}
+
 @test "clean_codex_desktop_staging skips while Codex or Sparkle updater is running" {
     local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
     rm -rf "$staging_root"
     mkdir -p "$staging_root/stale"
     touch -t 202001010000 "$staging_root/stale"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -672,10 +945,10 @@ clean_codex_desktop_staging
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"skipped (Codex running)"* ]] || return 1
+    [[ "$output" != *"skipped (Codex running)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -687,7 +960,7 @@ clean_codex_desktop_staging
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"skipped (updater running)"* ]] || return 1
+    [[ "$output" != *"skipped (updater running)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
 }
 
@@ -697,7 +970,7 @@ EOF
     mkdir -p "$staging_root/stale"
     touch -t 202001010000 "$staging_root/stale"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -711,10 +984,10 @@ clean_codex_desktop_staging
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"skipped (files in use)"* ]] || return 1
+    [[ "$output" != *"skipped (files in use)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -731,7 +1004,7 @@ EOF
     [[ "$output" == *"skipped (open-file check unavailable)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -746,13 +1019,130 @@ EOF
     [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
 }
 
+@test "clean_codex_desktop_staging fails closed when lsof is unavailable" {
+    local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+    rm -rf "$staging_root"
+    mkdir -p "$staging_root/stale"
+    touch -t 202001010000 "$staging_root/stale"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+
+probe_rc=0
+PATH=/nonexistent codex_sparkle_staging_has_open_files "$HOME/missing" || probe_rc=$?
+[[ $probe_rc -eq 2 ]] || { echo "WRONG_LSOF_RC:$probe_rc"; exit 1; }
+
+pgrep() { return 1; }
+is_path_whitelisted() { return 1; }
+codex_sparkle_staging_has_open_files() { return 2; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN:$2|$1"; }
+note_activity() { :; }
+clean_codex_desktop_staging
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"open-file check unavailable"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+}
+
+@test "codex staging treats lsof exit one with stderr as unknown" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+lsof() { return 1; }
+run_with_timeout() {
+    echo "lsof: cannot stat test path" >&2
+    return 1
+}
+probe_rc=0
+codex_sparkle_staging_has_open_files "$HOME/missing" || probe_rc=$?
+[[ $probe_rc -eq 2 ]] || { echo "WRONG_LSOF_RC:$probe_rc"; exit 1; }
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "clean_codex_desktop_staging rechecks Codex at the deletion boundary" {
+    local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+    rm -rf "$staging_root" "$HOME/codex-staging-probes"
+    mkdir -p "$staging_root/stale"
+    touch -t 202001010000 "$staging_root/stale"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+codex_desktop_process_state() {
+    printf 'probe\n' >> "$HOME/codex-staging-probes"
+    [[ $(wc -l < "$HOME/codex-staging-probes" | tr -d ' ') -ge 2 ]]
+}
+codex_sparkle_updater_running() { return 1; }
+codex_sparkle_staging_has_open_files() { return 1; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN:$2|$1"; }
+defer_cleanup_family() { echo "DEFER:$1"; }
+note_activity() { :; }
+clean_codex_desktop_staging
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"DEFER:Codex"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]] || return 1
+    [ -d "$staging_root/stale" ]
+}
+
+@test "clean_codex_desktop_staging revalidates candidate age before deletion" {
+    local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+    rm -rf "$staging_root" "$HOME/codex-staging-age-probes"
+    mkdir -p "$staging_root/stale"
+    touch -t 202001010000 "$staging_root/stale"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+codex_desktop_process_state() {
+    if [[ ! -e "$HOME/codex-staging-age-probes" ]]; then
+        : > "$HOME/codex-staging-age-probes"
+        touch "$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation/stale"
+    fi
+    return 1
+}
+codex_sparkle_updater_running() { return 1; }
+codex_sparkle_staging_has_open_files() { return 1; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN:$2|$1"; }
+note_activity() { :; }
+clean_codex_desktop_staging
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]] || return 1
+    [ -d "$staging_root/stale" ]
+}
+
 @test "clean_codex_desktop_staging routes dry-run candidates through safe_clean" {
     local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
     rm -rf "$staging_root"
     mkdir -p "$staging_root/stale"
     touch -t 202001010000 "$staging_root/stale"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -770,7 +1160,7 @@ EOF
 }
 
 @test "clean_dev_mise respects MISE_CACHE_DIR and only targets cache" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MISE_CACHE_DIR="/tmp/mise-cache" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MISE_CACHE_DIR="/tmp/mise-cache" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -787,7 +1177,7 @@ EOF
 }
 
 @test "clean_dev_other_langs cleans configured composer cache paths" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" COMPOSER_HOME="$HOME/.config/composer-home" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" COMPOSER_HOME="$HOME/.config/composer-home" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -801,7 +1191,7 @@ EOF
 }
 
 @test "clean_developer_tools runs key stages" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 stop_section_spinner() { :; }
@@ -849,7 +1239,7 @@ EOF
 }
 
 @test "clean_dev_ruby cleans rbenv, gem, and bundler caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -865,7 +1255,7 @@ EOF
 }
 
 @test "clean_dev_perl cleans CPAN build and source caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -879,7 +1269,7 @@ EOF
 }
 
 @test "clean_dev_other_langs no longer includes Ruby Bundler cache" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -896,7 +1286,7 @@ EOF
     touch "$HOME/Code/flutter_app/.dart_tool/cache.bin"
     touch "$HOME/Code/flutter_app/build/output.bin"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/caches.sh"
@@ -917,7 +1307,7 @@ EOF
     mkdir -p "$HOME/.cache/chrome-devtools-mcp/chrome-profile/Default/Cache"
     touch "$HOME/.cache/chrome-devtools-mcp/chrome-profile/Default/Cache/data"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -940,7 +1330,7 @@ EOF
     mkdir -p "$HOME/.cache/chrome-devtools-mcp/chrome-profile/Default/Cache"
     touch "$HOME/.cache/chrome-devtools-mcp/chrome-profile/Default/Cache/data"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -955,7 +1345,7 @@ clean_dev_misc
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Chrome DevTools MCP caches · skipped"* ]] || return 1
+    [[ "$output" != *"Chrome DevTools MCP caches · skipped"* ]] || return 1
     [[ "$output" != *"Chrome DevTools MCP browser cache"* ]]
 }
 
@@ -969,7 +1359,7 @@ EOF
     touch "$profile/Default/Cookies" "$profile/Default/Local Storage/leveldb/state"
     touch "$profile/Local State"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -988,6 +1378,55 @@ EOF
     [[ "$output" != *"Cookies"* ]] || return 1
     [[ "$output" != *"Local Storage"* ]] || return 1
     [[ "$output" != *"Local State"* ]]
+}
+
+@test "clean_chrome_devtools_mcp_caches ignores an empty active profile" {
+    profile="$HOME/.cache/chrome-devtools-mcp/chrome-profile"
+    rm -rf "$profile"
+    mkdir -p "$profile/Default/Cache" "$profile/Default/Service Worker/CacheStorage"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:$2"; }
+clean_service_worker_cache() { echo "UNEXPECTED_SWC"; }
+clean_chrome_devtools_mcp_caches
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SWC"* ]] || return 1
+    [[ "$output" != *"process state unknown"* ]]
+}
+
+@test "clean_chrome_devtools_mcp_caches recognizes root-level cache candidates" {
+    profile="$HOME/.cache/chrome-devtools-mcp/chrome-profile"
+    rm -rf "$profile"
+    mkdir -p "$profile/extensions_crx_cache"
+    touch "$profile/extensions_crx_cache/candidate"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+clean_service_worker_cache() { :; }
+clean_chrome_devtools_mcp_caches
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"SAFE_CLEAN:Chrome DevTools MCP extension cache|$profile/extensions_crx_cache/candidate"* ]]
 }
 
 @test "report_agent_worktree_candidates reports large worktree containers as review only" {

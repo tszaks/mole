@@ -27,7 +27,7 @@ teardown_file() {
 }
 
 @test "clean_user_essentials respects Trash whitelist" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -44,11 +44,34 @@ EOF
     [[ "$output" != *"Trash"* ]]
 }
 
+@test "clean_trash dry run stays silent for compiled-model-only items" {
+    mkdir -p "$HOME/.Trash/model/com.apple.e5rt.e5bundlecache"
+    touch "$HOME/.Trash/model/com.apple.e5rt.e5bundlecache/weights.bin"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+stop_section_spinner() { :; }
+note_activity() { :; }
+record_dry_run_cleanup_target() { echo "UNEXPECTED_RECORD:$1"; }
+get_path_size_kb() { echo "UNEXPECTED_SIZE"; return 1; }
+clean_trash
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == "" ]] || return 1
+    rm -rf "$HOME/.Trash/model"
+}
+
 @test "clean_user_essentials empties trash directly without Finder prompt" {
     mkdir -p "$HOME/.Trash"
     touch "$HOME/.Trash/one.tmp" "$HOME/.Trash/two.tmp"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -88,7 +111,7 @@ EOF
     touch "$HOME/Library/Logs/mole/operations.log"
     touch "$HOME/Library/Logs/OtherApp/old.log"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -118,7 +141,7 @@ EOF
 }
 
 @test "clean_app_caches includes macOS system caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -138,7 +161,7 @@ EOF
 }
 
 @test "clean_app_caches does not clean Autosave Information" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -159,7 +182,7 @@ EOF
 }
 
 @test "clean_app_caches includes additional Apple cache families" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -186,7 +209,7 @@ EOF
 }
 
 @test "clean_app_caches shows spinner during initial app cache scan" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -205,7 +228,7 @@ EOF
 
 @test "clean_support_app_data targets crash reports and messages preview caches only" {
     local support_home="$HOME/support-cache-home-1"
-    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -235,7 +258,7 @@ EOF
 
 @test "clean_support_app_data always cleans messages preview caches" {
     local support_home="$HOME/support-cache-home-2"
-    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -259,7 +282,7 @@ EOF
     # could not test what its name claimed: clean_app_caches walks a fixed list of
     # Apple container paths and never enumerates arbitrary bundle ids, so the
     # com.example.app fixture was never in scope either way.
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -284,7 +307,7 @@ EOF
 }
 
 @test "clean_app_caches preserves nested E5RT caches in sandboxed apps" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -324,7 +347,7 @@ EOF
 }
 
 @test "clean_app_caches skips expensive size scans for large sandboxed caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -357,7 +380,7 @@ EOF
 }
 
 @test "clean_application_support_logs counts nested directory contents in dry-run size summary" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -390,7 +413,7 @@ EOF
 
 @test "clean_application_support_logs uses bulk clean for large Application Support directories" {
     local support_home="$HOME/support-appsupport-bulk"
-    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -425,7 +448,7 @@ EOF
 
 @test "clean_application_support_logs does not clean generic Application Support logs" {
     local support_home="$HOME/support-appsupport-generic-logs"
-    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -455,7 +478,7 @@ EOF
 
 @test "clean_application_support_logs cleans Electron-style Cache only when cache markers exist" {
     local support_home="$HOME/support-appsupport-electron-cache"
-    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -495,7 +518,7 @@ EOF
 
 @test "clean_application_support_logs skips whitelisted application support directories" {
     local support_home="$HOME/support-appsupport-whitelist"
-    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -526,7 +549,7 @@ EOF
 
 @test "_clean_darwin_user_runtime_dir removes only old non-state files" {
     local runtime_home="$HOME/darwin-runtime"
-    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME/runtime/T"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -556,7 +579,7 @@ EOF
 
 @test "_clean_darwin_user_runtime_dir skips endpoint-security (EDR) agent caches" {
     local runtime_home="$HOME/darwin-runtime-edr"
-    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME/runtime/C/com.crowdstrike.falcon.App" "$HOME/runtime/C/com.example.App"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -590,7 +613,7 @@ EOF
 
 @test "app_support_entry_count_capped stops at cap without failing under pipefail" {
     local support_home="$HOME/support-appsupport-cap"
-    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 mkdir -p "$HOME"
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -611,7 +634,7 @@ EOF
 }
 
 @test "clean_group_container_caches keeps protected caches and cleans non-protected caches" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -648,7 +671,7 @@ EOF
 }
 
 @test "clean_handoff_pasteboard_cache removes stale items and keeps fresh ones (#1178)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -684,7 +707,7 @@ EOF
 }
 
 @test "clean_handoff_pasteboard_cache dry run reports without deleting" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -717,7 +740,7 @@ EOF
 }
 
 @test "jetbrains_stale_version_dirs reports only superseded IDE version dirs (#1179)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -742,7 +765,7 @@ EOF
 }
 
 @test "clean_group_container_caches skips Apple Notes group container" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -773,7 +796,7 @@ EOF
 }
 
 @test "clean_group_container_caches respects whitelist entries" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -809,7 +832,7 @@ EOF
 }
 
 @test "clean_group_container_caches skips systemgroup apple containers" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -839,7 +862,7 @@ EOF
 }
 
 @test "clean_group_container_caches does not report when only whitelisted items exist" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -874,7 +897,7 @@ EOF
 }
 
 @test "clean_group_container_caches skips per-item size scans for large candidates" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -904,7 +927,7 @@ EOF
 }
 
 @test "clean_finder_metadata respects protection flag" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PROTECT_FINDER_METADATA=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PROTECT_FINDER_METADATA=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -919,7 +942,7 @@ EOF
 }
 
 @test "clean_browsers calls expected cache paths" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -938,6 +961,197 @@ EOF
     [[ "$output" == *"Puppeteer browser cache"* ]]
 }
 
+@test "clean_browsers never enters Firefox cleanup while Firefox is running" {
+    mkdir -p "$HOME/Library/Caches/Firefox" \
+        "$HOME/Library/Application Support/Firefox/Profiles/default/cache2"
+    touch "$HOME/Library/Caches/Firefox/candidate" \
+        "$HOME/Library/Application Support/Firefox/Profiles/default/cache2/candidate"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+pgrep() { [[ "$*" == "-x Firefox" ]]; }
+safe_clean() { echo "SAFE_CLEAN:${!#}"; }
+clean_service_worker_cache() { :; }
+note_activity() { :; }
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"SAFE_CLEAN:Firefox cache"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Firefox profile cache"* ]]
+}
+
+@test "clean_browsers fails closed when the Chrome process probe errors" {
+    local chrome_support="$HOME/Library/Application Support/Google/Chrome"
+    rm -rf "$chrome_support"
+    mkdir -p "$chrome_support/Default/Code Cache"
+    touch "$chrome_support/Default/Code Cache/candidate"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+pgrep() { return 2; }
+safe_clean() { echo "SAFE_CLEAN:${!#}"; }
+clean_service_worker_cache() { :; }
+note_activity() { :; }
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Chrome profile caches · skipped (process state unknown)"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Chrome code cache"* ]]
+}
+
+@test "clean_browsers does not defer empty Chrome and Firefox roots" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+rm -rf "$HOME/Library/Application Support/Google/Chrome" \
+    "$HOME/Library/Caches/Firefox" \
+    "$HOME/Library/Application Support/Firefox/Profiles"
+mkdir -p "$HOME/Library/Application Support/Google/Chrome/Default/Code Cache" \
+    "$HOME/Library/Caches/Firefox" \
+    "$HOME/Library/Application Support/Firefox/Profiles/default/cache2"
+pgrep() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { :; }
+clean_service_worker_cache() { :; }
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER:Chrome"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DEFER:Firefox"* ]] || return 1
+    [[ "$output" != *"process state unknown"* ]]
+}
+
+@test "clean_browsers does not defer broken-symlink-only Chrome and Firefox roots" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+rm -rf "$HOME/Library/Application Support/Google/Chrome" \
+    "$HOME/Library/Caches/Firefox" \
+    "$HOME/Library/Application Support/Firefox/Profiles"
+mkdir -p "$HOME/Library/Application Support/Google/Chrome/Default/Code Cache" \
+    "$HOME/Library/Caches/Firefox" \
+    "$HOME/Library/Application Support/Firefox/Profiles/default/cache2"
+ln -s "$HOME/missing-chrome-cache" \
+    "$HOME/Library/Application Support/Google/Chrome/Default/Code Cache/broken"
+ln -s "$HOME/missing-firefox-cache" "$HOME/Library/Caches/Firefox/broken"
+ln -s "$HOME/missing-firefox-profile-cache" \
+    "$HOME/Library/Application Support/Firefox/Profiles/default/cache2/broken"
+mkdir -p "$HOME/Library/Application Support/Google/Chrome/Default/Code Cache/compiled/com.apple.e5rt.e5bundlecache"
+mkdir -p "$HOME/Library/Caches/Firefox/compiled/com.apple.e5rt.e5bundlecache"
+pgrep() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:${!#}"; }
+clean_service_worker_cache() { :; }
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER:Chrome"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DEFER:Firefox"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Chrome code cache"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Firefox cache"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Firefox profile cache"* ]]
+}
+
+@test "clean_browsers ignores active whitelist-only Chrome profile caches" {
+    local chrome_support="$HOME/Library/Application Support/Google/Chrome"
+    rm -rf "$chrome_support"
+    mkdir -p "$chrome_support/Default/Code Cache"
+    touch "$chrome_support/Default/Code Cache/whitelisted"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+target="$HOME/Library/Application Support/Google/Chrome/Default/Code Cache/whitelisted"
+is_path_whitelisted() { [[ "$1" == "$target" ]]; }
+pgrep() { return 0; }
+defer_cleanup_family() { echo "UNEXPECTED_DEFER:$1"; }
+safe_clean() { :; }
+clean_service_worker_cache() { :; }
+clean_browsers
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_DEFER:Chrome"* ]]
+}
+
+@test "clean_cloud_storage never enters active provider cleanup when caches are absent" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+pgrep() {
+    case "$*" in
+        "-x Dropbox" | "-x Google Drive" | "-x OneDrive") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+safe_clean() { echo "SAFE_CLEAN:${!#}"; }
+clean_cloud_storage
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"SAFE_CLEAN:Dropbox cache"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Google Drive cache"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:OneDrive cache"* ]]
+}
+
+@test "clean_cloud_storage fails closed when provider probes error" {
+    local cache_root="$HOME/Library/Caches"
+    mkdir -p "$cache_root/com.getdropbox.dropbox" \
+        "$cache_root/com.google.GoogleDrive" \
+        "$cache_root/com.microsoft.OneDrive"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+pgrep() { return 2; }
+should_protect_path() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:${!#}"; }
+clean_cloud_storage
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Dropbox cache · skipped (process state unknown)"* ]] || return 1
+    [[ "$output" == *"Google Drive cache · skipped (process state unknown)"* ]] || return 1
+    [[ "$output" == *"OneDrive cache · skipped (process state unknown)"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Dropbox cache"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Google Drive cache"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:OneDrive cache"* ]]
+}
+
 @test "clean_browsers keeps all Chrome AI model stores when whitelisted" {
     local chrome_support="$HOME/Library/Application Support/Google/Chrome"
     mkdir -p "$chrome_support/OptGuideOnDeviceModel/2026"
@@ -949,7 +1163,7 @@ EOF
     touch "$chrome_support/optimization_guide_model_store/2026/model.bin"
     touch "$chrome_support/Default/Code Cache/js/cache.bin"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -989,7 +1203,7 @@ EOF
 @test "clean_browsers preserves Brave Service Worker ScriptCache" {
     mkdir -p "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/Default/Service Worker/ScriptCache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1012,7 +1226,7 @@ EOF
 @test "clean_browsers covers Arc User Data layout" {
     mkdir -p "$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1042,7 +1256,7 @@ EOF
     mkdir -p "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/Default/Service Worker/ScriptCache"
     mkdir -p "$HOME/Library/Application Support/Vivaldi/Default/Service Worker/ScriptCache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1072,7 +1286,7 @@ EOF
 @test "clean_browsers preserves Arc User Data ScriptCache regardless of running state" {
     mkdir -p "$HOME/Library/Application Support/Arc/User Data/Default/Service Worker/ScriptCache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1098,7 +1312,7 @@ EOF
 @test "clean_browsers covers QQ Browser 3 caches when not running" {
     mkdir -p "$HOME/Library/Application Support/QQBrowser3/Default/Code Cache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1123,7 +1337,7 @@ EOF
 @test "clean_browsers skips QQ Browser 3 profile caches while running" {
     mkdir -p "$HOME/Library/Application Support/QQBrowser3/Default/Code Cache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1148,7 +1362,7 @@ EOF
 }
 
 @test "clean_application_support_logs skips when no access" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1161,7 +1375,7 @@ EOF
 }
 
 @test "clean_apple_silicon_caches exits when not M-series" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" IS_M_SERIES=false /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" IS_M_SERIES=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1181,7 +1395,7 @@ EOF
     mkdir -p "$HOME/.Trash/.hidden_dir"
     mkdir -p "$HOME/.Trash/regular_dir"
 
-    run /bin/bash <<'EOF'
+    run /bin/bash << 'EOF'
 set -euo pipefail
 count=0
 while IFS= read -r -d '' item; do
@@ -1200,7 +1414,7 @@ EOF
 }
 
 @test "validate_external_volume_target canonicalizes root before comparing target" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1230,7 +1444,7 @@ EOF
 }
 
 @test "clean_app_caches caps precise sandbox size scans when many containers exist" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true MOLE_CONTAINER_CACHE_PRECISE_SIZE_LIMIT=2 /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true MOLE_CONTAINER_CACHE_PRECISE_SIZE_LIMIT=2 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1290,7 +1504,7 @@ EOF
     touch "$HOME/Library/Caches/Dia/User Data/Default/Cache/Cache_Data/entry"
     touch "$HOME/Library/Application Support/Dia/User Data/component_crx_cache/blob"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1322,7 +1536,7 @@ EOF
     mkdir -p "$HOME/Library/Application Support/Dia/User Data/component_crx_cache"
     mkdir -p "$HOME/Library/Caches/Dia/User Data/Default/Cache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1348,7 +1562,7 @@ EOF
     mkdir -p "$HOME/Library/Application Support/Dia/User Data/component_crx_cache"
     mkdir -p "$HOME/Library/Caches/Dia/User Data/Default/Cache"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
@@ -1367,4 +1581,41 @@ EOF
     [[ "$output" == *"skipped (process state unknown)"* ]] || return 1
     [[ "$output" != *"CLEAN:Dia component CRX cache"* ]] || return 1
     [[ "$output" != *"CLEAN:Dia HTTP cache"* ]] || return 1
+}
+
+@test "large files includes the unique System Data review targets" {
+    local review_home="$HOME/large-review-targets"
+    mkdir -p \
+        "$review_home/Library/Developer/Xcode/DerivedData" \
+        "$review_home/Library/Developer/CoreSimulator/Devices" \
+        "$review_home/Library/Containers/com.docker.docker/Data"
+
+    run env HOME="$review_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+docker() { return 1; }
+defaults() { return 1; }
+du() { printf '2097152 %s\n' "${2:-/tmp}"; }
+run_with_timeout() {
+    shift
+    "$@"
+}
+check_large_file_candidates
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"☞"* ]] &&
+        [[ "$output" == *"Xcode DerivedData"* ]] &&
+        [[ "$output" == *"Simulator data"* ]] &&
+        [[ "$output" == *"Docker Desktop data"* ]] || {
+        echo "$output"
+        return 1
+    }
 }

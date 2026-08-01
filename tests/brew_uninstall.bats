@@ -42,7 +42,7 @@ setup() {
     mkdir -p "$HOME/Applications/TestApp.app"
     ln -s "$HOME/Applications/TestApp.app" "$HOME/Caskroom/test-app/1.0.0/TestApp.app"
 
-    run /bin/bash <<EOF
+    run /bin/bash << EOF
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/brew.sh"
 
@@ -74,7 +74,8 @@ EOF
 @test "get_brew_cask_name handles non-brew apps" {
     mkdir -p "$HOME/Applications/ManualApp.app"
 
-    result=$(/bin/bash <<EOF
+    result=$(
+        /bin/bash << EOF
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/brew.sh"
 # Mock brew to return nothing for this
@@ -90,7 +91,7 @@ EOF
 @test "brew detection requires brew info to mention the exact selected app path" {
     mkdir -p "$HOME/Applications/Owned.app" "$HOME/Applications/Other.app" "$HOME/Applications/SameName.app"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/brew.sh"
@@ -132,7 +133,7 @@ EOF
     mkdir -p "$HOME/Applications"
     ln -s "/opt/homebrew/Caskroom/real-cask/1.0/Real.app" "$HOME/Applications/Fake.app"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/brew.sh"
@@ -141,7 +142,10 @@ resolve_path() { printf '%s\n' "/opt/homebrew/Caskroom/real-cask/1.0/Real.app"; 
 ! _detect_cask_via_symlink_check "$HOME/Applications/Fake.app"
 EOF
 
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
 }
 
 @test "batch_uninstall_applications uses brew uninstall for casks (mocked)" {
@@ -246,7 +250,7 @@ files_cleaned=0
 total_items=0
 total_size_cleaned=0
 
-printf '\n' | batch_uninstall_applications > /dev/null 2>&1
+printf '\n' | batch_uninstall_applications > "$HOME/brew_shared_output.log" 2>&1
 
 grep -q "uninstall --cask brewshared-beta" "$HOME/brew_shared_calls.log" || {
     echo "WRONG: plain cask uninstall not invoked"
@@ -256,6 +260,11 @@ grep -q "uninstall --cask brewshared-beta" "$HOME/brew_shared_calls.log" || {
 if grep -q -- "--zap" "$HOME/brew_shared_calls.log"; then
     echo "WRONG: --zap used despite surviving same-bundle sibling"
     cat "$HOME/brew_shared_calls.log"
+    exit 1
+fi
+if grep -q -- "Homebrew apps will be fully cleaned" "$HOME/brew_shared_output.log"; then
+    echo "WRONG: preview claims --zap despite surviving same-bundle sibling"
+    cat "$HOME/brew_shared_output.log"
     exit 1
 fi
 [[ -d "$HOME/Applications/BrewShared.app" ]] || {
@@ -497,7 +506,7 @@ EOF
     local leftover="$HOME/Library/Application Support/BrewManual"
     mkdir -p "$app_bundle" "$leftover"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
@@ -538,7 +547,10 @@ total_size_cleaned=0
 printf '\n' | batch_uninstall_applications
 EOF
 
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
     [[ -d "$app_bundle" ]] || return 1
     [[ -d "$leftover" ]] || return 1
     [[ ! -e "$HOME/brew-manual-side-effects.log" ]] || return 1
@@ -592,7 +604,7 @@ EOF
 }
 
 @test "brew_uninstall_cask passes cask token as argv without shell evaluation" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/brew.sh"

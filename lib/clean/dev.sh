@@ -125,10 +125,30 @@ clean_conda_metadata_caches() {
     done
 }
 
-gradle_daemon_running() {
-    pgrep -f "org.gradle.launcher.daemon" > /dev/null 2>&1 && return 0
-    pgrep -f "GradleDaemon" > /dev/null 2>&1 && return 0
+_dev_cleanup_targets_exist() {
+    local target
+    for target in "$@"; do
+        # Match safe_clean's eligible set: broken symlinks are not cleanup
+        # candidates and must not trigger an active-process defer.
+        [[ -e "$target" ]] || continue
+        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
+            continue
+        fi
+        return 0
+    done
     return 1
+}
+
+gradle_daemon_running() {
+    mole_pgrep_any \
+        -f "org.gradle.launcher.daemon" \
+        -f "GradleDaemon"
 }
 
 # npm/pnpm/yarn/bun caches.
@@ -402,7 +422,7 @@ check_multiple_versions() {
         if [[ -n "$list_cmd" ]]; then
             hint=" ${GRAY}(${list_cmd})${NC}"
         fi
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} ${tool_name} · ${count} found${hint}"
+        echo -e "  ${YELLOW}${ICON_REVIEW}${NC} ${tool_name} · ${count} found${hint}"
     fi
 }
 
@@ -429,7 +449,7 @@ find_orbstack_data_dir() {
 clean_dev_docker() {
     if command -v docker > /dev/null 2>&1; then
         note_activity
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Docker unused data · skipped (review: docker system df)"
+        echo -e "  ${GRAY}${ICON_REVIEW}${NC} Docker unused data · review with docker system df"
         debug_log "Docker daemon-managed cleanup skipped by default"
     fi
 
@@ -442,7 +462,7 @@ clean_dev_docker() {
             [[ "$orb_size" =~ ^[0-9]+$ ]] || orb_size=0
         fi
         note_activity
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} OrbStack container data · skipped ($(bytes_to_human $((orb_size * 1024))), review: docker system df)"
+        echo -e "  ${GRAY}${ICON_REVIEW}${NC} OrbStack container data · $(bytes_to_human $((orb_size * 1024))) · review with docker system df"
         debug_log "OrbStack daemon-managed data left for manual prune ($orb_size KB)"
     fi
     safe_clean ~/.docker/buildx/cache/* "Docker BuildX cache"
@@ -495,18 +515,9 @@ clean_xcode_documentation_cache() {
     local doc_cache_root="${MOLE_XCODE_DOCUMENTATION_CACHE_DIR:-/Library/Developer/Xcode/DocumentationCache}"
     [[ -d "$doc_cache_root" ]] || return 0
 
-    local process_state=0
-    _xcode_xctest_devices_process_running || process_state=$?
-    if [[ $process_state -ne 1 ]]; then
-        local skip_reason="Xcode or build tooling running"
-        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (${skip_reason})"
-        note_activity
-        return 0
-    fi
-
     local -a index_entries=()
     while IFS= read -r -d '' entry; do
+        [[ ! -L "$entry" ]] || continue
         index_entries+=("$entry")
     done < <(command find "$doc_cache_root" -mindepth 1 -maxdepth 1 \( -name "DeveloperDocumentation.index" -o -name "DeveloperDocumentation*.index" \) -print0 2> /dev/null)
 
@@ -514,21 +525,32 @@ clean_xcode_documentation_cache() {
         return 0
     fi
 
-    local -a sorted_entries=()
-    while IFS= read -r line; do
-        sorted_entries+=("${line#* }")
-    done < <(
-        for entry in "${index_entries[@]}"; do
-            local mtime
-            mtime=$(stat -f%m "$entry" 2> /dev/null || echo "0")
-            printf '%s %s\n' "$mtime" "$entry"
-        done | sort -rn
-    )
+    local -a index_mtimes=()
+    local entry mtime
+    for entry in "${index_entries[@]}"; do
+        mtime=$(stat -f%m "$entry" 2> /dev/null || echo "0")
+        [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+        index_mtimes+=("$mtime")
+    done
+
+    # Keep pathnames byte-exact; index names can legally contain newlines.
+    local i j key_mtime key_entry
+    for ((i = 1; i < ${#index_entries[@]}; i++)); do
+        key_entry="${index_entries[$i]}"
+        key_mtime="${index_mtimes[$i]}"
+        j=$((i - 1))
+        while [[ $j -ge 0 && ${index_mtimes[$j]} -lt $key_mtime ]]; do
+            index_entries[j + 1]="${index_entries[$j]}"
+            index_mtimes[j + 1]="${index_mtimes[$j]}"
+            j=$((j - 1))
+        done
+        index_entries[j + 1]="$key_entry"
+        index_mtimes[j + 1]="$key_mtime"
+    done
 
     local -a stale_entries=()
     local idx=0
-    local entry
-    for entry in "${sorted_entries[@]}"; do
+    for entry in "${index_entries[@]}"; do
         if [[ $idx -eq 0 ]]; then
             idx=$((idx + 1))
             continue
@@ -541,9 +563,44 @@ clean_xcode_documentation_cache() {
         return 0
     fi
 
+    # Form the same eligible set as the deletion loop before consulting
+    # process state. Protected-only work must stay silent instead of promising
+    # an Xcode defer that can never be cleaned.
+    local -a eligible_stale_entries=()
+    local pre_skipped_count=0
+    for entry in "${stale_entries[@]}"; do
+        [[ ! -L "$entry" ]] || continue
+        if should_protect_path "$entry" || is_path_whitelisted "$entry" || holds_compiled_model_cache "$entry"; then
+            pre_skipped_count=$((pre_skipped_count + 1))
+            continue
+        fi
+        eligible_stale_entries+=("$entry")
+    done
+    [[ ${#eligible_stale_entries[@]} -gt 0 ]] || return 0
+    stale_entries=("${eligible_stale_entries[@]}")
+
+    local process_state=0
+    _xcode_xctest_devices_process_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $pre_skipped_count -gt 0 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${pre_skipped_count} protected items"
+            note_activity
+        fi
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Xcode"
+        fi
+        return 0
+    fi
+
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
-        safe_clean "${stale_entries[@]}" "Xcode documentation cache (old indexes)"
-        note_activity
+        _xcode_safe_clean_guarded \
+            _xcode_delete_guard_allows \
+            "Xcode documentation cache" \
+            "${stale_entries[@]}" \
+            "Xcode documentation cache (old indexes)" || return 0
         return 0
     fi
 
@@ -556,12 +613,13 @@ clean_xcode_documentation_cache() {
     fi
 
     local removed_count=0
-    local skipped_count=0
+    local removed_size_kb=0
+    local skipped_count=$pre_skipped_count
     local failed_count=0
     local stop_reason=""
     local stale_entry
     for stale_entry in "${stale_entries[@]}"; do
-        if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry"; then
+        if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry" || holds_compiled_model_cache "$stale_entry"; then
             skipped_count=$((skipped_count + 1))
             continue
         fi
@@ -577,6 +635,7 @@ clean_xcode_documentation_cache() {
         fi
         if safe_sudo_remove "$stale_entry" "$stale_size_kb"; then
             removed_count=$((removed_count + 1))
+            removed_size_kb=$((removed_size_kb + stale_size_kb))
         else
             failed_count=$((failed_count + 1))
         fi
@@ -584,6 +643,9 @@ clean_xcode_documentation_cache() {
 
     if [[ $removed_count -gt 0 ]]; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode documentation cache · removed ${removed_count} old indexes"
+        files_cleaned=$((${files_cleaned:-0} + removed_count))
+        total_size_cleaned=$((${total_size_cleaned:-0} + removed_size_kb))
+        total_items=$((${total_items:-0} + 1))
         if [[ $skipped_count -gt 0 ]]; then
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${skipped_count} protected items"
         fi
@@ -598,9 +660,6 @@ clean_xcode_documentation_cache() {
         fi
         note_activity
     elif [[ $skipped_count -gt 0 ]]; then
-        if [[ -z "$stop_reason" ]]; then
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode documentation cache · already clean"
-        fi
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped ${skipped_count} protected items"
         note_activity
     elif [[ -z "$stop_reason" ]]; then
@@ -608,8 +667,12 @@ clean_xcode_documentation_cache() {
         note_activity
     fi
     if [[ -n "$stop_reason" ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · stopped (${stop_reason})"
-        note_activity
+        if [[ "$stop_reason" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · stopped (${stop_reason})"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Xcode"
+        fi
     fi
 }
 
@@ -786,6 +849,90 @@ _xctest_devices_delete_guard_allows() {
     return 1
 }
 
+_defer_dev_cleanup_family() {
+    if declare -f defer_cleanup_family > /dev/null 2>&1; then
+        defer_cleanup_family "$1"
+    else
+        debug_log "Deferred cleanup while active: $1"
+    fi
+}
+
+_dev_process_delete_guard_allows() {
+    local process_state=0
+    "$_MOLE_DEV_PROCESS_GUARD_PROBE" || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_DEV_PROCESS_GUARD_REASON="$_MOLE_DEV_PROCESS_GUARD_FAMILY started"
+    [[ $process_state -eq 2 ]] && _MOLE_DEV_PROCESS_GUARD_REASON="process state unknown"
+    return 1
+}
+
+_dev_report_process_guard_stop() {
+    local display_name="$1"
+    local family="$2"
+    local reason="$3"
+
+    if [[ "$reason" == "process state unknown" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${reason})"
+        note_activity
+    else
+        _defer_dev_cleanup_family "$family"
+    fi
+}
+
+# Bind a tri-state process probe to safe_clean's post-size boundary. The local
+# guard state is intentionally dynamic so Bash 3.2 callbacks can read it.
+_dev_safe_clean_process_guarded() {
+    local probe="$1"
+    local family="$2"
+    local display_name="$3"
+    shift 3
+    local _MOLE_DEV_PROCESS_GUARD_PROBE="$probe"
+    local _MOLE_DEV_PROCESS_GUARD_FAMILY="$family"
+    local _MOLE_DEV_PROCESS_GUARD_REASON="${family} started"
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        if ! _dev_process_delete_guard_allows; then
+            _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_DEV_PROCESS_GUARD_REASON"
+            return 1
+        fi
+        safe_clean "$@"
+        return $?
+    fi
+
+    local guarded_rc=0
+    safe_clean_guarded _dev_process_delete_guard_allows "$@" || guarded_rc=$?
+    if [[ $guarded_rc -eq 75 ]]; then
+        _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_DEV_PROCESS_GUARD_REASON"
+        return 1
+    fi
+    return "$guarded_rc"
+}
+
+_dev_clean_service_worker_process_guarded() {
+    local probe="$1"
+    local family="$2"
+    local display_name="$3"
+    local browser_name="$4"
+    local cache_path="$5"
+    local _MOLE_DEV_PROCESS_GUARD_PROBE="$probe"
+    local _MOLE_DEV_PROCESS_GUARD_FAMILY="$family"
+    local _MOLE_DEV_PROCESS_GUARD_REASON="${family} started"
+    local guarded_rc=0
+
+    clean_service_worker_cache \
+        "$browser_name" \
+        "$cache_path" \
+        _dev_process_delete_guard_allows || guarded_rc=$?
+    if [[ $guarded_rc -eq 75 ]]; then
+        _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_DEV_PROCESS_GUARD_REASON"
+        return 1
+    fi
+    return "$guarded_rc"
+}
+
 # Production safe_clean_guarded binds the process probe to its internal
 # post-size deletion boundary. Unit-level callers that source this module
 # without bin/clean.sh keep the historical safe_clean surface.
@@ -797,8 +944,14 @@ _xcode_safe_clean_guarded() {
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! "$delete_guard"; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
-            note_activity
+            if [[ "$_MOLE_XCODE_DELETE_GUARD_REASON" == "process state unknown" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
+                note_activity
+            elif [[ "$delete_guard" == "_coresimulator_delete_guard_allows" ]]; then
+                _defer_dev_cleanup_family "Simulator"
+            else
+                _defer_dev_cleanup_family "Xcode"
+            fi
             return 1
         fi
         safe_clean "$@"
@@ -808,8 +961,14 @@ _xcode_safe_clean_guarded() {
     local guarded_rc=0
     safe_clean_guarded "$delete_guard" "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
-        note_activity
+        if [[ "$_MOLE_XCODE_DELETE_GUARD_REASON" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
+            note_activity
+        elif [[ "$delete_guard" == "_coresimulator_delete_guard_allows" ]]; then
+            _defer_dev_cleanup_family "Simulator"
+        else
+            _defer_dev_cleanup_family "Xcode"
+        fi
         return 1
     fi
     return "$guarded_rc"
@@ -819,13 +978,35 @@ clean_xcode_xctest_devices() {
     local xctest_devices_dir="${MOLE_XCODE_XCTEST_DEVICES_DIR:-$HOME/Library/Developer/XCTestDevices}"
     [[ -d "$xctest_devices_dir" ]] || return 0
 
+    # Preserve safe_clean's skip accounting while checking eligibility before
+    # the process gate. This avoids a false defer for policy-excluded roots.
+    local policy_reason=""
+    if should_protect_path "$xctest_devices_dir"; then
+        policy_reason="protected"
+    elif is_path_whitelisted "$xctest_devices_dir"; then
+        policy_reason="whitelist"
+    elif declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$xctest_devices_dir"; then
+        policy_reason="compiled model cache"
+    fi
+    if [[ -n "$policy_reason" ]]; then
+        if declare -p whitelist_skipped_count > /dev/null 2>&1; then
+            whitelist_skipped_count=$((whitelist_skipped_count + 1))
+        fi
+        if declare -f log_operation > /dev/null 2>&1; then
+            log_operation "clean" "SKIPPED" "$xctest_devices_dir" "$policy_reason"
+        fi
+        return 0
+    fi
+
     local process_state=0
     _xctest_devices_activity_state || process_state=$?
     if [[ $process_state -ne 1 ]]; then
-        local skip_reason="Xcode or XCTest running"
-        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (${skip_reason})"
-        note_activity
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Xcode"
+        fi
         return 0
     fi
 
@@ -840,46 +1021,87 @@ clean_xcode_system_coresimulator_caches() {
     local cache_root="${MOLE_XCODE_SYSTEM_CORESIMULATOR_CACHE_DIR:-/Library/Developer/CoreSimulator/Caches}"
     [[ -d "$cache_root" ]] || return 0
 
-    local process_state=0
-    _coresimulator_activity_state || process_state=$?
-    if [[ $process_state -ne 1 ]]; then
-        local skip_reason="CoreSimulator running"
-        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (${skip_reason})"
-        note_activity
-        return 0
-    fi
-
     local -a cache_entries=()
+    local entry
     while IFS= read -r -d '' entry; do
         cache_entries+=("$entry")
     done < <(command find "$cache_root" -mindepth 1 -maxdepth 1 -print0 2> /dev/null)
 
     [[ ${#cache_entries[@]} -gt 0 ]] || return 0
 
-    local entry
+    # Match the privileged removal loop before the process gate. Otherwise a
+    # protected-only cache root is incorrectly advertised as deferred work.
+    local -a eligible_cache_entries=()
+    local pre_skipped_count=0
+    for entry in "${cache_entries[@]}"; do
+        [[ ! -L "$entry" ]] || continue
+        if should_protect_path "$entry" || is_path_whitelisted "$entry" || holds_compiled_model_cache "$entry"; then
+            pre_skipped_count=$((pre_skipped_count + 1))
+            continue
+        fi
+        eligible_cache_entries+=("$entry")
+    done
+    [[ ${#eligible_cache_entries[@]} -gt 0 ]] || return 0
+    cache_entries=("${eligible_cache_entries[@]}")
+
+    local process_state=0
+    _coresimulator_activity_state || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Simulator"
+        fi
+        return 0
+    fi
 
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
         local total_size_kb=0
         local cleanable_count=0
+        local stop_reason=""
         for entry in "${cache_entries[@]}"; do
-            if should_protect_path "$entry" || is_path_whitelisted "$entry"; then
+            process_state=0
+            _coresimulator_activity_state || process_state=$?
+            if [[ $process_state -ne 1 ]]; then
+                stop_reason="CoreSimulator started"
+                [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
+                break
+            fi
+            if should_protect_path "$entry" || is_path_whitelisted "$entry" || holds_compiled_model_cache "$entry"; then
                 continue
             fi
             local entry_size_kb
             entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null || echo 0)
             [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
+
+            process_state=0
+            _coresimulator_activity_state || process_state=$?
+            if [[ $process_state -ne 1 ]]; then
+                stop_reason="CoreSimulator started"
+                [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
+                break
+            fi
             if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
                 record_dry_run_cleanup_target "$entry" "$entry_size_kb" 1 true || continue
             fi
             total_size_kb=$((total_size_kb + entry_size_kb))
             cleanable_count=$((cleanable_count + 1))
         done
-        [[ "$cleanable_count" -gt 0 ]] || return 0
-        local total_size_human
-        total_size_human=$(bytes_to_human "$((total_size_kb * 1024))")
-        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode Simulator system cache · would remove ${cleanable_count} entries (${total_size_human})"
-        note_activity
+        if [[ "$cleanable_count" -gt 0 ]]; then
+            local total_size_human
+            total_size_human=$(bytes_to_human "$((total_size_kb * 1024))")
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode Simulator system cache · would remove ${cleanable_count} entries (${total_size_human})"
+            note_activity
+        fi
+        if [[ -n "$stop_reason" ]]; then
+            if [[ "$stop_reason" == "process state unknown" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · stopped (${stop_reason})"
+                note_activity
+            else
+                _defer_dev_cleanup_family "Simulator"
+            fi
+        fi
         return 0
     fi
 
@@ -893,7 +1115,7 @@ clean_xcode_system_coresimulator_caches() {
 
     local removed_count=0
     local removed_size_kb=0
-    local skipped_count=0
+    local skipped_count=$pre_skipped_count
     local failed_count=0
     local stop_reason=""
     for entry in "${cache_entries[@]}"; do
@@ -904,7 +1126,7 @@ clean_xcode_system_coresimulator_caches() {
             [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
             break
         fi
-        if should_protect_path "$entry" || is_path_whitelisted "$entry"; then
+        if should_protect_path "$entry" || is_path_whitelisted "$entry" || holds_compiled_model_cache "$entry"; then
             skipped_count=$((skipped_count + 1))
             continue
         fi
@@ -942,6 +1164,9 @@ clean_xcode_system_coresimulator_caches() {
         if [[ $failed_count -gt 0 ]]; then
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · could not remove ${failed_count} entries"
         fi
+        files_cleaned=$((${files_cleaned:-0} + removed_count))
+        total_size_cleaned=$((${total_size_cleaned:-0} + removed_size_kb))
+        total_items=$((${total_items:-0} + 1))
         note_activity
     elif [[ $failed_count -gt 0 ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · could not remove ${failed_count} entries"
@@ -952,13 +1177,14 @@ clean_xcode_system_coresimulator_caches() {
     elif [[ $skipped_count -gt 0 ]]; then
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped ${skipped_count} protected, none removed"
         note_activity
-    elif [[ -z "$stop_reason" ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode Simulator system cache · already clean"
-        note_activity
     fi
     if [[ -n "$stop_reason" ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · stopped (${stop_reason})"
-        note_activity
+        if [[ "$stop_reason" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · stopped (${stop_reason})"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Simulator"
+        fi
     fi
 }
 
@@ -970,19 +1196,75 @@ clean_xcode_device_support() {
     local ds_dir="$1"
     local display_name="$2"
     local keep_count="${MOLE_XCODE_DEVICE_SUPPORT_KEEP:-2}"
+    local -a preview_stale_dirs=()
     [[ "$keep_count" =~ ^[0-9]+$ ]] || keep_count=2
 
     [[ -d "$ds_dir" ]] || return 0
+
+    local candidate
+    local -a preflight_dirs=()
+    while IFS= read -r -d '' candidate; do
+        preflight_dirs+=("$candidate")
+    done < <(command find "$ds_dir" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null || true)
+    local has_inner_cleanup_target=false
+    _dev_cleanup_targets_exist \
+        "$ds_dir"/*/Symbols/System/Library/Caches/* \
+        "$ds_dir"/*.log && has_inner_cleanup_target=true
+
+    local has_stale_cleanup_target=false
+    if [[ ${#preflight_dirs[@]} -gt $keep_count ]]; then
+        local -a preflight_mtimes=()
+        local preflight_mtime=""
+        for candidate in "${preflight_dirs[@]}"; do
+            if ! preflight_mtime=$(stat -f%m "$candidate" 2> /dev/null) || [[ ! "$preflight_mtime" =~ ^[0-9]+$ ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (metadata unavailable)"
+                note_activity
+                return 0
+            fi
+            preflight_mtimes+=("$preflight_mtime")
+        done
+
+        local -a preflight_pending_dirs=("${preflight_dirs[@]}")
+        local -a preflight_pending_mtimes=("${preflight_mtimes[@]}")
+        local preflight_rank=0 preflight_index preflight_best_index
+        while [[ ${#preflight_pending_dirs[@]} -gt 0 ]]; do
+            preflight_best_index=0
+            for ((preflight_index = 1; preflight_index < ${#preflight_pending_dirs[@]}; preflight_index++)); do
+                if [[ ${preflight_pending_mtimes[$preflight_index]} -gt ${preflight_pending_mtimes[$preflight_best_index]} ]]; then
+                    preflight_best_index=$preflight_index
+                fi
+            done
+            if [[ $preflight_rank -ge $keep_count ]] &&
+                ! should_protect_path "${preflight_pending_dirs[$preflight_best_index]}" &&
+                ! is_path_whitelisted "${preflight_pending_dirs[$preflight_best_index]}" &&
+                ! holds_compiled_model_cache "${preflight_pending_dirs[$preflight_best_index]}"; then
+                has_stale_cleanup_target=true
+                break
+            fi
+            preflight_rank=$((preflight_rank + 1))
+            unset "preflight_pending_dirs[$preflight_best_index]" "preflight_pending_mtimes[$preflight_best_index]"
+            if [[ ${#preflight_pending_dirs[@]} -gt 0 ]]; then
+                preflight_pending_dirs=("${preflight_pending_dirs[@]}")
+                preflight_pending_mtimes=("${preflight_pending_mtimes[@]}")
+            fi
+        done
+    fi
+
+    if [[ "$has_stale_cleanup_target" != "true" && "$has_inner_cleanup_target" != "true" ]]; then
+        return 0
+    fi
 
     # DeviceSupport contains symbols used by active builds, tests, and device
     # debugging. Keep every version when any Xcode tooling is active.
     local process_state=0
     _xcode_xctest_devices_process_running || process_state=$?
     if [[ $process_state -ne 1 ]]; then
-        local skip_reason="Xcode or build tooling running"
-        [[ $process_state -eq 2 ]] && skip_reason="process state unknown"
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (${skip_reason})"
-        note_activity
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Xcode"
+        fi
         return 0
     fi
 
@@ -1045,27 +1327,38 @@ clean_xcode_device_support() {
         local -a stale_dirs=("${sorted_dirs[@]:$keep_count}")
 
         if [[ ${#stale_dirs[@]} -gt 0 ]]; then
-            # Calculate total size of stale versions
             local stale_size_kb=0 entry_size_kb
-            for stale_entry in "${stale_dirs[@]}"; do
-                entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null || echo 0)
-                stale_size_kb=$((stale_size_kb + entry_size_kb))
-            done
-            local stale_size_human
-            stale_size_human=$(bytes_to_human "$((stale_size_kb * 1024))")
+            local stale_size_human=""
 
             if [[ "$DRY_RUN" == "true" ]]; then
                 local dry_run_count=0
+                local dry_stop_reason=""
                 stale_size_kb=0
                 for stale_entry in "${stale_dirs[@]}"; do
-                    if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry"; then
+                    process_state=0
+                    _xcode_xctest_devices_process_running || process_state=$?
+                    if [[ $process_state -ne 1 ]]; then
+                        dry_stop_reason="Xcode or build tools started"
+                        [[ $process_state -eq 2 ]] && dry_stop_reason="process state unknown"
+                        break
+                    fi
+                    if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry" || holds_compiled_model_cache "$stale_entry"; then
                         continue
                     fi
                     entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null || echo 0)
                     [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
+
+                    process_state=0
+                    _xcode_xctest_devices_process_running || process_state=$?
+                    if [[ $process_state -ne 1 ]]; then
+                        dry_stop_reason="Xcode or build tools started"
+                        [[ $process_state -eq 2 ]] && dry_stop_reason="process state unknown"
+                        break
+                    fi
                     if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
                         record_dry_run_cleanup_target "$stale_entry" "$entry_size_kb" 1 true || continue
                     fi
+                    preview_stale_dirs+=("$stale_entry")
                     stale_size_kb=$((stale_size_kb + entry_size_kb))
                     dry_run_count=$((dry_run_count + 1))
                 done
@@ -1073,6 +1366,15 @@ clean_xcode_device_support() {
                     stale_size_human=$(bytes_to_human "$((stale_size_kb * 1024))")
                     echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} ${display_name} · would remove ${dry_run_count} old versions (${stale_size_human}), keeping ${keep_count} most recent"
                     note_activity
+                fi
+                if [[ -n "$dry_stop_reason" ]]; then
+                    if [[ "$dry_stop_reason" == "process state unknown" ]]; then
+                        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${dry_stop_reason})"
+                        note_activity
+                    else
+                        _defer_dev_cleanup_family "Xcode"
+                    fi
+                    return 0
                 fi
             else
                 # Remove old versions
@@ -1087,7 +1389,7 @@ clean_xcode_device_support() {
                         [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
                         break
                     fi
-                    if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry"; then
+                    if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry" || holds_compiled_model_cache "$stale_entry"; then
                         continue
                     fi
                     entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null || echo 0)
@@ -1114,39 +1416,81 @@ clean_xcode_device_support() {
                     local line_color
                     line_color=$(cleanup_result_color_kb "$removed_size_kb")
                     echo -e "  ${line_color}${ICON_SUCCESS}${NC} ${display_name} · removed ${removed_count} old versions, ${line_color}${stale_size_human}${NC}"
+                    files_cleaned=$((${files_cleaned:-0} + removed_count))
+                    total_size_cleaned=$((${total_size_cleaned:-0} + removed_size_kb))
+                    total_items=$((${total_items:-0} + 1))
                     note_activity
                 fi
                 if [[ -n "$stop_reason" ]]; then
-                    echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${stop_reason})"
-                    note_activity
+                    if [[ "$stop_reason" == "process state unknown" ]]; then
+                        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${stop_reason})"
+                        note_activity
+                    else
+                        _defer_dev_cleanup_family "Xcode"
+                    fi
                     return 0
                 fi
             fi
         fi
     fi
 
-    # Clean caches/logs inside kept versions
+    # Clean caches/logs inside kept versions. In dry-run, stale versions still
+    # exist on disk but their whole directories are already in the preview
+    # ledger, so exclude their children to avoid double-counting.
+    local -a inner_cache_targets=()
+    local -a log_targets=()
+    local stale_dir skip_inner
+    for candidate in "$ds_dir"/*/Symbols/System/Library/Caches/*; do
+        skip_inner=false
+        if [[ "${DRY_RUN:-false}" == "true" && ${#preview_stale_dirs[@]} -gt 0 ]]; then
+            for stale_dir in "${preview_stale_dirs[@]}"; do
+                case "$candidate" in
+                    "$stale_dir"/*)
+                        skip_inner=true
+                        break
+                        ;;
+                esac
+            done
+        fi
+        [[ "$skip_inner" == "true" ]] && continue
+        _dev_cleanup_targets_exist "$candidate" && inner_cache_targets+=("$candidate")
+    done
+    for candidate in "$ds_dir"/*.log; do
+        _dev_cleanup_targets_exist "$candidate" && log_targets+=("$candidate")
+    done
+    if [[ ${#inner_cache_targets[@]} -eq 0 && ${#log_targets[@]} -eq 0 ]]; then
+        return 0
+    fi
+
     if [[ "${DRY_RUN:-false}" != "true" ]]; then
         process_state=0
         _xcode_xctest_devices_process_running || process_state=$?
         if [[ $process_state -ne 1 ]]; then
             local stop_reason="Xcode or build tools started"
             [[ $process_state -eq 2 ]] && stop_reason="process state unknown"
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${stop_reason})"
-            note_activity
+            if [[ "$stop_reason" == "process state unknown" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${stop_reason})"
+                note_activity
+            else
+                _defer_dev_cleanup_family "Xcode"
+            fi
             return 0
         fi
     fi
-    _xcode_safe_clean_guarded \
-        _xcode_delete_guard_allows \
-        "$display_name symbol cache" \
-        "$ds_dir"/*/Symbols/System/Library/Caches/* \
-        "$display_name symbol cache" || return 0
-    _xcode_safe_clean_guarded \
-        _xcode_delete_guard_allows \
-        "$display_name logs" \
-        "$ds_dir"/*.log \
-        "$display_name logs" || return 0
+    if [[ ${#inner_cache_targets[@]} -gt 0 ]]; then
+        _xcode_safe_clean_guarded \
+            _xcode_delete_guard_allows \
+            "$display_name symbol cache" \
+            "${inner_cache_targets[@]}" \
+            "$display_name symbol cache" || return 0
+    fi
+    if [[ ${#log_targets[@]} -gt 0 ]]; then
+        _xcode_safe_clean_guarded \
+            _xcode_delete_guard_allows \
+            "$display_name logs" \
+            "${log_targets[@]}" \
+            "$display_name logs" || return 0
+    fi
 }
 
 _sim_runtime_mount_points() {
@@ -1245,18 +1589,34 @@ clean_xcode_simulator_runtime_volumes() {
         local in_use_kb=0
         local unused_kb=0
         local cleanable_unused_count=0
+        local preview_in_use_count=0
+        local dry_stop_reason=""
         local i=0
         for candidate in "${sorted_candidates[@]}"; do
             local size_kb
             size_kb=$(_sim_runtime_size_kb "$candidate")
-            size_values+=("$size_kb")
             local status="${entry_statuses[$i]:-UNUSED}"
             if [[ "$status" == "IN_USE" ]]; then
+                size_values+=("$size_kb")
                 in_use_kb=$((in_use_kb + size_kb))
+                preview_in_use_count=$((preview_in_use_count + 1))
             else
+                local -a current_mount_points=()
+                while IFS= read -r line; do
+                    [[ -n "$line" ]] && current_mount_points+=("$line")
+                done < <(_sim_runtime_mount_points)
+                if [[ ${#current_mount_points[@]} -eq 0 ]]; then
+                    dry_stop_reason="mount state unknown"
+                    break
+                fi
+                if _sim_runtime_is_path_in_use "$candidate" "${current_mount_points[@]}"; then
+                    dry_stop_reason="runtime became mounted"
+                    break
+                fi
                 if ! should_protect_path "$candidate" && ! is_path_whitelisted "$candidate"; then
                     if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
                         record_dry_run_cleanup_target "$candidate" "$size_kb" 1 true || {
+                            size_values+=("$size_kb")
                             i=$((i + 1))
                             continue
                         }
@@ -1264,6 +1624,7 @@ clean_xcode_simulator_runtime_volumes() {
                     unused_kb=$((unused_kb + size_kb))
                     cleanable_unused_count=$((cleanable_unused_count + 1))
                 fi
+                size_values+=("$size_kb")
             fi
             i=$((i + 1))
         done
@@ -1272,7 +1633,7 @@ clean_xcode_simulator_runtime_volumes() {
             runtime_scan_spinner=false
         fi
 
-        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode runtime volumes · ${cleanable_unused_count} unused, ${in_use_count} in use"
+        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode runtime volumes · ${cleanable_unused_count} unused, ${preview_in_use_count} in use"
         local dryrun_total_kb=$((unused_kb + in_use_kb))
         local dryrun_total_human
         dryrun_total_human=$(bytes_to_human "$((dryrun_total_kb * 1024))")
@@ -1307,12 +1668,16 @@ clean_xcode_simulator_runtime_volumes() {
             done | LC_ALL=C sort -nr -k1,1
         )
 
-        local total_entries="${#sorted_candidates[@]}"
+        local total_entries="${#size_values[@]}"
         if [[ "$total_entries" -gt "$shown" ]]; then
             local remaining=$((total_entries - shown))
             echo -e "    ${GRAY}${ICON_LIST}${NC} ... and ${remaining} more runtime volume entries"
         fi
         note_activity
+        if [[ -n "$dry_stop_reason" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode runtime volumes · stopped (${dry_stop_reason})"
+            note_activity
+        fi
         return 0
     fi
 
@@ -1338,8 +1703,7 @@ clean_xcode_simulator_runtime_volumes() {
     fi
 
     if [[ ${#selected_paths[@]} -eq 0 ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode runtime volumes · already clean"
-        note_activity
+        debug_log "Xcode runtime volumes have no unused cleanable entries"
         return 0
     fi
 
@@ -1408,10 +1772,10 @@ clean_xcode_simulator_runtime_volumes() {
             fi
         elif [[ $skipped_protected -gt 0 ]]; then
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Xcode runtime volumes · skipped ${skipped_protected} protected, none removed"
-        elif [[ -z "$stop_reason" ]]; then
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode runtime volumes · already clean"
         fi
-        note_activity
+        if [[ $failed_count -gt 0 || $skipped_protected -gt 0 ]]; then
+            note_activity
+        fi
     fi
     if [[ -n "$stop_reason" ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode runtime volumes · stopped (${stop_reason})"
@@ -1677,15 +2041,14 @@ clean_dev_mobile() {
                             fi
                         done
                         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode unavailable simulators · would clean ${unavailable_before}, ${unavailable_size_human}"
+                        note_activity
                     else
-                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
+                        debug_log "Xcode unavailable simulators already clean"
                     fi
-                    note_activity
                 else
                     # Skip if no unavailable simulators
                     if ((unavailable_before == 0)); then
-                        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Xcode unavailable simulators · already clean"
-                        note_activity
+                        debug_log "Xcode unavailable simulators already clean"
                     else
                         start_section_spinner "Checking unavailable simulators..."
 
@@ -1744,10 +2107,10 @@ clean_dev_mobile() {
                                 debug_log "simctl delete error: $delete_output"
                             fi
                         fi
+                        note_activity
                     fi
                 fi # Close if ((unavailable_before == 0))
-                note_activity
-            fi # End of simctl_available check
+            fi     # End of simctl_available check
         else
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl could not be resolved"
             note_activity
@@ -1800,12 +2163,23 @@ clean_dev_jvm() {
     safe_clean ~/.ivy2/cache/* "Ivy cache"
     safe_clean ~/.gradle/caches/build-cache-*/* "Gradle build cache"
     safe_clean ~/.gradle/notifications/* "Gradle notifications cache"
-    if gradle_daemon_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Gradle daemon/workers · skipped (Gradle daemon running)"
-        note_activity
-    else
-        safe_clean ~/.gradle/daemon/* "Gradle daemon"
-        safe_clean ~/.gradle/workers/* "Gradle workers"
+    if _dev_cleanup_targets_exist "$HOME/.gradle/daemon"/* "$HOME/.gradle/workers"/*; then
+        local gradle_state=0
+        gradle_daemon_running || gradle_state=$?
+        if [[ $gradle_state -eq 0 ]]; then
+            _defer_dev_cleanup_family "Gradle"
+        elif [[ $gradle_state -eq 1 ]]; then
+            _dev_safe_clean_process_guarded \
+                gradle_daemon_running \
+                "Gradle" \
+                "Gradle daemon/workers" \
+                ~/.gradle/daemon/* \
+                ~/.gradle/workers/* \
+                "Gradle daemon/workers" || true
+        else
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Gradle daemon/workers · skipped (process state unknown)"
+            note_activity
+        fi
     fi
 }
 # JetBrains Toolbox old IDE versions (keep current + recent backup).
@@ -1926,15 +2300,22 @@ clean_dev_jetbrains_logs() {
 # plus the version pointed at by the active CLI symlink (mtime alone is
 # unreliable: Claude Code pre-downloads the next version before flipping
 # the symlink, so newest mtime is not always the active version).
-clean_versioned_agent_root() {
+_MOLE_VERSIONED_AGENT_CLEANUP_TARGETS=()
+_MOLE_VERSIONED_AGENT_RETENTION_TARGETS=()
+_MOLE_VERSIONED_AGENT_ACTIVE_PATH=""
+
+_plan_versioned_agent_cleanup_targets() {
     local versions_root="$1"
-    local label="$2"
-    local keep_previous="$3"
-    local active_path="${4:-}"
+    local keep_previous="$2"
+    local active_path="${3:-}"
+
+    _MOLE_VERSIONED_AGENT_CLEANUP_TARGETS=()
+    _MOLE_VERSIONED_AGENT_RETENTION_TARGETS=()
 
     [[ -d "$versions_root" ]] || return 0
 
     local -a entries=()
+    local -a entry_mtimes=()
     local entry
     while IFS= read -r -d '' entry; do
         local name
@@ -1942,26 +2323,33 @@ clean_versioned_agent_root() {
         [[ "$name" == .* ]] && continue
         [[ ! "$name" =~ ^[0-9] ]] && continue
         entries+=("$entry")
+        local mtime
+        mtime=$(stat -f%m "$entry" 2> /dev/null || echo "0")
+        [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+        entry_mtimes+=("$mtime")
     done < <(command find "$versions_root" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -print0 2> /dev/null)
 
     [[ ${#entries[@]} -le "$keep_previous" ]] && return 0
 
-    local -a sorted=()
-    local line
-    while IFS= read -r line; do
-        sorted+=("${line#* }")
-    done < <(
-        local version_entry
-        for version_entry in "${entries[@]}"; do
-            local mtime
-            mtime=$(stat -f%m "$version_entry" 2> /dev/null || echo "0")
-            printf '%s %s\n' "$mtime" "$version_entry"
-        done | sort -rn
-    )
+    # Sort the parallel arrays by mtime without serializing pathnames through
+    # newline-delimited text. Version directories can legally contain newlines.
+    local i j key_mtime key_path
+    for ((i = 1; i < ${#entries[@]}; i++)); do
+        key_path="${entries[$i]}"
+        key_mtime="${entry_mtimes[$i]}"
+        j=$((i - 1))
+        while [[ $j -ge 0 && ${entry_mtimes[$j]} -lt $key_mtime ]]; do
+            entries[j + 1]="${entries[$j]}"
+            entry_mtimes[j + 1]="${entry_mtimes[$j]}"
+            j=$((j - 1))
+        done
+        entries[j + 1]="$key_path"
+        entry_mtimes[j + 1]="$key_mtime"
+    done
 
     local idx=0
     local target
-    for target in "${sorted[@]}"; do
+    for target in "${entries[@]}"; do
         if [[ -n "$active_path" && "$target" == "$active_path" ]]; then
             continue
         fi
@@ -1969,9 +2357,166 @@ clean_versioned_agent_root() {
             idx=$((idx + 1))
             continue
         fi
+        _MOLE_VERSIONED_AGENT_RETENTION_TARGETS+=("$target")
+        if _dev_cleanup_targets_exist "$target"; then
+            _MOLE_VERSIONED_AGENT_CLEANUP_TARGETS+=("$target")
+        fi
+        idx=$((idx + 1))
+    done
+}
+
+_resolve_versioned_agent_active_path() {
+    local versions_root="$1"
+    local active_symlink="$2"
+    _MOLE_VERSIONED_AGENT_ACTIVE_PATH=""
+
+    [[ -L "$active_symlink" ]] || return 1
+    [[ -e "$active_symlink" ]] || return 2
+
+    local target
+    target=$(readlink "$active_symlink" 2> /dev/null || true)
+    [[ -n "$target" ]] || return 2
+    case "$target" in
+        /*) ;;
+        *) target="$(dirname "$active_symlink")/$target" ;;
+    esac
+
+    # Resolve dot segments and symlinked parent directories before comparing.
+    # Launchers commonly use ../../relative targets, and a lexical comparison
+    # would fail to pin the active version.
+    local target_parent target_name
+    target_parent=$(dirname "$target")
+    target_name=$(basename "$target")
+    target_parent=$(cd "$target_parent" 2> /dev/null && pwd -P) || return 2
+    target="$target_parent/$target_name"
+
+    local entry entry_resolved entry_parent entry_name
+    while IFS= read -r -d '' entry; do
+        if [[ -d "$entry" ]]; then
+            entry_resolved=$(cd "$entry" 2> /dev/null && pwd -P) || continue
+        else
+            entry_parent=$(dirname "$entry")
+            entry_name=$(basename "$entry")
+            entry_parent=$(cd "$entry_parent" 2> /dev/null && pwd -P) || continue
+            entry_resolved="$entry_parent/$entry_name"
+        fi
+        case "$target/" in
+            "$entry_resolved"/*)
+                _MOLE_VERSIONED_AGENT_ACTIVE_PATH="$entry"
+                return 0
+                ;;
+        esac
+    done < <(command find "$versions_root" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -print0 2> /dev/null)
+
+    return 2
+}
+
+_MOLE_VERSIONED_AGENT_GUARD_ROOT=""
+_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK=""
+_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED=false
+_MOLE_VERSIONED_AGENT_GUARD_KEEP=1
+_MOLE_VERSIONED_AGENT_GUARD_REASON=""
+
+_versioned_agent_delete_guard_allows() {
+    local target="${1:-}"
+    local active_path=""
+    local active_status=0
+
+    if [[ -n "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" ]]; then
+        _resolve_versioned_agent_active_path \
+            "$_MOLE_VERSIONED_AGENT_GUARD_ROOT" \
+            "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" || active_status=$?
+        if [[ $active_status -eq 0 ]]; then
+            active_path="$_MOLE_VERSIONED_AGENT_ACTIVE_PATH"
+        elif [[ $active_status -eq 2 ]]; then
+            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version unknown"
+            return 1
+        elif [[ "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED" == "true" ]]; then
+            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version changed"
+            return 1
+        fi
+    fi
+
+    # An updater can switch the launcher or install a newer version while size
+    # is being measured. Re-plan and authorize this exact target at the delete
+    # boundary so neither the active version nor the new retention set is lost.
+    _plan_versioned_agent_cleanup_targets \
+        "$_MOLE_VERSIONED_AGENT_GUARD_ROOT" \
+        "$_MOLE_VERSIONED_AGENT_GUARD_KEEP" \
+        "$active_path"
+
+    if [[ -n "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" ]]; then
+        local verified_active_path=""
+        local verified_active_status=0
+        _resolve_versioned_agent_active_path \
+            "$_MOLE_VERSIONED_AGENT_GUARD_ROOT" \
+            "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" || verified_active_status=$?
+        [[ $verified_active_status -ne 0 ]] || verified_active_path="$_MOLE_VERSIONED_AGENT_ACTIVE_PATH"
+        if [[ $verified_active_status -eq 2 ]]; then
+            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version unknown"
+            return 1
+        fi
+        if [[ $verified_active_status -ne $active_status || "$verified_active_path" != "$active_path" ]]; then
+            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version changed"
+            return 1
+        fi
+    fi
+
+    local planned_target
+    if [[ ${#_MOLE_VERSIONED_AGENT_CLEANUP_TARGETS[@]} -gt 0 ]]; then
+        for planned_target in "${_MOLE_VERSIONED_AGENT_CLEANUP_TARGETS[@]}"; do
+            [[ "$planned_target" == "$target" ]] && return 0
+        done
+    fi
+
+    _MOLE_VERSIONED_AGENT_GUARD_REASON="retention changed"
+    return 1
+}
+
+_report_versioned_agent_guard_stop() {
+    local label="$1"
+    echo -e "  ${GRAY}${ICON_WARNING}${NC} ${label} · stopped (${_MOLE_VERSIONED_AGENT_GUARD_REASON})"
+    note_activity
+}
+
+clean_versioned_agent_root() {
+    local versions_root="$1"
+    local label="$2"
+    local keep_previous="$3"
+    local active_path="${4:-}"
+    local active_symlink="${5:-}"
+
+    _plan_versioned_agent_cleanup_targets "$versions_root" "$keep_previous" "$active_path"
+    [[ ${#_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]} -gt 0 ]] || return 0
+
+    _MOLE_VERSIONED_AGENT_GUARD_ROOT="$versions_root"
+    _MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK="$active_symlink"
+    _MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED=false
+    [[ -n "$active_path" ]] && _MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED=true
+    _MOLE_VERSIONED_AGENT_GUARD_KEEP="$keep_previous"
+    _MOLE_VERSIONED_AGENT_GUARD_REASON="retention changed"
+
+    if declare -f safe_clean_guarded > /dev/null 2>&1; then
+        local guarded_rc=0
+        safe_clean_guarded \
+            _versioned_agent_delete_guard_allows \
+            "${_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]}" \
+            "$label" || guarded_rc=$?
+        if [[ $guarded_rc -eq 75 ]]; then
+            _report_versioned_agent_guard_stop "$label"
+            return 0
+        fi
+        return "$guarded_rc"
+    fi
+
+    local target
+    for target in "${_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]}"; do
+        if ! _versioned_agent_delete_guard_allows "$target"; then
+            _report_versioned_agent_guard_stop "$label"
+            return 0
+        fi
         safe_clean "$target" "$label"
         note_activity
-        idx=$((idx + 1))
     done
 }
 
@@ -2008,11 +2553,9 @@ claude_desktop_sdk_version_is_safe() {
 }
 
 claude_desktop_running() {
-    command -v pgrep > /dev/null 2>&1 || return 1
-
-    pgrep -x "Claude" > /dev/null 2>&1 && return 0
-    pgrep -f "/Claude.app/" > /dev/null 2>&1 && return 0
-    return 1
+    mole_pgrep_any \
+        -x "Claude" \
+        -f "/Claude.app/"
 }
 
 claude_desktop_sdk_version() {
@@ -2027,10 +2570,132 @@ claude_desktop_sdk_version() {
     printf '%s\n' "$sdk_version"
 }
 
+_MOLE_CLAUDE_DESKTOP_GUARD_SUPPORT=""
+_MOLE_CLAUDE_DESKTOP_GUARD_SDK_VERSION=""
+_MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT=""
+_MOLE_CLAUDE_DESKTOP_GUARD_CLI_ROOT=""
+_MOLE_CLAUDE_DESKTOP_GUARD_VM_ROOT=""
+_MOLE_CLAUDE_DESKTOP_GUARD_KEEP=1
+_MOLE_CLAUDE_DESKTOP_GUARD_REASON=""
+
+_claude_desktop_delete_guard_allows() {
+    local target="${1:-}"
+    local process_state=0
+    claude_desktop_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        _MOLE_CLAUDE_DESKTOP_GUARD_REASON="Claude Desktop started"
+        [[ $process_state -eq 2 ]] && _MOLE_CLAUDE_DESKTOP_GUARD_REASON="process state unknown"
+        return 1
+    fi
+
+    local current_sdk=""
+    current_sdk=$(claude_desktop_sdk_version "$_MOLE_CLAUDE_DESKTOP_GUARD_SUPPORT" || true)
+    if [[ -z "$current_sdk" || "$current_sdk" != "$_MOLE_CLAUDE_DESKTOP_GUARD_SDK_VERSION" ]]; then
+        _MOLE_CLAUDE_DESKTOP_GUARD_REASON="active version changed"
+        return 1
+    fi
+
+    local active_root active_entry
+    for active_root in \
+        "$_MOLE_CLAUDE_DESKTOP_GUARD_CLI_ROOT" \
+        "$_MOLE_CLAUDE_DESKTOP_GUARD_VM_ROOT"; do
+        [[ -n "$active_root" ]] || continue
+        active_entry="$active_root/$current_sdk"
+        if [[ -L "$active_entry" || (! -f "$active_entry" && ! -d "$active_entry") ]]; then
+            _MOLE_CLAUDE_DESKTOP_GUARD_REASON="active version changed"
+            return 1
+        fi
+    done
+
+    # A staged update can change which previous version retention should keep
+    # while size is being measured. Re-plan and authorize this exact target.
+    _plan_versioned_agent_cleanup_targets \
+        "$_MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT" \
+        "$_MOLE_CLAUDE_DESKTOP_GUARD_KEEP" \
+        "$_MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT/$current_sdk"
+
+    # Re-read the SDK marker and active entries after retention planning. The
+    # planner walks and stats every version, which gives an updater time to
+    # switch the active SDK after the first evidence check.
+    local verified_sdk=""
+    verified_sdk=$(claude_desktop_sdk_version "$_MOLE_CLAUDE_DESKTOP_GUARD_SUPPORT" || true)
+    if [[ -z "$verified_sdk" || "$verified_sdk" != "$current_sdk" ]]; then
+        _MOLE_CLAUDE_DESKTOP_GUARD_REASON="active version changed"
+        return 1
+    fi
+    for active_root in \
+        "$_MOLE_CLAUDE_DESKTOP_GUARD_CLI_ROOT" \
+        "$_MOLE_CLAUDE_DESKTOP_GUARD_VM_ROOT"; do
+        [[ -n "$active_root" ]] || continue
+        active_entry="$active_root/$verified_sdk"
+        if [[ -L "$active_entry" || (! -f "$active_entry" && ! -d "$active_entry") ]]; then
+            _MOLE_CLAUDE_DESKTOP_GUARD_REASON="active version changed"
+            return 1
+        fi
+    done
+
+    local planned_target
+    if [[ ${#_MOLE_VERSIONED_AGENT_CLEANUP_TARGETS[@]} -gt 0 ]]; then
+        for planned_target in "${_MOLE_VERSIONED_AGENT_CLEANUP_TARGETS[@]}"; do
+            [[ "$planned_target" == "$target" ]] && return 0
+        done
+    fi
+
+    _MOLE_CLAUDE_DESKTOP_GUARD_REASON="retention changed"
+    return 1
+}
+
+_claude_desktop_safe_clean_guarded() {
+    local display_name="$1"
+    shift
+    _MOLE_CLAUDE_DESKTOP_GUARD_REASON="process state changed"
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        local -a cleanup_args=("$@")
+        local cleanup_arg_count=${#cleanup_args[@]}
+        [[ $cleanup_arg_count -gt 1 ]] || return 0
+        local description="${cleanup_args[$((cleanup_arg_count - 1))]}"
+        local index target
+        for ((index = 0; index < cleanup_arg_count - 1; index++)); do
+            target="${cleanup_args[$index]}"
+            if ! _claude_desktop_delete_guard_allows "$target"; then
+                if [[ "$_MOLE_CLAUDE_DESKTOP_GUARD_REASON" == "Claude Desktop started" ]]; then
+                    _defer_dev_cleanup_family "Claude Desktop"
+                else
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLAUDE_DESKTOP_GUARD_REASON})"
+                    note_activity
+                fi
+                return 1
+            fi
+            safe_clean "$target" "$description" || return $?
+        done
+        return 0
+    fi
+
+    local guarded_rc=0
+    safe_clean_guarded _claude_desktop_delete_guard_allows "$@" || guarded_rc=$?
+    if [[ $guarded_rc -eq 75 ]]; then
+        if [[ "$_MOLE_CLAUDE_DESKTOP_GUARD_REASON" == "Claude Desktop started" ]]; then
+            _defer_dev_cleanup_family "Claude Desktop"
+        else
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLAUDE_DESKTOP_GUARD_REASON})"
+            note_activity
+        fi
+        return 1
+    fi
+    return "$guarded_rc"
+}
+
+_deny_versioned_agent_delete() {
+    return 1
+}
+
 clean_claude_desktop_bundled_versions() {
     local keep_previous="$1"
     local claude_support="$HOME/Library/Application Support/Claude"
     [[ -d "$claude_support" ]] || return 0
+    _MOLE_CLAUDE_DESKTOP_GUARD_CLI_ROOT=""
+    _MOLE_CLAUDE_DESKTOP_GUARD_VM_ROOT=""
 
     local -a desktop_specs=(
         "$claude_support/claude-code|Claude Desktop bundled Claude Code old version"
@@ -2054,12 +2719,6 @@ clean_claude_desktop_bundled_versions() {
 
     [[ "$has_multiple_versions" == "true" ]] || return 0
 
-    if claude_desktop_running; then
-        note_activity
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Claude Desktop bundled Claude Code · skipped (Claude Desktop running)"
-        return 0
-    fi
-
     local sdk_version=""
     sdk_version=$(claude_desktop_sdk_version "$claude_support" || true)
     if [[ -z "$sdk_version" ]]; then
@@ -2073,12 +2732,69 @@ clean_claude_desktop_bundled_versions() {
         local label="${spec#*|}"
         [[ -d "$versions_root" ]] || continue
 
-        if [[ ! -e "$versions_root/$sdk_version" ]]; then
+        local active_entry="$versions_root/$sdk_version"
+        if [[ -L "$active_entry" || (! -f "$active_entry" && ! -d "$active_entry") ]]; then
             note_activity
             echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
             return 0
         fi
     done
+
+    [[ -d "$claude_support/claude-code" ]] && _MOLE_CLAUDE_DESKTOP_GUARD_CLI_ROOT="$claude_support/claude-code"
+    [[ -d "$claude_support/claude-code-vm" ]] && _MOLE_CLAUDE_DESKTOP_GUARD_VM_ROOT="$claude_support/claude-code-vm"
+
+    # Confirm at least one exact, unprotected stale version exists before the
+    # process gate. Multiple directories alone are insufficient when retention
+    # keeps them all or policy excludes every old entry.
+    local has_cleanup_target=false
+    local has_retention_target=false
+    for spec in "${desktop_specs[@]}"; do
+        local versions_root="${spec%%|*}"
+        [[ -d "$versions_root" ]] || continue
+        _plan_versioned_agent_cleanup_targets "$versions_root" "$keep_previous" "$versions_root/$sdk_version"
+        if [[ ${#_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]} -gt 0 ]]; then
+            has_retention_target=true
+        fi
+        if [[ ${#_MOLE_VERSIONED_AGENT_CLEANUP_TARGETS[@]} -gt 0 ]]; then
+            has_cleanup_target=true
+            break
+        fi
+    done
+    [[ "$has_retention_target" == "true" ]] || return 0
+
+    # Preserve safe_clean's skip logging/counters for retention-selected paths
+    # even when policy currently excludes every target. The deny guard prevents
+    # a policy-changing race from turning this accounting pass into deletion.
+    if [[ "$has_cleanup_target" != "true" ]]; then
+        for spec in "${desktop_specs[@]}"; do
+            local versions_root="${spec%%|*}"
+            local label="${spec#*|}"
+            [[ -d "$versions_root" ]] || continue
+            _plan_versioned_agent_cleanup_targets "$versions_root" "$keep_previous" "$versions_root/$sdk_version"
+            [[ ${#_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]} -gt 0 ]] || continue
+            if declare -f safe_clean_guarded > /dev/null 2>&1; then
+                safe_clean_guarded \
+                    _deny_versioned_agent_delete \
+                    "${_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]}" \
+                    "$label" > /dev/null || true
+            else
+                safe_clean "${_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]}" "$label"
+            fi
+        done
+        return 0
+    fi
+
+    local process_state=0
+    claude_desktop_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Claude Desktop bundled Claude Code · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Claude Desktop"
+        fi
+        return 0
+    fi
 
     for spec in "${desktop_specs[@]}"; do
         local versions_root="${spec%%|*}"
@@ -2090,7 +2806,17 @@ clean_claude_desktop_bundled_versions() {
         [[ "$version_count" =~ ^[0-9]+$ ]] || version_count=0
         [[ "$version_count" -le 1 ]] && continue
 
-        clean_versioned_agent_root "$versions_root" "$label" "$keep_previous" "$versions_root/$sdk_version"
+        _plan_versioned_agent_cleanup_targets "$versions_root" "$keep_previous" "$versions_root/$sdk_version"
+        [[ ${#_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]} -gt 0 ]] || continue
+
+        _MOLE_CLAUDE_DESKTOP_GUARD_SUPPORT="$claude_support"
+        _MOLE_CLAUDE_DESKTOP_GUARD_SDK_VERSION="$sdk_version"
+        _MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT="$versions_root"
+        _MOLE_CLAUDE_DESKTOP_GUARD_KEEP="$keep_previous"
+        _claude_desktop_safe_clean_guarded \
+            "$label" \
+            "${_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]}" \
+            "$label" || return 0
     done
 }
 
@@ -2115,62 +2841,26 @@ clean_dev_ai_agents() {
 
         local active_path=""
         if [[ -n "$active_symlink" && -L "$active_symlink" ]]; then
-            if [[ ! -e "$active_symlink" ]]; then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active symlink broken)"
-                note_activity
-                continue
-            fi
-            local target
-            target=$(readlink "$active_symlink" 2> /dev/null || true)
-            if [[ -z "$target" ]]; then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
-                note_activity
-                continue
-            fi
-            case "$target" in
-                /*) ;;
-                *) target="$(dirname "$active_symlink")/$target" ;;
-            esac
-
-            # Resolve dot segments and symlinked parent directories before
-            # comparing. Launchers commonly use ../../relative targets, and a
-            # lexical comparison would fail to pin the active version.
-            local target_parent target_name
-            target_parent=$(dirname "$target")
-            target_name=$(basename "$target")
-            if ! target_parent=$(cd "$target_parent" 2> /dev/null && pwd -P); then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
-                note_activity
-                continue
-            fi
-            target="$target_parent/$target_name"
-
-            local entry entry_resolved entry_parent entry_name
-            for entry in "$versions_root"/*; do
-                [[ -e "$entry" ]] || continue
-                if [[ -d "$entry" ]]; then
-                    entry_resolved=$(cd "$entry" 2> /dev/null && pwd -P) || continue
+            local active_status=0
+            _resolve_versioned_agent_active_path "$versions_root" "$active_symlink" || active_status=$?
+            if [[ $active_status -ne 0 ]]; then
+                if [[ ! -e "$active_symlink" ]]; then
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active symlink broken)"
                 else
-                    entry_parent=$(dirname "$entry")
-                    entry_name=$(basename "$entry")
-                    entry_parent=$(cd "$entry_parent" 2> /dev/null && pwd -P) || continue
-                    entry_resolved="$entry_parent/$entry_name"
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
                 fi
-                case "$target/" in
-                    "$entry_resolved"/*)
-                        active_path="$entry"
-                        break
-                        ;;
-                esac
-            done
+                note_activity
+                continue
+            fi
+            active_path="$_MOLE_VERSIONED_AGENT_ACTIVE_PATH"
             if [[ -z "$active_path" ]]; then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active version unknown)"
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active symlink broken)"
                 note_activity
                 continue
             fi
         fi
 
-        clean_versioned_agent_root "$versions_root" "$label" "$keep_previous" "$active_path"
+        clean_versioned_agent_root "$versions_root" "$label" "$keep_previous" "$active_path" "$active_symlink"
     done
 
     clean_claude_desktop_bundled_versions "$keep_previous"
@@ -2216,8 +2906,8 @@ clean_dev_api_tools() {
     safe_clean ~/Library/Caches/com.proxyman.NSProxy/* "Proxyman cache"
 }
 
-codex_desktop_running() {
-    command -v pgrep > /dev/null 2>&1 || return 0
+codex_desktop_process_state() {
+    command -v pgrep > /dev/null 2>&1 || return 2
 
     local mode pattern probe_status
     while IFS='|' read -r mode pattern; do
@@ -2225,7 +2915,7 @@ codex_desktop_running() {
             return 0
         else
             probe_status=$?
-            [[ $probe_status -eq 1 ]] || return 0
+            [[ $probe_status -eq 1 ]] || return 2
         fi
     done << 'EOF'
 -x|Codex
@@ -2234,6 +2924,27 @@ codex_desktop_running() {
 -f|/ChatGPT.app/
 EOF
     return 1
+}
+
+codex_desktop_running() {
+    local process_state=0
+    codex_desktop_process_state || process_state=$?
+    [[ $process_state -ne 1 ]]
+}
+
+codex_runtime_process_state() {
+    local cli_state=0
+    local desktop_state=0
+    mole_pgrep_any -x "codex" || cli_state=$?
+    codex_desktop_process_state || desktop_state=$?
+
+    if [[ $cli_state -eq 0 || $desktop_state -eq 0 ]]; then
+        return 0
+    fi
+    if [[ $cli_state -eq 1 && $desktop_state -eq 1 ]]; then
+        return 1
+    fi
+    return 2
 }
 
 codex_desktop_cache_physical_path() {
@@ -2279,11 +2990,14 @@ codex_desktop_cache_physical_path() {
 }
 
 _codex_desktop_cache_delete_guard_allows() {
-    if ! codex_desktop_running; then
+    local process_state=0
+    codex_desktop_process_state || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
         return 0
     fi
 
-    _MOLE_CODEX_CACHE_GUARD_REASON="Codex active or process state unknown"
+    _MOLE_CODEX_CACHE_GUARD_REASON="Codex started"
+    [[ $process_state -eq 2 ]] && _MOLE_CODEX_CACHE_GUARD_REASON="process state unknown"
     return 1
 }
 
@@ -2294,8 +3008,12 @@ _codex_desktop_safe_clean_guarded() {
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! _codex_desktop_cache_delete_guard_allows; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
-            note_activity
+            if [[ "$_MOLE_CODEX_CACHE_GUARD_REASON" == "process state unknown" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
+                note_activity
+            else
+                _defer_dev_cleanup_family "Codex"
+            fi
             return 1
         fi
         safe_clean "$@"
@@ -2305,8 +3023,12 @@ _codex_desktop_safe_clean_guarded() {
     local guarded_rc=0
     safe_clean_guarded _codex_desktop_cache_delete_guard_allows "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
-        note_activity
+        if [[ "$_MOLE_CODEX_CACHE_GUARD_REASON" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Codex"
+        fi
         return 1
     fi
     return "$guarded_rc"
@@ -2315,12 +3037,6 @@ _codex_desktop_safe_clean_guarded() {
 clean_codex_desktop_caches() {
     local cache_root="$HOME/Library/Caches/Codex"
     [[ -d "$cache_root" ]] || return 0
-
-    if codex_desktop_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop caches · skipped (Codex active or process state unknown)"
-        note_activity
-        return 0
-    fi
 
     if ! codex_desktop_cache_physical_path "$cache_root" > /dev/null; then
         debug_log "Codex Desktop caches skipped: unsafe cache root"
@@ -2337,37 +3053,64 @@ clean_codex_desktop_caches() {
         "$cache_root/codex-browser-app"
     )
     local -a leaves=("Cache" "Code Cache")
+    local -a cleanable_physical_leaves=()
+    local -a cleanable_leaf_labels=()
     local profile leaf physical_leaf
     for profile in "${profiles[@]}"; do
         for leaf in "${leaves[@]}"; do
             physical_leaf=""
             if physical_leaf=$(codex_desktop_cache_physical_path "$profile/$leaf"); then
-                _codex_desktop_safe_clean_guarded \
-                    "Codex Desktop caches" \
-                    "$physical_leaf"/* \
-                    "Codex Desktop $leaf" || return 0
+                if _dev_cleanup_targets_exist "$physical_leaf"/*; then
+                    cleanable_physical_leaves+=("$physical_leaf")
+                    cleanable_leaf_labels+=("$leaf")
+                fi
             else
                 debug_log "Codex Desktop cache leaf skipped: $profile/$leaf"
             fi
         done
     done
+    [[ ${#cleanable_physical_leaves[@]} -gt 0 ]] || return 0
+
+    local process_state=0
+    codex_desktop_process_state || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop caches · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Codex"
+        fi
+        return 0
+    fi
+
+    local cleanable_index
+    for ((cleanable_index = 0; cleanable_index < ${#cleanable_physical_leaves[@]}; cleanable_index++)); do
+        physical_leaf="${cleanable_physical_leaves[$cleanable_index]}"
+        leaf="${cleanable_leaf_labels[$cleanable_index]}"
+        _codex_desktop_safe_clean_guarded \
+            "Codex Desktop caches" \
+            "$physical_leaf"/* \
+            "Codex Desktop $leaf" || return 0
+    done
 }
 
 codex_sparkle_updater_running() {
-    command -v pgrep > /dev/null 2>&1 || return 1
-
-    pgrep -f "org[.]sparkle-project[.]Sparkle" > /dev/null 2>&1 && return 0
-    pgrep -f "Sparkle[.]framework/.*/(Autoupdate|Installer|Downloader|Updater)" > /dev/null 2>&1 && return 0
-    return 1
+    mole_pgrep_any \
+        -f "org[.]sparkle-project[.]Sparkle" \
+        -f "Sparkle[.]framework/.*/(Autoupdate|Installer|Downloader|Updater)"
 }
 
 codex_sparkle_staging_has_open_files() {
     local staging_root="$1"
-    command -v lsof > /dev/null 2>&1 || return 1
+    command -v lsof > /dev/null 2>&1 || return 2
 
     local lsof_output=""
+    local lsof_error_file=""
     local lsof_rc=0
-    if lsof_output=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" lsof -Fn +D "$staging_root" 2> /dev/null); then
+    lsof_error_file=$(create_temp_file 2> /dev/null || true)
+    [[ -n "$lsof_error_file" && -f "$lsof_error_file" && ! -L "$lsof_error_file" ]] || return 2
+
+    if lsof_output=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" lsof -Fn +D "$staging_root" 2> "$lsof_error_file"); then
         [[ -n "$lsof_output" ]]
         return
     else
@@ -2375,19 +3118,161 @@ codex_sparkle_staging_has_open_files() {
     fi
 
     # `lsof +D` returns 1 when no open files match. Timeouts or other failures
-    # are different: the caller must conservatively skip cleanup.
-    [[ "$lsof_rc" -eq 1 ]] && return 1
+    # are different. Some probe errors also return 1, so stderr must be empty
+    # before treating that status as a reliable no-match.
+    [[ "$lsof_rc" -eq 1 && ! -s "$lsof_error_file" ]] && return 1
     return 2
+}
+
+codex_sparkle_staging_physical_path() {
+    local candidate="$1"
+    local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+    local home_prefix="${HOME%/}/"
+
+    case "$candidate" in
+        "$staging_root" | "$staging_root"/*) ;;
+        *) return 1 ;;
+    esac
+    [[ -d "$candidate" ]] || return 1
+    if [[ "$candidate" != "$staging_root" && "${candidate%/*}" != "$staging_root" ]]; then
+        return 1
+    fi
+
+    # This is a fixed app-owned cache path, so no component below HOME needs to
+    # be a symlink. Rejecting each one prevents Sparkle's lexical staging root
+    # from being redirected into ordinary user data.
+    local relative="${candidate#"$home_prefix"}"
+    local old_ifs="$IFS"
+    local -a components=()
+    IFS='/' read -r -a components <<< "$relative"
+    IFS="$old_ifs"
+    [[ ${#components[@]} -gt 0 ]] || return 1
+
+    local probe="$HOME"
+    local component
+    for component in "${components[@]}"; do
+        [[ -n "$component" ]] || return 1
+        probe="$probe/$component"
+        [[ -L "$probe" ]] && return 1
+    done
+
+    local physical_root=""
+    local physical_candidate=""
+    physical_root=$(cd -P "$staging_root" 2> /dev/null && pwd -P) || return 1
+    physical_candidate=$(cd -P "$candidate" 2> /dev/null && pwd -P) || return 1
+    if [[ "$candidate" == "$staging_root" ]]; then
+        [[ "$physical_candidate" == "$physical_root" ]] || return 1
+    else
+        [[ "${physical_candidate%/*}" == "$physical_root" ]] || return 1
+    fi
+
+    printf '%s\n' "$physical_candidate"
+}
+
+_MOLE_CODEX_STAGING_ROOT=""
+_MOLE_CODEX_STAGING_ENTRY=""
+_MOLE_CODEX_STAGING_GUARD_REASON=""
+
+_codex_staging_entry_is_still_stale() {
+    local staging_root="$_MOLE_CODEX_STAGING_ROOT"
+    local stale_entry="$_MOLE_CODEX_STAGING_ENTRY"
+    [[ -n "$staging_root" && -n "$stale_entry" ]] || return 1
+    [[ "${stale_entry%/*}" == "$staging_root" ]] || return 1
+    [[ -d "$stale_entry" && ! -L "$stale_entry" ]] || return 1
+
+    local physical_before=""
+    local physical_after=""
+    physical_before=$(codex_sparkle_staging_physical_path "$stale_entry") || return 1
+
+    local stale_match=""
+    while IFS= read -r -d '' stale_match; do
+        physical_after=$(codex_sparkle_staging_physical_path "$stale_entry") || return 1
+        [[ "$physical_after" == "$physical_before" ]] || return 1
+        return 0
+    done < <(command find -P "$stale_entry" -maxdepth 0 -type d -mtime +"$MOLE_ORPHAN_AGE_DAYS" -print0 2> /dev/null)
+    return 1
+}
+
+_codex_staging_delete_guard_allows() {
+    _MOLE_CODEX_STAGING_GUARD_REASON="staging entry changed"
+    _codex_staging_entry_is_still_stale || return 1
+
+    local process_state=0
+    codex_desktop_process_state || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        _MOLE_CODEX_STAGING_GUARD_REASON="Codex started"
+        [[ $process_state -eq 2 ]] && _MOLE_CODEX_STAGING_GUARD_REASON="process state unknown"
+        return 1
+    fi
+
+    local updater_state=0
+    codex_sparkle_updater_running || updater_state=$?
+    if [[ $updater_state -ne 1 ]]; then
+        _MOLE_CODEX_STAGING_GUARD_REASON="Sparkle updater started"
+        [[ $updater_state -eq 2 ]] && _MOLE_CODEX_STAGING_GUARD_REASON="updater state unknown"
+        return 1
+    fi
+
+    local open_file_state=0
+    if codex_sparkle_staging_has_open_files "$_MOLE_CODEX_STAGING_ROOT"; then
+        _MOLE_CODEX_STAGING_GUARD_REASON="staging files opened"
+        return 1
+    else
+        open_file_state=$?
+    fi
+    if [[ $open_file_state -eq 2 ]]; then
+        _MOLE_CODEX_STAGING_GUARD_REASON="open-file check unavailable"
+        return 1
+    fi
+
+    # Process and open-file probes add another race window after the first path
+    # check. Bind the same physical first-level entry and age again immediately
+    # before safe_clean reaches its deletion sink.
+    _codex_staging_entry_is_still_stale || return 1
+
+    return 0
+}
+
+_codex_staging_safe_clean_guarded() {
+    local staging_root="$1"
+    local stale_entry="$2"
+    _MOLE_CODEX_STAGING_ROOT="$staging_root"
+    _MOLE_CODEX_STAGING_ENTRY="$stale_entry"
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        if ! _codex_staging_delete_guard_allows; then
+            return 75
+        fi
+        safe_clean "$stale_entry" "Codex Desktop stale update staging"
+        return $?
+    fi
+
+    safe_clean_guarded \
+        _codex_staging_delete_guard_allows \
+        "$stale_entry" \
+        "Codex Desktop stale update staging"
 }
 
 clean_codex_desktop_staging() {
     local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
     [[ -d "$staging_root" ]] || return 0
+    if ! codex_sparkle_staging_physical_path "$staging_root" > /dev/null; then
+        debug_log "Codex Desktop staging skipped: unsafe staging root"
+        return 0
+    fi
 
-    local entry_count=0
-    entry_count=$(command find -P "$staging_root" -mindepth 1 -maxdepth 1 -type d -print 2> /dev/null | wc -l | tr -d ' ')
-    [[ "$entry_count" =~ ^[0-9]+$ ]] || entry_count=0
-    [[ "$entry_count" -gt 0 ]] || return 0
+    local -a stale_entries=()
+    local stale_entry
+    while IFS= read -r -d '' stale_entry; do
+        if ! codex_sparkle_staging_physical_path "$stale_entry" > /dev/null; then
+            continue
+        fi
+        if ! _dev_cleanup_targets_exist "$stale_entry"; then
+            continue
+        fi
+        stale_entries+=("$stale_entry")
+    done < <(command find -P "$staging_root" -mindepth 1 -maxdepth 1 -type d -mtime +"$MOLE_ORPHAN_AGE_DAYS" -print0 2> /dev/null)
+    [[ ${#stale_entries[@]} -gt 0 ]] || return 0
 
     if is_path_whitelisted "$staging_root"; then
         if [[ "${DRY_RUN:-false}" == "true" ]]; then
@@ -2399,22 +3284,33 @@ clean_codex_desktop_staging() {
         return 0
     fi
 
-    if codex_desktop_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (Codex running)"
-        note_activity
+    local process_state=0
+    codex_desktop_process_state || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Codex"
+        fi
         return 0
     fi
 
-    if codex_sparkle_updater_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (updater running)"
-        note_activity
+    local updater_state=0
+    codex_sparkle_updater_running || updater_state=$?
+    if [[ $updater_state -ne 1 ]]; then
+        if [[ $updater_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (updater state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Codex"
+        fi
         return 0
     fi
 
     local open_file_state=0
     if codex_sparkle_staging_has_open_files "$staging_root"; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (files in use)"
-        note_activity
+        _defer_dev_cleanup_family "Codex"
         return 0
     else
         open_file_state=$?
@@ -2425,34 +3321,35 @@ clean_codex_desktop_staging() {
         return 0
     fi
 
-    local stale_entry
-    while IFS= read -r -d '' stale_entry; do
-        safe_clean "$stale_entry" "Codex Desktop stale update staging"
-    done < <(command find -P "$staging_root" -mindepth 1 -maxdepth 1 -type d -mtime +"$MOLE_ORPHAN_AGE_DAYS" -print0 2> /dev/null)
-}
-
-# True when the Codex CLI or the Codex Desktop app is running.
-codex_running() {
-    command -v pgrep > /dev/null 2>&1 || return 1
-    pgrep -x "codex" > /dev/null 2>&1 && return 0
-    codex_desktop_running
+    for stale_entry in "${stale_entries[@]}"; do
+        local guarded_rc=0
+        _codex_staging_safe_clean_guarded "$staging_root" "$stale_entry" || guarded_rc=$?
+        if [[ $guarded_rc -eq 75 ]]; then
+            case "$_MOLE_CODEX_STAGING_GUARD_REASON" in
+                "process state unknown" | "updater state unknown" | "open-file check unavailable")
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · stopped (${_MOLE_CODEX_STAGING_GUARD_REASON})"
+                    note_activity
+                    ;;
+                "staging entry changed")
+                    debug_log "Codex Desktop staging entry changed before cleanup: $stale_entry"
+                    ;;
+                *) _defer_dev_cleanup_family "Codex" ;;
+            esac
+            return 0
+        fi
+    done
 }
 
 antigravity_or_gemini_running() {
-    command -v pgrep > /dev/null 2>&1 || return 1
-
-    pgrep -x "Antigravity" > /dev/null 2>&1 && return 0
-    pgrep -f "/Antigravity.app/" > /dev/null 2>&1 && return 0
-    pgrep -x "gemini" > /dev/null 2>&1 && return 0
-    pgrep -f "antigravity-browser-profile" > /dev/null 2>&1 && return 0
-    return 1
+    mole_pgrep_any \
+        -x "Antigravity" \
+        -f "/Antigravity.app/" \
+        -x "gemini" \
+        -f "antigravity-browser-profile"
 }
 
 chrome_devtools_mcp_running() {
-    command -v pgrep > /dev/null 2>&1 || return 1
-
-    pgrep -f "chrome-devtools-mcp" > /dev/null 2>&1 && return 0
-    return 1
+    mole_pgrep_any -f "chrome-devtools-mcp"
 }
 
 is_codex_runtime_active() {
@@ -2497,6 +3394,55 @@ _codex_runtime_size_human() {
     fi
 }
 
+_codex_runtime_delete_guard_allows() {
+    local process_state=0
+    codex_runtime_process_state || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        _MOLE_CODEX_RUNTIME_GUARD_REASON="Codex started"
+        [[ $process_state -eq 2 ]] && _MOLE_CODEX_RUNTIME_GUARD_REASON="process state unknown"
+        return 1
+    fi
+
+    if is_codex_runtime_active "$_MOLE_CODEX_RUNTIME_GUARD_PATH" ||
+        ! is_codex_runtime_stale "$_MOLE_CODEX_RUNTIME_GUARD_PATH"; then
+        _MOLE_CODEX_RUNTIME_GUARD_REASON="runtime state changed"
+        return 1
+    fi
+    return 0
+}
+
+_codex_runtime_safe_clean_guarded() {
+    local runtime_dir="$1"
+    local _MOLE_CODEX_RUNTIME_GUARD_PATH="$runtime_dir"
+    local _MOLE_CODEX_RUNTIME_GUARD_REASON="Codex started"
+    local guarded_rc=0
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        if ! _codex_runtime_delete_guard_allows; then
+            guarded_rc=75
+        else
+            safe_clean "$runtime_dir" "Codex CLI runtimes"
+            return $?
+        fi
+    else
+        safe_clean_guarded \
+            _codex_runtime_delete_guard_allows \
+            "$runtime_dir" \
+            "Codex CLI runtimes" || guarded_rc=$?
+    fi
+
+    if [[ $guarded_rc -eq 75 ]]; then
+        if [[ "$_MOLE_CODEX_RUNTIME_GUARD_REASON" == "Codex started" ]]; then
+            _defer_dev_cleanup_family "Codex"
+        else
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex runtimes · stopped (${_MOLE_CODEX_RUNTIME_GUARD_REASON})"
+            note_activity
+        fi
+        return 1
+    fi
+    return "$guarded_rc"
+}
+
 clean_codex_runtimes() {
     local runtime_root="$HOME/.cache/codex-runtimes"
     [[ -d "$runtime_root" ]] || return 0
@@ -2512,18 +3458,36 @@ clean_codex_runtimes() {
         return 0
     fi
 
-    if codex_desktop_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex runtimes · skipped (Codex running)"
-        note_activity
+    local has_stale_runtime=false
+    local runtime_dir
+    while IFS= read -r -d '' runtime_dir; do
+        if ! is_codex_runtime_active "$runtime_dir" &&
+            is_codex_runtime_stale "$runtime_dir" &&
+            _dev_cleanup_targets_exist "$runtime_dir"; then
+            has_stale_runtime=true
+            break
+        fi
+    done < <(command find "$runtime_root" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null)
+
+    local process_state=0
+    codex_runtime_process_state || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ "$has_stale_runtime" != "true" ]]; then
+            return 0
+        elif [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex runtimes · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Codex"
+        fi
         return 0
     fi
 
     local size_human
     size_human=$(_codex_runtime_size_human "$runtime_root")
-    echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex runtimes · manual review (${size_human})"
+    echo -e "  ${GRAY}${ICON_REVIEW}${NC} Codex runtimes · manual review (${size_human})"
     note_activity
 
-    local runtime_dir
     while IFS= read -r -d '' runtime_dir; do
         if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$runtime_dir"; then
             if [[ "${DRY_RUN:-false}" == "true" ]]; then
@@ -2542,7 +3506,7 @@ clean_codex_runtimes() {
         fi
 
         if is_codex_runtime_stale "$runtime_dir"; then
-            safe_clean "$runtime_dir" "Codex CLI runtimes"
+            _codex_runtime_safe_clean_guarded "$runtime_dir" || return 0
         else
             debug_log "Codex runtime left for manual review: $runtime_dir"
         fi
@@ -2555,14 +3519,6 @@ clean_codex_cli() {
     local codex_root="$HOME/.codex"
     [[ -d "$codex_root" ]] || return 0
 
-    if codex_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex CLI state · skipped (Codex running)"
-        note_activity
-        return 0
-    fi
-
-    echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex CLI state · preserved (sessions, credentials)"
-    note_activity
     debug_log "Codex CLI state left intact by default: $codex_root"
 }
 
@@ -2570,14 +3526,30 @@ clean_codex_cli() {
 clean_chromium_default_caches() {
     local profile_root="$1"
     local label="$2"
+    local running_probe="${3:-}"
+    local family="${4:-$label}"
 
     [[ -d "$profile_root" ]] || return 0
 
-    safe_clean "$profile_root/Default/Cache"/* "$label browser cache"
-    safe_clean "$profile_root/Default/Code Cache"/* "$label code cache"
-    safe_clean "$profile_root/Default/GPUCache"/* "$label GPU cache"
-    safe_clean "$profile_root/Default/DawnGraphiteCache"/* "$label Dawn cache"
-    safe_clean "$profile_root/Default/DawnWebGPUCache"/* "$label WebGPU cache"
+    if [[ -z "$running_probe" ]]; then
+        safe_clean "$profile_root/Default/Cache"/* "$label browser cache"
+        safe_clean "$profile_root/Default/Code Cache"/* "$label code cache"
+        safe_clean "$profile_root/Default/GPUCache"/* "$label GPU cache"
+        safe_clean "$profile_root/Default/DawnGraphiteCache"/* "$label Dawn cache"
+        safe_clean "$profile_root/Default/DawnWebGPUCache"/* "$label WebGPU cache"
+        return 0
+    fi
+
+    _dev_safe_clean_process_guarded "$running_probe" "$family" "$label browser cache" \
+        "$profile_root/Default/Cache"/* "$label browser cache" || return 1
+    _dev_safe_clean_process_guarded "$running_probe" "$family" "$label code cache" \
+        "$profile_root/Default/Code Cache"/* "$label code cache" || return 1
+    _dev_safe_clean_process_guarded "$running_probe" "$family" "$label GPU cache" \
+        "$profile_root/Default/GPUCache"/* "$label GPU cache" || return 1
+    _dev_safe_clean_process_guarded "$running_probe" "$family" "$label Dawn cache" \
+        "$profile_root/Default/DawnGraphiteCache"/* "$label Dawn cache" || return 1
+    _dev_safe_clean_process_guarded "$running_probe" "$family" "$label WebGPU cache" \
+        "$profile_root/Default/DawnWebGPUCache"/* "$label WebGPU cache" || return 1
 }
 
 # Antigravity (Gemini) keeps a full Chromium profile under
@@ -2585,45 +3557,106 @@ clean_chromium_default_caches() {
 # caches, mirroring the Antigravity Electron cache cleanup in clean_dev_misc.
 clean_antigravity_caches() {
     local ag_profile="$HOME/.gemini/antigravity-browser-profile"
+    [[ -d "$ag_profile" ]] || return 0
 
-    if antigravity_or_gemini_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Antigravity/Gemini caches · skipped (Antigravity or Gemini running)"
-        note_activity
+    _dev_cleanup_targets_exist \
+        "$ag_profile/Default/Cache"/* \
+        "$ag_profile/Default/Code Cache"/* \
+        "$ag_profile/Default/GPUCache"/* \
+        "$ag_profile/Default/DawnGraphiteCache"/* \
+        "$ag_profile/Default/DawnWebGPUCache"/* \
+        "$ag_profile/GraphiteDawnCache"/* \
+        "$ag_profile/component_crx_cache"/* \
+        "$ag_profile/extensions_crx_cache"/* \
+        "$ag_profile/Default/Service Worker/CacheStorage"/* || return 0
+
+    local process_state=0
+    antigravity_or_gemini_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Antigravity/Gemini caches · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Antigravity/Gemini"
+        fi
         return 0
     fi
 
-    if [[ -d "$ag_profile" ]]; then
-        clean_chromium_default_caches "$ag_profile" "Antigravity"
-        safe_clean "$ag_profile/GraphiteDawnCache"/* "Antigravity Graphite cache"
-        safe_clean "$ag_profile/component_crx_cache"/* "Antigravity component cache"
-        safe_clean "$ag_profile/extensions_crx_cache"/* "Antigravity extension cache"
-        clean_service_worker_cache "Antigravity" "$ag_profile/Default/Service Worker/CacheStorage"
-    fi
+    clean_chromium_default_caches \
+        "$ag_profile" \
+        "Antigravity" \
+        antigravity_or_gemini_running \
+        "Antigravity/Gemini" || return 0
+    _dev_safe_clean_process_guarded antigravity_or_gemini_running "Antigravity/Gemini" \
+        "Antigravity Graphite cache" "$ag_profile/GraphiteDawnCache"/* "Antigravity Graphite cache" || return 0
+    _dev_safe_clean_process_guarded antigravity_or_gemini_running "Antigravity/Gemini" \
+        "Antigravity component cache" "$ag_profile/component_crx_cache"/* "Antigravity component cache" || return 0
+    _dev_safe_clean_process_guarded antigravity_or_gemini_running "Antigravity/Gemini" \
+        "Antigravity extension cache" "$ag_profile/extensions_crx_cache"/* "Antigravity extension cache" || return 0
+    _dev_clean_service_worker_process_guarded \
+        antigravity_or_gemini_running \
+        "Antigravity/Gemini" \
+        "Antigravity Service Worker" \
+        "Antigravity" \
+        "$ag_profile/Default/Service Worker/CacheStorage" || return 0
     # Never clean ~/.gemini/tmp: despite the name it stores gemini-cli
     # conversation checkpoints and prompt history (AI chat state, not temp).
 }
 
 clean_chrome_devtools_mcp_caches() {
     local mcp_profile="$HOME/.cache/chrome-devtools-mcp/chrome-profile"
+    [[ -d "$mcp_profile" ]] || return 0
 
-    if chrome_devtools_mcp_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome DevTools MCP caches · skipped (server running)"
-        note_activity
+    _dev_cleanup_targets_exist \
+        "$mcp_profile/Default/Cache"/* \
+        "$mcp_profile/Default/Code Cache"/* \
+        "$mcp_profile/Default/GPUCache"/* \
+        "$mcp_profile/Default/DawnGraphiteCache"/* \
+        "$mcp_profile/Default/DawnWebGPUCache"/* \
+        "$mcp_profile/Default/DawnCache"/* \
+        "$mcp_profile/Default/GrShaderCache"/* \
+        "$mcp_profile/Default/GraphiteDawnCache"/* \
+        "$mcp_profile/GraphiteDawnCache"/* \
+        "$mcp_profile/component_crx_cache"/* \
+        "$mcp_profile/extensions_crx_cache"/* \
+        "$mcp_profile/Default/Service Worker/CacheStorage"/* || return 0
+
+    local process_state=0
+    chrome_devtools_mcp_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome DevTools MCP caches · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_dev_cleanup_family "Chrome DevTools MCP"
+        fi
         return 0
     fi
 
-    [[ -d "$mcp_profile" ]] || return 0
-
-    clean_chromium_default_caches "$mcp_profile" "Chrome DevTools MCP"
-    safe_clean "$mcp_profile/Default/DawnCache"/* "Chrome DevTools MCP Dawn cache"
-    safe_clean "$mcp_profile/Default/GrShaderCache"/* "Chrome DevTools MCP shader cache"
-    safe_clean "$mcp_profile/Default/GraphiteDawnCache"/* "Chrome DevTools MCP Graphite cache"
-    safe_clean "$mcp_profile/GraphiteDawnCache"/* "Chrome DevTools MCP Graphite cache"
-    safe_clean "$mcp_profile/component_crx_cache"/* "Chrome DevTools MCP component cache"
-    safe_clean "$mcp_profile/extensions_crx_cache"/* "Chrome DevTools MCP extension cache"
+    clean_chromium_default_caches \
+        "$mcp_profile" \
+        "Chrome DevTools MCP" \
+        chrome_devtools_mcp_running \
+        "Chrome DevTools MCP" || return 0
+    _dev_safe_clean_process_guarded chrome_devtools_mcp_running "Chrome DevTools MCP" \
+        "Chrome DevTools MCP Dawn cache" "$mcp_profile/Default/DawnCache"/* "Chrome DevTools MCP Dawn cache" || return 0
+    _dev_safe_clean_process_guarded chrome_devtools_mcp_running "Chrome DevTools MCP" \
+        "Chrome DevTools MCP shader cache" "$mcp_profile/Default/GrShaderCache"/* "Chrome DevTools MCP shader cache" || return 0
+    _dev_safe_clean_process_guarded chrome_devtools_mcp_running "Chrome DevTools MCP" \
+        "Chrome DevTools MCP Graphite cache" "$mcp_profile/Default/GraphiteDawnCache"/* \
+        "$mcp_profile/GraphiteDawnCache"/* "Chrome DevTools MCP Graphite cache" || return 0
+    _dev_safe_clean_process_guarded chrome_devtools_mcp_running "Chrome DevTools MCP" \
+        "Chrome DevTools MCP component cache" "$mcp_profile/component_crx_cache"/* "Chrome DevTools MCP component cache" || return 0
+    _dev_safe_clean_process_guarded chrome_devtools_mcp_running "Chrome DevTools MCP" \
+        "Chrome DevTools MCP extension cache" "$mcp_profile/extensions_crx_cache"/* "Chrome DevTools MCP extension cache" || return 0
 
     if declare -f clean_service_worker_cache > /dev/null 2>&1; then
-        clean_service_worker_cache "Chrome DevTools MCP" "$mcp_profile/Default/Service Worker/CacheStorage"
+        _dev_clean_service_worker_process_guarded \
+            chrome_devtools_mcp_running \
+            "Chrome DevTools MCP" \
+            "Chrome DevTools MCP Service Worker" \
+            "Chrome DevTools MCP" \
+            "$mcp_profile/Default/Service Worker/CacheStorage" || return 0
     fi
 }
 

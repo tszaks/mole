@@ -28,6 +28,52 @@ _xcode_cleanup_skip_reason() {
     fi
 }
 
+_defer_app_cache_family() {
+    if declare -f defer_cleanup_family > /dev/null 2>&1; then
+        defer_cleanup_family "$1"
+    else
+        debug_log "Deferred cleanup while active: $1"
+    fi
+}
+
+_app_cache_cleanup_targets_exist() {
+    local target
+    for target in "$@"; do
+        # Match safe_clean's eligible set: broken symlinks are not cleanup
+        # candidates and must not trigger an active-process defer.
+        [[ -e "$target" ]] || continue
+        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
+            continue
+        fi
+        return 0
+    done
+    return 1
+}
+
+_app_cache_cleanup_directories_exist() {
+    local target
+    for target in "$@"; do
+        [[ -d "$target" ]] || continue
+        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
+            continue
+        fi
+        return 0
+    done
+    return 1
+}
+
 _xcode_app_cache_delete_guard_allows() {
     local process_state=0
     _xcode_cleanup_process_state || process_state=$?
@@ -51,6 +97,26 @@ _simulator_app_cache_delete_guard_allows() {
     return 1
 }
 
+_final_cut_pro_delete_guard_allows() {
+    local process_state=0
+    final_cut_pro_is_running || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_APP_CACHE_GUARD_REASON="Final Cut Pro started"
+    [[ $process_state -eq 2 ]] && _MOLE_APP_CACHE_GUARD_REASON="process state unknown"
+    return 1
+}
+
+_defer_app_cache_guard_family() {
+    case "$1" in
+        _simulator_app_cache_delete_guard_allows) _defer_app_cache_family "Simulator" ;;
+        _final_cut_pro_delete_guard_allows) _defer_app_cache_family "Final Cut Pro" ;;
+        *) _defer_app_cache_family "Xcode" ;;
+    esac
+}
+
 _app_cache_safe_clean_guarded() {
     local delete_guard="$1"
     local display_name="$2"
@@ -59,8 +125,12 @@ _app_cache_safe_clean_guarded() {
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! "$delete_guard"; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_APP_CACHE_GUARD_REASON})"
-            note_activity
+            if [[ "$_MOLE_APP_CACHE_GUARD_REASON" == "process state unknown" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_APP_CACHE_GUARD_REASON})"
+                note_activity
+            else
+                _defer_app_cache_guard_family "$delete_guard"
+            fi
             return 1
         fi
         safe_clean "$@"
@@ -70,8 +140,12 @@ _app_cache_safe_clean_guarded() {
     local guarded_rc=0
     safe_clean_guarded "$delete_guard" "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_APP_CACHE_GUARD_REASON})"
-        note_activity
+        if [[ "$_MOLE_APP_CACHE_GUARD_REASON" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_APP_CACHE_GUARD_REASON})"
+            note_activity
+        else
+            _defer_app_cache_guard_family "$delete_guard"
+        fi
         return 1
     fi
     return "$guarded_rc"
@@ -84,36 +158,82 @@ clean_xcode_derived_data() {
 
     [[ -d "$dd_dir" ]] || return 0
 
-    # Only a conclusive "no matching process" result authorizes cleanup.
-    local xcode_state=0
-    _xcode_cleanup_process_state || xcode_state=$?
-    if [[ $xcode_state -ne 1 ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped ($(_xcode_cleanup_skip_reason "$xcode_state"))"
-        note_activity
-        return 0
-    fi
-
-    # Count projects (each subdirectory is a project build).
+    # Count projects before recording an active-process skip, so an empty
+    # DerivedData root stays silent.
     local -a projects=()
-    while IFS= read -r -d '' dir; do
+    local dir
+    for dir in "$dd_dir"/*; do
+        [[ -d "$dir" ]] || continue
+        if should_protect_path "$dir" || is_path_whitelisted "$dir" || holds_compiled_model_cache "$dir"; then
+            continue
+        fi
         projects+=("$dir")
-    done < <(command find "$dd_dir" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null || true)
+    done
 
     local project_count=${#projects[@]}
     [[ $project_count -eq 0 ]] && return 0
 
-    # Calculate total size.
-    local size_kb=0
-    size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skP "$dd_dir" 2> /dev/null | awk '{print $1}') || size_kb=0
-    local size_human
-    size_human=$(bytes_to_human "$((size_kb * 1024))")
+    # Only a conclusive "no matching process" result authorizes cleanup.
+    local xcode_state=0
+    _xcode_cleanup_process_state || xcode_state=$?
+    if [[ $xcode_state -ne 1 ]]; then
+        if [[ $xcode_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_app_cache_family "Xcode"
+        fi
+        return 0
+    fi
 
     local project_label="projects"
     [[ $project_count -eq 1 ]] && project_label="project"
 
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
-        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode DerivedData · ${project_count} ${project_label}, ${size_human}"
-        note_activity
+        # Measure and register only the filtered project set. Sizing the parent
+        # would include protected or whitelisted siblings that real cleanup
+        # intentionally leaves untouched.
+        local size_kb=0
+        local dir_size_kb=0
+        local dry_run_count=0
+        local dry_run_stopped_reason=""
+        for dir in "${projects[@]}"; do
+            xcode_state=0
+            _xcode_cleanup_process_state || xcode_state=$?
+            if [[ $xcode_state -ne 1 ]]; then
+                dry_run_stopped_reason=$(_xcode_cleanup_skip_reason "$xcode_state")
+                break
+            fi
+            dir_size_kb=$(get_path_size_kb "$dir" 2> /dev/null || echo 0)
+            [[ "$dir_size_kb" =~ ^[0-9]+$ ]] || dir_size_kb=0
+            xcode_state=0
+            _xcode_cleanup_process_state || xcode_state=$?
+            if [[ $xcode_state -ne 1 ]]; then
+                dry_run_stopped_reason=$(_xcode_cleanup_skip_reason "$xcode_state")
+                break
+            fi
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$dir" "$dir_size_kb" 1 true || continue
+            fi
+            size_kb=$((size_kb + dir_size_kb))
+            dry_run_count=$((dry_run_count + 1))
+        done
+        if [[ $dry_run_count -gt 0 ]]; then
+            project_label="projects"
+            [[ $dry_run_count -eq 1 ]] && project_label="project"
+            local size_human
+            size_human=$(bytes_to_human "$((size_kb * 1024))")
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode DerivedData · ${dry_run_count} ${project_label}, ${size_human}"
+            note_activity
+        fi
+        if [[ -n "$dry_run_stopped_reason" ]]; then
+            if [[ "$dry_run_stopped_reason" == "process state unknown" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · stopped (${dry_run_stopped_reason})"
+                note_activity
+            else
+                _defer_app_cache_family "Xcode"
+            fi
+        fi
         return 0
     fi
 
@@ -150,75 +270,121 @@ clean_xcode_derived_data() {
     if [[ $removed -gt 0 ]]; then
         project_label="projects"
         [[ $removed -eq 1 ]] && project_label="project"
+        local size_human
         size_human=$(bytes_to_human "$((removed_size_kb * 1024))")
         local line_color
         line_color=$(cleanup_result_color_kb "$removed_size_kb" 2> /dev/null || echo "$GREEN")
         echo -e "  ${line_color}${ICON_SUCCESS}${NC} Xcode DerivedData · ${removed} ${project_label}, ${line_color}${size_human}${NC}"
         files_cleaned=$((${files_cleaned:-0} + removed))
         total_size_cleaned=$((${total_size_cleaned:-0} + removed_size_kb))
-        total_items=$((${total_items:-0} + removed))
+        total_items=$((${total_items:-0} + 1))
         note_activity
     fi
     if [[ -n "$stopped_reason" ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · stopped (${stopped_reason})"
-        note_activity
+        if [[ "$stopped_reason" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · stopped (${stopped_reason})"
+            note_activity
+        else
+            _defer_app_cache_family "Xcode"
+        fi
     fi
 }
 # Xcode and iOS tooling.
 clean_xcode_tools() {
-    # Probe errors are unknown, never permission to clean active tool state.
-    local simulator_state=0
-    _simulator_cleanup_process_state || simulator_state=$?
-    if [[ $simulator_state -eq 1 ]]; then
-        _app_cache_safe_clean_guarded \
-            _simulator_app_cache_delete_guard_allows \
-            "Simulator caches" \
-            ~/Library/Developer/CoreSimulator/Caches/* \
-            "Simulator cache" || return 0
-        _app_cache_safe_clean_guarded \
-            _simulator_app_cache_delete_guard_allows \
-            "Simulator temp files" \
-            ~/Library/Developer/CoreSimulator/Devices/*/data/tmp/* \
-            "Simulator temp files" || return 0
-        _app_cache_safe_clean_guarded \
-            _simulator_app_cache_delete_guard_allows \
-            "CoreSimulator logs" \
-            ~/Library/Logs/CoreSimulator/* \
-            "CoreSimulator logs" || return 0
-    else
-        local simulator_reason="Simulator or CoreSimulator running"
-        [[ $simulator_state -eq 2 ]] && simulator_reason="process state unknown"
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Simulator caches · skipped (${simulator_reason})"
-        note_activity
+    local simulator_has_targets=false
+    if _app_cache_cleanup_targets_exist \
+        "$HOME/Library/Developer/CoreSimulator/Caches"/* \
+        "$HOME/Library/Developer/CoreSimulator/Devices"/*/data/tmp/* \
+        "$HOME/Library/Logs/CoreSimulator"/*; then
+        simulator_has_targets=true
     fi
-    local xcode_state=0
-    _xcode_cleanup_process_state || xcode_state=$?
-    if [[ $xcode_state -eq 1 ]]; then
-        _app_cache_safe_clean_guarded \
-            _xcode_app_cache_delete_guard_allows \
-            "Xcode cache" \
-            ~/Library/Caches/com.apple.dt.Xcode/* \
-            "Xcode cache" || return 0
 
-        xcode_state=0
-        _xcode_cleanup_process_state || xcode_state=$?
-        if [[ $xcode_state -ne 1 ]]; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode build products/DerivedData · stopped ($(_xcode_cleanup_skip_reason "$xcode_state"))"
-            note_activity
-            return 0
+    if [[ "$simulator_has_targets" == "true" ]]; then
+        # Probe errors are unknown, never permission to clean active tool state.
+        local simulator_state=0
+        _simulator_cleanup_process_state || simulator_state=$?
+        if [[ $simulator_state -eq 1 ]]; then
+            _app_cache_safe_clean_guarded \
+                _simulator_app_cache_delete_guard_allows \
+                "Simulator caches" \
+                ~/Library/Developer/CoreSimulator/Caches/* \
+                "Simulator cache" || return 0
+            _app_cache_safe_clean_guarded \
+                _simulator_app_cache_delete_guard_allows \
+                "Simulator temp files" \
+                ~/Library/Developer/CoreSimulator/Devices/*/data/tmp/* \
+                "Simulator temp files" || return 0
+            _app_cache_safe_clean_guarded \
+                _simulator_app_cache_delete_guard_allows \
+                "CoreSimulator logs" \
+                ~/Library/Logs/CoreSimulator/* \
+                "CoreSimulator logs" || return 0
+        else
+            if [[ $simulator_state -eq 2 ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Simulator caches · skipped (process state unknown)"
+                note_activity
+            else
+                _defer_app_cache_family "Simulator"
+            fi
         fi
-        _app_cache_safe_clean_guarded \
-            _xcode_app_cache_delete_guard_allows \
-            "Xcode build products" \
-            ~/Library/Developer/Xcode/Products/* \
-            "Xcode build products" || return 0
-        clean_xcode_derived_data
-    else
-        local xcode_reason
-        xcode_reason=$(_xcode_cleanup_skip_reason "$xcode_state")
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode cache/build products · skipped (${xcode_reason})"
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped (${xcode_reason})"
-        note_activity
+    fi
+
+    local xcode_cache_has_targets=false
+    local xcode_build_has_targets=false
+    _app_cache_cleanup_targets_exist \
+        "$HOME/Library/Caches/com.apple.dt.Xcode"/* && xcode_cache_has_targets=true
+    if _app_cache_cleanup_targets_exist "$HOME/Library/Developer/Xcode/Products"/* ||
+        _app_cache_cleanup_directories_exist "$HOME/Library/Developer/Xcode/DerivedData"/*; then
+        xcode_build_has_targets=true
+    fi
+
+    if [[ "$xcode_cache_has_targets" == "true" || "$xcode_build_has_targets" == "true" ]]; then
+        local xcode_state=0
+        _xcode_cleanup_process_state || xcode_state=$?
+        if [[ $xcode_state -eq 1 ]]; then
+            if [[ "$xcode_cache_has_targets" == "true" ]]; then
+                _app_cache_safe_clean_guarded \
+                    _xcode_app_cache_delete_guard_allows \
+                    "Xcode cache" \
+                    ~/Library/Caches/com.apple.dt.Xcode/* \
+                    "Xcode cache" || return 0
+            fi
+
+            # The cache pass may take long enough for the separate build
+            # candidates to disappear. Revalidate before another process gate
+            # so a completed cache-only pass never reports a deferred build.
+            xcode_build_has_targets=false
+            if _app_cache_cleanup_targets_exist "$HOME/Library/Developer/Xcode/Products"/* ||
+                _app_cache_cleanup_directories_exist "$HOME/Library/Developer/Xcode/DerivedData"/*; then
+                xcode_build_has_targets=true
+            fi
+            [[ "$xcode_build_has_targets" == "true" ]] || return 0
+
+            xcode_state=0
+            _xcode_cleanup_process_state || xcode_state=$?
+            if [[ $xcode_state -ne 1 ]]; then
+                if [[ $xcode_state -eq 2 ]]; then
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode build products/DerivedData · stopped (process state unknown)"
+                    note_activity
+                else
+                    _defer_app_cache_family "Xcode"
+                fi
+                return 0
+            fi
+            _app_cache_safe_clean_guarded \
+                _xcode_app_cache_delete_guard_allows \
+                "Xcode build products" \
+                ~/Library/Developer/Xcode/Products/* \
+                "Xcode build products" || return 0
+            clean_xcode_derived_data
+        else
+            if [[ $xcode_state -eq 2 ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode cache/build products · skipped (process state unknown)"
+                note_activity
+            else
+                _defer_app_cache_family "Xcode"
+            fi
+        fi
     fi
 }
 # Remove extension directories that VS Code / Cursor have marked obsolete.
@@ -329,8 +495,7 @@ clean_ai_apps() {
     # is the only path treated as an auto-rebuildable cache here.
     safe_clean ~/Library/Caches/CCTClearcutLogger "Google Clearcut logs"
     if [[ -d "$HOME/Library/Application Support/Codex" || -d "$HOME/Library/Logs/com.openai.codex" ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop state · preserved (sessions, credentials)"
-        note_activity
+        debug_log "Codex Desktop state left intact by default"
     fi
 }
 # Design and creative tools.
@@ -344,11 +509,9 @@ clean_design_tools() {
 }
 # Video editing tools.
 final_cut_pro_is_running() {
-    command -v pgrep > /dev/null 2>&1 || return 1
-
-    pgrep -x "Final Cut Pro" > /dev/null 2>&1 && return 0
-    pgrep -f "/Final Cut Pro.app/" > /dev/null 2>&1 && return 0
-    return 1
+    mole_pgrep_any \
+        -x "Final Cut Pro" \
+        -f "/Final Cut Pro.app/"
 }
 
 final_cut_pro_path_has_protected_component() {
@@ -420,19 +583,27 @@ find_final_cut_pro_generated_cache_targets() {
 }
 
 clean_final_cut_pro_generated_caches() {
-    if final_cut_pro_is_running; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Final Cut Pro generated caches · skipped (Final Cut Pro running)"
-        note_activity
-        return 0
-    fi
-
     local -a fcp_cache_targets=()
     local target
     while IFS= read -r -d '' target; do
-        fcp_cache_targets+=("$target")
+        if _app_cache_cleanup_targets_exist "$target"; then
+            fcp_cache_targets+=("$target")
+        fi
     done < <(find_final_cut_pro_generated_cache_targets)
 
     [[ ${#fcp_cache_targets[@]} -gt 0 ]] || return 0
+
+    local process_state=0
+    final_cut_pro_is_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Final Cut Pro generated caches · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_app_cache_family "Final Cut Pro"
+        fi
+        return 0
+    fi
 
     # Final Cut Pro generated cache cleanup (issue #843).
     # Safety scope for the first pass:
@@ -444,7 +615,11 @@ clean_final_cut_pro_generated_caches() {
     # Future expansion can add explicit flags or configurable roots for
     # optimized media, Analysis Files, and external cache bundles after more
     # field feedback.
-    safe_clean "${fcp_cache_targets[@]}" "Final Cut Pro generated cache"
+    _app_cache_safe_clean_guarded \
+        _final_cut_pro_delete_guard_allows \
+        "Final Cut Pro generated caches" \
+        "${fcp_cache_targets[@]}" \
+        "Final Cut Pro generated cache" || true
 }
 
 jianying_pro_is_running() {

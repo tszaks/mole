@@ -150,8 +150,6 @@ Space freed: 12.8GB
 ====================================================================
 ```
 
-Note: On macOS 15 and later, Local Network permission entries can outlive app removal. Mole warns when an uninstalled app declares Local Network usage, but it does not auto-reset `/Volumes/Data/Library/Preferences/com.apple.networkextension*.plist` because that reset is global and requires Recovery mode.
-
 ### System Optimization
 
 ```bash

@@ -449,6 +449,15 @@ safe_remove() {
         return 0
     fi
 
+    # Keep preview eligibility identical to real cleanup. This first check
+    # rejects an already-present compiled model cache before the dry-run return;
+    # the final-sink check below still catches one created during size probing.
+    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
+        debug_log "Skipped removal for compiled model cache: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
+        return 1
+    fi
+
     # Dry-run mode: log but don't delete
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         _record_file_ops_dry_run_target "$path" "$precomputed_size_kb"
@@ -500,6 +509,15 @@ safe_remove() {
         if [[ "$size_kb" =~ ^[0-9]+$ ]] && [[ "$size_kb" -gt 0 ]]; then
             size_human=$(bytes_to_human "$((size_kb * 1024))" 2> /dev/null || echo "${size_kb}KB")
         fi
+    fi
+
+    # Recheck at the final sink. A daemon can create this compiled-model cache
+    # while the preceding size probe walks the target, and deleting its parent
+    # then breaks recognition until the owning process restarts.
+    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
+        debug_log "Skipped removal after compiled model cache appeared: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
+        return 1
     fi
 
     # Perform the deletion
@@ -665,6 +683,14 @@ safe_sudo_remove() {
         return 1
     fi
 
+    # This policy must run before dry-run/test-mode returns so preview and real
+    # privileged cleanup agree on the eligible target set.
+    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
+        debug_log "Skipped sudo removal for compiled model cache: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
+        return "$MOLE_ERR_PROTECTED_PATH"
+    fi
+
     if _mole_privileged_path_has_mutable_ancestor "$path"; then
         if [[ ${EUID:-0} -ne 0 ]]; then
             debug_log "Downgrading sudo remove below mutable parent: $path"
@@ -743,6 +769,14 @@ safe_sudo_remove() {
         if [[ "$size_kb" =~ ^[0-9]+$ ]] && [[ "$size_kb" -gt 0 ]]; then
             size_human=$(bytes_to_human "$((size_kb * 1024))" 2> /dev/null || echo "${size_kb}KB")
         fi
+    fi
+
+    # Keep the same last-mile policy as safe_remove: privileged cleanup must
+    # also fail closed if a compiled-model cache appears during size probing.
+    if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
+        debug_log "Skipped sudo removal after compiled model cache appeared: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
+        return "$MOLE_ERR_PROTECTED_PATH"
     fi
 
     local output
@@ -1232,6 +1266,17 @@ _mole_move_path_to_user_trash() {
         dest="$trash_dir/$base.$ts.$$.$suffix"
     done
 
+    if [[ -n "${_MOLE_TRASH_MOVE_EXPECTED_PATH:-}" && "$_MOLE_TRASH_MOVE_EXPECTED_PATH" == "$path" ]]; then
+        if ! _mole_path_matches_identity \
+            "$path" \
+            "$_MOLE_TRASH_MOVE_EXPECTED_PARENT" \
+            "$_MOLE_TRASH_MOVE_EXPECTED_PARENT_ID" \
+            "$_MOLE_TRASH_MOVE_EXPECTED_TARGET_ID"; then
+            debug_log "Refusing Trash move after source path identity changed: $path"
+            return 1
+        fi
+    fi
+
     local move_output=""
     local move_rc=0
     if [[ "$needs_sudo" == "true" ]]; then
@@ -1323,22 +1368,105 @@ _mole_move_path_to_user_trash() {
 }
 
 # Batched Trash move for non-sudo, non-symlink paths. Removes the per-file
-# subprocess fan-out that made AppleScript-fallback uninstalls feel frozen
-# (100 files * ~1s each). Returns 0 only when the entire batch landed in the
-# Trash; callers must fall back to the per-file path on non-zero so nothing
-# is silently skipped.
+# Finder/AppleScript fan-out that made uninstalls feel frozen. The caller binds
+# each item to its original physical parent and inode through the snapshot
+# arrays below; this helper rechecks that identity before every direct move.
+_MOLE_TRASH_BATCH_SNAPSHOT_PATHS=()
+_MOLE_TRASH_BATCH_SNAPSHOT_PARENTS=()
+_MOLE_TRASH_BATCH_SNAPSHOT_PARENT_IDS=()
+_MOLE_TRASH_BATCH_SNAPSHOT_TARGET_IDS=()
+_MOLE_TRASH_BATCH_MOVED_PATHS=()
+_MOLE_TRASH_MOVE_EXPECTED_PATH=""
+_MOLE_TRASH_MOVE_EXPECTED_PARENT=""
+_MOLE_TRASH_MOVE_EXPECTED_PARENT_ID=""
+_MOLE_TRASH_MOVE_EXPECTED_TARGET_ID=""
+
+_MOLE_PATH_SNAPSHOT_PARENT=""
+_MOLE_PATH_SNAPSHOT_PARENT_ID=""
+_MOLE_PATH_SNAPSHOT_TARGET_ID=""
+
+_mole_snapshot_path_identity() {
+    local path="$1"
+    _MOLE_PATH_SNAPSHOT_PARENT=""
+    _MOLE_PATH_SNAPSHOT_PARENT_ID=""
+    _MOLE_PATH_SNAPSHOT_TARGET_ID=""
+
+    [[ -e "$path" && ! -L "$path" ]] || return 1
+    local lexical_parent="${path%/*}"
+    [[ -n "$lexical_parent" && "$lexical_parent" != "$path" ]] || lexical_parent="/"
+
+    local physical_parent=""
+    physical_parent=$(cd -P "$lexical_parent" 2> /dev/null && pwd -P) || return 1
+    local parent_id=""
+    local target_id=""
+    parent_id=$($STAT_BSD -f '%d:%i' "$physical_parent" 2> /dev/null || true)
+    target_id=$($STAT_BSD -f '%d:%i' "$path" 2> /dev/null || true)
+    [[ "$parent_id" =~ ^[0-9]+:[0-9]+$ && "$target_id" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+
+    _MOLE_PATH_SNAPSHOT_PARENT="$physical_parent"
+    _MOLE_PATH_SNAPSHOT_PARENT_ID="$parent_id"
+    _MOLE_PATH_SNAPSHOT_TARGET_ID="$target_id"
+}
+
+_mole_path_matches_identity() {
+    local path="$1"
+    local expected_parent="$2"
+    local expected_parent_id="$3"
+    local expected_target_id="$4"
+
+    _mole_snapshot_path_identity "$path" || return 1
+    [[ "$_MOLE_PATH_SNAPSHOT_PARENT" == "$expected_parent" ]] || return 1
+    [[ "$_MOLE_PATH_SNAPSHOT_PARENT_ID" == "$expected_parent_id" ]] || return 1
+    [[ "$_MOLE_PATH_SNAPSHOT_TARGET_ID" == "$expected_target_id" ]]
+}
+
 _mole_move_to_trash_batch() {
     local -a paths=("$@")
     [[ ${#paths[@]} -eq 0 ]] && return 0
+    _MOLE_TRASH_BATCH_MOVED_PATHS=()
+
+    local use_bound_snapshots=false
+    if [[ ${#_MOLE_TRASH_BATCH_SNAPSHOT_PATHS[@]} -eq ${#paths[@]} &&
+        ${#_MOLE_TRASH_BATCH_SNAPSHOT_PARENTS[@]} -eq ${#paths[@]} &&
+        ${#_MOLE_TRASH_BATCH_SNAPSHOT_PARENT_IDS[@]} -eq ${#paths[@]} &&
+        ${#_MOLE_TRASH_BATCH_SNAPSHOT_TARGET_IDS[@]} -eq ${#paths[@]} ]]; then
+        use_bound_snapshots=true
+    fi
+
+    local -a expected_parents=()
+    local -a expected_parent_ids=()
+    local -a expected_target_ids=()
+    local index p
+    for ((index = 0; index < ${#paths[@]}; index++)); do
+        p="${paths[$index]}"
+        if [[ "$use_bound_snapshots" == "true" ]]; then
+            [[ "${_MOLE_TRASH_BATCH_SNAPSHOT_PATHS[$index]}" == "$p" ]] || return 1
+            expected_parents+=("${_MOLE_TRASH_BATCH_SNAPSHOT_PARENTS[$index]}")
+            expected_parent_ids+=("${_MOLE_TRASH_BATCH_SNAPSHOT_PARENT_IDS[$index]}")
+            expected_target_ids+=("${_MOLE_TRASH_BATCH_SNAPSHOT_TARGET_IDS[$index]}")
+        else
+            _mole_snapshot_path_identity "$p" || return 1
+            expected_parents+=("$_MOLE_PATH_SNAPSHOT_PARENT")
+            expected_parent_ids+=("$_MOLE_PATH_SNAPSHOT_PARENT_ID")
+            expected_target_ids+=("$_MOLE_PATH_SNAPSHOT_TARGET_ID")
+        fi
+    done
 
     if [[ -n "${MOLE_TEST_TRASH_DIR:-}" ]]; then
         mkdir -p "$MOLE_TEST_TRASH_DIR" 2> /dev/null || return 1
         local ts
         ts=$(date +%s 2> /dev/null || echo 0)
-        local p dest
-        for p in "${paths[@]}"; do
+        local dest
+        for ((index = 0; index < ${#paths[@]}; index++)); do
+            p="${paths[$index]}"
+            _mole_path_matches_identity \
+                "$p" \
+                "${expected_parents[$index]}" \
+                "${expected_parent_ids[$index]}" \
+                "${expected_target_ids[$index]}" || return 1
             dest="$MOLE_TEST_TRASH_DIR/$(basename "$p").$$.${ts}.$RANDOM"
-            mv "$p" "$dest" 2> /dev/null || return 1
+            /bin/mv "$p" "$dest" 2> /dev/null || return 1
+            _MOLE_TRASH_BATCH_MOVED_PATHS+=("$p")
         done
         return 0
     fi
@@ -1347,20 +1475,35 @@ _mole_move_to_trash_batch() {
         return 1
     fi
 
-    if command -v trash > /dev/null 2>&1; then
-        trash "${paths[@]}" > /dev/null 2>&1 && return 0
-    fi
-
-    # AppleScript fallback: build one POSIX-file list and tell Finder once.
-    osascript - "${paths[@]}" > /dev/null 2>&1 << 'APPLESCRIPT'
-on run argv
-    set posixList to {}
-    repeat with a in argv
-        set end of posixList to POSIX file (a as text)
-    end repeat
-    tell application "Finder" to delete posixList
-end run
-APPLESCRIPT
+    # Avoid handing a stale lexical batch to a third-party Trash CLI or Finder.
+    # Direct per-item renames keep the helper in one shell process and let us
+    # recheck the bound parent/inode immediately before every move.
+    local failed=0
+    for ((index = 0; index < ${#paths[@]}; index++)); do
+        p="${paths[$index]}"
+        if ! _mole_path_matches_identity \
+            "$p" \
+            "${expected_parents[$index]}" \
+            "${expected_parent_ids[$index]}" \
+            "${expected_target_ids[$index]}"; then
+            failed=1
+            continue
+        fi
+        _MOLE_TRASH_MOVE_EXPECTED_PATH="$p"
+        _MOLE_TRASH_MOVE_EXPECTED_PARENT="${expected_parents[$index]}"
+        _MOLE_TRASH_MOVE_EXPECTED_PARENT_ID="${expected_parent_ids[$index]}"
+        _MOLE_TRASH_MOVE_EXPECTED_TARGET_ID="${expected_target_ids[$index]}"
+        if _mole_move_path_to_user_trash "$p" false; then
+            _MOLE_TRASH_BATCH_MOVED_PATHS+=("$p")
+        else
+            failed=1
+        fi
+        _MOLE_TRASH_MOVE_EXPECTED_PATH=""
+        _MOLE_TRASH_MOVE_EXPECTED_PARENT=""
+        _MOLE_TRASH_MOVE_EXPECTED_PARENT_ID=""
+        _MOLE_TRASH_MOVE_EXPECTED_TARGET_ID=""
+    done
+    [[ $failed -eq 0 ]]
 }
 
 _mole_delete_log() {

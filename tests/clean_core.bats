@@ -131,7 +131,7 @@ MOCK
     printf 'xxxx' > "$base/b"
     printf 'xxxx' > "$base/keep"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<EOF
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/bin/clean.sh"
@@ -167,7 +167,7 @@ EOF
     local base="$HOME/safe_clean_guarded"
     mkdir -p "$base/a" "$base/b" "$base/c" "$base/d"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<EOF
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/bin/clean.sh"
@@ -195,7 +195,10 @@ for path in "$base/a" "$base/b" "$base/c" "$base/d"; do
 done
 EOF
 
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
@@ -203,7 +206,7 @@ EOF
     local base="$HOME/safe_clean_guarded_dry"
     mkdir -p "$base/a" "$base/b"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<EOF
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << EOF
 set -euo pipefail
 source "\$PROJECT_ROOT/lib/core/common.sh"
 source "\$PROJECT_ROOT/bin/clean.sh"
@@ -235,6 +238,48 @@ EOF
     [[ "$output" != *"UNEXPECTED_REGISTER"* ]] || return 1
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]] || return 1
     [[ "$output" != *"would clean"* ]]
+}
+
+@test "safe_clean_guarded dry-run stops at the first target-specific denial" {
+    local base="$HOME/safe_clean_guarded_dry_targets"
+    mkdir -p "$base/a" "$base/b"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=true
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+get_cleanup_path_size_kb() { echo 1; }
+delete_guard() {
+    echo "GUARD:\$1"
+    [[ "\$1" == "$base/a" ]]
+}
+register_dry_run_cleanup_target() { echo "REGISTER:\$1"; return 0; }
+
+rc=0
+safe_clean_guarded delete_guard \
+    "$base/a" "$base/b" \
+    "Target guard preview" || rc=\$?
+printf 'RC=%s FILES=%s\n' "\$rc" "\$files_cleaned"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"GUARD:$base/a"* ]] || return 1
+    [[ "$output" == *"GUARD:$base/b"* ]] || return 1
+    [[ "$output" == *"REGISTER:$base/a"* ]] || return 1
+    [[ "$output" != *"REGISTER:$base/b"* ]] || return 1
+    [[ "$output" == *"RC=75 FILES=1"* ]] || return 1
+    [[ "$output" != *"2 items"* ]]
 }
 
 @test "safe_clean_guarded filters ineligible targets before the dry-run guard" {
@@ -318,7 +363,7 @@ MOCK
 }
 
 @test "mo clean adopts cached sudo before system cleanup (#1084)" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc << 'SCRIPT'
 set -euo pipefail
 TRACE="$HOME/sudo-adopt.log"
 > "$TRACE"
@@ -355,7 +400,7 @@ SCRIPT
 
 @test "mo clean sudo prompt preserves a directly typed password (#1059)" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
-        /bin/bash --noprofile --norc <<'SCRIPT'
+        /bin/bash --noprofile --norc << 'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -392,7 +437,7 @@ SCRIPT
 
 @test "mo clean sudo prompt still skips on explicit Space (#1059)" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
-        /bin/bash --noprofile --norc <<'SCRIPT'
+        /bin/bash --noprofile --norc << 'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -426,7 +471,7 @@ SCRIPT
 @test "mo clean summary separates tracked cleanup from free space change" {
     local mock_bin="$HOME/bin"
     mkdir -p "$mock_bin"
-    cat > "$mock_bin/df" <<'MOCK'
+    cat > "$mock_bin/df" << 'MOCK'
 #!/bin/bash
 count_file="${MOLE_DF_COUNT:?}"
 count=0
@@ -446,7 +491,7 @@ printf '/dev/disk1 200000000 126599680 %s 64%% /\n' "$available"
 MOCK
     chmod +x "$mock_bin/df"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" MOLE_DF_COUNT="$HOME/df.count" MOLE_TEST_MODE=0 /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="$mock_bin:$PATH" MOLE_DF_COUNT="$HOME/df.count" MOLE_TEST_MODE=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -480,12 +525,10 @@ clean_orphaned_system_services() { :; }
 clean_orphaned_container_stubs() { :; }
 clean_stale_launch_services_registrations() { :; }
 show_user_launch_agent_hint_notice() { :; }
-show_orphan_dotdir_hint_notice() { :; }
 clean_apple_silicon_caches() { :; }
 clean_cached_device_firmware() { :; }
 clean_time_machine_failed_backups() { :; }
 check_large_file_candidates() { :; }
-show_system_data_hint_notice() { :; }
 show_project_artifact_hint_notice() { :; }
 
 perform_cleanup
@@ -533,7 +576,7 @@ EOF
 
 @test "mo clean --dry-run reports stale login item without deleting it" {
     mkdir -p "$HOME/Library/LaunchAgents"
-    cat > "$HOME/Library/LaunchAgents/com.example.stale.plist" <<'PLIST'
+    cat > "$HOME/Library/LaunchAgents/com.example.stale.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -593,15 +636,6 @@ PLIST
     dd if=/dev/zero of="$whitelisted_cache/keep.bin" bs=1024 count=1024 2> /dev/null
     dd if=/dev/zero of="$protected_cache/protected.bin" bs=1024 count=1024 2> /dev/null
     printf '%s\n' "$whitelisted_cache/keep.bin" > "$test_home/.config/mole/whitelist"
-    local explicit_bytes generic_bytes explicit_kb generic_kb expected_human
-    explicit_bytes=$(stat -f%z "$explicit_cache/explicit.bin")
-    generic_bytes=$(stat -f%z "$generic_cache/generic.bin")
-    explicit_kb=$(((explicit_bytes + 1023) / 1024))
-    generic_kb=$(((generic_bytes + 1023) / 1024))
-    # shellcheck disable=SC2016
-    expected_human=$(env PROJECT_ROOT="$PROJECT_ROOT" EXPECTED_KB="$((explicit_kb + generic_kb))" \
-        bash --noprofile --norc -c 'source "$PROJECT_ROOT/lib/core/common.sh"; bytes_to_human_kb "$EXPECTED_KB"')
-
     set_mock_sudo_uncached "$test_home"
     set_mock_host_toolchains "$test_home"
     run env HOME="$test_home" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 \
@@ -621,7 +655,7 @@ PLIST
     preview_items=$(sed -n 's/^# Items: //p' "$preview")
     preview_categories=$(sed -n 's/^# Categories: //p' "$preview")
     [[ -n "$preview_total" && "$preview_items" =~ ^[0-9]+$ && "$preview_categories" =~ ^[0-9]+$ ]] || return 1
-    printf '%s\n' "$output" | grep -F "Category total" | grep -qF "$expected_human" || return 1
+    [[ "$output" != *"Category total"* ]] || return 1
     printf '%s\n' "$output" | grep -F "Potential space:" |
         grep -F "Items: $preview_items" |
         grep -F "Categories: $preview_categories" |
@@ -630,7 +664,7 @@ PLIST
 
 @test "dry-run ledger keeps shell-timeout child candidates and unknown sizes" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
-        bash --noprofile --norc <<'EOF'
+        bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/clean.sh"
 
@@ -648,13 +682,11 @@ record_timeout_candidate() {
 run_with_shell_timeout 5 record_timeout_candidate < /dev/null
 
 render_clean_preview_from_ledger
-dry_run_ledger_stats
 printf 'PARTIAL=%s\n' "$DRY_RUN_TOTAL_PARTIAL"
 cat "$EXPORT_LIST_FILE"
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"0 1 1 1"* ]] || return 1
     [[ "$output" == *"PARTIAL=true"* ]] || return 1
     [[ "$output" == *"Cloud & Office"* ]] || return 1
     [[ "$output" == *"cache.bin  # size unknown"* ]] || return 1
@@ -716,7 +748,7 @@ EOF
     # scan has flipped the flag. The previous version called is_whitelisted, which
     # answers "is this exact pattern already in the whitelist" for the management UI
     # and never matches a file path, so it asserted nothing.
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'SCRIPT'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
@@ -1032,7 +1064,7 @@ EOF
     [[ "$list_content" != *"com.example.ocr"* ]] || return 1
 }
 
-@test "active clean sections report isolated category totals" {
+@test "active clean sections rely on the final total" {
     # shellcheck disable=SC2016  # inner bash expands these from its environment
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
         /bin/bash --noprofile --norc -c '
@@ -1047,8 +1079,41 @@ EOF
             end_section
         '
     [[ "$status" -eq 0 ]] || return 1
-    [[ "$output" == *"First"*"Category total"*"3.1MB"*"Second"*"Category total"*"2.0MB"* ]] || return 1
-    [[ "$(printf '%s\n' "$output" | grep -c "Category total")" -eq 2 ]] || return 1
+    [[ "$output" == *"First"*"Second"* ]] || return 1
+    [[ "$output" != *"Category total"* ]] || return 1
+}
+
+@test "active cleanup families are deduplicated for the final summary" {
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        /bin/bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            defer_cleanup_family "Xcode"
+            defer_cleanup_family "Simulator"
+            defer_cleanup_family "Xcode"
+            defer_cleanup_family "Codex"
+            format_deferred_cleanup_families
+        '
+    [[ "$status" -eq 0 ]] || return 1
+    [[ "$output" == "Xcode, Simulator, Codex" ]]
+}
+
+@test "timeout worker cleanup families reach the parent summary" {
+    # shellcheck disable=SC2016  # inner bash expands these from its environment
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        /bin/bash --noprofile --norc -c '
+            source "$PROJECT_ROOT/bin/clean.sh"
+            DEFERRED_CLEANUP_FAMILIES=()
+            DEFERRED_CLEANUP_FAMILIES_FILE=$(create_temp_file)
+            run_with_shell_timeout 5 defer_cleanup_family "Dropbox"
+            sync_deferred_cleanup_families
+            format_deferred_cleanup_families
+        '
+    [[ "$status" -eq 0 ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == "Dropbox" ]]
 }
 
 @test "report-only clean sections omit the category total" {

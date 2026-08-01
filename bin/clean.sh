@@ -193,7 +193,6 @@ fi
 total_items=0
 TRACK_SECTION=0
 SECTION_ACTIVITY=0
-SECTION_START_SIZE_KB=0
 files_cleaned=0
 total_size_cleaned=0
 whitelist_skipped_count=0
@@ -206,13 +205,63 @@ PROJECT_ARTIFACT_HINT_ESTIMATE_SAMPLES=0
 PROJECT_ARTIFACT_HINT_ESTIMATE_PARTIAL=false
 declare -a DRY_RUN_SEEN_IDENTITIES=()
 DRY_RUN_TOTAL_PARTIAL=false
-SECTION_START_UNKNOWN_COUNT=0
+declare -a DEFERRED_CLEANUP_FAMILIES=()
+DEFERRED_CLEANUP_FAMILIES_FILE=""
 
 # shellcheck disable=SC2329
 note_activity() {
     if [[ "${TRACK_SECTION:-0}" == "1" ]]; then
         SECTION_ACTIVITY=1
     fi
+}
+
+# Record expected process-state skips without turning every protected target
+# into a separate warning row. Unknown process state is not recorded here and
+# remains visible at the call site.
+# shellcheck disable=SC2329
+defer_cleanup_family() {
+    local family="${1:-}"
+    local existing
+    [[ -n "$family" ]] || return 0
+
+    if [[ ${#DEFERRED_CLEANUP_FAMILIES[@]} -gt 0 ]]; then
+        for existing in "${DEFERRED_CLEANUP_FAMILIES[@]}"; do
+            [[ "$existing" == "$family" ]] && return 0
+        done
+    fi
+
+    DEFERRED_CLEANUP_FAMILIES+=("$family")
+    if [[ -n "${DEFERRED_CLEANUP_FAMILIES_FILE:-}" &&
+        -f "$DEFERRED_CLEANUP_FAMILIES_FILE" &&
+        ! -L "$DEFERRED_CLEANUP_FAMILIES_FILE" ]]; then
+        printf '%s\0' "$family" >> "$DEFERRED_CLEANUP_FAMILIES_FILE"
+    fi
+    debug_log "Deferred cleanup while active: $family"
+}
+
+# The Cloud & Office section runs in a timeout worker, so its array writes stay
+# in that child shell. Replay its file-backed records before rendering the
+# parent summary.
+sync_deferred_cleanup_families() {
+    local record_file="${DEFERRED_CLEANUP_FAMILIES_FILE:-}"
+    local family
+    [[ -n "$record_file" && -f "$record_file" && ! -L "$record_file" ]] || return 0
+
+    DEFERRED_CLEANUP_FAMILIES_FILE=""
+    while IFS= read -r -d '' family; do
+        defer_cleanup_family "$family"
+    done < "$record_file"
+    DEFERRED_CLEANUP_FAMILIES_FILE="$record_file"
+}
+
+format_deferred_cleanup_families() {
+    local family
+    local output=""
+    for family in "${DEFERRED_CLEANUP_FAMILIES[@]}"; do
+        [[ -n "$output" ]] && output+=", "
+        output+="$family"
+    done
+    printf '%s\n' "$output"
 }
 
 # shellcheck disable=SC2329
@@ -343,41 +392,6 @@ emit_deduplicated_dry_run_ledger() {
         printf '%s\0%s\0%s\0%s\0%s\0%s\0' \
             "$identity" "$size_kb" "$count" "$size_known" "$section" "$path"
     done < "$CLEAN_PREVIEW_LEDGER_FILE"
-}
-
-# Prints: known_size_kb item_count category_count unknown_size_count.
-dry_run_ledger_stats() {
-    local known_size_kb=0
-    local item_count=0
-    local category_count=0
-    local unknown_size_count=0
-    local identity size_kb count size_known section path
-    local -a seen_sections=()
-
-    if [[ -z "${CLEAN_PREVIEW_LEDGER_FILE:-}" || ! -f "$CLEAN_PREVIEW_LEDGER_FILE" ]]; then
-        printf '0 0 0 0\n'
-        return 0
-    fi
-
-    while IFS= read -r -d '' identity &&
-        IFS= read -r -d '' size_kb &&
-        IFS= read -r -d '' count &&
-        IFS= read -r -d '' size_known &&
-        IFS= read -r -d '' section &&
-        IFS= read -r -d '' path; do
-        [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
-        [[ "$count" =~ ^[0-9]+$ ]] || count=1
-        known_size_kb=$((known_size_kb + size_kb))
-        item_count=$((item_count + count))
-        [[ "$size_known" == "true" ]] || unknown_size_count=$((unknown_size_count + 1))
-
-        if [[ ${#seen_sections[@]} -eq 0 ]] || ! mole_identity_in_list "$section" "${seen_sections[@]}"; then
-            seen_sections+=("$section")
-            category_count=$((category_count + 1))
-        fi
-    done < <(emit_deduplicated_dry_run_ledger)
-
-    printf '%s %s %s %s\n' "$known_size_kb" "$item_count" "$category_count" "$unknown_size_count"
 }
 
 write_clean_preview_header() {
@@ -596,14 +610,6 @@ flush_idle_section_slot() {
 start_section() {
     TRACK_SECTION=1
     SECTION_ACTIVITY=0
-    if [[ "$DRY_RUN" == "true" && -n "${CLEAN_PREVIEW_LEDGER_FILE:-}" ]]; then
-        local _start_items _start_categories
-        read -r SECTION_START_SIZE_KB _start_items _start_categories SECTION_START_UNKNOWN_COUNT \
-            < <(dry_run_ledger_stats)
-    else
-        SECTION_START_SIZE_KB="${total_size_cleaned:-0}"
-        SECTION_START_UNKNOWN_COUNT=0
-    fi
     CURRENT_SECTION="$1"
     if [[ "${IDLE_SECTION_PENDING:-0}" == "1" ]]; then
         # Overwrite the previous idle section's header line in place (the
@@ -638,32 +644,6 @@ end_section() {
         fi
     else
         IDLE_SECTION_PENDING=0
-        # Report-only sections (Large files, System Data clues, Project
-        # artifacts, hint-only App leftovers) mark activity without reclaiming
-        # anything, so a footer there would read "Category total · 0B" directly
-        # under a row quoting a 100GB directory. Only sections that actually
-        # moved the tracked total get one.
-        local section_size_kb=0
-        local section_unknown_count=0
-        if [[ "$DRY_RUN" == "true" && -n "${CLEAN_PREVIEW_LEDGER_FILE:-}" ]]; then
-            local current_size_kb _current_items _current_categories current_unknown_count
-            read -r current_size_kb _current_items _current_categories current_unknown_count \
-                < <(dry_run_ledger_stats)
-            section_size_kb=$((current_size_kb - SECTION_START_SIZE_KB))
-            section_unknown_count=$((current_unknown_count - SECTION_START_UNKNOWN_COUNT))
-        else
-            section_size_kb=$((total_size_cleaned - SECTION_START_SIZE_KB))
-        fi
-
-        if [[ "$section_unknown_count" -gt 0 ]]; then
-            if [[ "$section_size_kb" -gt 0 ]]; then
-                echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · at least $(colorize_human_size "$(bytes_to_human_kb "$section_size_kb")")"
-            else
-                echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · size unknown"
-            fi
-        elif [[ "$section_size_kb" -gt 0 ]]; then
-            echo -e "  ${GRAY}${ICON_SUBLIST} Category total${NC} · $(colorize_human_size "$(bytes_to_human_kb "$section_size_kb")")"
-        fi
     fi
     TRACK_SECTION=0
 }
@@ -977,22 +957,14 @@ _safe_clean_impl() {
         fi
     done
 
-    # Preview must use the same eligible candidate set as a real cleanup.
-    # Only then may the process-state guard decide whether either mode stops.
-    if [[ "${DRY_RUN:-false}" == "true" && -n "$delete_guard" && ${#existing_paths[@]} -gt 0 ]] &&
-        ! "$delete_guard" "${existing_paths[0]}"; then
-        return 75
-    fi
+    if [[ ${#existing_paths[@]} -gt 1 ]]; then
+        local -a normalized_paths=()
+        while IFS= read -r -d '' path; do
+            [[ -n "$path" ]] && normalized_paths+=("$path")
+        done < <(normalize_paths_for_cleanup "${existing_paths[@]}")
 
-    if [[ "$DRY_RUN" == "true" && ${#existing_paths[@]} -gt 0 ]]; then
-        local -a registered_paths=()
-        for path in "${existing_paths[@]}"; do
-            if register_dry_run_cleanup_target "$path"; then
-                registered_paths+=("$path")
-            fi
-        done
-        if [[ ${#registered_paths[@]} -gt 0 ]]; then
-            existing_paths=("${registered_paths[@]}")
+        if [[ ${#normalized_paths[@]} -gt 0 ]]; then
+            existing_paths=("${normalized_paths[@]}")
         else
             existing_paths=()
         fi
@@ -1038,20 +1010,8 @@ _safe_clean_impl() {
         if [[ "$show_scan_feedback" == "true" ]]; then
             stop_section_spinner
         fi
+        [[ $delete_guard_stopped -eq 1 ]] && return 75
         return 0
-    fi
-
-    if [[ ${#existing_paths[@]} -gt 1 ]]; then
-        local -a normalized_paths=()
-        while IFS= read -r -d '' path; do
-            [[ -n "$path" ]] && normalized_paths+=("$path")
-        done < <(normalize_paths_for_cleanup "${existing_paths[@]}")
-
-        if [[ ${#normalized_paths[@]} -gt 0 ]]; then
-            existing_paths=("${normalized_paths[@]}")
-        else
-            existing_paths=()
-        fi
     fi
 
     local show_spinner=false
@@ -1189,7 +1149,10 @@ _safe_clean_impl() {
                         elif safe_remove "$path" true "$size"; then
                             removed=1
                         fi
-                    else
+                    elif [[ -n "$delete_guard" ]] && ! "$delete_guard" "$path"; then
+                        delete_guard_stopped=1
+                        break
+                    elif record_dry_run_cleanup_target "$path" "$size" 1 true; then
                         removed=1
                     fi
 
@@ -1237,7 +1200,10 @@ _safe_clean_impl() {
                     elif safe_remove "$path" true "$size_kb"; then
                         removed=1
                     fi
-                else
+                elif [[ -n "$delete_guard" ]] && ! "$delete_guard" "$path"; then
+                    delete_guard_stopped=1
+                    break
+                elif record_dry_run_cleanup_target "$path" "$size_kb" 1 true; then
                     removed=1
                 fi
 
@@ -1293,23 +1259,6 @@ _safe_clean_impl() {
             local size_display
             size_display=$(colorize_human_size "$size_human")
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $description${NC} · ${count_note}${size_display} ${YELLOW}dry${NC}"
-
-            idx=0
-            if [[ ${#existing_paths[@]} -gt 0 ]]; then
-                for path in "${existing_paths[@]}"; do
-                    local size=0
-
-                    if [[ -n "${temp_dir:-}" && -f "$temp_dir/result_${idx}" ]]; then
-                        read -r size count < "$temp_dir/result_${idx}" 2> /dev/null || true
-                    else
-                        size=$(get_cleanup_path_size_kb "$path" 2> /dev/null || echo "0")
-                    fi
-
-                    [[ "$size" =~ ^[0-9]+$ ]] || size=0
-                    append_dry_run_cleanup_target "$path" "$size" 1 true
-                    idx=$((idx + 1))
-                done
-            fi
         else
             local line_color
             line_color=$(cleanup_result_color_kb "$total_size_kb")
@@ -1541,6 +1490,8 @@ perform_cleanup() {
     total_items=0
     files_cleaned=0
     total_size_cleaned=0
+    DEFERRED_CLEANUP_FAMILIES=()
+    DEFERRED_CLEANUP_FAMILIES_FILE=$(create_temp_file 2> /dev/null || true)
 
     local had_errexit=0
     [[ $- == *e* ]] && had_errexit=1
@@ -1609,8 +1560,8 @@ perform_cleanup() {
         clean_developer_tools
         end_section
 
-        # ===== 7. Applications =====
-        start_section "Applications"
+        # ===== 7. Apps & utilities =====
+        start_section "Apps & utilities"
         clean_user_gui_applications
         end_section
 
@@ -1631,7 +1582,6 @@ perform_cleanup() {
         clean_orphaned_container_stubs
         clean_stale_launch_services_registrations
         show_user_launch_agent_hint_notice
-        show_orphan_dotdir_hint_notice
         end_section
 
         # ===== 11. Apple Silicon =====
@@ -1654,12 +1604,7 @@ perform_cleanup() {
         check_large_file_candidates
         end_section
 
-        # ===== 15. System Data clues =====
-        start_section "System Data clues"
-        show_system_data_hint_notice
-        end_section
-
-        # ===== 16. Project artifacts =====
+        # ===== 15. Project artifacts =====
         start_section "Project artifacts"
         show_project_artifact_hint_notice
         end_section
@@ -1672,6 +1617,8 @@ perform_cleanup() {
     if [[ "$DRY_RUN" == "true" ]]; then
         render_clean_preview_from_ledger
     fi
+
+    sync_deferred_cleanup_families
 
     local summary_heading=""
     local summary_status="success"
@@ -1765,7 +1712,13 @@ perform_cleanup() {
         fi
     else
         summary_status="info"
-        if [[ "$DRY_RUN" == "true" ]]; then
+        if [[ ${#DEFERRED_CLEANUP_FAMILIES[@]} -gt 0 ]]; then
+            if [[ "$DRY_RUN" == "true" ]]; then
+                summary_details+=("No additional reclaimable space detected.")
+            else
+                summary_details+=("No additional space freed.")
+            fi
+        elif [[ "$DRY_RUN" == "true" ]]; then
             summary_details+=("No significant reclaimable space detected, system already clean.")
         else
             summary_details+=("System was already clean; no additional space freed.")
@@ -1774,6 +1727,10 @@ perform_cleanup() {
         while IFS= read -r free_space_line; do
             summary_details+=("$free_space_line")
         done < <(emit_free_space_summary "$initial_free_space_kb")
+    fi
+
+    if [[ ${#DEFERRED_CLEANUP_FAMILIES[@]} -gt 0 ]]; then
+        summary_details+=("Skipped while active: ${GRAY}$(format_deferred_cleanup_families)${NC}")
     fi
 
     if [[ "$DRY_RUN" == "true" &&

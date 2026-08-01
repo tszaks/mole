@@ -2,6 +2,83 @@
 # User Data Cleanup Module
 set -euo pipefail
 
+_defer_user_cleanup_family() {
+    if declare -f defer_cleanup_family > /dev/null 2>&1; then
+        defer_cleanup_family "$1"
+    else
+        debug_log "Deferred cleanup while active: $1"
+    fi
+}
+
+_user_cleanup_targets_exist() {
+    local target
+    for target in "$@"; do
+        # Match safe_clean's eligible set: broken symlinks are not cleanup
+        # candidates and must not trigger an active-process defer.
+        [[ -e "$target" ]] || continue
+        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
+            continue
+        fi
+        return 0
+    done
+    return 1
+}
+
+_user_process_delete_guard_allows() {
+    local process_state=0
+    "$_MOLE_USER_PROCESS_GUARD_PROBE" || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_USER_PROCESS_GUARD_REASON="$_MOLE_USER_PROCESS_GUARD_FAMILY started"
+    [[ $process_state -eq 2 ]] && _MOLE_USER_PROCESS_GUARD_REASON="process state unknown"
+    return 1
+}
+
+_user_safe_clean_process_guarded() {
+    local probe="$1"
+    local family="$2"
+    local display_name="$3"
+    shift 3
+    local _MOLE_USER_PROCESS_GUARD_PROBE="$probe"
+    local _MOLE_USER_PROCESS_GUARD_FAMILY="$family"
+    local _MOLE_USER_PROCESS_GUARD_REASON="${family} started"
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        if ! _user_process_delete_guard_allows; then
+            if [[ "$_MOLE_USER_PROCESS_GUARD_REASON" == "process state unknown" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_USER_PROCESS_GUARD_REASON})"
+                note_activity
+            else
+                _defer_user_cleanup_family "$family"
+            fi
+            return 1
+        fi
+        safe_clean "$@"
+        return $?
+    fi
+
+    local guarded_rc=0
+    safe_clean_guarded _user_process_delete_guard_allows "$@" || guarded_rc=$?
+    if [[ $guarded_rc -eq 75 ]]; then
+        if [[ "$_MOLE_USER_PROCESS_GUARD_REASON" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_USER_PROCESS_GUARD_REASON})"
+            note_activity
+        else
+            _defer_user_cleanup_family "$family"
+        fi
+        return 1
+    fi
+    return "$guarded_rc"
+}
+
 clean_trash() {
     if is_path_whitelisted "$HOME/.Trash"; then
         return 0
@@ -20,34 +97,39 @@ clean_trash() {
 
     if [[ "$DRY_RUN" == "true" ]]; then
         if [[ $trash_count -gt 0 ]]; then
-            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
-                local trash_item
-                while IFS= read -r -d '' trash_item; do
-                    [[ -e "$trash_item" ]] || continue
-                    if should_protect_path "$trash_item" 2> /dev/null || is_path_whitelisted "$trash_item" 2> /dev/null; then
-                        continue
-                    fi
-                    local trash_item_kb
-                    trash_item_kb=$(get_path_size_kb "$trash_item" 2> /dev/null || echo "0")
-                    [[ "$trash_item_kb" =~ ^[0-9]+$ ]] || trash_item_kb=0
-                    record_dry_run_cleanup_target "$trash_item" "$trash_item_kb" 1 true || true
-                done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+            local preview_count=0
+            local trash_item
+            while IFS= read -r -d '' trash_item; do
+                [[ -e "$trash_item" ]] || continue
+                if should_protect_path "$trash_item" 2> /dev/null ||
+                    is_path_whitelisted "$trash_item" 2> /dev/null ||
+                    (declare -f holds_compiled_model_cache > /dev/null 2>&1 &&
+                        holds_compiled_model_cache "$trash_item" 2> /dev/null); then
+                    continue
+                fi
+                local trash_item_kb
+                trash_item_kb=$(get_path_size_kb "$trash_item" 2> /dev/null || echo "0")
+                [[ "$trash_item_kb" =~ ^[0-9]+$ ]] || trash_item_kb=0
+                if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                    record_dry_run_cleanup_target "$trash_item" "$trash_item_kb" 1 true || continue
+                fi
+                preview_count=$((preview_count + 1))
+            done < <(command find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
+            if [[ $preview_count -gt 0 ]]; then
+                echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $preview_count items"
+                note_activity
             fi
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Trash · would empty, $trash_count items"
-        else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
         fi
-        note_activity
         return 0
     fi
 
     if [[ $trash_count -eq 0 ]]; then
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Trash · already empty"
+        debug_log "Trash already empty"
         return 0
     fi
 
     if [[ -t 1 ]]; then
-        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Emptying trash, ${trash_count} items..."
+        MOLE_SPINNER_PREFIX="  " start_inline_spinner "Emptying trash..."
     fi
 
     local cleaned_count=0
@@ -391,23 +473,17 @@ _clean_chromium_old_versions() {
     shift 3
     local -a app_paths=("$@")
 
-    if "$running_probe"; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${label} old versions · skipped (${label} running)"
-        note_activity
-        return 0
-    fi
-
+    local app_path versions_dir
     local cleaned_count=0
     local total_size=0
     local cleaned_any=false
-    local app_path
-
+    local stopped_reason=""
     for app_path in "${app_paths[@]}"; do
         [[ -d "$app_path" ]] || continue
 
         # Every silent skip below logs its reason: "old versions not removed"
         # reports are undiagnosable without knowing which gate bailed (#1216).
-        local versions_dir="$app_path/Contents/Frameworks/$framework/Versions"
+        versions_dir="$app_path/Contents/Frameworks/$framework/Versions"
         if [[ ! -d "$versions_dir" ]]; then
             debug_log "${label} old versions: no Versions dir at $versions_dir"
             continue
@@ -446,7 +522,7 @@ _clean_chromium_old_versions() {
         local -a old_versions=()
         local dir name
         for dir in "$versions_dir"/*; do
-            [[ -d "$dir" ]] || continue
+            [[ -d "$dir" && ! -L "$dir" ]] || continue
             name=$(basename "$dir")
             [[ "$name" == "Current" ]] && continue
             local mtime
@@ -463,12 +539,12 @@ _clean_chromium_old_versions() {
         fi
 
         for dir in "$versions_dir"/*; do
-            [[ -d "$dir" ]] || continue
+            [[ -d "$dir" && ! -L "$dir" ]] || continue
             name=$(basename "$dir")
             [[ "$name" == "Current" ]] && continue
             [[ "$name" == "$current_version" ]] && continue
             [[ -n "$newest_version" && "$name" == "$newest_version" ]] && continue
-            if is_path_whitelisted "$dir"; then
+            if should_protect_path "$dir" || is_path_whitelisted "$dir" || holds_compiled_model_cache "$dir"; then
                 continue
             fi
             old_versions+=("$dir")
@@ -479,24 +555,62 @@ _clean_chromium_old_versions() {
             continue
         fi
 
+        local process_state=0
+        "$running_probe" || process_state=$?
+        if [[ $process_state -ne 1 ]]; then
+            if [[ $process_state -eq 2 ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${label} old versions · skipped (process state unknown)"
+                note_activity
+            else
+                _defer_user_cleanup_family "$label"
+            fi
+            return 0
+        fi
+
         for dir in "${old_versions[@]}"; do
+            process_state=0
+            "$running_probe" || process_state=$?
+            if [[ $process_state -ne 1 ]]; then
+                stopped_reason="${label} started"
+                [[ $process_state -eq 2 ]] && stopped_reason="process state unknown"
+                break
+            fi
             local size_kb
             size_kb=$(get_path_size_kb "$dir" || echo 0)
             size_kb="${size_kb:-0}"
-            if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
-                record_dry_run_cleanup_target "$dir" "$size_kb" 1 true || continue
+            process_state=0
+            "$running_probe" || process_state=$?
+            if [[ $process_state -ne 1 ]]; then
+                stopped_reason="${label} started"
+                [[ $process_state -eq 2 ]] && stopped_reason="process state unknown"
+                break
             fi
-            total_size=$((total_size + size_kb))
-            cleaned_count=$((cleaned_count + 1))
-            cleaned_any=true
-            if [[ "$DRY_RUN" != "true" ]]; then
-                if has_sudo_session; then
-                    safe_sudo_remove "$dir" > /dev/null 2>&1 || true
-                else
-                    safe_remove "$dir" true > /dev/null 2>&1 || true
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+                if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                    record_dry_run_cleanup_target "$dir" "$size_kb" 1 true || continue
                 fi
+                total_size=$((total_size + size_kb))
+                cleaned_count=$((cleaned_count + 1))
+                cleaned_any=true
+                continue
+            fi
+
+            local removed=false
+            if has_sudo_session; then
+                safe_sudo_remove "$dir" "$size_kb" > /dev/null 2>&1 && removed=true
+            else
+                safe_remove "$dir" true "$size_kb" > /dev/null 2>&1 && removed=true
+            fi
+            if [[ "$removed" == "true" ]]; then
+                total_size=$((total_size + size_kb))
+                cleaned_count=$((cleaned_count + 1))
+                cleaned_any=true
+            else
+                debug_log "${label} old version removal failed: $dir"
             fi
         done
+        [[ -n "$stopped_reason" ]] && break
     done
 
     if [[ "$cleaned_any" == "true" ]]; then
@@ -514,23 +628,92 @@ _clean_chromium_old_versions() {
         total_items=$((total_items + 1))
         note_activity
     fi
+    if [[ -n "$stopped_reason" ]]; then
+        if [[ "$stopped_reason" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${label} old versions · stopped (${stopped_reason})"
+            note_activity
+        else
+            _defer_user_cleanup_family "$label"
+        fi
+    fi
 }
 
 # Chrome also runs under a helper process name, so the probe is wider than pgrep -x.
 is_google_chrome_running() {
-    pgrep -x "Google Chrome" > /dev/null 2>&1 && return 0
-    pgrep -x "Google Chrome Helper" > /dev/null 2>&1 && return 0
-    pgrep -f "/Google Chrome.app/" > /dev/null 2>&1 && return 0
-    return 1
+    mole_pgrep_any \
+        -x "Google Chrome" \
+        -x "Google Chrome Helper" \
+        -f "/Google Chrome.app/"
 }
 
 # Exact process names only: "Microsoft Edge" must not match Microsoft Teams.
 is_microsoft_edge_running() {
-    pgrep -x "Microsoft Edge" > /dev/null 2>&1
+    mole_pgrep_any -x "Microsoft Edge"
 }
 
 is_brave_browser_running() {
-    pgrep -x "Brave Browser" > /dev/null 2>&1
+    mole_pgrep_any -x "Brave Browser"
+}
+
+_firefox_process_state() {
+    mole_pgrep_any -x "Firefox"
+}
+
+_dropbox_process_state() {
+    mole_pgrep_any -x "Dropbox"
+}
+
+_google_drive_process_state() {
+    mole_pgrep_any -x "Google Drive"
+}
+
+_onedrive_process_state() {
+    mole_pgrep_any -x "OneDrive"
+}
+
+_clean_chrome_profile_caches_guarded() {
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome app cache" \
+        ~/Library/Application\ Support/Google/Chrome/*/Application\ Cache/* "Chrome app cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome code cache" \
+        ~/Library/Application\ Support/Google/Chrome/*/Code\ Cache/* "Chrome code cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome GPU cache" \
+        ~/Library/Application\ Support/Google/Chrome/*/GPUCache/* "Chrome GPU cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome Dawn cache" \
+        ~/Library/Application\ Support/Google/Chrome/*/DawnCache/* "Chrome Dawn cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome GR shader cache" \
+        ~/Library/Application\ Support/Google/Chrome/*/GrShaderCache/* "Chrome GR shader cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome Graphite Dawn cache" \
+        ~/Library/Application\ Support/Google/Chrome/*/GraphiteDawnCache/* "Chrome Graphite Dawn cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome component CRX cache" \
+        ~/Library/Application\ Support/Google/Chrome/component_crx_cache/* "Chrome component CRX cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome shader cache" \
+        ~/Library/Application\ Support/Google/Chrome/ShaderCache/* "Chrome shader cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome GR shader cache" \
+        ~/Library/Application\ Support/Google/Chrome/GrShaderCache/* "Chrome GR shader cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome Dawn cache" \
+        ~/Library/Application\ Support/Google/Chrome/GraphiteDawnCache/* "Chrome Dawn cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome crash reports" \
+        ~/Library/Application\ Support/Google/Chrome/Crashpad/completed/* "Chrome crash reports" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome on-device model cache" \
+        ~/Library/Application\ Support/Google/Chrome/OptGuideOnDeviceModel/* "Chrome on-device model cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome on-device classifier cache" \
+        ~/Library/Application\ Support/Google/Chrome/OptGuideOnDeviceClassifierModel/* "Chrome on-device classifier cache" || return 1
+    _user_safe_clean_process_guarded is_google_chrome_running "Chrome" "Chrome optimization guide models" \
+        ~/Library/Application\ Support/Google/Chrome/optimization_guide_model_store/* "Chrome optimization guide models" || return 1
+}
+
+_clean_firefox_caches_guarded() {
+    _user_safe_clean_process_guarded _firefox_process_state "Firefox" "Firefox cache" \
+        ~/Library/Caches/Firefox/* "Firefox cache" || return 1
+    _user_safe_clean_process_guarded _firefox_process_state "Firefox" "Firefox profile cache" \
+        ~/Library/Application\ Support/Firefox/Profiles/*/cache2/* "Firefox profile cache" || return 1
+}
+
+_clean_dropbox_caches_guarded() {
+    _user_safe_clean_process_guarded _dropbox_process_state "Dropbox" "Dropbox cache" \
+        ~/Library/Caches/com.dropbox.* "Dropbox cache" || return 1
+    _user_safe_clean_process_guarded _dropbox_process_state "Dropbox" "Dropbox cache" \
+        ~/Library/Caches/com.getdropbox.dropbox "Dropbox cache" || return 1
 }
 
 # Remove old Google Chrome versions while keeping Current.
@@ -570,16 +753,10 @@ clean_edge_updater_old_versions() {
     local updater_dir="$HOME/Library/Application Support/Microsoft/EdgeUpdater/apps/msedge-stable"
     [[ -d "$updater_dir" ]] || return 0
 
-    if pgrep -x "Microsoft Edge" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Edge updater old versions · skipped (Edge running)"
-        note_activity
-        return 0
-    fi
-
     local -a version_dirs=()
     local dir
     for dir in "$updater_dir"/*; do
-        [[ -d "$dir" ]] || continue
+        [[ -d "$dir" && ! -L "$dir" ]] || continue
         version_dirs+=("$dir")
     done
 
@@ -610,10 +787,7 @@ clean_edge_updater_old_versions() {
         [[ -n "$latest_version" ]] || return 0
     fi
 
-    local cleaned_count=0
-    local total_size=0
-    local cleaned_any=false
-
+    local -a cleanable_dirs=()
     for dir in "${version_dirs[@]}"; do
         local name
         name=$(basename "$dir")
@@ -627,20 +801,55 @@ clean_edge_updater_old_versions() {
         else
             [[ "$name" == "$latest_version" ]] && continue
         fi
-        if is_path_whitelisted "$dir"; then
+        if should_protect_path "$dir" || is_path_whitelisted "$dir" || holds_compiled_model_cache "$dir"; then
             continue
         fi
+        cleanable_dirs+=("$dir")
+    done
+    [[ ${#cleanable_dirs[@]} -gt 0 ]] || return 0
+
+    local process_state=0
+    is_microsoft_edge_running || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Edge updater old versions · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_user_cleanup_family "Edge"
+        fi
+        return 0
+    fi
+
+    local cleaned_count=0
+    local total_size=0
+    local cleaned_any=false
+    local stopped_reason=""
+    for dir in "${cleanable_dirs[@]}"; do
         local size_kb
         size_kb=$(get_path_size_kb "$dir" || echo 0)
         size_kb="${size_kb:-0}"
-        if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
-            record_dry_run_cleanup_target "$dir" "$size_kb" 1 true || continue
+        process_state=0
+        is_microsoft_edge_running || process_state=$?
+        if [[ $process_state -ne 1 ]]; then
+            stopped_reason="Edge started"
+            [[ $process_state -eq 2 ]] && stopped_reason="process state unknown"
+            break
         fi
-        total_size=$((total_size + size_kb))
-        cleaned_count=$((cleaned_count + 1))
-        cleaned_any=true
-        if [[ "$DRY_RUN" != "true" ]]; then
-            safe_remove "$dir" true > /dev/null 2>&1 || true
+        if [[ "$DRY_RUN" == "true" ]]; then
+            if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                record_dry_run_cleanup_target "$dir" "$size_kb" 1 true || continue
+            fi
+            total_size=$((total_size + size_kb))
+            cleaned_count=$((cleaned_count + 1))
+            cleaned_any=true
+            continue
+        fi
+        if safe_remove "$dir" true "$size_kb" > /dev/null 2>&1; then
+            total_size=$((total_size + size_kb))
+            cleaned_count=$((cleaned_count + 1))
+            cleaned_any=true
+        else
+            debug_log "Edge updater old version removal failed: $dir"
         fi
     done
 
@@ -658,6 +867,14 @@ clean_edge_updater_old_versions() {
         total_size_cleaned=$((total_size_cleaned + total_size))
         total_items=$((total_items + 1))
         note_activity
+    fi
+    if [[ -n "$stopped_reason" ]]; then
+        if [[ "$stopped_reason" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Edge updater old versions · stopped (${stopped_reason})"
+            note_activity
+        else
+            _defer_user_cleanup_family "Edge"
+        fi
     fi
 }
 
@@ -1384,27 +1601,35 @@ clean_browsers() {
     # closed, removing MV3 extension bytecode can break extension service
     # workers and trigger security warnings during dry-run scans. See #785,
     # #964, and #968.
-    local _chrome_running=false
-    pgrep -x "Google Chrome" > /dev/null 2>&1 && _chrome_running=true
-    if [[ "$_chrome_running" != "true" ]]; then
-        safe_clean ~/Library/Application\ Support/Google/Chrome/*/Application\ Cache/* "Chrome app cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/*/Code\ Cache/* "Chrome code cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/*/GPUCache/* "Chrome GPU cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/*/DawnCache/* "Chrome Dawn cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/*/GrShaderCache/* "Chrome GR shader cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/*/GraphiteDawnCache/* "Chrome Graphite Dawn cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/component_crx_cache/* "Chrome component CRX cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/ShaderCache/* "Chrome shader cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/GrShaderCache/* "Chrome GR shader cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/GraphiteDawnCache/* "Chrome Dawn cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/Crashpad/completed/* "Chrome crash reports"
+    local chrome_support_has_targets=false
+    if _user_cleanup_targets_exist \
+        "$HOME/Library/Application Support/Google/Chrome"/*/Application\ Cache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/*/Code\ Cache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/*/GPUCache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/*/DawnCache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/*/GrShaderCache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/*/GraphiteDawnCache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/component_crx_cache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/ShaderCache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/GrShaderCache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/GraphiteDawnCache/* \
+        "$HOME/Library/Application Support/Google/Chrome"/Crashpad/completed/* \
+        "$HOME/Library/Application Support/Google/Chrome"/OptGuideOnDeviceModel/* \
+        "$HOME/Library/Application Support/Google/Chrome"/OptGuideOnDeviceClassifierModel/* \
+        "$HOME/Library/Application Support/Google/Chrome"/optimization_guide_model_store/*; then
+        chrome_support_has_targets=true
+    fi
+
+    local chrome_state=0
+    is_google_chrome_running || chrome_state=$?
+    if [[ $chrome_state -eq 1 ]]; then
         # On-device AI model stores managed by Chrome's component updater;
         # re-downloaded on demand and often multiple GB (#1179).
-        safe_clean ~/Library/Application\ Support/Google/Chrome/OptGuideOnDeviceModel/* "Chrome on-device model cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/OptGuideOnDeviceClassifierModel/* "Chrome on-device classifier cache"
-        safe_clean ~/Library/Application\ Support/Google/Chrome/optimization_guide_model_store/* "Chrome optimization guide models"
-    else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome Application Support cache · skipped (Chrome running)"
+        _clean_chrome_profile_caches_guarded || true
+    elif [[ $chrome_state -eq 0 && "$chrome_support_has_targets" == "true" ]]; then
+        _defer_user_cleanup_family "Chrome"
+    elif [[ "$chrome_support_has_targets" == "true" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome profile caches · skipped (process state unknown)"
         note_activity
     fi
     local _chrome_profile
@@ -1530,15 +1755,21 @@ clean_browsers() {
         safe_clean ~/Library/Application\ Support/Yandex/YandexBrowser/GraphiteDawnCache/* "Yandex Dawn cache"
         safe_clean ~/Library/Application\ Support/Yandex/YandexBrowser/*/GPUCache/* "Yandex GPU cache"
     fi
-    local firefox_running=false
-    if pgrep -x "Firefox" > /dev/null 2>&1; then
-        firefox_running=true
-    fi
-    if [[ "$firefox_running" == "true" ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Firefox cache · skipped (Firefox running)"
+    local firefox_state=0
+    _firefox_process_state || firefox_state=$?
+    local firefox_cache_targets=false
+    local firefox_profile_cache_targets=false
+    _user_cleanup_targets_exist "$HOME/Library/Caches/Firefox"/* && firefox_cache_targets=true
+    _user_cleanup_targets_exist "$HOME/Library/Application Support/Firefox/Profiles"/*/cache2/* && firefox_profile_cache_targets=true
+    if [[ $firefox_state -eq 0 ]]; then
+        if [[ "$firefox_cache_targets" == "true" || "$firefox_profile_cache_targets" == "true" ]]; then
+            _defer_user_cleanup_family "Firefox"
+        fi
+    elif [[ $firefox_state -eq 1 ]]; then
+        _clean_firefox_caches_guarded || true
+    elif [[ "$firefox_cache_targets" == "true" || "$firefox_profile_cache_targets" == "true" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Firefox caches · skipped (process state unknown)"
         note_activity
-    else
-        safe_clean ~/Library/Caches/Firefox/* "Firefox cache"
     fi
     safe_clean ~/Library/Caches/com.operasoftware.Opera/* "Opera cache"
     # Vivaldi Browser.
@@ -1565,12 +1796,6 @@ clean_browsers() {
     safe_clean ~/Library/Caches/Comet/* "Comet cache"
     safe_clean ~/Library/Caches/com.kagi.kagimacOS/* "Orion cache"
     safe_clean ~/Library/Caches/zen/* "Zen cache"
-    if [[ "$firefox_running" == "true" ]]; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Firefox profile cache · skipped (Firefox running)"
-        note_activity
-    else
-        safe_clean ~/Library/Application\ Support/Firefox/Profiles/*/cache2/* "Firefox profile cache"
-    fi
     clean_chrome_old_versions
     clean_edge_old_versions
     clean_edge_updater_old_versions
@@ -1597,27 +1822,58 @@ clean_cloud_storage() {
     if [[ "${MO_DEBUG:-0}" == "1" ]]; then
         echo "[DEBUG] Cleaning cloud storage caches..." >&2
     fi
-    if pgrep -x "Dropbox" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Dropbox cache · skipped (Dropbox running)"
+    local dropbox_state=0
+    _dropbox_process_state || dropbox_state=$?
+    if [[ $dropbox_state -eq 0 ]]; then
+        if _user_cleanup_targets_exist \
+            "$HOME/Library/Caches/com.getdropbox.dropbox" \
+            "$HOME/Library/Caches"/com.dropbox.*; then
+            _defer_user_cleanup_family "Dropbox"
+        fi
+    elif [[ $dropbox_state -eq 1 ]]; then
+        _clean_dropbox_caches_guarded || true
+    elif _user_cleanup_targets_exist \
+        "$HOME/Library/Caches/com.getdropbox.dropbox" \
+        "$HOME/Library/Caches"/com.dropbox.*; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Dropbox cache · skipped (process state unknown)"
         note_activity
-    else
-        safe_clean ~/Library/Caches/com.dropbox.* "Dropbox cache"
-        safe_clean ~/Library/Caches/com.getdropbox.dropbox "Dropbox cache"
     fi
-    if pgrep -x "Google Drive" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Google Drive cache · skipped (Google Drive running)"
+    local google_drive_state=0
+    _google_drive_process_state || google_drive_state=$?
+    if [[ $google_drive_state -eq 0 ]]; then
+        if _user_cleanup_targets_exist "$HOME/Library/Caches/com.google.GoogleDrive"; then
+            _defer_user_cleanup_family "Google Drive"
+        fi
+    elif [[ $google_drive_state -eq 1 ]]; then
+        _user_safe_clean_process_guarded \
+            _google_drive_process_state \
+            "Google Drive" \
+            "Google Drive cache" \
+            ~/Library/Caches/com.google.GoogleDrive \
+            "Google Drive cache" || true
+    elif _user_cleanup_targets_exist "$HOME/Library/Caches/com.google.GoogleDrive"; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Google Drive cache · skipped (process state unknown)"
         note_activity
-    else
-        safe_clean ~/Library/Caches/com.google.GoogleDrive "Google Drive cache"
     fi
     safe_clean ~/Library/Caches/com.baidu.netdisk "Baidu Netdisk cache"
     safe_clean ~/Library/Caches/com.alibaba.teambitiondisk "Alibaba Cloud cache"
     safe_clean ~/Library/Caches/com.box.desktop "Box cache"
-    if pgrep -x "OneDrive" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} OneDrive cache · skipped (OneDrive running)"
+    local onedrive_state=0
+    _onedrive_process_state || onedrive_state=$?
+    if [[ $onedrive_state -eq 0 ]]; then
+        if _user_cleanup_targets_exist "$HOME/Library/Caches/com.microsoft.OneDrive"; then
+            _defer_user_cleanup_family "OneDrive"
+        fi
+    elif [[ $onedrive_state -eq 1 ]]; then
+        _user_safe_clean_process_guarded \
+            _onedrive_process_state \
+            "OneDrive" \
+            "OneDrive cache" \
+            ~/Library/Caches/com.microsoft.OneDrive \
+            "OneDrive cache" || true
+    elif _user_cleanup_targets_exist "$HOME/Library/Caches/com.microsoft.OneDrive"; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} OneDrive cache · skipped (process state unknown)"
         note_activity
-    else
-        safe_clean ~/Library/Caches/com.microsoft.OneDrive "OneDrive cache"
     fi
 }
 
@@ -1680,9 +1936,15 @@ clean_tart_caches() {
         return 0
     fi
 
-    if pgrep -x "tart" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Tart caches · skipped (Tart running)"
-        note_activity
+    local tart_state=0
+    mole_pgrep_any -x "tart" || tart_state=$?
+    if [[ $tart_state -ne 1 ]]; then
+        if [[ $tart_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Tart caches · skipped (process state unknown)"
+            note_activity
+        else
+            _defer_user_cleanup_family "Tart"
+        fi
         return 0
     fi
 
@@ -1699,7 +1961,18 @@ clean_tart_caches() {
         start_section_spinner "Pruning Tart caches..."
     fi
     local prune_succeeded=false
-    if run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" tart prune --entries caches --older-than "$MOLE_ORPHAN_AGE_DAYS" > /dev/null 2>&1; then
+    tart_state=0
+    mole_pgrep_any -x "tart" || tart_state=$?
+    if [[ $tart_state -ne 1 ]]; then
+        [[ -t 1 ]] && stop_section_spinner
+        if [[ $tart_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Tart caches · stopped (process state unknown)"
+            note_activity
+        else
+            _defer_user_cleanup_family "Tart"
+        fi
+        return 0
+    elif run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" tart prune --entries caches --older-than "$MOLE_ORPHAN_AGE_DAYS" > /dev/null 2>&1; then
         prune_succeeded=true
     fi
     if [[ -t 1 ]]; then
@@ -2226,7 +2499,7 @@ report_agent_worktree_candidates() {
             size_kb=$(get_path_size_kb "$container" 2> /dev/null || echo 0)
             [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
             [[ "$size_kb" -ge "$threshold_kb" ]] || continue
-            echo -e "  ${YELLOW}${ICON_WARNING}${NC} AI agent worktrees · ${GREEN}$(bytes_to_human "$((size_kb * 1024))")${NC} · ${GRAY}$(format_path_link "$container")${NC}"
+            echo -e "  ${YELLOW}${ICON_REVIEW}${NC} AI agent worktrees · ${GREEN}$(bytes_to_human "$((size_kb * 1024))")${NC} · ${GRAY}$(format_path_link "$container")${NC}"
             note_activity
         done < <(run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" command find "$root" -maxdepth 6 -type d -path "*/.claude/worktrees" -prune -print0 2> /dev/null)
     done
@@ -2249,7 +2522,7 @@ check_large_file_candidates() {
         printf '%s\n' "$size_kb"
     }
 
-    # One row per large item: "label · size · path". The ◎ icon carries the
+    # One row per large item: "label · size · path". The review icon carries the
     # review-only semantics; format_path_link keeps the path clickable even
     # with spaces (OSC 8 link, not terminal auto-linking).
     _report_large_review_row() {
@@ -2257,7 +2530,7 @@ check_large_file_candidates() {
         local size_human="$2"
         local path="$3"
         stop_section_spinner
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} ${label} · ${GREEN}${size_human}${NC} · ${GRAY}$(format_path_link "$path")${NC}"
+        echo -e "  ${YELLOW}${ICON_REVIEW}${NC} ${label} · ${GREEN}${size_human}${NC} · ${GRAY}$(format_path_link "$path")${NC}"
         found_any=true
         start_section_spinner "Scanning large files..."
     }
@@ -2333,13 +2606,14 @@ check_large_file_candidates() {
             snapshot_count=$(echo "$snapshot_list" | { grep -Eo 'com\.apple\.TimeMachine\.[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}' || true; } | wc -l | awk '{print $1}')
             if [[ "$snapshot_count" =~ ^[0-9]+$ && "$snapshot_count" -gt 0 ]]; then
                 stop_section_spinner
-                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Time Machine local snapshots · ${GREEN}${snapshot_count}${NC}"
+                echo -e "  ${YELLOW}${ICON_REVIEW}${NC} Time Machine local snapshots · ${GREEN}${snapshot_count}${NC}"
                 found_any=true
                 start_section_spinner "Scanning large files..."
             fi
         fi
     fi
 
+    local docker_reported=false
     if command -v docker > /dev/null 2>&1; then
         local docker_output
         docker_output=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" docker system df --format '{{.Type}}\t{{.Size}}\t{{.Reclaimable}}' 2> /dev/null || true)
@@ -2351,22 +2625,29 @@ check_large_file_candidates() {
             done <<< "$docker_output"
             if [[ -n "$docker_detail" ]]; then
                 stop_section_spinner
-                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Docker storage · ${GRAY}${docker_detail}${NC}"
+                echo -e "  ${YELLOW}${ICON_REVIEW}${NC} Docker storage · ${GRAY}${docker_detail}${NC}"
                 found_any=true
+                docker_reported=true
                 start_section_spinner "Scanning large files..."
             fi
         else
             docker_output=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" docker system df 2> /dev/null || true)
             if [[ -n "$docker_output" ]]; then
                 stop_section_spinner
-                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Docker storage · ${GRAY}docker system df${NC}"
+                echo -e "  ${YELLOW}${ICON_REVIEW}${NC} Docker storage · ${GRAY}docker system df${NC}"
                 found_any=true
+                docker_reported=true
                 start_section_spinner "Scanning large files..."
             fi
         fi
     fi
 
+    _report_large_review_dir "Xcode DerivedData" "$HOME/Library/Developer/Xcode/DerivedData"
     _report_large_review_dir "Xcode archives" "$HOME/Library/Developer/Xcode/Archives"
+    _report_large_review_dir "Simulator data" "$HOME/Library/Developer/CoreSimulator/Devices"
+    if [[ "$docker_reported" != "true" ]]; then
+        _report_large_review_dir "Docker Desktop data" "$HOME/Library/Containers/com.docker.docker/Data"
+    fi
     # Device backups reach 100GB+ with millions of small files; the default
     # 3s du budget times out cold and silently drops the most valuable row,
     # so give this probe the hint-scan budget instead.

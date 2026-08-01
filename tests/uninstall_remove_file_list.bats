@@ -98,7 +98,7 @@ EOF
     [ "$ok_lines" -eq 5 ]
 }
 
-@test "remove_file_list falls through to per-file path when batch helper fails" {
+@test "remove_file_list preserves unmoved paths when the guarded batch helper fails" {
     local f1="$SANDBOX/x.plist"
     local f2="$SANDBOX/y.plist"
     : > "$f1"
@@ -109,31 +109,58 @@ EOF
     local trace="$SANDBOX/trace"
     : > "$trace"
 
-    # Stub the batch helper to fail, and stub mole_delete to record per-file
-    # invocations and act on the file. This proves the fallback path runs once
-    # per file rather than silently dropping the batch.
+    # A failed identity-bound batch must not hand the same stale lexical paths
+    # to a second sink. The files stay in place for manual review.
     run /bin/bash --noprofile --norc <<EOF
 $(prelude)
 _mole_move_to_trash_batch() { return 1; }
 mole_delete() {
     printf 'mole_delete %s\n' "\$1" >> "$trace"
-    rm -f "\$1"
-    return 0
+    return 99
 }
 remove_file_list "$list" "false"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"2"* ]] || return 1
+    [[ "$output" == *"0"* ]] || return 1
+    [[ -e "$f1" && -e "$f2" ]] || return 1
+    [[ ! -s "$trace" ]]
+}
 
-    [[ ! -e "$f1" ]] || return 1
-    [[ ! -e "$f2" ]] || return 1
+@test "guarded Trash batch rejects an ancestor swapped after collection" {
+    local base="$SANDBOX/swap-parent"
+    local original_parent="$SANDBOX/original-parent"
+    local outside_parent="$HOME/Documents/OutsideParent"
+    local target="$base/cache"
+    mkdir -p "$target" "$outside_parent/cache"
+    touch "$target/OWNED_SENTINEL" "$outside_parent/cache/OUTSIDE_SENTINEL"
+    local list="$target"
 
-    local fallback_calls
-    fallback_calls=$(wc -l < "$trace" | tr -d ' ')
-    [ "$fallback_calls" -eq 2 ]
-    grep -qF "mole_delete $f1" "$trace"
-    grep -qF "mole_delete $f2" "$trace"
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+eval "\$(declare -f _mole_snapshot_path_identity | sed '1s/_mole_snapshot_path_identity/_real_mole_snapshot_path_identity/')"
+snapshot_calls=0
+_mole_snapshot_path_identity() {
+    snapshot_calls=\$((snapshot_calls + 1))
+    if [[ \$snapshot_calls -eq 2 ]]; then
+        mv "$base" "$original_parent"
+        ln -s "$outside_parent" "$base"
+    fi
+    _real_mole_snapshot_path_identity "\$1"
+}
+mole_delete() { echo "UNEXPECTED_FALLBACK:\$1"; return 99; }
+remove_file_list "$list" "false"
+[[ -f "$outside_parent/cache/OUTSIDE_SENTINEL" ]]
+[[ -f "$original_parent/cache/OWNED_SENTINEL" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"0"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_FALLBACK"* ]] || return 1
+    [[ ! -e "$MOLE_TEST_TRASH_DIR/cache" ]]
 }
 
 @test "_mole_move_to_trash_batch returns 1 when trash CLI is missing under MOLE_TEST_NO_AUTH" {

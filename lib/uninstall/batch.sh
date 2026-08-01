@@ -15,23 +15,6 @@ is_uninstall_dry_run() {
     [[ "${MOLE_DRY_RUN:-0}" == "1" ]]
 }
 
-app_declares_local_network_usage() {
-    local app_path="$1"
-    local info_plist="$app_path/Contents/Info.plist"
-
-    [[ -f "$info_plist" ]] || return 1
-
-    if plutil -extract NSLocalNetworkUsageDescription raw "$info_plist" > /dev/null 2>&1; then
-        return 0
-    fi
-
-    if plutil -extract NSBonjourServices xml1 -o - "$info_plist" > /dev/null 2>&1; then
-        return 0
-    fi
-
-    return 1
-}
-
 # High-performance sensitive data detection (pure Bash, no subprocess)
 # Faster than grep for batch operations, especially when processing many apps
 has_sensitive_data() {
@@ -179,8 +162,13 @@ _uninstall_match_loaded_background_items() {
     [[ ${#details[@]} -eq 0 || ${#success_paths[@]} -eq 0 ]] && return 0
 
     local detail app_name app_path bundle_id enc_helpers sp matched
+    local _total_kb _encoded_files _encoded_system_files _has_sensitive_data
+    local _needs_sudo _is_brew_cask _cask_name _encoded_diag_system
+    local _encoded_review_system _sibling_guard
     for detail in "${details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id _ _ _ _ _ _ _ _ _ _ enc_helpers _ <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id _total_kb _encoded_files _encoded_system_files \
+            _has_sensitive_data _needs_sudo _is_brew_cask _cask_name _encoded_diag_system \
+            _encoded_review_system enc_helpers _sibling_guard <<< "$detail"
         matched=false
         for sp in "${success_paths[@]}"; do
             [[ "$sp" == "$app_path" ]] && matched=true && break
@@ -462,10 +450,9 @@ remove_login_item() {
 # Remove files (handles symlinks, optional sudo).
 # Security: All paths pass validate_path_for_deletion() before any deletion.
 # Performance: when MOLE_DELETE_MODE=trash and the batch is sudo-free and
-# symlink-free, the eligible paths are sent to Trash in a single subprocess
-# (one `trash` exec or one Finder AppleScript round-trip). This collapses the
-# previous N-subprocess fan-out that caused the post-confirmation "frozen
-# terminal" reported during `mo uninstall` on apps with many leftovers.
+# symlink-free, eligible paths share one guarded helper invocation. The helper
+# binds physical parent/target identities and uses direct Trash renames, avoiding
+# Finder/AppleScript startup per item without trusting a stale lexical batch.
 remove_file_list() {
     local file_list="$1"
     local use_sudo="${2:-false}"
@@ -474,6 +461,10 @@ remove_file_list() {
 
     local -a trash_batch=()
     local -a fallback_paths=()
+    _MOLE_TRASH_BATCH_SNAPSHOT_PATHS=()
+    _MOLE_TRASH_BATCH_SNAPSHOT_PARENTS=()
+    _MOLE_TRASH_BATCH_SNAPSHOT_PARENT_IDS=()
+    _MOLE_TRASH_BATCH_SNAPSHOT_TARGET_IDS=()
 
     while IFS= read -r file; do
         [[ -n "$file" && -e "$file" ]] || continue
@@ -494,26 +485,42 @@ remove_file_list() {
         if [[ "$mode" == "trash" && "$use_sudo" != "true" && ! -L "$file" ]] &&
             ! _mole_path_requires_direct_trash "$file" &&
             ! is_uninstall_dry_run; then
-            trash_batch+=("$file")
+            if _mole_snapshot_path_identity "$file"; then
+                trash_batch+=("$file")
+                _MOLE_TRASH_BATCH_SNAPSHOT_PATHS+=("$file")
+                _MOLE_TRASH_BATCH_SNAPSHOT_PARENTS+=("$_MOLE_PATH_SNAPSHOT_PARENT")
+                _MOLE_TRASH_BATCH_SNAPSHOT_PARENT_IDS+=("$_MOLE_PATH_SNAPSHOT_PARENT_ID")
+                _MOLE_TRASH_BATCH_SNAPSHOT_TARGET_IDS+=("$_MOLE_PATH_SNAPSHOT_TARGET_ID")
+            else
+                debug_log "Skipped Trash batch path with unstable identity: $file"
+                log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$file" "path identity unavailable"
+            fi
         else
             fallback_paths+=("$file")
         fi
     done <<< "$file_list"
 
     if [[ ${#trash_batch[@]} -gt 0 ]]; then
-        if _mole_move_to_trash_batch "${trash_batch[@]}"; then
-            local _bp _bsize
-            for _bp in "${trash_batch[@]}"; do
+        local batch_rc=0
+        _mole_move_to_trash_batch "${trash_batch[@]}" || batch_rc=$?
+        if [[ $batch_rc -eq 0 && ${#_MOLE_TRASH_BATCH_MOVED_PATHS[@]} -eq 0 ]]; then
+            # Test doubles and compatible older helpers report all-or-nothing
+            # success without populating the optional moved-path ledger.
+            _MOLE_TRASH_BATCH_MOVED_PATHS=("${trash_batch[@]}")
+        fi
+        local _bp _bsize
+        if [[ ${#_MOLE_TRASH_BATCH_MOVED_PATHS[@]} -gt 0 ]]; then
+            for _bp in "${_MOLE_TRASH_BATCH_MOVED_PATHS[@]}"; do
                 _bsize="unknown"
                 _mole_delete_log "trash" "$_bsize" "ok" "$_bp"
                 log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "TRASHED" "$_bp" "batch"
+                count=$((count + 1))
             done
-            count=$((count + ${#trash_batch[@]}))
-        else
-            # Batch failed wholesale: route each path through mole_delete so
-            # per-file Trash handling fails closed and forensic logging stays
-            # intact.
-            fallback_paths+=("${trash_batch[@]}")
+        fi
+        if [[ $batch_rc -ne 0 ]]; then
+            # Do not hand paths whose identity changed to a second lexical sink.
+            # A failed direct move leaves that item in place for manual review.
+            debug_log "Trash batch stopped; unmoved paths were preserved"
         fi
     fi
 
@@ -855,11 +862,6 @@ _batch_scan_app_details() {
             has_sensitive_data="true"
         fi
 
-        local has_local_network_usage="false"
-        if app_declares_local_network_usage "$app_path"; then
-            has_local_network_usage="true"
-        fi
-
         # Store details for later use (base64 keeps lists on one line).
         local encoded_files
         encoded_files=$(printf '%s' "$related_files" | base64 | tr -d '\n' || echo "")
@@ -873,7 +875,7 @@ _batch_scan_app_details() {
         login_item_helpers=$(discover_login_item_helper_bundle_ids "$app_path" || true)
         local encoded_login_item_helpers
         encoded_login_item_helpers=$(printf '%s' "$login_item_helpers" | base64 | tr -d '\n' || echo "")
-        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system|$has_local_network_usage|$encoded_review_system|$encoded_login_item_helpers|$sibling_guard")
+        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system|$encoded_review_system|$encoded_login_item_helpers|$sibling_guard")
     done
     if [[ -t 1 ]]; then stop_inline_spinner; fi
 
@@ -913,7 +915,7 @@ _batch_preview_and_confirm() {
     local has_zap_cask=false
     local zap_detail zap_is_brew zap_guard
     for zap_detail in "${app_details[@]}"; do
-        IFS='|' read -r _ _ _ _ _ _ _ _ zap_is_brew _ _ _ _ _ zap_guard <<< "$zap_detail"
+        IFS='|' read -r _ _ _ _ _ _ _ _ zap_is_brew _ _ _ _ zap_guard <<< "$zap_detail"
         if [[ "$zap_is_brew" == "true" && "${zap_guard:-none}" == "none" ]]; then
             has_zap_cask=true
             break
@@ -927,7 +929,7 @@ _batch_preview_and_confirm() {
     echo ""
 
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system has_local_network_usage encoded_review_system encoded_login_item_helpers sibling_guard <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system encoded_review_system encoded_login_item_helpers sibling_guard <<< "$detail"
         local app_size_display=$(bytes_to_human "$((total_kb * 1024))")
 
         local brew_tag=""
@@ -1026,14 +1028,14 @@ _batch_preview_and_confirm() {
 }
 
 # Phase 4: iterate app_details and perform the actual removal for each.
-# Tracks per-app failures, warnings (local network, system extensions,
-# still-running processes, container leftovers), and the total bytes
+# Tracks per-app failures, warnings (system extensions, still-running
+# processes, container leftovers), and the total bytes
 # actually freed. Per-app failures do not halt the loop; the surrounding
 # trap still terminates the whole pass on SIGINT/SIGTERM.
 # Reads:  app_details
 # Writes: success_count, failed_count, failed_items, success_items,
-#         success_dock_targets, local_network_warning_apps,
-#         system_extension_warning_apps, review_only_system_leftovers,
+#         success_dock_targets, system_extension_warning_apps,
+#         review_only_system_leftovers,
 #         review_only_system_leftover_keys, running_at_uninstall_apps,
 #         total_size_freed, brew_apps_removed,
 #         files_cleaned, total_items (the latter two via dynamic scope)
@@ -1044,7 +1046,7 @@ _batch_execute_removals() {
     local current_index=0
     for detail in "${app_details[@]}"; do
         current_index=$((current_index + 1))
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system has_local_network_usage encoded_review_system encoded_login_item_helpers sibling_guard <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system encoded_review_system encoded_login_item_helpers sibling_guard <<< "$detail"
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local diag_system=$(decode_file_list "$encoded_diag_system" "$app_name")
@@ -1343,10 +1345,6 @@ _batch_execute_removals() {
             total_items=$((total_items + 1))
             success_items+=("$app_path")
             success_dock_targets+=("$app_path|$bundle_id")
-            if [[ "$has_local_network_usage" == "true" ]]; then
-                local_network_warning_apps+=("$app_name")
-            fi
-
             # Check for orphaned system extensions (camera, network, endpoint security, etc.)
             if mole_is_reverse_dns_bundle_id "$bundle_id" && [[ -d /Library/SystemExtensions ]]; then
                 local system_extension_path=""
@@ -1383,11 +1381,11 @@ _batch_execute_removals() {
 }
 
 # Phase 5+6: assemble the post-removal summary block (success line, failed
-# apps, Local Network / system extension / Background Items / still-running
-# warnings) and emit it as a single summary block.
+# apps, system extension / Background Items / still-running warnings) and emit
+# it as a single summary block.
 # Reads:  success_count, failed_count, failed_items, success_items,
-#         total_size_freed, local_network_warning_apps,
-#         system_extension_warning_apps, review_only_system_leftovers,
+#         total_size_freed, system_extension_warning_apps,
+#         review_only_system_leftovers,
 #         background_items_warning_apps, running_at_uninstall_apps
 _batch_render_summary() {
     # Summary
@@ -1501,19 +1499,6 @@ _batch_render_summary() {
         done
 
         summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Review these paths before removing them manually; prefer the app's official uninstaller when available")
-    fi
-
-    if [[ ${#local_network_warning_apps[@]} -gt 0 ]]; then
-        local local_network_list=""
-        local idx
-        for ((idx = 0; idx < ${#local_network_warning_apps[@]}; idx++)); do
-            [[ $idx -gt 0 ]] && local_network_list+=", "
-            local_network_list+="${local_network_warning_apps[idx]}"
-        done
-
-        summary_details+=("${ICON_REVIEW} Local Network permissions on macOS 15+ can outlive app removal: ${YELLOW}${local_network_list}${NC}")
-        summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Mole does not reset ${GRAY}/Volumes/Data/Library/Preferences/com.apple.networkextension*.plist${NC}")
-        summary_details+=("${GRAY}${ICON_SUBLIST}${NC} If stale or duplicate entries remain, clear them manually in Recovery mode because the reset is global${NC}")
     fi
 
     if [[ ${#system_extension_warning_apps[@]} -gt 0 ]]; then
@@ -1657,7 +1642,6 @@ batch_uninstall_applications() {
     local -a failed_items=()
     local -a success_items=()
     local -a success_dock_targets=()
-    local -a local_network_warning_apps=()
     local -a system_extension_warning_apps=()
     local -a review_only_system_leftovers=()
     local -a review_only_system_leftover_keys=()

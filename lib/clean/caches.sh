@@ -41,14 +41,16 @@ check_tcc_permissions() {
     ensure_user_file "$permission_flag"
     return 0
 }
-# Args: $1=browser_name, $2=cache_path
+# Args: $1=browser_name, $2=cache_path, $3=optional post-size guard callback
 # Clean Service Worker cache while protecting critical web editors.
 clean_service_worker_cache() {
     local browser_name="$1"
     local cache_path="$2"
+    local delete_guard="${3:-}"
     [[ ! -d "$cache_path" ]] && return 0
     local cleaned_size=0
     local protected_count=0
+    local guard_stopped=false
     # shellcheck disable=SC2016
     while IFS= read -r cache_dir; do
         [[ ! -d "$cache_dir" ]] && continue
@@ -77,11 +79,16 @@ clean_service_worker_cache() {
             protected_count=$((protected_count + 1))
         fi
         if [[ "$is_protected" == "false" ]]; then
-            if [[ "$DRY_RUN" == "true" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
-                record_dry_run_cleanup_target "$cache_dir" "$size" 1 true || continue
+            if [[ -n "$delete_guard" ]] && ! "$delete_guard"; then
+                guard_stopped=true
+                break
             fi
-            if [[ "$DRY_RUN" != "true" ]]; then
-                safe_remove "$cache_dir" true || true
+            if [[ "$DRY_RUN" == "true" ]]; then
+                if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
+                    record_dry_run_cleanup_target "$cache_dir" "$size" 1 true || continue
+                fi
+            elif ! safe_remove "$cache_dir" true "$size"; then
+                continue
             fi
             cleaned_size=$((cleaned_size + size))
         fi
@@ -113,6 +120,8 @@ clean_service_worker_cache() {
             MOLE_SPINNER_PREFIX="  " start_inline_spinner "Scanning browser Service Worker caches..."
         fi
     fi
+    [[ "$guard_stopped" == "true" ]] && return 75
+    return 0
 }
 # Check whether a directory looks like a project container.
 project_cache_has_indicators() {

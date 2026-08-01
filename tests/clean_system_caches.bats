@@ -245,6 +245,70 @@ EOF
     rm -rf "$test_cache"
 }
 
+@test "clean_service_worker_cache reports only successful removals" {
+    local test_cache="$HOME/test_sw_cache_failed_remove"
+    mkdir -p "$test_cache/abc123_https_example.com_0"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/caches.sh"
+DRY_RUN=false
+declare -a PROTECTED_SW_DOMAINS=("never.invalid")
+safe_remove() { return 1; }
+note_activity() { :; }
+run_with_timeout() {
+    shift
+    if [[ "\$1" == "sh" ]]; then
+        printf '%s\n' "$test_cache/abc123_https_example.com_0"
+    elif [[ "\$1" == "du" ]]; then
+        printf '512\t%s\n' "$test_cache/abc123_https_example.com_0"
+    else
+        "\$@"
+    fi
+}
+clean_service_worker_cache TestBrowser "$test_cache"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" != *"TestBrowser Service Worker"* ]]
+}
+
+@test "clean_service_worker_cache checks its guard after sizing before dry-run registration" {
+    local test_cache="$HOME/test_sw_cache_guard"
+    mkdir -p "$test_cache/abc123_https_example.com_0"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<EOF
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/caches.sh"
+DRY_RUN=true
+declare -a PROTECTED_SW_DOMAINS=("never.invalid")
+delete_guard() { [[ ! -e "$test_cache/process-started" ]]; }
+record_dry_run_cleanup_target() { echo "UNEXPECTED_RECORD:\$1"; }
+note_activity() { :; }
+run_with_timeout() {
+    shift
+    if [[ "\$1" == "sh" ]]; then
+        printf '%s\n' "$test_cache/abc123_https_example.com_0"
+    elif [[ "\$1" == "du" ]]; then
+        touch "$test_cache/process-started"
+        printf '512\t%s\n' "$test_cache/abc123_https_example.com_0"
+    else
+        "\$@"
+    fi
+}
+rc=0
+clean_service_worker_cache TestBrowser "$test_cache" delete_guard || rc=\$?
+printf 'RC:%s\n' "\$rc"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC:75"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_RECORD"* ]] || return 1
+    [[ "$output" != *"TestBrowser Service Worker"* ]]
+}
+
 @test "clean_project_caches completes without errors" {
     mkdir -p "$HOME/Projects/test-app/.next/cache"
     mkdir -p "$HOME/Projects/python-app/__pycache__"
