@@ -928,6 +928,15 @@ _safe_clean_impl() {
         return 0
     fi
 
+    # Preview must not list entries the real run would refuse right now: the
+    # guard verdict is computed once here, before any dry-run registration, so
+    # dry-run and real cleanup render the same stopped row for the same
+    # machine state. Real mode keeps its per-path checks at the deletion
+    # boundary below.
+    if [[ "${DRY_RUN:-false}" == "true" && -n "$delete_guard" ]] && ! "$delete_guard" "${targets[0]}"; then
+        return 75
+    fi
+
     local removed_any=0
     local total_size_kb=0
     local total_count=0

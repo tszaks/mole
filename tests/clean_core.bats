@@ -199,6 +199,41 @@ EOF
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
+@test "safe_clean_guarded dry-run consults the guard before registering preview targets" {
+    local base="$HOME/safe_clean_guarded_dry"
+    mkdir -p "$base/a" "$base/b"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=true
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+delete_guard() { return 1; }
+register_dry_run_cleanup_target() { echo "UNEXPECTED_REGISTER:\$1"; }
+safe_remove() { echo "UNEXPECTED_REMOVE:\$1"; }
+
+# A guard that refuses must stop the preview the same way it stops the real
+# run, before any dry-run target is registered into the summary ledger.
+rc=0
+safe_clean_guarded delete_guard \
+    "$base/a" "$base/b" \
+    "Guarded cache" || rc=\$?
+[[ \$rc -eq 75 ]] || { echo "WRONG_RC:\$rc"; exit 1; }
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"UNEXPECTED_REGISTER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]] || return 1
+    [[ "$output" != *"would clean"* ]]
+}
+
 @test "mo clean --dry-run skips system cleanup in non-interactive mode" {
     set_mock_sudo_uncached
     run_clean_dry_run
