@@ -93,7 +93,17 @@ _update_self_heal_reinstall() {
     if [[ "$update_ref" == "main" ]]; then
         local installed_commit=""
         installed_commit=$(MOLE_CONFIG_DIR="$config_dir" get_install_commit 2> /dev/null || true)
-        if [[ ! "$expected_commit" =~ ^[0-9a-f]{40}$ || ! "$installed_commit" =~ ^[0-9a-f]{7,40}$ ||
+        # The registry commit is written only after install_files and
+        # verify_installation succeed, and the probe below confirms the
+        # installed binary answers. Installer stdout is never trusted.
+        if [[ ! "$installed_commit" =~ ^[0-9a-f]{7,40}$ ]] ||
+            ! "$mole_path" --version > /dev/null 2>&1; then
+            return 1
+        fi
+        # A known remote HEAD must match; fail closed on a stale reinstall.
+        # An unknown remote HEAD (API rate limit, offline) is not a failure:
+        # the reinstall itself is already verified above.
+        if [[ "$expected_commit" =~ ^[0-9a-f]{40}$ &&
             "${installed_commit:0:7}" != "${expected_commit:0:7}" ]]; then
             return 1
         fi

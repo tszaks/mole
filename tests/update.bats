@@ -837,6 +837,8 @@ SCRIPT
 	run env HOME="$HOME/wget-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
 mkdir -p "$HOME/config" "$HOME/bin"
+printf '#!/bin/bash\necho "Mole version 0.0.1"\n' > "$HOME/bin/mole"
+chmod +x "$HOME/bin/mole"
 source "$PROJECT_ROOT/lib/core/common.sh"
 VERSION="0.0.1"
 SCRIPT_DIR="$HOME/config"
@@ -877,4 +879,81 @@ INNER
 
 	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
 	[[ "$output" == *"Updated to nightly build (main), def5678"* ]]
+}
+
+@test "nightly self-heal succeeds when the latest commit is unknown" {
+	run env HOME="$HOME/unknown-head-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+mkdir -p "$HOME/config" "$HOME/bin"
+printf '#!/bin/bash\necho "Mole version 0.0.1"\n' > "$HOME/bin/mole"
+chmod +x "$HOME/bin/mole"
+source "$PROJECT_ROOT/lib/core/common.sh"
+VERSION="0.0.1"
+SCRIPT_DIR="$HOME/config"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+curl() {
+	cat <<'INSTALLER'
+#!/usr/bin/env bash
+config=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--config)
+			config="$2"
+			shift 2
+			;;
+		*) shift ;;
+	esac
+done
+mkdir -p "$config"
+printf 'CHANNEL=nightly\nCOMMIT_HASH=fee1bad\n' > "$config/install_channel"
+INSTALLER
+}
+
+# A GitHub API rate limit leaves the expected commit empty. The verified
+# reinstall must still report success instead of "Nightly update failed".
+_update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""
+INNER
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" == *"Updated to nightly build (main), fee1bad"* ]]
+}
+
+@test "nightly self-heal fails when the installed binary does not answer" {
+	run env HOME="$HOME/dead-binary-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+mkdir -p "$HOME/config" "$HOME/bin"
+source "$PROJECT_ROOT/lib/core/common.sh"
+VERSION="0.0.1"
+SCRIPT_DIR="$HOME/config"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+curl() {
+	cat <<'INSTALLER'
+#!/usr/bin/env bash
+config=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--config)
+			config="$2"
+			shift 2
+			;;
+		*) shift ;;
+	esac
+done
+mkdir -p "$config"
+printf 'CHANNEL=nightly\nCOMMIT_HASH=fee1bad\n' > "$config/install_channel"
+INSTALLER
+}
+
+# The registry claims success but no binary exists at the install path.
+# Success asserted from installer output alone is the V1.47.1 shape.
+if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""; then
+	exit 1
+fi
+exit 0
+INNER
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+	[[ "$output" != *"Updated to nightly build (main)"* ]]
 }
