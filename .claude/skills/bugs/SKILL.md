@@ -23,9 +23,9 @@ Ranked by how often they recur. Walk the ones the area touches and write down pr
 |---|---|---|---|
 | 1 | Deletion candidate built from a weak name signal | grep name-derived globs | `3fa3eb5c` `5498edd1` `ec1cd647` `229bd0f9` |
 | 2 | Existence decided by a single probe | grep `mdfind` / `command -v` / `pgrep` as sole gate | `6a055de4` `28ee58c9` `37a446c9` |
-| 3 | Guard present on one branch only | diff dry-run branch against real branch | `cfe14601` `36f52a95` `8c781372` |
+| 3 | Guard present on one branch only | diff dry-run branch against real branch | `cfe14601` `36f52a95` `8c781372` `3f42ad39` |
 | 4 | Unbounded external command | grep the command, count `run_with_timeout` wraps | `edb214c0` `35d856f1` `63030e3a` |
-| 5 | bash 3.2, errexit, pipefail semantics | grep array expansions and `fn \|\| handler` | `893b4e6f` `2c06cb91` |
+| 5 | bash 3.2, errexit, pipefail semantics | grep array expansions and `fn \|\| handler` | `893b4e6f` `2c06cb91` `a33a0b51` |
 | 6 | TTY, stdin, and process-group theft | grep background callers of `run_with_timeout` | `c93afca3` `63030e3a` |
 | 7 | Parsing system command output | grep for missing `LC_ALL=C` and format assumptions | `4e83743b` `51b352a2` `f0896d03` |
 | 8 | Stale persisted derived data | grep cache write sites, check schema and invalidation | `7a996aa5` |
@@ -69,6 +69,7 @@ Protection that lives at the call site instead of in the funnel will be missing 
 - `should_protect_path` ran only inside the real-clean branch, so `--dry-run` promised to remove files the real run silently skipped (`cfe14601`).
 - The user whitelist was consulted per caller, so `clean_user_caches` simply forgot it. The fix hoisted the check into `safe_find_delete` and `safe_sudo_find_delete` next to the existing protection gate, so future callers get it for free (`5498edd1`).
 - A Raycast v2 exclusion existed in one place but not in the `find` predicates that actually ran (`452e194d`).
+- `_safe_clean_impl` ran its delete guard only on the real branch, so dry-run previewed (and counted) items an active-process guard would refuse at the same moment. The fix consults the guard once before any preview registration (`3f42ad39`).
 
 The method: enumerate every caller of each protection helper, then every deletion site, and diff the two lists. The gap is the bug. Then check dry-run and real paths compute the same verdict, and prefer moving the guard into `validate_path_for_deletion` / `should_protect_path` over adding a fourth call site.
 
@@ -97,6 +98,7 @@ macOS ships bash 3.2.57 and the shipped code runs under `set -u`. Read [referenc
 
 - **Empty array expansion under nounset.** `"${arr[@]}"` on an empty array aborts. When it aborts inside a scan, the spinner subshell is orphaned and the user sees "scanning forever" (`893b4e6f`, `2c06cb91`). Guard with `[[ ${#arr[@]} -gt 0 ]]`.
 - **`fn || handler` disables errexit inside `fn` for its whole body**, converting every unchecked failure into a no-op. That is how eight consecutive failed copies still reported a successful install. Safety-critical steps use explicit `if ! cmd; then return 1; fi`.
+- **A graceful-skip path that only works because the caller's section window ran `set +e`.** `clean_orphaned_app_data` called `scan_installed_apps` bare, then read `$?`; under errexit the failing call aborts the shell before the skip message prints, and only the `set +e` window in `bin/clean.sh` masked it. Capture failures with explicit `if !` so degradation does not depend on the calling environment (`a33a0b51`).
 
 ```bash
 command grep -rn '\$\{[a-z_]*\[@\]\}' lib/ bin/ | wc -l   # spot-check new sites
