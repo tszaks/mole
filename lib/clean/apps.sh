@@ -101,6 +101,8 @@ publish_installed_apps_cache() {
 # Usage: scan_installed_apps "output_file"
 scan_installed_apps() {
     local installed_bundles="$1"
+    # Reset the failure detail so a retry cannot report a stale bundle.
+    MOLE_APP_SCAN_FAILURE_DETAIL=""
     # Cache installed app scans briefly. Only a current-schema file with the
     # completeness footer can authorize orphan decisions.
     local cache_file="$HOME/.cache/mole/installed_apps_cache"
@@ -173,15 +175,19 @@ scan_installed_apps() {
         (
             local app_paths
             if ! app_paths=$(command find "$app_dir" -maxdepth 3 -type d -name '*.app' 2> /dev/null); then
+                printf '%s\n' "$app_dir" >> "$scan_tmp_dir/scan_failures.list"
                 exit 1
             fi
             while IFS= read -r app_path; do
                 [[ -n "$app_path" ]] || continue
                 local plist_path="$app_path/Contents/Info.plist"
-                [[ -f "$plist_path" && -r "$plist_path" ]] || exit 1
                 local bundle_id=""
-                bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist_path" 2> /dev/null) || exit 1
-                [[ -n "$bundle_id" && "$bundle_id" != "missing value" ]] || exit 1
+                if [[ ! -f "$plist_path" || ! -r "$plist_path" ]] ||
+                    ! bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist_path" 2> /dev/null) ||
+                    [[ -z "$bundle_id" || "$bundle_id" == "missing value" ]]; then
+                    printf '%s\n' "$app_path" >> "$scan_tmp_dir/scan_failures.list"
+                    exit 1
+                fi
                 echo "$bundle_id"
             done <<< "$app_paths"
         ) > "$scan_tmp_dir/apps_${dir_idx}.txt" &
@@ -252,7 +258,13 @@ scan_installed_apps() {
     fi
     debug_log "All background processes completed"
     if [[ $app_scan_failed -ne 0 ]]; then
-        debug_log "Failed to scan one or more installed application directories"
+        # Surface the first unreadable bundle so the skip message is actionable
+        # without --debug. Workers append before exiting nonzero.
+        MOLE_APP_SCAN_FAILURE_DETAIL=""
+        if [[ -s "$scan_tmp_dir/scan_failures.list" ]]; then
+            MOLE_APP_SCAN_FAILURE_DETAIL=$(head -1 "$scan_tmp_dir/scan_failures.list")
+        fi
+        debug_log "Failed to scan one or more installed application directories${MOLE_APP_SCAN_FAILURE_DETAIL:+: $MOLE_APP_SCAN_FAILURE_DETAIL}"
         return 1
     fi
     if ! cat "$scan_tmp_dir"/*.txt >> "$installed_bundles" 2> /dev/null; then
@@ -446,15 +458,25 @@ clean_orphaned_app_data() {
     start_section_spinner "Scanning installed apps..."
     local installed_bundles=""
     local scan_status=0
-    installed_bundles=$(create_temp_file)
-    scan_status=$?
+    # Explicit if-not capture keeps the graceful skip below reachable even for
+    # a caller running with errexit enabled; a bare call would abort the shell
+    # before the skip message prints.
+    if ! installed_bundles=$(create_temp_file); then
+        scan_status=1
+    fi
     if [[ $scan_status -eq 0 && -n "$installed_bundles" ]]; then
-        scan_installed_apps "$installed_bundles"
-        scan_status=$?
+        if ! scan_installed_apps "$installed_bundles"; then
+            scan_status=1
+        fi
     fi
     if [[ $scan_status -ne 0 || -z "$installed_bundles" ]]; then
         stop_section_spinner
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: Unable to scan installed applications"
+        local scan_detail="${MOLE_APP_SCAN_FAILURE_DETAIL:-}"
+        if [[ -n "$scan_detail" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: Unable to scan installed applications (${scan_detail##*/})"
+        else
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipped: Unable to scan installed applications"
+        fi
         note_activity
         return 0
     fi

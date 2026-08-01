@@ -627,6 +627,61 @@ EOF
     [[ "$output" == *"APP_DIRECTORY_SCAN_FAILURE_CLOSED"* ]]
 }
 
+@test "clean_orphaned_app_data skips gracefully under errexit and names the unreadable bundle" {
+    local scan_home="$HOME/errexit-scan"
+    rm -rf "$scan_home"
+    mkdir -p "$scan_home"
+
+    run env HOME="$scan_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+mkdir -p "$HOME/Applications/Broken.app/Contents" \
+    "$HOME/Library/Caches/com.example.LiveApp"
+touch -t "$(date -v-31d +%Y%m%d%H%M.%S)" "$HOME/Library/Caches/com.example.LiveApp"
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+
+stub_dir="$HOME/stub-bin-errexit-scan"
+mkdir -p "$stub_dir"
+cat > "$stub_dir/find" <<'SH'
+#!/bin/sh
+if [ "${1:-}" = "$HOME/Applications" ]; then
+    printf '%s\n' "$HOME/Applications/Broken.app"
+fi
+exit 0
+SH
+cat > "$stub_dir/lsappinfo" <<'SH'
+#!/bin/sh
+exit 0
+SH
+chmod +x "$stub_dir/find" "$stub_dir/lsappinfo"
+export PATH="$stub_dir:$PATH"
+
+mdfind() { return 0; }
+run_with_timeout() { shift; "$@"; }
+get_path_size_kb() { printf '1\n'; }
+safe_clean() {
+    : > "$HOME/safe-clean-called"
+    return 0
+}
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+
+# No set +e wrapper: the production section window is the only reason a bare
+# scan failure did not abort before this change, and a future caller outside
+# that window must still reach the graceful skip.
+clean_orphaned_app_data
+
+[[ ! -e "$HOME/safe-clean-called" ]] || exit 1
+printf 'ERREXIT_SCAN_FAILURE_CLOSED\n'
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipped: Unable to scan installed applications (Broken.app)"* ]] || return 1
+    [[ "$output" == *"ERREXIT_SCAN_FAILURE_CLOSED"* ]]
+}
+
 @test "is_bundle_orphaned returns true for old uninstalled bundle" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" ORPHAN_AGE_THRESHOLD=30 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
