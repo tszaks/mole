@@ -176,6 +176,11 @@ type ProxyStatus struct {
 	Enabled bool   `json:"enabled"`
 	Type    string `json:"type"` // HTTP, HTTPS, SOCKS, PAC, WPAD, TUN
 	Host    string `json:"host"`
+	// True when the only evidence is an active tunnel interface rather than a
+	// configured proxy. A `utun` is equally iCloud Private Relay, a corporate
+	// VPN, or a TUN-mode proxy client, and nothing at this layer can tell them
+	// apart, so the reading must not be presented as "you have a proxy".
+	IsTunnel bool `json:"is_tunnel,omitempty"`
 }
 
 type BatteryStatus struct {

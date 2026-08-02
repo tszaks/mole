@@ -182,3 +182,30 @@ func TestCollectNetworkClampsCounterReset(t *testing.T) {
 		t.Fatalf("expected reset counters to clamp to zero, got %+v", got[0])
 	}
 }
+
+func TestTunnelInterfaceIsNotReportedAsAProxy(t *testing.T) {
+	// A machine with no configured proxy but an active utun (iCloud Private
+	// Relay, a corporate VPN, or a TUN-mode client) must not be told it has a
+	// proxy. The reading is still surfaced, just honestly labelled.
+	original := ioCountersFunc
+	ioCountersFunc = func(bool) ([]gopsutilnet.IOCountersStat, error) {
+		return []gopsutilnet.IOCountersStat{
+			{Name: "en0", BytesRecv: 100},
+			{Name: "utun4", BytesRecv: 20, BytesSent: 30},
+		}, nil
+	}
+	t.Cleanup(func() { ioCountersFunc = original })
+
+	got := collectProxyFromTunInterfaces()
+	if !got.Enabled || !got.IsTunnel || got.Type != "TUN" || got.Host != "utun4" {
+		t.Fatalf("unexpected tunnel status: %+v", got)
+	}
+	card := renderNetworkCard(
+		[]NetworkStatus{{Name: "en0", IP: "192.0.2.10"}},
+		NetworkHistory{}, got, 40,
+	)
+	rendered := strings.Join(card.lines, "\n")
+	if !strings.Contains(rendered, "Tunnel") || strings.Contains(rendered, "Proxy Tunnel") {
+		t.Fatalf("tunnel must be rendered without a proxy claim: %q", rendered)
+	}
+}

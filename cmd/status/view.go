@@ -671,7 +671,11 @@ func renderNetworkCard(netStats []NetworkStatus, history NetworkHistory, proxy P
 		// Show proxy and IP on one line.
 		var infoParts []string
 		if proxy.Enabled {
-			infoParts = append(infoParts, "Proxy "+proxy.Type)
+			if proxy.IsTunnel {
+				infoParts = append(infoParts, "Tunnel")
+			} else {
+				infoParts = append(infoParts, "Proxy "+proxy.Type)
+			}
 		}
 		if primaryIP != "" {
 			infoParts = append(infoParts, primaryIP)
