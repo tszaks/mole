@@ -829,6 +829,8 @@ if acquire_install_lock; then
 	echo "UNEXPECTED_LOCK_SYMLINK_FOLLOW"
 	exit 1
 fi
+# A planted lock path is not contention, and must not be reported as such.
+[[ "$INSTALL_LOCK_FAILURE" == "lock_path" ]] || exit 1
 [[ "$(cat "$victim")" == "DO-NOT-TOUCH" ]] || exit 1
 unlink "$lock_path"
 mkfifo "$lock_path"
@@ -836,6 +838,7 @@ if acquire_install_lock; then
 	echo "UNEXPECTED_LOCK_FIFO_OPEN"
 	exit 1
 fi
+[[ "$INSTALL_LOCK_FAILURE" == "lock_path" ]] || exit 1
 unlink "$lock_path"
 acquire_install_lock
 release_install_lock
@@ -851,7 +854,13 @@ grep -q "trap 'cleanup_installer' EXIT" "$PROJECT_ROOT/install.sh"
 [[ "$(grep -c 'report_install_lock_failure$' "$PROJECT_ROOT/install.sh")" -eq 2 ]] || exit 1
 grep -qF 'Cache credentials first, then retry: sudo -v && mo update' "$PROJECT_ROOT/install.sh"
 grep -qF 'Refusing a privileged install through' "$PROJECT_ROOT/install.sh"
+grep -qF 'is not a regular file' "$PROJECT_ROOT/install.sh"
+grep -qF 'is not usable' "$PROJECT_ROOT/install.sh"
 grep -qF 'is held by another process' "$PROJECT_ROOT/install.sh"
+# A lapsed session gets one terminal-bound retry, and never a silent prompt on
+# captured stdio or a hang where there is no terminal to ask on.
+grep -qF 'sudo -v < /dev/tty > /dev/tty 2> /dev/tty' "$PROJECT_ROOT/install.sh"
+grep -qF '[[ -r /dev/tty && -w /dev/tty ]] || return 1' "$PROJECT_ROOT/install.sh"
 EOF
 
 	[ "$status" -eq 0 ] || {

@@ -310,6 +310,18 @@ install_lock_command() {
     fi
 }
 
+# One interactive recovery for a lapsed sudo session, through the controlling
+# terminal so it works even when the installer's stdio is captured by a caller.
+# Returns non-zero without prompting when there is no terminal to ask on.
+install_lock_reauthenticate() {
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        return 1
+    fi
+    [[ -r /dev/tty && -w /dev/tty ]] || return 1
+    # shellcheck disable=SC2024 # sudo's own prompt belongs on the same terminal.
+    sudo -v < /dev/tty > /dev/tty 2> /dev/tty
+}
+
 install_lock_current_shell_pid() {
     local variable_name="$1"
     local pid_file current_pid=""
@@ -391,16 +403,32 @@ acquire_install_lock() {
     # and gets reported as a busy lock.
     if [[ "$use_sudo" == "true" ]] &&
         ! install_lock_command "$use_sudo" /usr/bin/true 2> /dev/null; then
-        INSTALL_LOCK_FAILURE="no_admin"
+        # A caller that set MOLE_ASSUME_SUDO_AUTH did authenticate, but the
+        # session can lapse before this point on a slow download or when the
+        # keepalive dies. Recover once through the controlling terminal instead
+        # of failing an install that only needs the password again. Without a
+        # terminal this is a no-op and the refusal stands.
+        if ! install_lock_reauthenticate ||
+            ! install_lock_command "$use_sudo" /usr/bin/true 2> /dev/null; then
+            INSTALL_LOCK_FAILURE="no_admin"
+            return 1
+        fi
+    fi
+    if ! install_lock_prepare_dir "$use_sudo"; then
+        INSTALL_LOCK_FAILURE="lock_dir"
         return 1
     fi
-    install_lock_prepare_dir "$use_sudo" || return 1
     if install_lock_command "$use_sudo" /bin/test -e "$lock_path" 2> /dev/null ||
         install_lock_command "$use_sudo" /bin/test -L "$lock_path" 2> /dev/null; then
+        INSTALL_LOCK_FAILURE="lock_path"
         install_lock_command "$use_sudo" /bin/test -f "$lock_path" 2> /dev/null || return 1
         ! install_lock_command "$use_sudo" /bin/test -L "$lock_path" 2> /dev/null || return 1
+        INSTALL_LOCK_FAILURE="busy"
     fi
-    [[ -x /usr/bin/lockf ]] || return 1
+    if [[ ! -x /usr/bin/lockf ]]; then
+        INSTALL_LOCK_FAILURE="no_lockf"
+        return 1
+    fi
     install_lock_current_shell_pid owner_pid || return 1
     owner_start=$(install_lock_process_start "$owner_pid")
     [[ -n "$owner_start" ]] || return 1
@@ -465,6 +493,20 @@ report_install_lock_failure() {
             log_error "Refusing a privileged install through ${INSTALL_LOCK_UNSAFE_ANCESTOR:-a parent directory}"
             log_error "It is a symlink, or writable by someone other than root, so a privileged write there cannot be trusted"
             log_error "Restore ownership, then retry: sudo chown root:wheel ${INSTALL_LOCK_UNSAFE_ANCESTOR:-<dir>} && sudo chmod go-w ${INSTALL_LOCK_UNSAFE_ANCESTOR:-<dir>}"
+            ;;
+        lock_dir)
+            log_error "The lock directory $INSTALL_DIR/.mole-update.lock is not usable"
+            log_error "It must be a plain directory owned by the installing user with no ACL and no group or world access"
+            log_error "Inspect it, remove it if it is stale, then retry: sudo ls -lde $INSTALL_DIR/.mole-update.lock"
+            ;;
+        lock_path)
+            log_error "The lock file $INSTALL_DIR/.mole-update.lock/kernel.lock is not a regular file"
+            log_error "Refusing to open a symlink or device in its place"
+            log_error "Remove it, then retry: sudo rm -f $INSTALL_DIR/.mole-update.lock/kernel.lock"
+            ;;
+        no_lockf)
+            log_error "/usr/bin/lockf is missing, so concurrent installs cannot be kept apart"
+            log_error "Restore it from macOS, then retry"
             ;;
         *)
             log_error "The Mole installation lock for $INSTALL_DIR is held by another process"
