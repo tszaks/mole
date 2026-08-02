@@ -428,9 +428,18 @@ _clean_darwin_user_runtime_dir() {
     current_uid=$(id -u 2> /dev/null || echo "")
     [[ -n "$current_uid" ]] || return 0
 
+    # Swap the section spinner text in place so the temp and cache phases
+    # read as distinct work instead of one long static "Cleaning runtime
+    # files...".
+    start_section_spinner "Cleaning ${label}..."
+
+    local scan_rc_file=""
+    scan_rc_file=$(mktemp "${TMPDIR:-/tmp}/mole-runtime-scan-rc.XXXXXX") || return 0
+
     local count=0
     local total_size_kb=0
     local hit_cap=false
+    local scan_partial=false
     local found_any=false
     local item
 
@@ -456,9 +465,15 @@ _clean_darwin_user_runtime_dir() {
             continue
         fi
 
+        # -type f plus the -L guard above make plain stat sufficient here.
+        # get_path_size_kb forked a bounded du per item and dominated the
+        # whole pass (~10ms x hundreds of mostly tiny files).
         local item_size_kb=0
-        item_size_kb=$(get_path_size_kb "$item" 2> /dev/null || echo "0")
-        [[ "$item_size_kb" =~ ^[0-9]+$ ]] || item_size_kb=0
+        local item_size_bytes=""
+        item_size_bytes=$("$STAT_BSD" -f%z "$item" 2> /dev/null) || item_size_bytes=""
+        if [[ "$item_size_bytes" =~ ^[0-9]+$ && "$item_size_bytes" -gt 0 ]]; then
+            item_size_kb=$(((item_size_bytes + 1023) / 1024))
+        fi
 
         if [[ "${DRY_RUN:-false}" == "true" ]]; then
             if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
@@ -477,12 +492,36 @@ _clean_darwin_user_runtime_dir() {
             hit_cap=true
             break
         fi
+        if [[ $count -gt 0 && $((count % 200)) -eq 0 ]]; then
+            start_section_spinner "Cleaning ${label}... ($count)"
+        fi
     done < <(
+        scan_probe_rc=0
         run_with_timeout "$scan_timeout" \
             find -P "$runtime_dir" -xdev -mindepth 1 -user "$current_uid" -type f -mtime +"$age_days" \
             ! -name "*.sqlite" ! -name "*.sqlite-shm" ! -name "*.sqlite-wal" ! -name "*.db" ! -name "*.plist" \
-            -print0 2> /dev/null || true
+            -print0 2> /dev/null || scan_probe_rc=$?
+        printf '%s' "$scan_probe_rc" > "$scan_rc_file"
     )
+
+    # A truncated scan is consumed, not discarded, and that is deliberate:
+    # every record already satisfies the uid + age + type + name filters under
+    # a vetted parent, safe_remove revalidates each path, and read -d ''
+    # drops an unterminated final record, so a shorter list means fewer
+    # deletions, never wrong ones. Discarding wholesale would permanently
+    # starve cleanup on a TMPDIR too large to ever finish inside the budget;
+    # the result line declares the pass partial instead. On a cap break the
+    # producer may still be running, so its status is only read otherwise.
+    local scan_rc=0
+    if [[ "$hit_cap" != "true" ]]; then
+        scan_rc=$(cat "$scan_rc_file" 2> /dev/null) || scan_rc=0
+        [[ "$scan_rc" =~ ^[0-9]+$ ]] || scan_rc=0
+    fi
+    if [[ $scan_rc -ge 128 ]]; then
+        rm -f -- "$scan_rc_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        return "$scan_rc"
+    fi
+    [[ $scan_rc -eq 124 ]] && scan_partial=true
 
     if [[ "$count" -lt "$max_items" ]]; then
         # Same safety contract as the file loop above: parent vetted,
@@ -508,10 +547,24 @@ _clean_darwin_user_runtime_dir() {
                 break
             fi
         done < <(
+            scan_probe_rc=0
             run_with_timeout "$scan_timeout" \
-                find -P "$runtime_dir" -xdev -mindepth 1 -user "$current_uid" -type d -empty -mtime +"$age_days" -print0 2> /dev/null || true
+                find -P "$runtime_dir" -xdev -mindepth 1 -user "$current_uid" -type d -empty -mtime +"$age_days" -print0 2> /dev/null || scan_probe_rc=$?
+            printf '%s' "$scan_probe_rc" > "$scan_rc_file"
         )
+        # Same partial-prefix contract as the file pass above.
+        local dir_scan_rc=0
+        if [[ "$hit_cap" != "true" ]]; then
+            dir_scan_rc=$(cat "$scan_rc_file" 2> /dev/null) || dir_scan_rc=0
+            [[ "$dir_scan_rc" =~ ^[0-9]+$ ]] || dir_scan_rc=0
+        fi
+        if [[ $dir_scan_rc -ge 128 ]]; then
+            rm -f -- "$scan_rc_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+            return "$dir_scan_rc"
+        fi
+        [[ $dir_scan_rc -eq 124 ]] && scan_partial=true
     fi
+    rm -f -- "$scan_rc_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
 
     if [[ "$found_any" == "true" ]]; then
         stop_section_spinner
@@ -519,6 +572,9 @@ _clean_darwin_user_runtime_dir() {
         size_human=$(bytes_to_human "$((total_size_kb * 1024))")
         local cap_note=""
         [[ "$hit_cap" == "true" ]] && cap_note=", capped"
+        # An 8s scan window cannot finish a huge TMPDIR; say so instead of
+        # letting a truncated count read as the complete total.
+        [[ "$scan_partial" == "true" && -z "$cap_note" ]] && cap_note=", partial"
         if [[ "${DRY_RUN:-false}" == "true" ]]; then
             echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} ${label}${NC} · ${YELLOW}${count} old items, $(colorize_human_size "$size_human") ${YELLOW}dry${cap_note}${NC}"
         else

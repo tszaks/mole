@@ -247,6 +247,9 @@ probe_project_artifact_hints() {
             break
         fi
         [[ -d "$root" ]] || continue
+        # In-place spinner text swap per root: a multi-second walk with a
+        # static label reads as a hang, a moving path reads as progress.
+        start_section_spinner "Scanning projects · ${root/#$HOME/~}"
         local root_projects_scanned=0
 
         if is_quick_purge_project_root "$root"; then
@@ -393,7 +396,12 @@ probe_project_artifact_hints() {
 
 # shellcheck disable=SC2329
 show_project_artifact_hint_notice() {
+    # The probe walks up to 200 project roots and du-samples candidates under
+    # a 15s budget; without a loading state the section title just sits there
+    # and the result row pops out of nowhere.
+    start_section_spinner "Scanning project artifacts..."
     probe_project_artifact_hints
+    stop_section_spinner
 
     if [[ "$PROJECT_ARTIFACT_HINT_DETECTED" != "true" ]]; then
         if [[ "${PROJECT_ARTIFACT_HINT_SCAN_SKIPPED:-false}" == "true" ]]; then

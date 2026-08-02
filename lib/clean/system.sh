@@ -555,9 +555,13 @@ clean_deep_system() {
         code_sign_scan_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" \
             "$system_cleanup_deadline") || code_sign_scan_rc=$?
         if [[ $code_sign_scan_rc -eq 0 ]]; then
+            # -path is a test, not a prune: without the container-level prune
+            # find still walks every C/ and T/ tree even though only X/ can
+            # match. Depth 3 is the /var/folders/<xx>/<hash>/<container> level.
             materialize_completed_system_scan "$code_sign_scan_file" \
                 "$code_sign_scan_timeout" /usr/bin/find /private/var/folders \
-                -maxdepth 5 -type d -name "*.code_sign_clone" -path "*/X/*" -print0 || code_sign_scan_rc=$?
+                -maxdepth 5 -type d \( -depth 3 ! -name X \) -prune \
+                -o -type d -name "*.code_sign_clone" -path "*/X/*" -print0 || code_sign_scan_rc=$?
         fi
         if [[ $code_sign_scan_rc -eq 0 ]]; then
             while IFS= read -r -d '' cache_dir; do
@@ -667,8 +671,14 @@ clean_deep_system() {
         local gpu_scan_timeout=""
         gpu_scan_timeout=$(_mole_timeout_with_deadline 8 "$system_cleanup_deadline") || gpu_scan_rc=$?
         if [[ $gpu_scan_rc -eq 0 ]]; then
+            # -path "*/C/*" is a test, not a prune: without the container-level
+            # prune find walks the entire T/ temp tree to depth 8 even though
+            # nothing there can match (measured 217k dirs / 19s on a dev
+            # machine, 99.6% of them under T/; pruned: 0.09s, same results).
             materialize_completed_system_scan "$gpu_scan_file" "$gpu_scan_timeout" /usr/bin/find \
-                /private/var/folders -maxdepth 8 -type d \( \
+                /private/var/folders -maxdepth 8 \
+                -type d \( -depth 3 ! -name C \) -prune \
+                -o -type d \( \
                 -name "com.apple.gpuarchiver" -o \
                 -name "com.apple.metal" -o \
                 -name "com.apple.metalfe" \

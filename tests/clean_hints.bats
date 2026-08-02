@@ -373,3 +373,29 @@ EOT6
     [[ "$output" != *"Stale login item"* ]] || return 1
     [[ "$output" != *"Associated app not found"* ]] || return 1
 }
+
+@test "project artifact hint shows a loading state while probing" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOT7'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/hints.sh"
+note_activity() { :; }
+start_section_spinner() { echo "SPIN:$1"; }
+stop_section_spinner() { echo "SPIN-STOP"; }
+# The probe itself can take up to its 15s budget; the section must show a
+# loading state for that whole window, not pop the row out of silence.
+probe_project_artifact_hints() {
+    echo "PROBE"
+    PROJECT_ARTIFACT_HINT_DETECTED=false
+    PROJECT_ARTIFACT_HINT_SCAN_SKIPPED=false
+}
+show_project_artifact_hint_notice
+EOT7
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SPIN:Scanning project artifacts..."* ]] || return 1
+    # Spinner starts before the probe runs and stops after it.
+    [[ "$output" == *"SPIN:Scanning project artifacts...
+PROBE
+SPIN-STOP"* ]]
+}

@@ -2230,3 +2230,18 @@ EOF
         return 1
     }
 }
+
+@test "var/folders scans prune non-target containers at depth 3" {
+    # find's -path is a test, not a prune: without a container-level prune the
+    # GPU scan walks the entire T/ temp tree to depth 8 (measured 217k dirs /
+    # 19s on a dev machine, against an 8s budget) even though only C/ can
+    # match, so the step times out on every run. Same shape for the X/-only
+    # code-sign scan. Pin both prunes.
+    run grep -cF -- '\( -depth 3 ! -name C \) -prune' "$PROJECT_ROOT/lib/clean/system.sh"
+    [ "$status" -eq 0 ] || return 1
+    [ "$output" -ge 1 ] || return 1
+
+    run grep -cF -- '\( -depth 3 ! -name X \) -prune' "$PROJECT_ROOT/lib/clean/system.sh"
+    [ "$status" -eq 0 ] || return 1
+    [ "$output" -ge 1 ]
+}

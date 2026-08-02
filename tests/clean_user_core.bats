@@ -577,6 +577,70 @@ EOF
     [[ "$output" == *"PASS"* ]]
 }
 
+@test "_clean_darwin_user_runtime_dir marks a timed-out scan partial and propagates interrupts" {
+    local runtime_home="$HOME/darwin-runtime-partial"
+    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+mkdir -p "$HOME/runtime/T"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+_darwin_user_runtime_dir_is_safe() { return 0; }
+note_activity() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+echo old1 > "$HOME/runtime/T/a.tmp"
+echo old2 > "$HOME/runtime/T/b.tmp"
+
+# find dies at its timeout after flushing two complete records. The prefix
+# stays deletable (each record independently qualifies), but the result line
+# must declare the pass partial instead of reading as the complete total.
+# Only the runtime-dir finds are stubbed; safe_remove's own bounded calls
+# must keep running for the deletions to actually happen.
+run_with_timeout() {
+    shift
+    if [[ "$*" == *"runtime/T"* && "$*" == *"-type f"* ]]; then
+        printf '%s\0' "$HOME/runtime/T/a.tmp" "$HOME/runtime/T/b.tmp"
+        return 124
+    fi
+    if [[ "$*" == *"runtime/T"* && "$*" == *"-type d"* ]]; then
+        return 124
+    fi
+    "$@"
+}
+
+rc=0
+_clean_darwin_user_runtime_dir "$HOME/runtime/T" "temp" "Darwin user temp files" || rc=$?
+[ "$rc" -eq 0 ] || { echo "WRONG: partial scan rc=$rc"; exit 1; }
+[[ ! -e "$HOME/runtime/T/a.tmp" ]] || { echo "WRONG: qualifying prefix was not cleaned"; exit 1; }
+
+# An interrupt (>=128) must propagate instead of being read as a result.
+echo old3 > "$HOME/runtime/T/c.tmp"
+run_with_timeout() {
+    shift
+    if [[ "$*" == *"runtime/T"* ]]; then
+        return 130
+    fi
+    "$@"
+}
+rc=0
+_clean_darwin_user_runtime_dir "$HOME/runtime/T" "temp" "Darwin user temp files" || rc=$?
+[ "$rc" -eq 130 ] || { echo "WRONG: interrupt rc=$rc"; exit 1; }
+[[ -e "$HOME/runtime/T/c.tmp" ]] || { echo "WRONG: interrupted scan still deleted"; exit 1; }
+echo DONE
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DONE"* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *", partial"* ]]
+}
+
 @test "_clean_darwin_user_runtime_dir skips endpoint-security (EDR) agent caches" {
     local runtime_home="$HOME/darwin-runtime-edr"
     run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
