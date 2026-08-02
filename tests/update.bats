@@ -890,6 +890,12 @@ SCRIPT_DIR="$HOME/config"
 source "$PROJECT_ROOT/lib/manage/update.sh"
 
 mkdir -p "$HOME/install/bin"
+/bin/chmod 0775 "$HOME/install/bin"
+[[ "$(/usr/bin/stat -f%Lp "$HOME/install/bin")" == "775" ]] || exit 1
+if ! _update_lock_path_has_unsafe_ancestor "$HOME/install/bin" true; then
+	echo "UNEXPECTED_PRIVILEGED_GROUP_WRITABLE_UPDATE_PREFIX_ACCEPTED"
+	exit 1
+fi
 acl_rule="everyone allow list,add_file,search,add_subdirectory,delete_child,file_inherit,directory_inherit"
 /bin/chmod +a "$acl_rule" "$HOME/install/bin"
 /bin/mkdir -m 0700 "$HOME/install/bin/acl-probe"
@@ -966,12 +972,13 @@ INNER
 		echo "$output"
 		return 1
 	}
-	[[ "$output" != *"UNEXPECTED_CONCURRENT_LOCK"* ]]
-	[[ "$output" != *"UNEXPECTED_EXTERNAL_LOCK_BYPASS"* ]]
-	[[ "$output" != *"UNEXPECTED_UPDATE_LOCK_SYMLINK_FOLLOW"* ]]
-	[[ "$output" != *"UNEXPECTED_AMBIENT_CONTROL_REMOVAL"* ]]
-	[[ "$output" != *"UNEXPECTED_INHERITED_UPDATE_LOCK_ACL"* ]]
-	[[ "$output" != *"UNEXPECTED_WRITABLE_UPDATE_PARENT_ACL_ACCEPTED"* ]]
+	[[ "$output" != *"UNEXPECTED_CONCURRENT_LOCK"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_EXTERNAL_LOCK_BYPASS"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_UPDATE_LOCK_SYMLINK_FOLLOW"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_AMBIENT_CONTROL_REMOVAL"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_INHERITED_UPDATE_LOCK_ACL"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_WRITABLE_UPDATE_PARENT_ACL_ACCEPTED"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_PRIVILEGED_GROUP_WRITABLE_UPDATE_PREFIX_ACCEPTED"* ]] || return 1
 }
 
 @test "nightly commit lookup and self-heal fall back to wget" {

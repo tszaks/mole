@@ -103,6 +103,9 @@ safe_rm() {
     fi
 
     tmp_root="${TMPDIR:-/tmp}"
+    while [[ "$tmp_root" != "/" && "$tmp_root" == */ ]]; do
+        tmp_root="${tmp_root%/}"
+    done
     case "$target" in
         "$tmp_root" | /tmp)
             log_error "safe_rm: refusing to remove temp root: $target"
@@ -253,10 +256,14 @@ install_lock_has_unsafe_ancestor() {
         [[ "$owner_uid" =~ ^[0-9]+$ && "$mode" =~ ^[0-7]+$ ]] || return 0
         if [[ "$use_sudo" == "true" || ${EUID:-0} -eq 0 ]]; then
             [[ "$owner_uid" -eq 0 ]] || return 0
+            (((8#$mode & 0022) == 0)) || return 0
         elif [[ "$owner_uid" -ne 0 && "$owner_uid" -ne "$current_uid" ]]; then
             return 0
+        else
+            # A regular installer already writes through this tree. Accept
+            # group-writable prefixes, but keep world-writable paths closed.
+            (((8#$mode & 0002) == 0)) || return 0
         fi
-        (((8#$mode & 0022) == 0)) || return 0
         acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
         if printf '%s\n' "$acl_listing" |
             /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
@@ -1385,7 +1392,7 @@ perform_install() {
     check_requirements
     create_directories
     acquire_install_lock || {
-        log_error "Another Mole installation or update is already writing to $INSTALL_DIR"
+        log_error "Could not acquire the Mole installation lock for $INSTALL_DIR"
         exit 1
     }
     install_files
@@ -1473,7 +1480,7 @@ perform_update() {
     }
     acquire_install_lock || {
         VERBOSE=$old_verbose
-        log_error "Another Mole installation or update is already writing to $INSTALL_DIR"
+        log_error "Could not acquire the Mole installation lock for $INSTALL_DIR"
         exit 1
     }
     install_files || {

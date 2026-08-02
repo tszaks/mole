@@ -100,10 +100,14 @@ _update_lock_path_has_unsafe_ancestor() {
         [[ "$owner_uid" =~ ^[0-9]+$ && "$mode" =~ ^[0-7]+$ ]] || return 0
         if [[ "$use_sudo" == "true" || ${EUID:-0} -eq 0 ]]; then
             [[ "$owner_uid" -eq 0 ]] || return 0
+            (((8#$mode & 0022) == 0)) || return 0
         elif [[ "$owner_uid" -ne 0 && "$owner_uid" -ne "$current_uid" ]]; then
             return 0
+        else
+            # A regular updater already writes through this tree. Accept
+            # group-writable prefixes, but keep world-writable paths closed.
+            (((8#$mode & 0002) == 0)) || return 0
         fi
-        (((8#$mode & 0022) == 0)) || return 0
         acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
         if printf '%s\n' "$acl_listing" |
             /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then

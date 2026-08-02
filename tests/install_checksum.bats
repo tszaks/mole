@@ -675,6 +675,41 @@ EOF
 	[[ "$output" != *"UNEXPECTED_PROBE_SUCCESS"* ]]
 }
 
+@test "standalone installer cleans source temp under trailing-slash TMPDIR" {
+	local tmp_root="$HOME/installer-tmp"
+	mkdir -p "$tmp_root"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TMPDIR="$tmp_root/" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+log_error() { printf 'ERROR:%s\n' "$*"; }
+stop_line_spinner() { :; }
+release_install_lock() { :; }
+
+eval "$(sed -n '/^safe_rm() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^cleanup_installer() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+
+INSTALL_SOURCE_TMP=$(mktemp -d "${TMPDIR}mole-source.XXXXXX")
+source_tmp="$INSTALL_SOURCE_TMP"
+printf 'downloaded source\n' > "$source_tmp/payload"
+cleanup_installer
+
+[[ -z "$INSTALL_SOURCE_TMP" ]] || exit 1
+[[ ! -e "$source_tmp" ]] || exit 1
+if safe_rm "${TMPDIR%/}"; then
+	echo "UNEXPECTED_TEMP_ROOT_REMOVAL"
+	exit 1
+fi
+[[ -d "${TMPDIR%/}" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"UNEXPECTED_TEMP_ROOT_REMOVAL"* ]] || return 1
+	[[ "$output" != *"safe_rm: refusing to remove non-temp path"* ]] || return 1
+}
+
 @test "standalone installer serializes writers with the stable install lock" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -683,12 +718,7 @@ INSTALL_LOCK_PATH=""
 INSTALL_LOCK_CONTROL=""
 INSTALL_LOCK_HOLDER_PID=""
 mkdir -p "$INSTALL_DIR"
-
-acl_rule="everyone allow list,add_file,search,add_subdirectory,delete_child,file_inherit,directory_inherit"
-/bin/chmod +a "$acl_rule" "$INSTALL_DIR"
-/bin/mkdir -m 0700 "$INSTALL_DIR/acl-probe"
-/bin/ls -lde "$INSTALL_DIR/acl-probe" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'
-/bin/rmdir "$INSTALL_DIR/acl-probe"
+/bin/chmod 0775 "$INSTALL_DIR"
 
 eval "$(sed -n '/^safe_rm() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
 eval "$(sed -n '/^needs_sudo() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
@@ -697,6 +727,17 @@ eval "$(sed -n '/^maybe_sudo() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
 eval "$(sed -n '/^install_lock_has_unsafe_ancestor() {/,/^get_remote_main_commit_hash() {/p' "$PROJECT_ROOT/install.sh" | sed '$d')"
 log_error() { printf 'ERROR:%s\n' "$*"; }
 
+[[ "$(/usr/bin/stat -f%Lp "$INSTALL_DIR")" == "775" ]] || exit 1
+if ! install_lock_has_unsafe_ancestor true; then
+	echo "UNEXPECTED_PRIVILEGED_GROUP_WRITABLE_PREFIX_ACCEPTED"
+	exit 1
+fi
+
+acl_rule="everyone allow list,add_file,search,add_subdirectory,delete_child,file_inherit,directory_inherit"
+/bin/chmod +a "$acl_rule" "$INSTALL_DIR"
+/bin/mkdir -m 0700 "$INSTALL_DIR/acl-probe"
+/bin/ls -lde "$INSTALL_DIR/acl-probe" | /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:'
+/bin/rmdir "$INSTALL_DIR/acl-probe"
 if acquire_install_lock; then
 	echo "UNEXPECTED_WRITABLE_PARENT_ACL_ACCEPTED"
 	exit 1
@@ -753,18 +794,21 @@ release_install_lock
 declare -f acquire_install_lock | grep -q '/usr/bin/lockf'
 ! grep -q 'trap cleanup_tmp EXIT' "$PROJECT_ROOT/install.sh"
 grep -q "trap 'cleanup_installer' EXIT" "$PROJECT_ROOT/install.sh"
+! grep -qF 'Another Mole installation or update is already writing' "$PROJECT_ROOT/install.sh"
+grep -qF 'Could not acquire the Mole installation lock for' "$PROJECT_ROOT/install.sh"
 EOF
 
 	[ "$status" -eq 0 ] || {
 		echo "$output"
 		return 1
 	}
-	[[ "$output" != *"UNEXPECTED_CONCURRENT_INSTALL_LOCK"* ]]
-	[[ "$output" != *"UNEXPECTED_EXTERNAL_LOCK_BYPASS"* ]]
-	[[ "$output" != *"UNEXPECTED_LOCK_SYMLINK_FOLLOW"* ]]
-	[[ "$output" != *"UNEXPECTED_LOCK_FIFO_OPEN"* ]]
-	[[ "$output" != *"UNEXPECTED_INHERITED_INSTALL_LOCK_ACL"* ]]
-	[[ "$output" != *"UNEXPECTED_WRITABLE_PARENT_ACL_ACCEPTED"* ]]
+	[[ "$output" != *"UNEXPECTED_CONCURRENT_INSTALL_LOCK"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_EXTERNAL_LOCK_BYPASS"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_LOCK_SYMLINK_FOLLOW"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_LOCK_FIFO_OPEN"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_INHERITED_INSTALL_LOCK_ACL"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_WRITABLE_PARENT_ACL_ACCEPTED"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_PRIVILEGED_GROUP_WRITABLE_PREFIX_ACCEPTED"* ]] || return 1
 }
 
 @test "standalone installer normalizes a relative prefix before lock validation" {
