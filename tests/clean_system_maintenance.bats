@@ -199,8 +199,6 @@ sudo() {
         case "$2" in
             /Library/Caches) printf '%s\0' "/Library/Caches/test.log" ;;
             /private/var/log) printf '%s\0' "/private/var/log/system.log" ;;
-            /private/tmp) printf '%s\0' "/private/tmp/stale.tmp" ;;
-            /private/var/tmp) printf '%s\0' "/private/var/tmp/stale.tmp" ;;
         esac
         return 0
     fi
@@ -235,9 +233,10 @@ EOF
     [[ "$output" == *"/Library/Caches"* ]] || return 1
     [[ "$output" =~ safe_sudo_find_delete:/Library/Caches:\*\.cache:7:f:5:[0-9]+ ]] || return 1
     [[ "$output" =~ safe_sudo_find_delete:/Library/Caches:\*\.cache:7:f:5:[0-9]+:\*\.tmp:\*\.log ]] || return 1
-    [[ "$output" == *"/private/tmp"* ]] || return 1
-    [[ "$output" =~ safe_sudo_find_delete:/private/tmp:\*:7:f:1:[0-9]+ ]] || return 1
-    [[ "$output" =~ safe_sudo_find_delete:/private/var/tmp:\*:7:f:1:[0-9]+ ]] || return 1
+    # Generic shared temp roots are not exact cleanup targets: age alone does
+    # not authorize deleting third-party runtime state from them.
+    [[ "$output" != *"safe_sudo_find_delete:/private/tmp:"* ]] || return 1
+    [[ "$output" != *"safe_sudo_find_delete:/private/var/tmp:"* ]] || return 1
     [[ "$output" == *"/private/var/log"* ]] || return 1
     [[ "$output" =~ safe_sudo_find_delete:/private/var/log:\*\.log:7:f:3:[0-9]+ ]] || return 1
     [[ "$output" =~ safe_sudo_find_delete:/private/var/log:\*\.log:7:f:3:[0-9]+:\*\.gz:\*\.asl ]] || return 1

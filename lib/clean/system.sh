@@ -273,40 +273,9 @@ clean_deep_system() {
         report_system_cleanup_budget_reached
         return 0
     fi
-    start_section_spinner "Cleaning system temporary files..."
-    local tmp_cleaned=0
-    local tmp_status=0
-    local -a sys_temp_dirs=("/private/tmp" "/private/var/tmp")
-    for tmp_dir in "${sys_temp_dirs[@]}"; do
-        if system_cleanup_budget_reached "$system_cleanup_deadline"; then
-            tmp_status=124
-            break
-        fi
-        local tmp_rc=0
-        safe_sudo_find_delete "$tmp_dir" "*" "${MOLE_TEMP_FILE_AGE_DAYS}" "f" "1" \
-            "$system_cleanup_deadline" || tmp_rc=$?
-        if [[ $tmp_rc -ge 128 ]]; then
-            stop_section_spinner
-            return "$tmp_rc"
-        fi
-        if [[ $tmp_rc -eq 0 && ${MOLE_SAFE_SUDO_FIND_DELETE_COUNT:-0} -gt 0 ]]; then
-            tmp_cleaned=1
-        elif [[ $tmp_rc -ne 0 && $tmp_status -eq 0 ]]; then
-            tmp_status=$tmp_rc
-        fi
-        [[ $tmp_rc -eq 124 ]] && break
-    done
-    stop_section_spinner
-    if [[ $tmp_status -ne 0 ]]; then
-        report_system_cleanup_incomplete "System temporary files" "$tmp_status"
-    fi
-    if [[ $tmp_cleaned -eq 1 ]]; then
-        log_success "System temp files"
-    fi
-    if system_cleanup_budget_reached "$system_cleanup_deadline"; then
-        report_system_cleanup_budget_reached
-        return 0
-    fi
+    # Do not sweep generic /private/tmp or /private/var/tmp contents here.
+    # Age and a bounded scan do not prove third-party runtime state is
+    # disposable, and large shared temp roots made this section look hung.
     start_section_spinner "Cleaning system crash reports..."
     local crash_rc=0
     safe_sudo_find_delete "/Library/Logs/DiagnosticReports" "*" \

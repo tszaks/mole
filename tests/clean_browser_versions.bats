@@ -36,6 +36,11 @@ versions_dir="$HOME/Applications/Google Chrome.app/Contents/Frameworks/Google Ch
     mkdir -p "$versions_dir/128.0.0.0" "$versions_dir/129.0.0.0"
     ln -s "129.0.0.0" "$versions_dir/Current"
 touch "$versions_dir/128.0.0.0/sentinel"
+# Adding the sentinel updates the old directory mtime. Pin both directories so
+# a wall-clock second boundary cannot make the old version look like a newer
+# staged update under parallel test load.
+touch -t 202401010000 "$versions_dir/128.0.0.0"
+touch -t 202402010000 "$versions_dir/129.0.0.0"
 export MOLE_CHROME_APP_PATHS="$HOME/Applications/Google Chrome.app"
 
 # Mock pgrep to simulate Chrome running
@@ -91,6 +96,8 @@ versions_dir="$HOME/Applications/Google Chrome.app/Contents/Frameworks/Google Ch
     mkdir -p "$versions_dir/128.0.0.0" "$versions_dir/129.0.0.0"
     ln -s "129.0.0.0" "$versions_dir/Current"
 touch "$versions_dir/128.0.0.0/sentinel"
+touch -t 202401010000 "$versions_dir/128.0.0.0"
+touch -t 202402010000 "$versions_dir/129.0.0.0"
 export MOLE_CHROME_APP_PATHS="$HOME/Applications/Google Chrome.app"
 
 pgrep() {
@@ -124,6 +131,8 @@ versions_dir="$HOME/Applications/Google Chrome.app/Contents/Frameworks/Google Ch
 mkdir -p "$versions_dir/128.0.0.0" "$versions_dir/129.0.0.0"
 ln -s "129.0.0.0" "$versions_dir/Current"
 touch "$versions_dir/128.0.0.0/sentinel"
+touch -t 202401010000 "$versions_dir/128.0.0.0"
+touch -t 202402010000 "$versions_dir/129.0.0.0"
 export MOLE_CHROME_APP_PATHS="$HOME/Applications/Google Chrome.app"
 pgrep() { return 2; }
 safe_remove() { echo "UNEXPECTED_REMOVE:$1"; }
@@ -732,6 +741,8 @@ versions_dir="$HOME/Applications/Microsoft Edge.app/Contents/Frameworks/Microsof
     mkdir -p "$versions_dir/120.0.0.0" "$versions_dir/121.0.0.0"
     ln -s "121.0.0.0" "$versions_dir/Current"
 touch "$versions_dir/120.0.0.0/sentinel"
+touch -t 202401010000 "$versions_dir/120.0.0.0"
+touch -t 202402010000 "$versions_dir/121.0.0.0"
 export MOLE_EDGE_APP_PATHS="$HOME/Applications/Microsoft Edge.app"
 
 # Mock pgrep to simulate Edge running

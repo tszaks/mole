@@ -44,6 +44,27 @@ EOF
     [[ "$output" != *"Trash"* ]]
 }
 
+@test "clean_user_essentials avoids Darwin runtime probes and live-log truncation" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+safe_clean() { echo "SAFE:$2"; }
+clean_trash() { echo "TRASH"; }
+_clean_recent_items() { :; }
+_clean_mail_downloads() { :; }
+getconf() { echo "WRONG:getconf"; return 99; }
+lsof() { echo "WRONG:lsof"; return 99; }
+mole_truncate_log_file() { echo "WRONG:truncate"; return 99; }
+clean_user_essentials
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [ "$output" = $'SAFE:User app cache\nSAFE:User app logs\nTRASH' ]
+}
+
 @test "clean_trash dry run stays silent for compiled-model-only items" {
     mkdir -p "$HOME/.Trash/model/com.apple.e5rt.e5bundlecache"
     touch "$HOME/.Trash/model/com.apple.e5rt.e5bundlecache/weights.bin"
@@ -545,134 +566,6 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"REMOVE:"* ]]
-}
-
-@test "_clean_darwin_user_runtime_dir removes only old non-state files" {
-    local runtime_home="$HOME/darwin-runtime"
-    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-mkdir -p "$HOME/runtime/T"
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-_darwin_user_runtime_dir_is_safe() { return 0; }
-note_activity() { :; }
-files_cleaned=0
-total_size_cleaned=0
-total_items=0
-
-echo "old" > "$HOME/runtime/T/old.tmp"
-echo "new" > "$HOME/runtime/T/new.tmp"
-echo "state" > "$HOME/runtime/T/state.sqlite"
-touch -t 202301010000 "$HOME/runtime/T/old.tmp" "$HOME/runtime/T/state.sqlite"
-
-_clean_darwin_user_runtime_dir "$HOME/runtime/T" "temp" "Darwin user temp files"
-
-[[ ! -e "$HOME/runtime/T/old.tmp" ]]
-[[ -e "$HOME/runtime/T/new.tmp" ]]
-[[ -e "$HOME/runtime/T/state.sqlite" ]]
-echo "PASS"
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"PASS"* ]]
-}
-
-@test "_clean_darwin_user_runtime_dir marks a timed-out scan partial and propagates interrupts" {
-    local runtime_home="$HOME/darwin-runtime-partial"
-    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-mkdir -p "$HOME/runtime/T"
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-_darwin_user_runtime_dir_is_safe() { return 0; }
-note_activity() { :; }
-start_section_spinner() { :; }
-stop_section_spinner() { :; }
-files_cleaned=0
-total_size_cleaned=0
-total_items=0
-
-echo old1 > "$HOME/runtime/T/a.tmp"
-echo old2 > "$HOME/runtime/T/b.tmp"
-
-# find dies at its timeout after flushing two complete records. The prefix
-# stays deletable (each record independently qualifies), but the result line
-# must declare the pass partial instead of reading as the complete total.
-# Only the runtime-dir finds are stubbed; safe_remove's own bounded calls
-# must keep running for the deletions to actually happen.
-run_with_timeout() {
-    shift
-    if [[ "$*" == *"runtime/T"* && "$*" == *"-type f"* ]]; then
-        printf '%s\0' "$HOME/runtime/T/a.tmp" "$HOME/runtime/T/b.tmp"
-        return 124
-    fi
-    if [[ "$*" == *"runtime/T"* && "$*" == *"-type d"* ]]; then
-        return 124
-    fi
-    "$@"
-}
-
-rc=0
-_clean_darwin_user_runtime_dir "$HOME/runtime/T" "temp" "Darwin user temp files" || rc=$?
-[ "$rc" -eq 0 ] || { echo "WRONG: partial scan rc=$rc"; exit 1; }
-[[ ! -e "$HOME/runtime/T/a.tmp" ]] || { echo "WRONG: qualifying prefix was not cleaned"; exit 1; }
-
-# An interrupt (>=128) must propagate instead of being read as a result.
-echo old3 > "$HOME/runtime/T/c.tmp"
-run_with_timeout() {
-    shift
-    if [[ "$*" == *"runtime/T"* ]]; then
-        return 130
-    fi
-    "$@"
-}
-rc=0
-_clean_darwin_user_runtime_dir "$HOME/runtime/T" "temp" "Darwin user temp files" || rc=$?
-[ "$rc" -eq 130 ] || { echo "WRONG: interrupt rc=$rc"; exit 1; }
-[[ -e "$HOME/runtime/T/c.tmp" ]] || { echo "WRONG: interrupted scan still deleted"; exit 1; }
-echo DONE
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"DONE"* ]] || {
-        echo "$output"
-        return 1
-    }
-    [[ "$output" == *", partial"* ]]
-}
-
-@test "_clean_darwin_user_runtime_dir skips endpoint-security (EDR) agent caches" {
-    local runtime_home="$HOME/darwin-runtime-edr"
-    run env HOME="$runtime_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-mkdir -p "$HOME/runtime/C/com.crowdstrike.falcon.App" "$HOME/runtime/C/com.example.App"
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-_darwin_user_runtime_dir_is_safe() { return 0; }
-# Isolate the loop's use of the guard from the predicate's real var/folders
-# anchoring (which is covered in core_safe_functions.bats): treat the Falcon
-# fixture as an EDR path regardless of the test sandbox location.
-is_endpoint_security_cache_path() { case "$1" in *com.crowdstrike.*) return 0 ;; *) return 1 ;; esac; }
-note_activity() { :; }
-files_cleaned=0
-total_size_cleaned=0
-total_items=0
-
-echo edr > "$HOME/runtime/C/com.crowdstrike.falcon.App/cache.bin"
-echo norm > "$HOME/runtime/C/com.example.App/cache.bin"
-touch -t 202301010000 "$HOME/runtime/C/com.crowdstrike.falcon.App/cache.bin" "$HOME/runtime/C/com.example.App/cache.bin"
-
-_clean_darwin_user_runtime_dir "$HOME/runtime/C" "cache" "Darwin user cache files"
-
-# The EDR agent's user-owned cache is never deleted (tamper protection)...
-[[ -e "$HOME/runtime/C/com.crowdstrike.falcon.App/cache.bin" ]]
-# ...while a normal app's old cache file still gets reclaimed.
-[[ ! -e "$HOME/runtime/C/com.example.App/cache.bin" ]]
-echo "PASS"
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"PASS"* ]]
 }
 
 @test "app_support_entry_count_capped stops at cap without failing under pipefail" {
@@ -1682,127 +1575,4 @@ EOF
         echo "$output"
         return 1
     }
-}
-
-@test "live log truncation runs before the Logs removal pass" {
-    # Once safe_clean unlinks a writer-held log there is nothing left to
-    # truncate, so the call order in clean_user_essentials is load-bearing.
-    local truncate_line removal_line
-    truncate_line=$(grep -n '_clean_live_app_logs$' "$PROJECT_ROOT/lib/clean/user.sh" | tail -1 | cut -d: -f1)
-    removal_line=$(grep -n 'safe_clean ~/Library/Logs/\*' "$PROJECT_ROOT/lib/clean/user.sh" | head -1 | cut -d: -f1)
-    [ -n "$truncate_line" ] || return 1
-    [ -n "$removal_line" ] || return 1
-    [ "$truncate_line" -lt "$removal_line" ]
-}
-
-@test "_clean_live_app_logs discards a timed-out scan without truncating" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-start_section_spinner() { :; }
-stop_section_spinner() { :; }
-note_activity() { :; }
-log_operation() { echo "WRONG: oplog entry $2 $3"; }
-
-mkdir -p "$HOME/Library/Logs"
-echo content > "$HOME/Library/Logs/big.log"
-
-# A timed-out find still flushed one complete candidate before dying. The
-# old code fed that partial prefix straight into the truncation loop.
-run_with_timeout() {
-    shift
-    if [[ "$*" == *"find"* ]]; then
-        printf '%s\0' "$HOME/Library/Logs/big.log"
-        return 124
-    fi
-    echo "12345"
-    return 0
-}
-
-rc=0
-_clean_live_app_logs || rc=$?
-[ "$rc" -eq 124 ] || { echo "WRONG: timeout not propagated (rc=$rc)"; exit 1; }
-[[ -s "$HOME/Library/Logs/big.log" ]] || { echo "WRONG: truncated from a partial scan"; exit 1; }
-echo OK
-EOF
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"OK"* ]] || {
-        echo "$output"
-        return 1
-    }
-    [[ "$output" != *"WRONG"* ]]
-}
-
-@test "_clean_live_app_logs only empties logs a process holds open" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-start_section_spinner() { :; }
-stop_section_spinner() { :; }
-note_activity() { :; }
-log_operation() { printf '%s %s %s\n' "$1" "$2" "$3" >> "$HOME/oplog.trace"; }
-
-mkdir -p "$HOME/Library/Logs"
-echo opencontent > "$HOME/Library/Logs/open.log"
-echo closedcontent > "$HOME/Library/Logs/closed.log"
-
-run_with_timeout() {
-    shift
-    if [[ "$*" == *"find"* ]]; then
-        printf '%s\0' "$HOME/Library/Logs/open.log" "$HOME/Library/Logs/closed.log"
-        return 0
-    fi
-    # lsof: only open.log has a holder; a closed log is left for removal.
-    if [[ "$*" == *"open.log"* ]]; then
-        echo "4242"
-        return 0
-    fi
-    return 1
-}
-
-_clean_live_app_logs || { echo "WRONG: rc=$?"; exit 1; }
-[[ ! -s "$HOME/Library/Logs/open.log" ]] || { echo "WRONG: open log kept content"; exit 1; }
-[[ -f "$HOME/Library/Logs/open.log" ]] || { echo "WRONG: open log was unlinked"; exit 1; }
-[[ -s "$HOME/Library/Logs/closed.log" ]] || { echo "WRONG: closed log was emptied"; exit 1; }
-grep -q "clean TRUNCATED $HOME/Library/Logs/open.log" "$HOME/oplog.trace" || { echo "WRONG: no oplog entry"; exit 1; }
-[[ $(wc -l < "$HOME/oplog.trace") -eq 1 ]] || { echo "WRONG: extra oplog entries"; exit 1; }
-rm -f "$HOME/oplog.trace"
-echo OK
-EOF
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"OK"* ]] || {
-        echo "$output"
-        return 1
-    }
-    [[ "$output" == *"Active app logs"* ]] && [[ "$output" == *"1 emptied"* ]]
-}
-
-@test "_clean_live_app_logs does nothing and logs nothing in dry-run" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc << 'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/clean/user.sh"
-start_section_spinner() { :; }
-stop_section_spinner() { :; }
-note_activity() { :; }
-log_operation() { echo "WRONG: dry-run wrote an oplog entry"; }
-run_with_timeout() { echo "WRONG: dry-run ran a scan"; return 0; }
-
-mkdir -p "$HOME/Library/Logs"
-echo content > "$HOME/Library/Logs/big.log"
-
-_clean_live_app_logs || { echo "WRONG: rc=$?"; exit 1; }
-[[ -s "$HOME/Library/Logs/big.log" ]] || { echo "WRONG: dry-run emptied the file"; exit 1; }
-echo OK
-EOF
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"OK"* ]] || {
-        echo "$output"
-        return 1
-    }
-    [[ "$output" != *"WRONG"* ]] || return 1
-    # No emptied claim may appear in dry-run output.
-    [[ "$output" != *"emptied"* ]]
 }
