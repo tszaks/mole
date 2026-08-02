@@ -147,11 +147,106 @@ clean_trash() {
     fi
 }
 
+# Big log files a live process is still writing to.
+#
+# Unlink returns no blocks while the writer holds the descriptor, so a
+# resident agent's multi-gigabyte log survives every clean and the user never
+# sees the space come back. Emptying those files in place is the fix, and it
+# must happen BEFORE the removal pass unlinks them out of the namespace, or
+# there is nothing left to truncate.
+#
+# Only files lsof proves are open right now get touched: a closed log is
+# better served by the removal pass that follows, and freshness or size alone
+# proves nothing about an open descriptor. The scan is bounded (depth 2, one
+# find, wall-clock timeout) and a timed-out or failed scan is discarded
+# whole; partial output never feeds the truncation loop.
+_MOLE_LIVE_LOG_MIN_MB="${_MOLE_LIVE_LOG_MIN_MB:-50}"
+
+_mole_log_has_open_writer() {
+    local path="$1"
+    local pids=""
+    local probe_rc=0
+    pids=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" \
+        lsof -t -- "$path" 2> /dev/null < /dev/null) || probe_rc=$?
+    [[ $probe_rc -ge 128 ]] && return "$probe_rc"
+    # Timeout or lsof failure means "not proven open": leave the file to the
+    # removal pass instead of guessing.
+    [[ $probe_rc -eq 0 && -n "$pids" ]]
+}
+
+_clean_live_app_logs() {
+    local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ "${MOLE_CURRENT_COMMAND:-}" == "clean" &&
+        ("$pending_clean_cancel" -eq 124 || "$pending_clean_cancel" -ge 128) ]]; then
+        return "$pending_clean_cancel"
+    fi
+
+    # Dry-run: these files are already in the removal preview that follows,
+    # and nothing gets unlinked in dry-run, so a separate truncate promise
+    # would double-count the same bytes and log actions that never ran.
+    [[ "${MOLE_DRY_RUN:-0}" == "1" ]] && return 0
+    [[ -d "$HOME/Library/Logs" ]] || return 0
+    command -v lsof > /dev/null 2>&1 || return 0
+
+    local scan_file=""
+    scan_file=$(mktemp "${TMPDIR:-/tmp}/mole-live-logs.XXXXXX") || return 0
+
+    start_section_spinner "Checking active logs..."
+    local scan_rc=0
+    run_with_timeout "$MOLE_TIMEOUT_HINT_SCAN_SEC" \
+        find "$HOME/Library/Logs" -maxdepth 2 -type f \
+        -size +"${_MOLE_LIVE_LOG_MIN_MB}"M -mtime -1 -print0 \
+        > "$scan_file" 2> /dev/null || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        # find may have flushed a partial prefix before dying; never truncate
+        # from an incomplete scan.
+        stop_section_spinner
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        [[ $scan_rc -eq 124 || $scan_rc -ge 128 ]] && return "$scan_rc"
+        return 0
+    fi
+
+    local truncated_count=0
+    local reclaimed_kb=0
+    local log_path=""
+    local abort_rc=0
+    while IFS= read -r -d '' log_path; do
+        local writer_rc=0
+        _mole_log_has_open_writer "$log_path" || writer_rc=$?
+        if [[ $writer_rc -ge 128 ]]; then
+            abort_rc=$writer_rc
+            break
+        fi
+        [[ $writer_rc -eq 0 ]] || continue
+
+        local size_bytes
+        size_bytes=$(stat -f '%z' "$log_path" 2> /dev/null) || size_bytes=0
+        [[ "$size_bytes" =~ ^[0-9]+$ ]] || size_bytes=0
+        if mole_truncate_log_file "$log_path"; then
+            truncated_count=$((truncated_count + 1))
+            reclaimed_kb=$((reclaimed_kb + size_bytes / 1024))
+            log_operation "clean" "TRUNCATED" "$log_path" "$((size_bytes / 1024))KB"
+        fi
+    done < "$scan_file"
+    rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+    stop_section_spinner
+    [[ $abort_rc -ne 0 ]] && return "$abort_rc"
+
+    [[ $truncated_count -gt 0 ]] || return 0
+    local size_human
+    size_human=$(bytes_to_human "$((reclaimed_kb * 1024))" 2> /dev/null || echo "${reclaimed_kb}KB")
+    log_success "Active app logs · ${truncated_count} emptied · ${size_human}"
+    note_activity
+}
+
 clean_user_essentials() {
     start_section_spinner "Scanning caches..."
     safe_clean ~/Library/Caches/* "User app cache"
     stop_section_spinner
 
+    # Empty still-open logs in place first: once safe_clean unlinks them the
+    # blocks stay pinned by the writer and nothing is left to truncate.
+    _clean_live_app_logs
     safe_clean ~/Library/Logs/* "User app logs"
 
     start_section_spinner "Cleaning runtime files..."

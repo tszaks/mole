@@ -2688,3 +2688,95 @@ diagnose_removal_failure() {
 
     echo "$reason|$suggestion"
 }
+
+# Empty a log file in place instead of unlinking it.
+#
+# Unlink frees NO blocks while a writer still holds the descriptor: the space
+# only comes back when that process exits, so a "cleaned" 8 GB log keeps
+# occupying the disk. Worse, a writer that reopens by path (most rotating
+# loggers) then crashes with ENOENT. Truncating to zero reclaims the blocks
+# immediately, and an O_APPEND writer simply continues at offset 0.
+#
+# Guards, all required:
+#   - the name must be a known log form (never a config or state file
+#     sitting next to one)
+#   - protection, whitelist, and deletion-path policy all apply, exactly as
+#     they do at the removal funnel
+#   - the truncate binds to one descriptor via _mole_truncate_bound, so a
+#     leaf swapped in after these checks cannot redirect it
+# Returns 0 only when the file was actually emptied (or passed every guard
+# in dry-run, where nothing is written).
+mole_truncate_log_file() {
+    local path="$1"
+
+    [[ -n "$path" ]] || return 1
+    mole_is_log_like_name "${path##*/}" || return 1
+    [[ -L "$path" ]] && return 1
+    [[ -f "$path" ]] || return 1
+
+    if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$path"; then
+        return 1
+    fi
+    if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$path"; then
+        return 1
+    fi
+    validate_path_for_deletion "$path" 2> /dev/null || return 1
+
+    if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        return 0
+    fi
+
+    _mole_truncate_bound "$path"
+}
+
+# Last-mile truncate bound to a single descriptor. The shell-level checks in
+# mole_truncate_log_file race against a concurrent rename: a symlink swapped
+# in between the [[ -L ]] test and the write would be followed by a plain
+# `: >` redirect. sysopen(O_NOFOLLOW) refuses a symlink leaf at open time,
+# the regular-file test runs on the OPEN handle (fstat), and truncate() hits
+# that same handle, so nothing re-resolves the path after verification.
+# O_NONBLOCK keeps a fifo swapped in from hanging the open.
+_mole_truncate_bound() {
+    local path="$1"
+    [[ -n "$path" ]] || return 1
+    /usr/bin/perl -e '
+        use Fcntl qw(O_WRONLY O_NOFOLLOW O_NONBLOCK);
+        sysopen(my $fh, $ARGV[0], O_WRONLY | O_NOFOLLOW | O_NONBLOCK) or exit 1;
+        exit 1 unless -f $fh;
+        truncate($fh, 0) or exit 1;
+        close($fh) or exit 1;
+        exit 0;
+    ' "$path" 2> /dev/null
+}
+
+# Names that are logs rather than state files that merely live beside them.
+# Rotated suffixes are an explicit allowlist: apps ship foo.log.json,
+# foo.log.lock, foo.log.wal and similar state files that must never be
+# emptied, so every component after ".log." has to be a known rotation
+# marker (counter, date stamp, or compression suffix).
+mole_is_log_like_name() {
+    local name="$1"
+    [[ -n "$name" ]] || return 1
+    case "$name" in
+        .*) return 1 ;;
+    esac
+    local lower
+    lower=$(printf '%s' "$name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+    case "$lower" in
+        *.log | *.crash | *.diag) return 0 ;;
+        *.log.*) ;;
+        *) return 1 ;;
+    esac
+    local trailer="${lower##*.log.}"
+    local component
+    for component in ${trailer//./ }; do
+        case "$component" in
+            gz | bz2 | xz | zst | old | prev | previous)
+                continue
+                ;;
+        esac
+        # Counters (1, 01) and date stamps (2025-05-01, 20250501-120000)
+        [[ "$component" =~ ^[0-9][0-9-]*$ ]] || return 1
+    done
+    return 0
+}

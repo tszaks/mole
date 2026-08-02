@@ -1619,3 +1619,126 @@ EOF
         return 1
     }
 }
+
+@test "live log truncation runs before the Logs removal pass" {
+    # Once safe_clean unlinks a writer-held log there is nothing left to
+    # truncate, so the call order in clean_user_essentials is load-bearing.
+    local truncate_line removal_line
+    truncate_line=$(grep -n '_clean_live_app_logs$' "$PROJECT_ROOT/lib/clean/user.sh" | tail -1 | cut -d: -f1)
+    removal_line=$(grep -n 'safe_clean ~/Library/Logs/\*' "$PROJECT_ROOT/lib/clean/user.sh" | head -1 | cut -d: -f1)
+    [ -n "$truncate_line" ] || return 1
+    [ -n "$removal_line" ] || return 1
+    [ "$truncate_line" -lt "$removal_line" ]
+}
+
+@test "_clean_live_app_logs discards a timed-out scan without truncating" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+log_operation() { echo "WRONG: oplog entry $2 $3"; }
+
+mkdir -p "$HOME/Library/Logs"
+echo content > "$HOME/Library/Logs/big.log"
+
+# A timed-out find still flushed one complete candidate before dying. The
+# old code fed that partial prefix straight into the truncation loop.
+run_with_timeout() {
+    shift
+    if [[ "$*" == *"find"* ]]; then
+        printf '%s\0' "$HOME/Library/Logs/big.log"
+        return 124
+    fi
+    echo "12345"
+    return 0
+}
+
+rc=0
+_clean_live_app_logs || rc=$?
+[ "$rc" -eq 124 ] || { echo "WRONG: timeout not propagated (rc=$rc)"; exit 1; }
+[[ -s "$HOME/Library/Logs/big.log" ]] || { echo "WRONG: truncated from a partial scan"; exit 1; }
+echo OK
+EOF
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"OK"* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"WRONG"* ]]
+}
+
+@test "_clean_live_app_logs only empties logs a process holds open" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+log_operation() { printf '%s %s %s\n' "$1" "$2" "$3" >> "$HOME/oplog.trace"; }
+
+mkdir -p "$HOME/Library/Logs"
+echo opencontent > "$HOME/Library/Logs/open.log"
+echo closedcontent > "$HOME/Library/Logs/closed.log"
+
+run_with_timeout() {
+    shift
+    if [[ "$*" == *"find"* ]]; then
+        printf '%s\0' "$HOME/Library/Logs/open.log" "$HOME/Library/Logs/closed.log"
+        return 0
+    fi
+    # lsof: only open.log has a holder; a closed log is left for removal.
+    if [[ "$*" == *"open.log"* ]]; then
+        echo "4242"
+        return 0
+    fi
+    return 1
+}
+
+_clean_live_app_logs || { echo "WRONG: rc=$?"; exit 1; }
+[[ ! -s "$HOME/Library/Logs/open.log" ]] || { echo "WRONG: open log kept content"; exit 1; }
+[[ -f "$HOME/Library/Logs/open.log" ]] || { echo "WRONG: open log was unlinked"; exit 1; }
+[[ -s "$HOME/Library/Logs/closed.log" ]] || { echo "WRONG: closed log was emptied"; exit 1; }
+grep -q "clean TRUNCATED $HOME/Library/Logs/open.log" "$HOME/oplog.trace" || { echo "WRONG: no oplog entry"; exit 1; }
+[[ $(wc -l < "$HOME/oplog.trace") -eq 1 ]] || { echo "WRONG: extra oplog entries"; exit 1; }
+rm -f "$HOME/oplog.trace"
+echo OK
+EOF
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"OK"* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Active app logs"* ]] && [[ "$output" == *"1 emptied"* ]]
+}
+
+@test "_clean_live_app_logs does nothing and logs nothing in dry-run" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+log_operation() { echo "WRONG: dry-run wrote an oplog entry"; }
+run_with_timeout() { echo "WRONG: dry-run ran a scan"; return 0; }
+
+mkdir -p "$HOME/Library/Logs"
+echo content > "$HOME/Library/Logs/big.log"
+
+_clean_live_app_logs || { echo "WRONG: rc=$?"; exit 1; }
+[[ -s "$HOME/Library/Logs/big.log" ]] || { echo "WRONG: dry-run emptied the file"; exit 1; }
+echo OK
+EOF
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"OK"* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"WRONG"* ]] || return 1
+    # No emptied claim may appear in dry-run output.
+    [[ "$output" != *"emptied"* ]]
+}
