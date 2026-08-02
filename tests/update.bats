@@ -1116,10 +1116,13 @@ INNER
 	command -v timeout > /dev/null 2>&1 || timeout_cmd="gtimeout"
 	command -v "$timeout_cmd" > /dev/null 2>&1 || skip "timeout command unavailable"
 
-	run "$timeout_cmd" 1 env HOME="$HOME/bounded-version-self-heal" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TIMEOUT_QUICK_DETECT_SEC=0.1 /bin/bash --noprofile --norc << 'INNER'
+	# The inner 0.1-second probe is the behavior under test. Keep the outer
+	# timeout as a generous deadman for a real regression so a loaded parallel
+	# CI runner cannot fail the correct path merely from scheduling delay.
+	run "$timeout_cmd" 10 env HOME="$HOME/bounded-version-self-heal" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TIMEOUT_QUICK_DETECT_SEC=0.1 /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 mkdir -p "$HOME/config" "$HOME/bin"
-printf '#!/bin/bash\nsleep 5\n' > "$HOME/bin/mole"
+printf '#!/bin/bash\nsleep 30\n' > "$HOME/bin/mole"
 chmod +x "$HOME/bin/mole"
 source "$PROJECT_ROOT/lib/core/common.sh"
 VERSION="0.0.1"
