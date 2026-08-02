@@ -27,7 +27,7 @@ teardown_file() {
 }
 
 # clean_deep_system reaches its two /private/var/folders sweeps through
-# `command find`, which a shell-function `find` mock cannot intercept, and a
+# `/usr/bin/find`, which a shell-function `find` mock cannot intercept, and a
 # plain "drop the timeout and run it" wrapper mock removes the production
 # bound as well. Each test then walked the host's real temp tree twice,
 # unbounded, for seconds. Intercept at the wrapper instead and hand back an
@@ -37,13 +37,150 @@ mock_run_with_timeout_skipping_var_folders() {
     # shellcheck disable=SC2329  # Invoked by lib/clean/system.sh once defined.
     run_with_timeout() {
         shift
-        if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+        if [[ "${1:-}" == "/usr/bin/find" && "${2:-}" == "/private/var/folders" ]]; then
             return 0
         fi
         "$@"
     }
 }
 export -f mock_run_with_timeout_skipping_var_folders
+
+@test "materialize_completed_system_scan discards a timed-out partial prefix" {
+    local slow_scan="$HOME/partial-system-scan.sh"
+    local trace="$HOME/partial-system-scan.trace"
+    cat > "$slow_scan" <<'SCRIPT'
+#!/bin/bash
+printf 'started\n' >> "$SYSTEM_SCAN_TRACE"
+printf 'partial\0'
+exec sleep 4
+SCRIPT
+    chmod +x "$slow_scan"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" SLOW_SCAN="$slow_scan" \
+        SYSTEM_SCAN_TRACE="$trace" \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+scan_file=$(create_temp_file)
+rc=0
+materialize_completed_system_scan "$scan_file" 1 "$SLOW_SCAN" || rc=$?
+printf 'RC=%s\n' "$rc"
+printf 'BYTES=%s\n' "$(wc -c < "$scan_file" | tr -d ' ')"
+rm -f -- "$scan_file"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$(< "$trace")" == "started" ]] || return 1
+    [[ "$output" == *"BYTES=0"* ]]
+}
+
+@test "materialize_completed_system_scan preserves NUL-delimited paths with newlines" {
+    local producer="$HOME/newline-system-scan.sh"
+    cat > "$producer" <<'SCRIPT'
+#!/bin/bash
+printf '/Volumes/Backup/line\nbreak.inProgress\0'
+SCRIPT
+    chmod +x "$producer"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PRODUCER="$producer" \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+scan_file=$(create_temp_file)
+materialize_completed_system_scan "$scan_file" 1 "$PRODUCER"
+record=""
+IFS= read -r -d '' record < "$scan_file" || true
+[[ "$record" == $'/Volumes/Backup/line\nbreak.inProgress' ]]
+printf 'PRESERVED\n'
+rm -f -- "$scan_file"
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == "PRESERVED" ]]
+}
+
+@test "clean_deep_system stops later scans after its overall budget" {
+    run /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+calls=0
+safe_sudo_find_delete() {
+    calls=$((calls + 1))
+    MOLE_SAFE_SUDO_FIND_DELETE_COUNT=0
+    SECONDS=$((SECONDS + 121))
+    return 0
+}
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_deep_system
+printf 'CALLS=%s\n' "$calls"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CALLS=1"* ]] || return 1
+    [[ "$output" == *"time limit reached"* ]]
+}
+
+@test "clean_deep_system propagates an interrupted privileged cleanup" {
+    run /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+calls=0
+safe_sudo_find_delete() {
+    calls=$((calls + 1))
+    return 130
+}
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+rc=0
+clean_deep_system || rc=$?
+printf 'RC=%s\nCALLS=%s\n' "$rc" "$calls"
+SCRIPT
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=130"* ]] || return 1
+    [[ "$output" == *"CALLS=1"* ]]
+}
+
+@test "clean_deep_system propagates an interrupted macOS version probe" {
+    run /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+safe_sudo_find_delete() {
+    MOLE_SAFE_SUDO_FIND_DELETE_COUNT=0
+    return 0
+}
+safe_sudo_remove() {
+    printf 'UNEXPECTED_REMOVE:%s\n' "$1"
+    return 99
+}
+show_large_active_powerlog_notice() { :; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+run_with_timeout() {
+    local _duration="$1"
+    shift
+    if [[ "${1:-}" == "sw_vers" ]]; then
+        printf 'SW_VERS_INTERRUPTED\n'
+        return 130
+    fi
+    "$@"
+}
+rc=0
+clean_deep_system || rc=$?
+printf 'RC=%s\n' "$rc"
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=130"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
 
 @test "clean_deep_system issues safe sudo deletions" {
     run /bin/bash --noprofile --norc << 'EOF'
@@ -62,9 +199,6 @@ sudo() {
         case "$2" in
             /Library/Caches) printf '%s\0' "/Library/Caches/test.log" ;;
             /private/var/log) printf '%s\0' "/private/var/log/system.log" ;;
-            # Each sweep is gated on this probe finding at least one aged file, so a
-            # directory with no case here is silently never cleaned and the matching
-            # assertion below can never hold.
             /private/tmp) printf '%s\0' "/private/tmp/stale.tmp" ;;
             /private/var/tmp) printf '%s\0' "/private/var/tmp/stale.tmp" ;;
         esac
@@ -77,7 +211,7 @@ sudo() {
     return 0
 }
 safe_sudo_find_delete() {
-    echo "safe_sudo_find_delete:$1:$2:$3:$4" >> "$CALL_LOG"
+    echo "safe_sudo_find_delete:$1:$2:$3:$4:${5:-default}:${6:-none}:${7:-none}:${8:-none}" >> "$CALL_LOG"
     return 0
 }
 show_large_active_powerlog_notice() { echo "powerlog_notice" >> "$CALL_LOG"; }
@@ -99,9 +233,15 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"/Library/Caches"* ]] || return 1
+    [[ "$output" =~ safe_sudo_find_delete:/Library/Caches:\*\.cache:7:f:5:[0-9]+ ]] || return 1
+    [[ "$output" =~ safe_sudo_find_delete:/Library/Caches:\*\.cache:7:f:5:[0-9]+:\*\.tmp:\*\.log ]] || return 1
     [[ "$output" == *"/private/tmp"* ]] || return 1
+    [[ "$output" =~ safe_sudo_find_delete:/private/tmp:\*:7:f:1:[0-9]+ ]] || return 1
+    [[ "$output" =~ safe_sudo_find_delete:/private/var/tmp:\*:7:f:1:[0-9]+ ]] || return 1
     [[ "$output" == *"/private/var/log"* ]] || return 1
-    [[ "$output" == *"safe_sudo_find_delete:/private/var/db/powerlog:*:7:f"* ]] || return 1
+    [[ "$output" =~ safe_sudo_find_delete:/private/var/log:\*\.log:7:f:3:[0-9]+ ]] || return 1
+    [[ "$output" =~ safe_sudo_find_delete:/private/var/log:\*\.log:7:f:3:[0-9]+:\*\.gz:\*\.asl ]] || return 1
+    [[ "$output" =~ safe_sudo_find_delete:/private/var/db/powerlog:\*:7:f:5:[0-9]+ ]] || return 1
     [[ "$output" == *"powerlog_notice"* ]]
 }
 
@@ -151,8 +291,6 @@ sudo() {
             /Library/Caches) printf '%s\0' "/Library/Caches/test.log" ;;
             /private/var/log) printf '%s\0' "/private/var/log/system.log" ;;
             /Library/Logs) echo "/Library/Logs/adobegc.log" ;;
-            # The third-party sweep probes each vendor dir by exact path, so a
-            # bare /Library/Logs case never gates it on.
             /Library/Logs/Adobe) printf '%s\0' "/Library/Logs/Adobe/old.log" ;;
             /Library/Logs/CreativeCloud) printf '%s\0' "/Library/Logs/CreativeCloud/old.log" ;;
         esac
@@ -187,7 +325,7 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]] || return 1
     [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]] || return 1
-    [[ "$output" == *"safe_sudo_remove:/Library/Logs/adobegc.log"* ]]
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs:adobegc.log"* ]]
 }
 
 @test "clean_deep_system removes stale idleassetsd aerial downloads scoped to the temp dir (#1253)" {
@@ -225,6 +363,11 @@ sudo() {
 }
 safe_sudo_find_delete() {
     echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    if [[ "$1" == "$IDLE_DIR" ]]; then
+        MOLE_SAFE_SUDO_FIND_DELETE_COUNT=1
+    else
+        MOLE_SAFE_SUDO_FIND_DELETE_COUNT=0
+    fi
     return 0
 }
 safe_sudo_remove() { return 0; }
@@ -247,7 +390,7 @@ EOF
     [[ "$output" == *"SUCCESS:Stale wallpaper downloads"* ]] || return 1
 }
 
-@test "clean_deep_system skips idleassetsd sweep when no stale download exists (#1253)" {
+@test "clean_deep_system does not report idleassetsd success when no stale download exists (#1253)" {
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/system_calls_idle_empty.log"
@@ -293,7 +436,7 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" != *"safe_sudo_find_delete:$IDLE_DIR:CFNetworkDownload"* ]] || return 1
+    [[ "$output" == *"safe_sudo_find_delete:/private/var/folders/zz/abcdef/T/com.apple.idleassetsd:CFNetworkDownload_*.tmp"* ]] || return 1
     [[ "$output" != *"SUCCESS:Stale wallpaper downloads"* ]] || return 1
 }
 
@@ -336,7 +479,7 @@ find() { return 0; }
 run_with_timeout() {
     local _timeout="$1"
     shift
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+    if [[ "${1:-}" == "/usr/bin/find" && "${2:-}" == "/private/var/folders" ]]; then
         return 0
     fi
     "$@"
@@ -348,8 +491,8 @@ EOF2
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"SUCCESS:Third-party system logs"* ]] || return 1
-    [[ "$output" != *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]] || return 1
-    [[ "$output" != *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]] || return 1
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/Adobe:*"* ]] || return 1
+    [[ "$output" == *"safe_sudo_find_delete:/Library/Logs/CreativeCloud:*"* ]] || return 1
     [[ "$output" != *"safe_sudo_remove:/Library/Logs/adobegc.log"* ]]
 }
 
@@ -397,7 +540,7 @@ find() { return 0; }
 run_with_timeout() {
     local _timeout="$1"
     shift
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+    if [[ "${1:-}" == "/usr/bin/find" && "${2:-}" == "/private/var/folders" ]]; then
         return 0
     fi
     "$@"
@@ -1082,6 +1225,11 @@ sudo() {
 }
 safe_sudo_find_delete() {
     echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    if [[ "$1" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" ]]; then
+        MOLE_SAFE_SUDO_FIND_DELETE_COUNT=1
+    else
+        MOLE_SAFE_SUDO_FIND_DELETE_COUNT=0
+    fi
     return 0
 }
 safe_sudo_remove() { return 0; }
@@ -1095,8 +1243,8 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"reportmemoryexception/MemoryLimitViolations"* ]] || return 1
-    [[ "$output" == *"-mtime +30"* ]] # 30-day retention
-    [[ "$output" == *"safe_sudo_find_delete"* ]]
+    [[ "$output" == *"-mtime +30"* ]] || return 1 # 30-day retention
+    [[ "$output" == *"safe_sudo_find_delete:/private/var/db/reportmemoryexception/MemoryLimitViolations:*"* ]]
 }
 
 @test "clean_deep_system memory exception respects DRY_RUN flag" {
@@ -1128,6 +1276,11 @@ sudo() {
 }
 safe_sudo_find_delete() {
     echo "safe_sudo_find_delete:$1:$2" >> "$CALL_LOG"
+    if [[ "$1" == "/private/var/db/reportmemoryexception/MemoryLimitViolations" ]]; then
+        MOLE_SAFE_SUDO_FIND_DELETE_COUNT=1
+    else
+        MOLE_SAFE_SUDO_FIND_DELETE_COUNT=0
+    fi
     return 0
 }
 safe_sudo_remove() { return 0; }
@@ -1184,7 +1337,7 @@ EOF
     [[ "$output" != *"SUCCESS:Memory exception reports"* ]]
 }
 
-@test "clean_deep_system cleans diagnostic trace logs" {
+@test "clean_deep_system uses one broad diagnostic log scan" {
     run /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 CALL_LOG="$HOME/diag_calls.log"
@@ -1229,9 +1382,9 @@ cat "$CALL_LOG"
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"safe_sudo_find_delete:/private/var/db/diagnostics:*.tracev3"* ]] || return 1
+    [[ "$output" == *"safe_sudo_find_delete:/private/var/db/diagnostics:*"* ]] || return 1
     [[ "$output" == *"safe_sudo_find_delete:/private/var/db/DiagnosticPipeline:*"* ]] || return 1
-    [[ "$output" == *"tracev3"* ]]
+    [[ "$output" != *"safe_sudo_find_delete:/private/var/db/diagnostics:*.tracev3"* ]]
 }
 
 @test "show_large_active_powerlog_notice reports an abnormal database in real and dry-run modes" {
@@ -1329,7 +1482,7 @@ find() { return 0; }
 run_with_timeout() {
     local _timeout="$1"
     shift
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+    if [[ "${1:-}" == "/usr/bin/find" && "${2:-}" == "/private/var/folders" ]]; then
         printf '%s\0' "/private/var/folders/test/a/X/demo.code_sign_clone"
         return 0
     fi
@@ -1374,7 +1527,7 @@ find() { return 0; }
 run_with_timeout() {
     local _timeout="$1"
     shift
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+    if [[ "${1:-}" == "/usr/bin/find" && "${2:-}" == "/private/var/folders" ]]; then
         printf '%s\0' "/private/var/folders/test/a/X/demo.code_sign_clone"
         return 0
     fi
@@ -1419,7 +1572,7 @@ find() { return 0; }
 run_with_timeout() {
     local _timeout="$1"
     shift
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" ]]; then
+    if [[ "${1:-}" == "/usr/bin/find" && "${2:-}" == "/private/var/folders" ]]; then
         printf '%s\0' \
             "/private/var/folders/test/a/X/com.crowdstrike.falcon.App.code_sign_clone" \
             "/private/var/folders/test/a/X/demo.code_sign_clone"
@@ -1479,6 +1632,37 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"safe_sudo_remove:/Library/Caches/com.apple.iconservices.store"* ]] || return 1
     [[ "$output" == *"SUCCESS:Rebuildable system caches, 1 item"* ]]
+}
+
+@test "clean_deep_system does not report an absent rebuildable system cache" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+CALL_LOG="$HOME/rebuildable_cache_absent_calls.log"
+> "$CALL_LOG"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+safe_sudo_find_delete() {
+    MOLE_SAFE_SUDO_FIND_DELETE_COUNT=0
+    return 0
+}
+_mole_bounded_sudo() { return 1; }
+safe_sudo_remove() {
+    echo "UNEXPECTED_REMOVE:$1" >> "$CALL_LOG"
+    return 0
+}
+log_success() { echo "SUCCESS:$1" >> "$CALL_LOG"; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+mock_run_with_timeout_skipping_var_folders
+
+clean_deep_system
+cat "$CALL_LOG"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"UNEXPECTED_REMOVE:/Library/Caches/com.apple.iconservices.store"* ]] || return 1
+    [[ "$output" != *"SUCCESS:Rebuildable system caches"* ]]
 }
 
 @test "is_rebuildable_gpu_cache_dir only allows C GPU cache shards" {
@@ -1551,7 +1735,7 @@ run_with_timeout() {
     # prefix also swallowed the code_sign_clone sweep, which then received this GPU
     # list and removed every entry in it, including the /T/ path this test asserts is
     # never touched.
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${3:-}" == "/private/var/folders" && "$*" == *"com.apple.metal"* ]]; then
+    if [[ "${1:-}" == "/usr/bin/find" && "${2:-}" == "/private/var/folders" && "$*" == *"com.apple.metal"* ]]; then
         printf 'find_args:%s\n' "$*" >> "$CALL_LOG"
         printf '%s\0' \
             "/private/var/folders/test/a/C/com.example.App/com.apple.metal" \
@@ -1607,14 +1791,14 @@ run_with_timeout() {
     shift
     # The GPU-cache sweep is the deep walk (maxdepth 8); feed candidates only to
     # it and let every other find scan return nothing so this exercises just it.
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" && "${5:-}" == "8" ]]; then
+    if [[ "${1:-}" == "/usr/bin/find" && "${4:-}" == "8" ]]; then
         printf '%s\0' \
             "/private/var/folders/test/a/C/com.crowdstrike.falcon.App/com.apple.metalfe" \
             "/private/var/folders/test/a/C/com.sentinelone.agent/com.apple.metal" \
             "/private/var/folders/test/a/C/com.example.App/com.apple.metalfe"
         return 0
     fi
-    if [[ "${1:-}" == "command" && "${2:-}" == "find" ]]; then
+    if [[ "${1:-}" == "/usr/bin/find" ]]; then
         return 0
     fi
     "$@"
@@ -1900,6 +2084,140 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"GATES_OK"* ]]
+}
+
+@test "software_update_pending_or_unknown propagates an interrupted plist probe" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+fixture="$HOME/software-update.plist"
+touch "$fixture"
+run_with_timeout() { return 130; }
+rc=0
+software_update_pending_or_unknown "$fixture" || rc=$?
+printf 'RC=%s\n' "$rc"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=130"* ]]
+}
+
+@test "time_machine_candidate_still_eligible rejects replacement symlink and active backup races" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+candidate="$HOME/old.inProgress"
+mkdir -p "$candidate"
+deadline=$((SECONDS + 10))
+expected=$(time_machine_candidate_identity "$candidate" "$deadline")
+expected_mtime="${expected##*:}"
+get_epoch_seconds() { echo "$((expected_mtime + 49 * 3600))"; }
+tm_is_running() { return 1; }
+
+time_machine_candidate_still_eligible "$candidate" "$expected" 48 "$deadline"
+
+replacement="$HOME/replacement.inProgress"
+mkdir -p "$replacement"
+rm -rf "$candidate"
+mv "$replacement" "$candidate"
+if time_machine_candidate_still_eligible "$candidate" "$expected" 48 "$deadline"; then
+    echo "REPLACEMENT_ACCEPTED"
+    exit 1
+fi
+
+rm -rf "$candidate"
+mkdir -p "$HOME/real-backup"
+ln -s "$HOME/real-backup" "$candidate"
+if time_machine_candidate_still_eligible "$candidate" "$expected" 48 "$deadline"; then
+    echo "SYMLINK_ACCEPTED"
+    exit 1
+fi
+
+rm -f "$candidate"
+mkdir -p "$candidate"
+expected=$(time_machine_candidate_identity "$candidate" "$deadline")
+expected_mtime="${expected##*:}"
+tm_is_running() { return 0; }
+if time_machine_candidate_still_eligible "$candidate" "$expected" 48 "$deadline"; then
+    echo "ACTIVE_ACCEPTED"
+    exit 1
+fi
+echo "RACES_REJECTED"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RACES_REJECTED"* ]] || return 1
+    [[ "$output" != *"ACCEPTED"* ]]
+}
+
+@test "macos_installer_candidate_still_eligible rejects invalid age replacement active and pending races" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/system.sh"
+
+installer="$HOME/Install macOS Test.app"
+mkdir -p "$installer/Contents"
+touch "$installer/Contents/Info.plist"
+deadline=$((SECONDS + 10))
+expected=$(macos_installer_candidate_identity "$installer" "$deadline")
+expected_mtime="${expected##*:}"
+get_epoch_seconds() { echo "$((expected_mtime + 15 * 86400))"; }
+software_update_pending_or_unknown() { return 1; }
+macos_installer_process_is_idle() { return 0; }
+run_with_timeout() {
+    local _duration="$1"
+    shift
+    if [[ "${1:-}" == "/usr/libexec/PlistBuddy" ]]; then
+        printf '15.0\n'
+        return 0
+    fi
+    "$@"
+}
+
+macos_installer_candidate_still_eligible "$installer" "$expected" 14 "$deadline"
+
+macos_installer_candidate_identity() { printf '1:2:0\n'; }
+if macos_installer_candidate_still_eligible "$installer" '1:2:0' 14 "$deadline"; then
+    echo 'INVALID_MTIME_ACCEPTED'
+    exit 1
+fi
+unset -f macos_installer_candidate_identity
+source "$PROJECT_ROOT/lib/clean/system.sh"
+software_update_pending_or_unknown() { return 1; }
+
+replacement="$HOME/installer-replacement"
+mkdir -p "$replacement/Contents"
+touch "$replacement/Contents/Info.plist"
+rm -rf "$installer"
+mv "$replacement" "$installer"
+if macos_installer_candidate_still_eligible "$installer" "$expected" 14 "$deadline"; then
+    echo 'REPLACEMENT_ACCEPTED'
+    exit 1
+fi
+
+expected=$(macos_installer_candidate_identity "$installer" "$deadline")
+expected_mtime="${expected##*:}"
+macos_installer_process_is_idle() { return 1; }
+if macos_installer_candidate_still_eligible "$installer" "$expected" 14 "$deadline"; then
+    echo 'ACTIVE_ACCEPTED'
+    exit 1
+fi
+macos_installer_process_is_idle() { return 0; }
+software_update_pending_or_unknown() { return 0; }
+if macos_installer_candidate_still_eligible "$installer" "$expected" 14 "$deadline"; then
+    echo 'PENDING_ACCEPTED'
+    exit 1
+fi
+echo 'INSTALLER_RACES_REJECTED'
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"INSTALLER_RACES_REJECTED"* ]] || return 1
+    [[ "$output" != *"ACCEPTED"* ]]
 }
 
 @test "clean never deletes Software Update-owned staging trees" {

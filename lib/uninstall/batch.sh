@@ -164,11 +164,14 @@ _uninstall_match_loaded_background_items() {
     local detail app_name app_path bundle_id enc_helpers sp matched
     local _total_kb _encoded_files _encoded_system_files _has_sensitive_data
     local _needs_sudo _is_brew_cask _cask_name _encoded_diag_system
-    local _encoded_review_system _sibling_guard
+    local _encoded_review_system _sibling_guard _expected_app_identity
+    local _original_bundle_id _encoded_live_sibling_fingerprint _expected_info_identity
     for detail in "${details[@]}"; do
         IFS='|' read -r app_name app_path bundle_id _total_kb _encoded_files _encoded_system_files \
             _has_sensitive_data _needs_sudo _is_brew_cask _cask_name _encoded_diag_system \
-            _encoded_review_system enc_helpers _sibling_guard <<< "$detail"
+            _encoded_review_system enc_helpers _sibling_guard _expected_app_identity \
+            _original_bundle_id _encoded_live_sibling_fingerprint \
+            _expected_info_identity <<< "$detail"
         matched=false
         for sp in "${success_paths[@]}"; do
             [[ "$sp" == "$app_path" ]] && matched=true && break
@@ -222,17 +225,48 @@ format_uninstall_preview_path() {
 discover_login_item_helper_bundle_ids() {
     local app_path="$1"
     local login_items_root="$app_path/Contents/Library/LoginItems"
+    local _MOLE_UNINSTALL_DISCOVERY_DEADLINE="${_MOLE_UNINSTALL_DISCOVERY_DEADLINE:-$((SECONDS + MOLE_TIMEOUT_DISK_VERIFY_SEC))}"
     [[ -d "$login_items_root" ]] || return 0
 
+    local scan_file=""
+    scan_file=$(create_temp_file) || return 1
+    local scan_rc=0
+    _mole_uninstall_materialize_find0 "$scan_file" \
+        "$login_items_root" -maxdepth 1 -name "*.app" \
+        -print0 || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        return "$scan_rc"
+    fi
+
     local helper info bundle_id
+    local result_rc=0
     while IFS= read -r -d '' helper; do
         info="$helper/Contents/Info.plist"
         [[ -f "$info" ]] || continue
-        bundle_id=$(plutil -extract CFBundleIdentifier raw "$info" 2> /dev/null || true)
+        local plist_rc=0
+        local plist_timeout=""
+        plist_timeout=$(_mole_timeout_with_deadline \
+            "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            "$_MOLE_UNINSTALL_DISCOVERY_DEADLINE") || plist_rc=$?
+        if [[ $plist_rc -eq 0 ]]; then
+            bundle_id=$(run_with_timeout "$plist_timeout" plutil \
+                -extract CFBundleIdentifier raw "$info" \
+                2> /dev/null) || plist_rc=$?
+        fi
+        if [[ $plist_rc -eq 124 || $plist_rc -ge 128 ]]; then
+            result_rc=$plist_rc
+            break
+        fi
         if mole_is_reverse_dns_bundle_id "$bundle_id"; then
             printf '%s\n' "$bundle_id"
         fi
-    done < <(find "$login_items_root" -maxdepth 1 -name "*.app" -print0 2> /dev/null || true)
+    done < "$scan_file"
+    rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+    if [[ $result_rc -ne 0 ]]; then
+        return "$result_rc"
+    fi
+    return 0
 }
 
 bootout_login_item_helpers() {
@@ -253,8 +287,12 @@ bootout_login_item_helpers() {
         case "$helper_id" in
             com.apple.*) continue ;;
         esac
-        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" launchctl bootout "gui/$uid/$helper_id" > /dev/null 2>&1 || true
+        local bootout_rc=0
+        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" launchctl \
+            bootout "gui/$uid/$helper_id" > /dev/null 2>&1 || bootout_rc=$?
+        [[ $bootout_rc -eq 124 || $bootout_rc -ge 128 ]] && return "$bootout_rc"
     done <<< "$helper_ids"
+    return 0
 }
 
 can_unload_launch_plist() {
@@ -270,12 +308,82 @@ can_unload_launch_plist() {
 unload_launch_plist() {
     local plist="$1"
     local needs_sudo="${2:-false}"
+    local deadline="${3:-}"
     can_unload_launch_plist "$plist" || return 0
-    if [[ "$needs_sudo" == "true" ]]; then
-        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sudo launchctl unload "$plist" > /dev/null 2>&1 || true
-    else
-        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" launchctl unload "$plist" > /dev/null 2>&1 || true
+    local unload_timeout="$MOLE_TIMEOUT_MEDIUM_PROBE_SEC"
+    if [[ -n "$deadline" ]]; then
+        unload_timeout=$(_mole_timeout_with_deadline "$unload_timeout" \
+            "$deadline") || return $?
     fi
+    if [[ "$needs_sudo" == "true" ]]; then
+        local unload_rc=0
+        run_with_timeout "$unload_timeout" sudo launchctl \
+            unload "$plist" > /dev/null 2>&1 || unload_rc=$?
+    else
+        local unload_rc=0
+        run_with_timeout "$unload_timeout" launchctl \
+            unload "$plist" > /dev/null 2>&1 || unload_rc=$?
+    fi
+    [[ $unload_rc -eq 124 || $unload_rc -ge 128 ]] && return "$unload_rc"
+    return 0
+}
+
+_uninstall_unload_launch_plists() {
+    local root="$1"
+    local needs_sudo="$2"
+    local bundle_id="${3:-}"
+    local app_path="${4:-}"
+    local _MOLE_UNINSTALL_DISCOVERY_DEADLINE="${_MOLE_UNINSTALL_DISCOVERY_DEADLINE:-$((SECONDS + MOLE_TIMEOUT_DISK_VERIFY_SEC))}"
+    [[ -d "$root" ]] || return 0
+
+    local scan_file=""
+    scan_file=$(create_temp_file) || return 1
+    local scan_rc=0
+    if [[ -n "$bundle_id" ]]; then
+        _mole_uninstall_materialize_find0 "$scan_file" "$root" \
+            -maxdepth 1 \( -name "${bundle_id}.plist" -o \
+            -name "${bundle_id}.*.plist" \) -print0 || scan_rc=$?
+    else
+        _mole_uninstall_materialize_find0 "$scan_file" "$root" \
+            -maxdepth 1 -name '*.plist' -print0 || scan_rc=$?
+    fi
+    if [[ $scan_rc -ne 0 ]]; then
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        return "$scan_rc"
+    fi
+
+    local plist
+    local result_rc=0
+    while IFS= read -r -d '' plist; do
+        if [[ -n "$app_path" ]]; then
+            local grep_rc=0
+            local grep_timeout=""
+            grep_timeout=$(_mole_timeout_with_deadline \
+                "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                "$_MOLE_UNINSTALL_DISCOVERY_DEADLINE") || grep_rc=$?
+            if [[ $grep_rc -eq 0 ]]; then
+                run_with_timeout "$grep_timeout" grep -qF -- \
+                    "$app_path" "$plist" 2> /dev/null || grep_rc=$?
+            fi
+            [[ $grep_rc -eq 124 || $grep_rc -ge 128 ]] && {
+                result_rc=$grep_rc
+                break
+            }
+            [[ $grep_rc -eq 0 ]] || continue
+        fi
+        local unload_rc=0
+        unload_launch_plist "$plist" "$needs_sudo" \
+            "$_MOLE_UNINSTALL_DISCOVERY_DEADLINE" || unload_rc=$?
+        if [[ $unload_rc -eq 124 || $unload_rc -ge 128 ]]; then
+            result_rc=$unload_rc
+            break
+        fi
+    done < "$scan_file"
+    rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+    if [[ $result_rc -ne 0 ]]; then
+        return "$result_rc"
+    fi
+    return 0
 }
 
 # Unload Launch Agents/Daemons for an app.
@@ -309,21 +417,18 @@ stop_launch_services() {
     fi
 
     if [[ "$bundle_id_usable" == "true" ]] && [[ -d ~/Library/LaunchAgents ]]; then
-        while IFS= read -r -d '' plist; do
-            unload_launch_plist "$plist" "false"
-        done < <(find ~/Library/LaunchAgents -maxdepth 1 \( -name "${bundle_id}.plist" -o -name "${bundle_id}.*.plist" \) -print0 2> /dev/null)
+        _uninstall_unload_launch_plists \
+            "$HOME/Library/LaunchAgents" false "$bundle_id" || return $?
     fi
 
     if [[ "$bundle_id_usable" == "true" && "$has_system_files" == "true" && "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
         if [[ -d /Library/LaunchAgents ]]; then
-            while IFS= read -r -d '' plist; do
-                unload_launch_plist "$plist" "true"
-            done < <(find /Library/LaunchAgents -maxdepth 1 \( -name "${bundle_id}.plist" -o -name "${bundle_id}.*.plist" \) -print0 2> /dev/null)
+            _uninstall_unload_launch_plists \
+                /Library/LaunchAgents true "$bundle_id" || return $?
         fi
         if [[ -d /Library/LaunchDaemons ]]; then
-            while IFS= read -r -d '' plist; do
-                unload_launch_plist "$plist" "true"
-            done < <(find /Library/LaunchDaemons -maxdepth 1 \( -name "${bundle_id}.plist" -o -name "${bundle_id}.*.plist" \) -print0 2> /dev/null)
+            _uninstall_unload_launch_plists \
+                /Library/LaunchDaemons true "$bundle_id" || return $?
         fi
     fi
 
@@ -335,23 +440,17 @@ stop_launch_services() {
     # silently dead inside a NUL-delimited read loop.
     if [[ -n "$app_path" ]]; then
         if [[ -d ~/Library/LaunchAgents ]]; then
-            while IFS= read -r -d '' plist; do
-                grep -qF -- "$app_path" "$plist" 2> /dev/null || continue
-                unload_launch_plist "$plist" "false"
-            done < <(find ~/Library/LaunchAgents -maxdepth 1 -name '*.plist' -print0 2> /dev/null)
+            _uninstall_unload_launch_plists \
+                "$HOME/Library/LaunchAgents" false "" "$app_path" || return $?
         fi
         if [[ "$has_system_files" == "true" && "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
             if [[ -d /Library/LaunchAgents ]]; then
-                while IFS= read -r -d '' plist; do
-                    grep -qF -- "$app_path" "$plist" 2> /dev/null || continue
-                    unload_launch_plist "$plist" "true"
-                done < <(find /Library/LaunchAgents -maxdepth 1 -name '*.plist' -print0 2> /dev/null)
+                _uninstall_unload_launch_plists \
+                    /Library/LaunchAgents true "" "$app_path" || return $?
             fi
             if [[ -d /Library/LaunchDaemons ]]; then
-                while IFS= read -r -d '' plist; do
-                    grep -qF -- "$app_path" "$plist" 2> /dev/null || continue
-                    unload_launch_plist "$plist" "true"
-                done < <(find /Library/LaunchDaemons -maxdepth 1 -name '*.plist' -print0 2> /dev/null)
+                _uninstall_unload_launch_plists \
+                    /Library/LaunchDaemons true "" "$app_path" || return $?
             fi
         fi
     fi
@@ -371,9 +470,11 @@ unregister_app_bundle() {
 
     [[ "${MOLE_DRY_RUN:-0}" == "1" ]] && return 0
 
-    set +e
-    "$lsregister" -u "$app_path" > /dev/null 2>&1
-    set -e
+    local unregister_rc=0
+    run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" "$lsregister" \
+        -u "$app_path" > /dev/null 2>&1 || unregister_rc=$?
+    [[ $unregister_rc -eq 124 || $unregister_rc -ge 128 ]] && return "$unregister_rc"
+    return 0
 }
 
 # Compact and rebuild LaunchServices after uninstall batch to clear stale app metadata.
@@ -430,7 +531,9 @@ remove_login_item() {
             local escaped_name="${clean_name//\\/\\\\}"
             escaped_name="${escaped_name//\"/\\\"}"
 
-            osascript <<- EOF > /dev/null 2>&1 || true
+            local login_item_rc=0
+            run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" osascript \
+                > /dev/null 2>&1 <<- EOF || login_item_rc=$?
 				tell application "System Events"
 				    try
 				        set itemCount to count of login items
@@ -446,6 +549,7 @@ remove_login_item() {
 				    end try
 				end tell
 			EOF
+            [[ $login_item_rc -eq 124 || $login_item_rc -ge 128 ]] && return "$login_item_rc"
         fi
     fi
 }
@@ -525,7 +629,7 @@ remove_file_list() {
             # A failed direct move leaves that item in place for manual review.
             debug_log "Trash batch stopped; unmoved paths were preserved"
         fi
-        [[ $batch_rc -ge 128 ]] && return "$batch_rc"
+        [[ $batch_rc -eq 124 || $batch_rc -ge 128 ]] && return "$batch_rc"
     fi
 
     if [[ ${#fallback_paths[@]} -gt 0 ]]; then
@@ -536,7 +640,7 @@ remove_file_list() {
             # the caller explicitly selected permanent mode. See #723.
             local delete_rc=0
             mole_delete "$fb" "$use_sudo" || delete_rc=$?
-            [[ $delete_rc -ge 128 ]] && return "$delete_rc"
+            [[ $delete_rc -eq 124 || $delete_rc -ge 128 ]] && return "$delete_rc"
             [[ $delete_rc -eq 0 ]] && count=$((count + 1))
         done
     fi
@@ -571,6 +675,376 @@ remove_file_list() {
 # `LC_ALL=C tr` rather than `${var,,}`: this repo still supports bash 3.2.
 uninstall_normalize_bundle_id() {
     printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+}
+
+# A preview-time inventory cannot authorize bundle-id teardown: an app may be
+# mounted, installed, or copied into place while the confirmation screen is
+# open. This bounded scan is deliberately stricter than UI discovery. Every
+# root must complete, and every candidate bundle id must be readable, before
+# absence is trusted.
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=(
+    "/Applications"
+    "$HOME/Applications"
+    "/System/Applications"
+    "/Library/Input Methods"
+    "$HOME/Library/Input Methods"
+    "$HOME/Library/Application Support/Setapp/Applications"
+    "/opt/homebrew/Caskroom"
+    "/usr/local/Caskroom"
+)
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="/Volumes"
+
+_uninstall_materialize_complete_find0() {
+    local output_file="$1"
+    local deadline_seconds="$2"
+    shift 2
+
+    : > "$output_file" || return 1
+    local scan_timeout=""
+    local scan_rc=0
+    scan_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" \
+        "$deadline_seconds") || scan_rc=$?
+    if [[ $scan_rc -eq 0 ]]; then
+        run_with_timeout "$scan_timeout" find "$@" -print0 \
+            < /dev/null > "$output_file" 2> /dev/null || scan_rc=$?
+    fi
+    if [[ $scan_rc -ne 0 ]]; then
+        : > "$output_file" || true
+        return "$scan_rc"
+    fi
+    return 0
+}
+
+_uninstall_live_candidate_is_selected() {
+    local candidate="$1"
+    local selected_path="$2"
+    [[ "$candidate" == "$selected_path" ]] && return 0
+    if [[ (-e "$candidate" || -L "$candidate") &&
+        (-e "$selected_path" || -L "$selected_path") &&
+        "$candidate" -ef "$selected_path" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+_uninstall_live_candidate_is_nested_app() {
+    local root="$1"
+    local candidate="$2"
+    local relative="${candidate#"$root"/}"
+    [[ "$relative" != "$candidate" ]] || return 0
+    local parent="${relative%/*}"
+    [[ "$parent" != "$relative" ]] || return 1
+
+    local component
+    while [[ -n "$parent" && "$parent" != "." ]]; do
+        component="${parent%%/*}"
+        [[ "$component" == *.app ]] && return 0
+        [[ "$parent" == */* ]] || break
+        parent="${parent#*/}"
+    done
+    return 1
+}
+
+# The most recent complete sibling scan. The fingerprint is a newline-separated,
+# sorted set of base64(path):app-identity:Info.plist-identity records. Paths stay
+# separately available so the preview can prove that every live sibling was
+# represented in the inventory used to build its deletion plan.
+_MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT=""
+_MOLE_UNINSTALL_LIVE_SIBLING_PATHS=()
+
+_uninstall_insert_sorted_live_record() {
+    local record="$1"
+    local -a inserted=()
+    local item
+    local did_insert=false
+
+    # shellcheck disable=SC2154 # live_records is provided by the caller via dynamic scope.
+    for item in "${live_records[@]+"${live_records[@]}"}"; do
+        [[ "$item" == "$record" ]] && return 0
+        if [[ "$did_insert" == false && "$record" < "$item" ]]; then
+            inserted+=("$record")
+            did_insert=true
+        fi
+        inserted+=("$item")
+    done
+    [[ "$did_insert" == false ]] && inserted+=("$record")
+    live_records=("${inserted[@]}")
+}
+
+_uninstall_live_sibling_path_is_duplicate() {
+    local candidate="$1"
+    local existing
+    # shellcheck disable=SC2154 # live_paths is provided by the caller via dynamic scope.
+    for existing in "${live_paths[@]+"${live_paths[@]}"}"; do
+        [[ "$candidate" == "$existing" ]] && return 0
+        if [[ (-e "$candidate" || -L "$candidate") &&
+            (-e "$existing" || -L "$existing") &&
+            "$candidate" -ef "$existing" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+_uninstall_live_sibling_record() {
+    local app="$1"
+    local info="$2"
+    local deadline_seconds="$3"
+    local identity_timeout=""
+    local identity_rc=0
+    identity_timeout=$(_mole_timeout_with_deadline \
+        "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$deadline_seconds") || identity_rc=$?
+
+    local app_identity=""
+    local info_identity=""
+    if [[ $identity_rc -eq 0 ]]; then
+        app_identity=$(run_with_timeout "$identity_timeout" "$STAT_BSD" \
+            -f%d:%i:%m "$app" 2> /dev/null) || identity_rc=$?
+    fi
+    if [[ $identity_rc -eq 0 ]]; then
+        identity_timeout=$(_mole_timeout_with_deadline \
+            "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$deadline_seconds") || identity_rc=$?
+    fi
+    if [[ $identity_rc -eq 0 ]]; then
+        info_identity=$(run_with_timeout "$identity_timeout" "$STAT_BSD" \
+            -f%d:%i:%m "$info" 2> /dev/null) || identity_rc=$?
+    fi
+    [[ $identity_rc -eq 0 ]] || return "$identity_rc"
+    [[ "$app_identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || return 2
+    [[ "$info_identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || return 2
+
+    local encoded_path=""
+    encoded_path=$(printf '%s' "$app" | base64 | tr -d '\n') || return 2
+    printf '%s:%s:%s\n' "$encoded_path" "$app_identity" "$info_identity"
+}
+
+_uninstall_materialize_complete_pkg_apps() {
+    local output_file="$1"
+    local deadline_seconds="$2"
+    : > "$output_file" || return 2
+    declare -f pkg_receipt_nonstandard_app_paths > /dev/null 2>&1 || return 2
+
+    local remaining=""
+    local remaining_rc=0
+    remaining=$(_mole_timeout_with_deadline \
+        "$MOLE_TIMEOUT_DISK_VERIFY_SEC" "$deadline_seconds") || remaining_rc=$?
+    [[ $remaining_rc -eq 0 ]] || return "$remaining_rc"
+
+    local producer_rc=0
+    MOLE_PKG_RECEIPT_CACHE_DISABLE=1 \
+        MOLE_PKG_RECEIPT_LIST_TIMEOUT="$remaining" \
+        MOLE_PKG_RECEIPT_SCAN_TIMEOUT="$remaining" \
+        pkg_receipt_nonstandard_app_paths \
+        --require-complete > "$output_file" || producer_rc=$?
+    if [[ $producer_rc -ne 0 ]]; then
+        : > "$output_file" || true
+        return "$producer_rc"
+    fi
+    return 0
+}
+
+_uninstall_collect_live_sibling_candidate() {
+    local app="$1"
+    local selected_path="$2"
+    local bundle_id_lower="$3"
+    local deadline_seconds="$4"
+    local missing_info_is_unknown="$5"
+
+    _uninstall_live_candidate_is_selected "$app" "$selected_path" && return 1
+    local info="$app/Contents/Info.plist"
+    if [[ ! -f "$info" ]]; then
+        [[ "$missing_info_is_unknown" == true ]] && return 2
+        return 1
+    fi
+
+    local plist_timeout=""
+    local plist_rc=0
+    plist_timeout=$(_mole_timeout_with_deadline \
+        "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$deadline_seconds") || plist_rc=$?
+    local app_bundle=""
+    if [[ $plist_rc -eq 0 ]]; then
+        app_bundle=$(run_with_timeout "$plist_timeout" plutil \
+            -extract CFBundleIdentifier raw "$info" \
+            2> /dev/null) || plist_rc=$?
+    fi
+    if [[ $plist_rc -ne 0 || -z "$app_bundle" ]]; then
+        [[ $plist_rc -eq 124 || $plist_rc -ge 128 ]] && return "$plist_rc"
+        return 2
+    fi
+    [[ "$(uninstall_normalize_bundle_id "$app_bundle")" == "$bundle_id_lower" ]] || return 1
+    _uninstall_live_sibling_path_is_duplicate "$app" && return 1
+
+    local live_record=""
+    local record_rc=0
+    live_record=$(_uninstall_live_sibling_record \
+        "$app" "$info" "$deadline_seconds") || record_rc=$?
+    [[ $record_rc -eq 0 ]] || return "$record_rc"
+    # shellcheck disable=SC2154 # live_paths/live_records are caller-owned snapshot arrays.
+    live_paths+=("$app")
+    _uninstall_insert_sorted_live_record "$live_record"
+    return 0
+}
+
+# Return 0 for one or more other live installs, 1 only for a complete
+# proof of absence, 2 for incomplete/unknown state, and preserve
+# timeout/signals. A successful scan always refreshes the fingerprint globals.
+uninstall_live_bundle_has_other_install() {
+    local bundle_id="$1"
+    local selected_path="$2"
+    _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT=""
+    _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=()
+    mole_is_reverse_dns_bundle_id "$bundle_id" || return 1
+
+    local deadline_seconds=$((SECONDS + (2 * MOLE_TIMEOUT_DISK_VERIFY_SEC)))
+    local bundle_id_lower
+    bundle_id_lower=$(uninstall_normalize_bundle_id "$bundle_id")
+    local scan_file=""
+    scan_file=$(create_temp_file) || return 2
+    local pkg_paths_file=""
+    pkg_paths_file=$(create_temp_file) || {
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        return 2
+    }
+
+    local pkg_scan_rc=0
+    _uninstall_materialize_complete_pkg_apps "$pkg_paths_file" \
+        "$deadline_seconds" || pkg_scan_rc=$?
+    if [[ $pkg_scan_rc -ne 0 ]]; then
+        rm -f -- "$scan_file" "$pkg_paths_file" 2> /dev/null || true # SAFE: exact tracked temp files created above
+        [[ $pkg_scan_rc -eq 124 || $pkg_scan_rc -ge 128 ]] && return "$pkg_scan_rc"
+        return 2
+    fi
+
+    local -a live_roots=()
+    local configured_root
+    for configured_root in "${_MOLE_UNINSTALL_LIVE_APP_ROOTS[@]+"${_MOLE_UNINSTALL_LIVE_APP_ROOTS[@]}"}"; do
+        live_roots+=("$configured_root")
+    done
+    if [[ -d "$_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT" ]]; then
+        local volume_roots_file=""
+        volume_roots_file=$(create_temp_file) || {
+            rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+            return 2
+        }
+        local volume_scan_rc=0
+        _uninstall_materialize_complete_find0 "$volume_roots_file" \
+            "$deadline_seconds" "$_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT" \
+            -mindepth 2 -maxdepth 2 \
+            -type d -name Applications || volume_scan_rc=$?
+        if [[ $volume_scan_rc -ne 0 ]]; then
+            rm -f -- "$volume_roots_file" "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp files created above
+            [[ $volume_scan_rc -eq 124 || $volume_scan_rc -ge 128 ]] && return "$volume_scan_rc"
+            return 2
+        fi
+        local volume_root
+        while IFS= read -r -d '' volume_root; do
+            live_roots+=("$volume_root")
+        done < "$volume_roots_file"
+        rm -f -- "$volume_roots_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+    fi
+
+    local root app
+    local -a live_records=()
+    local -a live_paths=()
+    local result=1
+    for root in "${live_roots[@]+"${live_roots[@]}"}"; do
+        [[ -e "$root" ]] || continue
+        if [[ ! -d "$root" || ! -r "$root" ]]; then
+            result=2
+            break
+        fi
+        # Match the inventory's bounded app-root traversal. Receipt-backed
+        # non-standard paths are supplied separately as exact candidates.
+        local scan_rc=0
+        _uninstall_materialize_complete_find0 "$scan_file" \
+            "$deadline_seconds" "$root" -maxdepth 3 \
+            \( -type d -o -type l \) -name '*.app' || scan_rc=$?
+        if [[ $scan_rc -ne 0 ]]; then
+            [[ $scan_rc -eq 124 || $scan_rc -ge 128 ]] && result=$scan_rc || result=2
+            break
+        fi
+
+        while IFS= read -r -d '' app; do
+            # Nested helpers belong to their containing app, not a distinct
+            # installation root.
+            _uninstall_live_candidate_is_nested_app "$root" "$app" && continue
+            local candidate_rc=0
+            _uninstall_collect_live_sibling_candidate \
+                "$app" "$selected_path" "$bundle_id_lower" \
+                "$deadline_seconds" false || candidate_rc=$?
+            if [[ $candidate_rc -eq 0 ]]; then
+                result=0
+            elif [[ $candidate_rc -ne 1 ]]; then
+                [[ $candidate_rc -eq 124 || $candidate_rc -ge 128 ]] && result=$candidate_rc || result=2
+                break
+            fi
+        done < "$scan_file"
+        [[ $result -eq 2 || $result -eq 124 || $result -ge 128 ]] && break
+    done
+
+    if [[ $result -ne 2 && $result -ne 124 && $result -lt 128 ]]; then
+        local pkg_app
+        while IFS= read -r pkg_app; do
+            [[ -n "$pkg_app" ]] || continue
+            local candidate_rc=0
+            _uninstall_collect_live_sibling_candidate \
+                "$pkg_app" "$selected_path" "$bundle_id_lower" \
+                "$deadline_seconds" true || candidate_rc=$?
+            if [[ $candidate_rc -eq 0 ]]; then
+                result=0
+            elif [[ $candidate_rc -ne 1 ]]; then
+                [[ $candidate_rc -eq 124 || $candidate_rc -ge 128 ]] && result=$candidate_rc || result=2
+                break
+            fi
+        done < "$pkg_paths_file"
+    fi
+
+    rm -f -- "$scan_file" "$pkg_paths_file" 2> /dev/null || true # SAFE: exact tracked temp files created above
+    if [[ $result -eq 0 ]]; then
+        local IFS=$'\n'
+        _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT="${live_records[*]}"
+        _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=("${live_paths[@]}")
+    fi
+    return "$result"
+}
+
+_uninstall_decode_live_sibling_fingerprint() {
+    local encoded="$1"
+    [[ -z "$encoded" ]] && return 0
+    local decoded=""
+    if ! decoded=$(printf '%s' "$encoded" | base64 -D 2> /dev/null); then
+        decoded=$(printf '%s' "$encoded" | base64 -d 2> /dev/null) || return 1
+    fi
+    printf '%s' "$decoded"
+}
+
+_uninstall_live_fingerprint_without_successful_paths() {
+    local fingerprint="$1"
+    local record encoded_path decoded_path success_path
+    local keep
+    local output=""
+    while IFS= read -r record; do
+        [[ -n "$record" ]] || continue
+        encoded_path="${record%%:*}"
+        decoded_path=""
+        if ! decoded_path=$(printf '%s' "$encoded_path" | base64 -D 2> /dev/null); then
+            decoded_path=$(printf '%s' "$encoded_path" | base64 -d 2> /dev/null) || return 1
+        fi
+        keep=true
+        # shellcheck disable=SC2154 # success_items is owned by the batch executor via dynamic scope.
+        for success_path in "${success_items[@]+"${success_items[@]}"}"; do
+            if [[ "$decoded_path" == "$success_path" &&
+                ! -e "$success_path" && ! -L "$success_path" ]]; then
+                keep=false
+                break
+            fi
+        done
+        if [[ "$keep" == true ]]; then
+            [[ -n "$output" ]] && output+=$'\n'
+            output+="$record"
+        fi
+    done <<< "$fingerprint"
+    printf '%s' "$output"
 }
 
 uninstall_bundle_id_has_surviving_sibling() {
@@ -698,7 +1172,57 @@ _batch_refresh_selected_app_bundle_id() {
     printf '%s\n' "$fallback_bundle_id"
 }
 
+_batch_selected_app_identity() {
+    local app_path="$1"
+    local identity=""
+    local identity_rc=0
+    identity=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        "$STAT_BSD" -f%d:%i:%m "$app_path" 2> /dev/null) || identity_rc=$?
+    [[ $identity_rc -eq 0 ]] || return "$identity_rc"
+    [[ "$identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || return 1
+    printf '%s\n' "$identity"
+}
+
+_batch_selected_app_info_identity() {
+    local app_path="$1"
+    local info="$app_path/Contents/Info.plist"
+    if [[ ! -e "$info" && ! -L "$info" ]]; then
+        printf '%s\n' "missing"
+        return 0
+    fi
+
+    local identity=""
+    local identity_rc=0
+    identity=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        "$STAT_BSD" -f%d:%i:%m "$info" 2> /dev/null) || identity_rc=$?
+    [[ $identity_rc -eq 0 ]] || return "$identity_rc"
+    [[ "$identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || return 1
+    printf '%s\n' "$identity"
+}
+
+_batch_selected_app_plan_matches() {
+    local app_path="$1"
+    local expected_app_identity="$2"
+    local expected_info_identity="$3"
+    [[ -n "$expected_app_identity" && -n "$expected_info_identity" ]] || return 1
+
+    local current_app_identity=""
+    local current_info_identity=""
+    local identity_rc=0
+    current_app_identity=$(_batch_selected_app_identity \
+        "$app_path") || identity_rc=$?
+    [[ $identity_rc -eq 0 ]] || return "$identity_rc"
+    current_info_identity=$(_batch_selected_app_info_identity \
+        "$app_path") || identity_rc=$?
+    [[ $identity_rc -eq 0 ]] || return "$identity_rc"
+    [[ "$current_app_identity" == "$expected_app_identity" &&
+        "$current_info_identity" == "$expected_info_identity" ]]
+}
+
 _batch_scan_app_details() {
+    # All selected-app discovery shares one wall-clock budget. Individual
+    # producer probes clamp themselves to this deadline.
+    local _MOLE_UNINSTALL_DISCOVERY_DEADLINE=$((SECONDS + (2 * MOLE_TIMEOUT_DISK_VERIFY_SEC)))
     # Cache current user outside loop
     local current_user=$(whoami)
 
@@ -709,11 +1233,41 @@ _batch_scan_app_details() {
         IFS='|' read -r _ app_path app_name bundle_id _ _ <<< "$selected_app"
 
         local current_bundle_id=""
-        if ! current_bundle_id=$(_batch_refresh_selected_app_bundle_id "$app_path" "$bundle_id"); then
+        local refresh_rc=0
+        current_bundle_id=$(_batch_refresh_selected_app_bundle_id \
+            "$app_path" "$bundle_id") || refresh_rc=$?
+        if [[ $refresh_rc -ge 128 ]]; then
+            return "$refresh_rc"
+        elif [[ $refresh_rc -ne 0 ]]; then
             manual_removal_apps+=("$app_name")
             continue
         fi
         bundle_id="$current_bundle_id"
+        local original_bundle_id="$bundle_id"
+
+        # Bind the confirmation record to the exact bundle object that was
+        # inspected. A path can be replaced while the preview is open; the
+        # execution phase must reject that new inode instead of treating the
+        # same pathname as user approval.
+        local app_identity=""
+        local app_identity_rc=0
+        app_identity=$(_batch_selected_app_identity "$app_path") || app_identity_rc=$?
+        if [[ $app_identity_rc -eq 124 || $app_identity_rc -ge 128 ]]; then
+            return "$app_identity_rc"
+        elif [[ $app_identity_rc -ne 0 ]]; then
+            manual_removal_apps+=("$app_name")
+            continue
+        fi
+        local app_info_identity=""
+        local app_info_identity_rc=0
+        app_info_identity=$(_batch_selected_app_info_identity \
+            "$app_path") || app_info_identity_rc=$?
+        if [[ $app_info_identity_rc -eq 124 || $app_info_identity_rc -ge 128 ]]; then
+            return "$app_info_identity_rc"
+        elif [[ $app_info_identity_rc -ne 0 ]]; then
+            manual_removal_apps+=("$app_name")
+            continue
+        fi
 
         # Leftover matching is destructive and must use the current bundle
         # basename, not a display name cached when the selection list opened.
@@ -726,18 +1280,35 @@ _batch_scan_app_details() {
             continue
         fi
 
-        # A surviving install sharing this bundle id (e.g. Xcode.app when
-        # uninstalling Xcode-beta.app) still owns every bundle-id-keyed path.
-        # Demote the bundle id to "unknown" so leftover discovery and the
-        # bundle-id-keyed removal steps all fall back to name/path matching.
-        # Name matching gets the same treatment: discovery keys on the .app
-        # basename (unique even when both installs resolve to one display
-        # name, which happens when mdls has no index and CFBundleName says
-        # "Xcode" for the beta), and if even that collides with the survivor,
-        # or its version-suffix-stripped base does, name discovery is dropped
-        # entirely so the fallback can never be broader than the primary path.
+        # Capture the complete same-bundle installation set that this preview
+        # is based on. If a live sibling exists, current display names cannot
+        # be trusted from the older inventory that opened the selection UI.
+        # Narrow the plan to the selected app bundle only: no bundle-id/name
+        # leftovers, login item, process, helper, or Homebrew zap teardown.
+        # Execution compares the exact snapshot before its first side effect.
+        local live_sibling_rc=0
+        local live_sibling_present=false
+        uninstall_live_bundle_has_other_install \
+            "$original_bundle_id" "$app_path" || live_sibling_rc=$?
+        if [[ $live_sibling_rc -eq 0 ]]; then
+            live_sibling_present=true
+        elif [[ $live_sibling_rc -eq 1 ]]; then
+            : # Complete absence proof; the empty fingerprint is authoritative.
+        elif [[ $live_sibling_rc -eq 124 || $live_sibling_rc -ge 128 ]]; then
+            return "$live_sibling_rc"
+        else
+            debug_log "Could not complete the live same-bundle scan for $app_name"
+            return 1
+        fi
+        local preview_live_sibling_fingerprint="$_MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT"
+
         local sibling_guard="none"
-        if uninstall_bundle_id_has_surviving_sibling "$bundle_id" "$app_path"; then
+        if [[ "$live_sibling_present" == true ]]; then
+            sibling_guard="guard_login"
+            discovery_app_name=""
+            debug_log "Bundle id $bundle_id is shared with a live sibling; removing only the selected app bundle for $app_name"
+            bundle_id="unknown"
+        elif uninstall_bundle_id_has_surviving_sibling "$bundle_id" "$app_path"; then
             sibling_guard="guard"
 
             local survivor_names
@@ -795,8 +1366,14 @@ _batch_scan_app_details() {
 
         local cask_name="" is_brew_cask="false"
         if command -v get_brew_cask_name > /dev/null 2>&1; then
-            local detected_cask
-            detected_cask=$(get_brew_cask_name "$app_path" 2> /dev/null || true)
+            local detected_cask=""
+            local cask_detect_rc=0
+            detected_cask=$(get_brew_cask_name "$app_path" 2> /dev/null) || cask_detect_rc=$?
+            if [[ $cask_detect_rc -eq 124 || $cask_detect_rc -ge 128 ]]; then
+                return "$cask_detect_rc"
+            elif [[ $cask_detect_rc -ne 0 && $cask_detect_rc -ne 1 ]]; then
+                return "$cask_detect_rc"
+            fi
             if [[ -n "$detected_cask" ]]; then
                 cask_name="$detected_cask"
                 is_brew_cask="true"
@@ -854,7 +1431,11 @@ _batch_scan_app_details() {
             # caches the surviving install uses.
             local sibling_survives=0
             [[ "$sibling_guard" != "none" ]] && sibling_survives=1
-            related_files=$(MOLE_UNINSTALL_SIBLING_SURVIVES="$sibling_survives" find_app_files "$bundle_id" "$discovery_app_name" "$app_path" || true)
+            local discovery_rc=0
+            related_files=$(MOLE_UNINSTALL_SIBLING_SURVIVES="$sibling_survives" \
+                find_app_files "$bundle_id" "$discovery_app_name" \
+                "$app_path") || discovery_rc=$?
+            [[ $discovery_rc -eq 0 ]] || return "$discovery_rc"
             # Diagnostic-report discovery prefers CFBundleExecutable from the
             # selected bundle, and same-bundle-id siblings ship the same
             # executable name ("Xcode" for Xcode-beta.app), so under the
@@ -862,14 +1443,24 @@ _batch_scan_app_details() {
             # which name is passed in. Leaving crash logs behind is the
             # fail-safe direction.
             if [[ "$sibling_guard" == "none" ]]; then
-                diag_user=$(get_diagnostic_report_paths_for_app "$app_path" "$discovery_app_name" "$HOME/Library/Logs/DiagnosticReports" || true)
+                discovery_rc=0
+                diag_user=$(get_diagnostic_report_paths_for_app "$app_path" \
+                    "$discovery_app_name" \
+                    "$HOME/Library/Logs/DiagnosticReports") || discovery_rc=$?
+                [[ $discovery_rc -eq 0 ]] || return "$discovery_rc"
                 [[ -n "$diag_user" ]] && related_files=$(
                     [[ -n "$related_files" ]] && echo "$related_files"
                     echo "$diag_user"
                 )
-                diag_system=$(get_diagnostic_report_paths_for_app "$app_path" "$discovery_app_name" "/Library/Logs/DiagnosticReports" || true)
+                discovery_rc=0
+                diag_system=$(get_diagnostic_report_paths_for_app "$app_path" \
+                    "$discovery_app_name" "/Library/Logs/DiagnosticReports") || discovery_rc=$?
+                [[ $discovery_rc -eq 0 ]] || return "$discovery_rc"
             fi
-            system_files=$(find_app_system_files "$bundle_id" "$discovery_app_name" || true)
+            discovery_rc=0
+            system_files=$(find_app_system_files \
+                "$bundle_id" "$discovery_app_name") || discovery_rc=$?
+            [[ $discovery_rc -eq 0 ]] || return "$discovery_rc"
         fi
         local related_size_kb="0"
         local related_size_rc=0
@@ -895,8 +1486,12 @@ _batch_scan_app_details() {
 
         # Check for sensitive user data once.
         local has_sensitive_data="false"
-        if has_sensitive_data "$related_files" 2> /dev/null; then
+        local sensitive_rc=0
+        has_sensitive_data "$related_files" 2> /dev/null || sensitive_rc=$?
+        if [[ $sensitive_rc -eq 0 ]]; then
             has_sensitive_data="true"
+        elif [[ $sensitive_rc -eq 124 || $sensitive_rc -ge 128 ]]; then
+            return "$sensitive_rc"
         fi
 
         # Store details for later use (base64 keeps lists on one line).
@@ -908,11 +1503,16 @@ _batch_scan_app_details() {
         encoded_diag_system=$(printf '%s' "$diag_system" | base64 | tr -d '\n' || echo "")
         local encoded_review_system
         encoded_review_system=$(printf '%s' "$review_only_system_files" | base64 | tr -d '\n' || echo "")
-        local login_item_helpers
-        login_item_helpers=$(discover_login_item_helper_bundle_ids "$app_path" || true)
+        local login_item_helpers=""
+        local login_helpers_rc=0
+        login_item_helpers=$(discover_login_item_helper_bundle_ids \
+            "$app_path") || login_helpers_rc=$?
+        [[ $login_helpers_rc -eq 0 ]] || return "$login_helpers_rc"
         local encoded_login_item_helpers
         encoded_login_item_helpers=$(printf '%s' "$login_item_helpers" | base64 | tr -d '\n' || echo "")
-        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system|$encoded_review_system|$encoded_login_item_helpers|$sibling_guard")
+        local encoded_live_sibling_fingerprint
+        encoded_live_sibling_fingerprint=$(printf '%s' "$preview_live_sibling_fingerprint" | base64 | tr -d '\n') || return 1
+        app_details+=("$app_name|$app_path|$bundle_id|$total_kb|$encoded_files|$encoded_system_files|$has_sensitive_data|$needs_sudo|$is_brew_cask|$cask_name|$encoded_diag_system|$encoded_review_system|$encoded_login_item_helpers|$sibling_guard|$app_identity|$original_bundle_id|$encoded_live_sibling_fingerprint|$app_info_identity")
     done
     if [[ -t 1 ]]; then stop_inline_spinner; fi
 
@@ -952,7 +1552,7 @@ _batch_preview_and_confirm() {
     local has_zap_cask=false
     local zap_detail zap_is_brew zap_guard
     for zap_detail in "${app_details[@]}"; do
-        IFS='|' read -r _ _ _ _ _ _ _ _ zap_is_brew _ _ _ _ zap_guard <<< "$zap_detail"
+        IFS='|' read -r _ _ _ _ _ _ _ _ zap_is_brew _ _ _ _ zap_guard _ <<< "$zap_detail"
         if [[ "$zap_is_brew" == "true" && "${zap_guard:-none}" == "none" ]]; then
             has_zap_cask=true
             break
@@ -966,7 +1566,7 @@ _batch_preview_and_confirm() {
     echo ""
 
     for detail in "${app_details[@]}"; do
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system encoded_review_system encoded_login_item_helpers sibling_guard <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo_flag is_brew_cask cask_name encoded_diag_system encoded_review_system encoded_login_item_helpers sibling_guard _expected_app_identity _original_bundle_id _encoded_live_sibling_fingerprint _expected_info_identity <<< "$detail"
         local app_size_display=$(bytes_to_human "$((total_kb * 1024))")
 
         local brew_tag=""
@@ -1088,7 +1688,7 @@ _batch_execute_removals() {
     local current_index=0
     for detail in "${app_details[@]}"; do
         current_index=$((current_index + 1))
-        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system encoded_review_system encoded_login_item_helpers sibling_guard <<< "$detail"
+        IFS='|' read -r app_name app_path bundle_id total_kb encoded_files encoded_system_files has_sensitive_data needs_sudo is_brew_cask cask_name encoded_diag_system encoded_review_system encoded_login_item_helpers sibling_guard expected_app_identity original_bundle_id encoded_live_sibling_fingerprint expected_info_identity <<< "$detail"
         local related_files=$(decode_file_list "$encoded_files" "$app_name")
         local system_files=$(decode_file_list "$encoded_system_files" "$app_name")
         local diag_system=$(decode_file_list "$encoded_diag_system" "$app_name")
@@ -1096,6 +1696,54 @@ _batch_execute_removals() {
         local login_item_helpers=$(decode_bundle_id_list "$encoded_login_item_helpers" "$app_name")
         local reason=""
         local suggestion=""
+
+        local app_plan_rc=0
+        _batch_selected_app_plan_matches "$app_path" \
+            "$expected_app_identity" "$expected_info_identity" || app_plan_rc=$?
+        if [[ $app_plan_rc -eq 124 || $app_plan_rc -ge 128 ]]; then
+            return "$app_plan_rc"
+        elif [[ $app_plan_rc -ne 0 ]]; then
+            reason="selected app changed after preview"
+            suggestion="Select the app again and review the new removal plan"
+        fi
+
+        # Rebuild the exact same-bundle installation snapshot immediately
+        # before the first teardown side effect. This uses the original
+        # resolved id even when the preview demoted bundle_id to "unknown" to
+        # suppress shared leftovers. Any added, removed, replaced, or modified
+        # sibling invalidates both the name guard and the reviewed plan.
+        original_bundle_id="${original_bundle_id:-$bundle_id}"
+        if [[ -z "$reason" ]] && mole_is_reverse_dns_bundle_id "$original_bundle_id"; then
+            local preview_live_sibling_fingerprint=""
+            if ! preview_live_sibling_fingerprint=$(
+                _uninstall_decode_live_sibling_fingerprint \
+                    "${encoded_live_sibling_fingerprint:-}"
+            ); then
+                reason="unable to verify the reviewed app installation set"
+                suggestion="Select the app again and review the new removal plan"
+            elif ! preview_live_sibling_fingerprint=$(
+                _uninstall_live_fingerprint_without_successful_paths \
+                    "$preview_live_sibling_fingerprint"
+            ); then
+                reason="unable to verify the reviewed app installation set"
+                suggestion="Select the app again and review the new removal plan"
+            fi
+
+            local live_sibling_rc=0
+            uninstall_live_bundle_has_other_install \
+                "$original_bundle_id" "$app_path" || live_sibling_rc=$?
+            if [[ $live_sibling_rc -eq 0 || $live_sibling_rc -eq 1 ]]; then
+                if [[ "$preview_live_sibling_fingerprint" != "$_MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT" ]]; then
+                    reason="the app installation set changed after preview"
+                    suggestion="Select the app again and review the new removal plan"
+                fi
+            elif [[ $live_sibling_rc -eq 124 || $live_sibling_rc -ge 128 ]]; then
+                return "$live_sibling_rc"
+            else
+                reason="unable to verify other apps with the same bundle id"
+                suggestion="Check mounted volumes and application folders, then try again"
+            fi
+        fi
 
         # Show progress for current app
         local brew_tag=""
@@ -1112,16 +1760,37 @@ _batch_execute_removals() {
         local has_system_files="false"
         [[ -n "$system_files" ]] && has_system_files="true"
 
-        stop_launch_services "$bundle_id" "$has_system_files" "$app_path"
-        unregister_app_bundle "$app_path"
+        if [[ -z "$reason" ]]; then
+            app_plan_rc=0
+            _batch_selected_app_plan_matches "$app_path" \
+                "$expected_app_identity" "$expected_info_identity" || app_plan_rc=$?
+            if [[ $app_plan_rc -eq 124 || $app_plan_rc -ge 128 ]]; then
+                return "$app_plan_rc"
+            elif [[ $app_plan_rc -ne 0 ]]; then
+                reason="selected app changed after preview"
+                suggestion="Select the app again and review the new removal plan"
+            fi
+        fi
+
+        if [[ -z "$reason" ]]; then
+            local teardown_rc=0
+            stop_launch_services \
+                "$bundle_id" "$has_system_files" "$app_path" || teardown_rc=$?
+            [[ $teardown_rc -eq 124 || $teardown_rc -ge 128 ]] && return "$teardown_rc"
+            teardown_rc=0
+            unregister_app_bundle "$app_path" || teardown_rc=$?
+            [[ $teardown_rc -eq 124 || $teardown_rc -ge 128 ]] && return "$teardown_rc"
+        fi
 
         # Remove from Login Items. Skipped when the sibling guard flagged a
         # name collision: login items are matched by display name only, and
         # deleting "Xcode" by name would take out the surviving install's
         # login item along with the beta's.
-        if [[ "${sibling_guard:-none}" != "guard_login" ]]; then
-            remove_login_item "$app_name" "$bundle_id"
-        else
+        if [[ -z "$reason" && "${sibling_guard:-none}" != "guard_login" ]]; then
+            local login_remove_rc=0
+            remove_login_item "$app_name" "$bundle_id" || login_remove_rc=$?
+            [[ $login_remove_rc -eq 124 || $login_remove_rc -ge 128 ]] && return "$login_remove_rc"
+        elif [[ -z "$reason" ]]; then
             debug_log "Skipping login item removal for $app_name: name is shared with a surviving install"
         fi
 
@@ -1134,11 +1803,14 @@ _batch_execute_removals() {
         # can belong to the surviving install (Xcode-beta.app ships the
         # executable "Xcode"), so the kill ladder could SIGKILL the
         # survivor's running process instead.
-        if [[ "${sibling_guard:-none}" == "none" ]]; then
-            if ! force_kill_app "$app_name" "$app_path"; then
+        if [[ -z "$reason" && "${sibling_guard:-none}" == "none" ]]; then
+            local kill_rc=0
+            force_kill_app "$app_name" "$app_path" || kill_rc=$?
+            [[ $kill_rc -ge 128 ]] && return "$kill_rc"
+            if [[ $kill_rc -ne 0 ]]; then
                 running_at_uninstall_apps+=("$app_name")
             fi
-        else
+        elif [[ -z "$reason" ]]; then
             debug_log "Skipping process termination for $app_name: identifiers are shared with a surviving install"
         fi
 
@@ -1159,6 +1831,17 @@ _batch_execute_removals() {
 
         local used_brew_successfully=false
         if [[ -z "$reason" ]]; then
+            app_plan_rc=0
+            _batch_selected_app_plan_matches "$app_path" \
+                "$expected_app_identity" "$expected_info_identity" || app_plan_rc=$?
+            if [[ $app_plan_rc -eq 124 || $app_plan_rc -ge 128 ]]; then
+                return "$app_plan_rc"
+            elif [[ $app_plan_rc -ne 0 ]]; then
+                reason="selected app changed after preview"
+                suggestion="Select the app again and review the new removal plan"
+            fi
+        fi
+        if [[ -z "$reason" ]]; then
             if [[ "$is_brew_cask" == "true" && -n "$cask_name" ]]; then
                 # Zap stanzas delete bundle-id-keyed prefs/caches. When the
                 # sibling guard is active those paths still belong to the
@@ -1166,8 +1849,13 @@ _batch_execute_removals() {
                 local cask_zap_mode="zap"
                 [[ "${sibling_guard:-none}" != "none" ]] && cask_zap_mode="nozap"
                 # Use brew_uninstall_cask helper (handles env vars, timeout, verification)
-                if brew_uninstall_cask "$cask_name" "$app_path" "$cask_zap_mode"; then
+                local brew_uninstall_rc=0
+                brew_uninstall_cask "$cask_name" "$app_path" \
+                    "$cask_zap_mode" || brew_uninstall_rc=$?
+                if [[ $brew_uninstall_rc -eq 0 ]]; then
                     used_brew_successfully=true
+                elif [[ $brew_uninstall_rc -eq 124 || $brew_uninstall_rc -ge 128 ]]; then
+                    return "$brew_uninstall_rc"
                 else
                     # Only fall back to manual app removal when Homebrew no longer
                     # tracks the cask. Otherwise we would recreate the mismatch
@@ -1181,17 +1869,30 @@ _batch_execute_removals() {
                             cask_state=$?
                         fi
                     fi
+                    [[ $cask_state -ge 128 ]] && return "$cask_state"
 
                     if [[ $cask_state -eq 1 ]]; then
-                        local removal_rc=0
-                        mole_delete "$app_path" "$needs_sudo" || removal_rc=$?
-                        if [[ $removal_rc -ne 0 ]]; then
-                            if [[ $removal_rc -eq $MOLE_ERR_MUTABLE_PARENT ]]; then
-                                local diagnosis
-                                diagnosis=$(diagnose_removal_failure "$removal_rc" "$app_name")
-                                IFS='|' read -r reason suggestion <<< "$diagnosis"
-                            else
-                                reason="brew cleanup incomplete, manual removal failed"
+                        app_plan_rc=0
+                        _batch_selected_app_plan_matches "$app_path" \
+                            "$expected_app_identity" "$expected_info_identity" || app_plan_rc=$?
+                        if [[ $app_plan_rc -eq 124 || $app_plan_rc -ge 128 ]]; then
+                            return "$app_plan_rc"
+                        elif [[ $app_plan_rc -ne 0 ]]; then
+                            reason="selected app changed after preview"
+                            suggestion="Select the app again and review the new removal plan"
+                        else
+                            local removal_rc=0
+                            mole_delete "$app_path" "$needs_sudo" \
+                                "$expected_app_identity" || removal_rc=$?
+                            [[ $removal_rc -eq 124 || $removal_rc -ge 128 ]] && return "$removal_rc"
+                            if [[ $removal_rc -ne 0 ]]; then
+                                if [[ $removal_rc -eq $MOLE_ERR_MUTABLE_PARENT ]]; then
+                                    local diagnosis
+                                    diagnosis=$(diagnose_removal_failure "$removal_rc" "$app_name")
+                                    IFS='|' read -r reason suggestion <<< "$diagnosis"
+                                else
+                                    reason="brew cleanup incomplete, manual removal failed"
+                                fi
                             fi
                         fi
                     elif [[ $cask_state -eq 0 ]]; then
@@ -1222,24 +1923,38 @@ _batch_execute_removals() {
                                 reason="protected system symlink, cannot remove"
                                 ;;
                             *)
-                                if ! mole_delete "$app_path" "true"; then
+                                local removal_rc=0
+                                mole_delete "$app_path" "true" \
+                                    "$expected_app_identity" || removal_rc=$?
+                                [[ $removal_rc -eq 124 || $removal_rc -ge 128 ]] && return "$removal_rc"
+                                if [[ $removal_rc -ne 0 ]]; then
                                     reason="failed to remove symlink"
                                 fi
                                 ;;
                         esac
                     else
-                        if ! mole_delete "$app_path" "true"; then
+                        local removal_rc=0
+                        mole_delete "$app_path" "true" \
+                            "$expected_app_identity" || removal_rc=$?
+                        [[ $removal_rc -eq 124 || $removal_rc -ge 128 ]] && return "$removal_rc"
+                        if [[ $removal_rc -ne 0 ]]; then
                             reason="failed to remove symlink"
                         fi
                     fi
                 else
                     if is_uninstall_dry_run; then
-                        if ! mole_delete "$app_path" "false"; then
+                        local removal_rc=0
+                        mole_delete "$app_path" "false" \
+                            "$expected_app_identity" || removal_rc=$?
+                        [[ $removal_rc -eq 124 || $removal_rc -ge 128 ]] && return "$removal_rc"
+                        if [[ $removal_rc -ne 0 ]]; then
                             reason="dry-run path validation failed"
                         fi
                     else
                         local ret=0
-                        mole_delete "$app_path" "true" || ret=$?
+                        mole_delete "$app_path" "true" \
+                            "$expected_app_identity" || ret=$?
+                        [[ $ret -eq 124 || $ret -ge 128 ]] && return "$ret"
                         if [[ $ret -ne 0 ]]; then
                             local diagnosis
                             diagnosis=$(diagnose_removal_failure "$ret" "$app_name")
@@ -1248,7 +1963,11 @@ _batch_execute_removals() {
                     fi
                 fi
             else
-                if ! mole_delete "$app_path" "false"; then
+                local removal_rc=0
+                mole_delete "$app_path" "false" \
+                    "$expected_app_identity" || removal_rc=$?
+                [[ $removal_rc -eq 124 || $removal_rc -ge 128 ]] && return "$removal_rc"
+                if [[ $removal_rc -ne 0 ]]; then
                     if [[ ! -w "$(dirname "$app_path")" ]]; then
                         reason="parent directory not writable"
                     else
@@ -1267,7 +1986,9 @@ _batch_execute_removals() {
                 fi
                 start_inline_spinner "${_phase_prefix}Cleaning files for ${app_name}..."
             fi
-            remove_file_list "$related_files" "false" > /dev/null
+            local related_remove_rc=0
+            remove_file_list "$related_files" "false" > /dev/null || related_remove_rc=$?
+            [[ $related_remove_rc -eq 124 || $related_remove_rc -ge 128 ]] && return "$related_remove_rc"
 
             # Identify leftovers (silent rm failures, e.g. container directories
             # macOS protects via com.apple.provenance xattr). Compute their
@@ -1289,8 +2010,11 @@ _batch_execute_removals() {
                 done <<< "$related_files"
 
                 if [[ ${#leftover_paths[@]} -gt 0 ]]; then
-                    local _du_total
-                    _du_total=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skcP "${leftover_paths[@]}" 2> /dev/null | awk 'END {print $1}')
+                    local _du_total=""
+                    local _du_rc=0
+                    _du_total=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+                        du -skcP "${leftover_paths[@]}" 2> /dev/null | awk 'END {print $1}') || _du_rc=$?
+                    [[ $_du_rc -eq 124 || $_du_rc -ge 128 ]] && return "$_du_rc"
                     if [[ "$_du_total" =~ ^[0-9]+$ ]]; then
                         leftover_kb=$_du_total
                     fi
@@ -1301,7 +2025,9 @@ _batch_execute_removals() {
                 start_inline_spinner "${_phase_prefix}Cleaning system files for ${app_name}..."
             fi
             if [[ "$used_brew_successfully" == "true" ]]; then
-                remove_file_list "$diag_system" "true" > /dev/null
+                local system_remove_rc=0
+                remove_file_list "$diag_system" "true" > /dev/null || system_remove_rc=$?
+                [[ $system_remove_rc -eq 124 || $system_remove_rc -ge 128 ]] && return "$system_remove_rc"
             else
                 local system_all="$system_files"
                 if [[ -n "$diag_system" ]]; then
@@ -1310,7 +2036,9 @@ _batch_execute_removals() {
                     fi
                     system_all+="$diag_system"
                 fi
-                remove_file_list "$system_all" "true" > /dev/null
+                local system_remove_rc=0
+                remove_file_list "$system_all" "true" > /dev/null || system_remove_rc=$?
+                [[ $system_remove_rc -eq 124 || $system_remove_rc -ge 128 ]] && return "$system_remove_rc"
             fi
 
             # Defaults writes are side effects that should never run in dry-run mode.
@@ -1327,9 +2055,30 @@ _batch_execute_removals() {
                 # User-owned plists, so route through user-mode mole_delete to
                 # avoid prompting for sudo when uninstalling a normal app.
                 if [[ -d "$HOME/Library/Preferences/ByHost" ]]; then
+                    local byhost_scan_file=""
+                    byhost_scan_file=$(create_temp_file) || return 1
+                    local byhost_scan_rc=0
+                    run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find \
+                        "$HOME/Library/Preferences/ByHost" -maxdepth 1 -type f \
+                        -name "${bundle_id}.*.plist" -print0 > "$byhost_scan_file" \
+                        2> /dev/null || byhost_scan_rc=$?
+                    if [[ $byhost_scan_rc -ne 0 ]]; then
+                        rm -f -- "$byhost_scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+                        return "$byhost_scan_rc"
+                    fi
+                    local byhost_delete_rc=0
                     while IFS= read -r -d '' plist_file; do
-                        mole_delete "$plist_file" "false" || true
-                    done < <(command find "$HOME/Library/Preferences/ByHost" -maxdepth 1 -type f -name "${bundle_id}.*.plist" -print0 2> /dev/null || true)
+                        local plist_delete_rc=0
+                        mole_delete "$plist_file" "false" || plist_delete_rc=$?
+                        if [[ $plist_delete_rc -eq 124 || $plist_delete_rc -ge 128 ]]; then
+                            byhost_delete_rc=$plist_delete_rc
+                            break
+                        fi
+                    done < "$byhost_scan_file"
+                    rm -f -- "$byhost_scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+                    if [[ $byhost_delete_rc -ne 0 ]]; then
+                        return "$byhost_delete_rc"
+                    fi
                 fi
             fi
 
@@ -1338,7 +2087,9 @@ _batch_execute_removals() {
             # under the guard would stop the surviving install's running
             # helper.
             if [[ "${sibling_guard:-none}" == "none" ]]; then
-                bootout_login_item_helpers "$login_item_helpers"
+                local bootout_rc=0
+                bootout_login_item_helpers "$login_item_helpers" || bootout_rc=$?
+                [[ $bootout_rc -eq 124 || $bootout_rc -ge 128 ]] && return "$bootout_rc"
             else
                 debug_log "Skipping login item helper bootout for $app_name: helper ids are shared with a surviving install"
             fi
@@ -1630,6 +2381,12 @@ batch_uninstall_applications() {
         fi
     }
 
+    _abort_uninstall_batch() {
+        stop_inline_spinner 2> /dev/null || true
+        unset MOLE_UNINSTALL_MODE
+        _restore_uninstall_traps
+    }
+
     # SIGINT/SIGTERM during a phase helper would normally `return 130` out of
     # the helper only; without an explicit signal flag the orchestrator would
     # cheerfully run the next phase. The trap sets _batch_interrupted so the
@@ -1649,31 +2406,43 @@ batch_uninstall_applications() {
     local total_estimated_size=0
     local -a app_details=()
 
-    _batch_scan_app_details
+    local _scan_rc=0
+    _batch_scan_app_details || _scan_rc=$?
     if [[ $_batch_interrupted -eq 1 ]]; then
-        _restore_uninstall_traps
+        _abort_uninstall_batch
         return 130
+    fi
+    if [[ $_scan_rc -eq 124 || $_scan_rc -ge 128 ]]; then
+        _abort_uninstall_batch
+        return "$_scan_rc"
+    elif [[ $_scan_rc -ne 0 ]]; then
+        _abort_uninstall_batch
+        return 1
     fi
 
     if [[ ${#app_details[@]} -eq 0 ]]; then
-        _restore_uninstall_traps
+        _abort_uninstall_batch
         return 1
     fi
 
     local _confirm_rc=0
     _batch_preview_and_confirm || _confirm_rc=$?
     if [[ $_batch_interrupted -eq 1 ]]; then
-        _restore_uninstall_traps
+        _abort_uninstall_batch
         return 130
+    fi
+    if [[ $_confirm_rc -eq 124 || $_confirm_rc -ge 128 ]]; then
+        _abort_uninstall_batch
+        return "$_confirm_rc"
     fi
     case $_confirm_rc in
         0) ;;
         2)
-            _restore_uninstall_traps
+            _abort_uninstall_batch
             return 0
             ;;
         *)
-            _restore_uninstall_traps
+            _abort_uninstall_batch
             return 1
             ;;
     esac
@@ -1693,10 +2462,18 @@ batch_uninstall_applications() {
     # know to quit/relaunch the lingering process.
     local -a running_at_uninstall_apps=()
 
-    _batch_execute_removals
+    local _execute_rc=0
+    _batch_execute_removals || _execute_rc=$?
     if [[ $_batch_interrupted -eq 1 ]]; then
-        _restore_uninstall_traps
+        _abort_uninstall_batch
         return 130
+    fi
+    if [[ $_execute_rc -eq 124 || $_execute_rc -ge 128 ]]; then
+        _abort_uninstall_batch
+        return "$_execute_rc"
+    elif [[ $_execute_rc -ne 0 ]]; then
+        _abort_uninstall_batch
+        return 1
     fi
 
     # Detect background jobs that survived the uninstall (System Settings >
@@ -1748,6 +2525,7 @@ batch_uninstall_applications() {
     unset MOLE_UNINSTALL_MODE
 
     _restore_uninstall_traps
+    unset -f _abort_uninstall_batch
     unset -f _restore_uninstall_traps
 
     total_size_cleaned=$((total_size_cleaned + total_size_freed))

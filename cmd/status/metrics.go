@@ -180,7 +180,7 @@ type ProxyStatus struct {
 	// configured proxy. A `utun` is equally iCloud Private Relay, a corporate
 	// VPN, or a TUN-mode proxy client, and nothing at this layer can tell them
 	// apart, so the reading must not be presented as "you have a proxy".
-	IsTunnel bool `json:"is_tunnel,omitempty"`
+	IsTunnel bool `json:"-"`
 }
 
 type BatteryStatus struct {

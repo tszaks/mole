@@ -85,6 +85,8 @@ Two subtler variants:
 
 - **Checkpoint at the wrong nesting level.** `probe_project_artifact_hints` checked its deadline at the top of each root but not inside the nested-subdirectory loop, so once an iteration was entered it ran up to 120 more times past the budget. Every loop level needs its own checkpoint, not just the outer one (`edb214c0`).
 - **A timeout tuned on a warm machine.** CoreSimulatorService takes over 2s on cold boot, so a 2s probe reported "simctl not available" (`35d856f1`). For each constant, name the slowest healthy case and check the constant clears it.
+- **A bounded producer with an unbounded or status-blind consumer.** Wrapping `find` is not enough when process substitution adds `|| true`, hides status 124, and lets a deletion loop consume the partial prefix. Materialize the complete scan first, discard it on any nonzero status, then run the guarded delete pass. Bound the delete command too and propagate timeout/failure instead of returning a false success.
+- **Probe and action use different eligibility plans.** A shallow `find -maxdepth 1` probe followed by a depth-5 delete does not authorize what the action reaches. Use one scan-to-delete helper, or make pattern, type, age, and depth identical and test the exact arguments.
 
 ```bash
 for c in 'du -s' mdfind xcrun system_profiler ioreg brew; do
@@ -169,6 +171,7 @@ Four other ways a test here has passed vacuously:
 
 - `MOLE_TEST_MODE=1` (exported by `scripts/test.sh`) makes the function under test early-return, leaving `$output` empty, so a negative `!=` assertion is trivially true. Override to `0` and mock `sudo -n true` when the body must run.
 - A shell-function mock puts the test in the wrong branch. Mocking `xcrun` as a function took the `declare -F xcrun` path, not the timeout-retry path where the fix lived. Use a PATH stub directory when the code under test execs the binary, because `run_with_timeout` execs and bypasses function mocks.
+- A timeout test checks elapsed time but accepts status 0, so the old "swallow 124 and continue" implementation still passes. Assert the exact nonzero status, prove partial output was discarded, and add a positive trace showing the production external-command branch ran.
 - A test inherited a previous test's cache through the shared `HOME`, so it validated a stale cache instead of a real scan.
 - The asserted string does not exist. A Maven test asserted the absence of "Maven repository cache" when the real label is "Maven local repository", so it passed even if protection regressed.
 

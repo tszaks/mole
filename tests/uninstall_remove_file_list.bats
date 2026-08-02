@@ -218,6 +218,36 @@ EOF
     [ "$n" -eq 2 ]
 }
 
+@test "remove_file_list stops after an interrupted per-file delete" {
+    local first="$SANDBOX/interrupt-first.plist"
+    local second="$SANDBOX/interrupt-second.plist"
+    : > "$first"
+    : > "$second"
+    local list
+    printf -v list '%s\n%s' "$first" "$second"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+_mole_path_requires_direct_trash() { return 0; }
+delete_calls=0
+mole_delete() {
+    delete_calls=\$((delete_calls + 1))
+    printf 'DELETE_CALL:%s\n' "\$1"
+    return 130
+}
+rc=0
+remove_file_list "$list" "false" || rc=\$?
+printf 'RC=%s CALLS=%s\n' "\$rc" "\$delete_calls"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=130 CALLS=1"* ]] || return 1
+    [[ "$output" == *"DELETE_CALL:$first"* ]] || return 1
+    [[ "$output" != *"DELETE_CALL:$second"* ]] || return 1
+    [[ -e "$first" ]] || return 1
+    [[ -e "$second" ]]
+}
+
 @test "remove_file_list routes Microsoft Word app data per-file and batches ordinary leftovers" {
     local container="$HOME/Library/Containers/com.microsoft.Word"
     local group_container="$HOME/Library/Group Containers/UBF8T346G9.Office"

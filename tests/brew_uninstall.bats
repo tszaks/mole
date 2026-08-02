@@ -129,6 +129,67 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "Homebrew detection preserves timeout and signal probe statuses" {
+    mkdir -p "$HOME/Applications/Probe.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/brew.sh"
+
+brew() { printf '%s\n' probe; }
+run_with_timeout() { return "${PROBE_RC:?}"; }
+
+PROBE_RC=124
+rc=0
+is_brew_cask_installed probe || rc=$?
+[[ $rc -eq 124 ]] || exit 1
+rc=0
+_detect_cask_via_brew_list "$HOME/Applications/Probe.app" "Probe.app" || rc=$?
+[[ $rc -eq 124 ]] || exit 1
+rc=0
+get_brew_cask_name "$HOME/Applications/Probe.app" || rc=$?
+[[ $rc -eq 124 ]] || exit 1
+
+PROBE_RC=143
+rc=0
+is_brew_cask_installed probe || rc=$?
+[[ $rc -eq 143 ]] || exit 1
+rc=0
+_detect_cask_via_brew_list "$HOME/Applications/Probe.app" "Probe.app" || rc=$?
+[[ $rc -eq 143 ]] || exit 1
+rc=0
+get_brew_cask_name "$HOME/Applications/Probe.app" || rc=$?
+[[ $rc -eq 143 ]]
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "brew uninstall preserves an interrupted app size probe" {
+    mkdir -p "$HOME/Applications/Probe.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/brew.sh"
+
+brew() { printf 'UNEXPECTED_BREW\n'; }
+get_path_size_kb() { return 124; }
+rc=0
+brew_uninstall_cask probe "$HOME/Applications/Probe.app" || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ $rc -eq 124 ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_BREW"* ]]
+}
+
 @test "Caskroom symlink detection rejects a mismatched app bundle name" {
     mkdir -p "$HOME/Applications"
     ln -s "/opt/homebrew/Caskroom/real-cask/1.0/Real.app" "$HOME/Applications/Fake.app"

@@ -320,6 +320,131 @@ EOF
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
+@test "safe_clean propagates an interrupted parallel size worker before deletion" {
+    local base="$HOME/safe_clean_parallel_interrupt"
+    mkdir -p "$base/a" "$base/b" "$base/c" "$base/d"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+get_cleanup_path_size_kb() {
+    [[ "\$1" == "$base/b" ]] && return 130
+    echo 1
+}
+safe_remove() { echo "UNEXPECTED_REMOVE:\$1"; /bin/rm -rf "\$1"; }
+
+rc=0
+safe_clean "$base/a" "$base/b" "$base/c" "$base/d" \
+    "Interrupted size batch" || rc=\$?
+[[ \$rc -eq 130 ]] || { echo "WRONG_RC:\$rc"; exit 1; }
+for path in "$base/a" "$base/b" "$base/c" "$base/d"; do
+    [[ -d "\$path" ]] || { echo "WRONG: removed \$path"; exit 1; }
+done
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "safe_clean stops a multi-target batch when deletion is interrupted" {
+    local base="$HOME/safe_clean_delete_interrupt"
+    mkdir -p "$base/a" "$base/b"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+get_cleanup_path_size_kb() { echo 1; }
+safe_remove() {
+    echo "REMOVE:\$1"
+    [[ "\$1" == "$base/a" ]] && return 130
+    /bin/rm -rf "\$1"
+}
+
+rc=0
+safe_clean "$base/a" "$base/b" "Interrupted delete batch" || rc=\$?
+[[ \$rc -eq 130 ]] || { echo "WRONG_RC:\$rc"; exit 1; }
+[[ -d "$base/a" && -d "$base/b" ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"REMOVE:$base/a"* ]] || return 1
+    [[ "$output" != *"REMOVE:$base/b"* ]]
+}
+
+@test "safe_clean keeps cancellation sticky across best-effort callers" {
+    local base="$HOME/safe_clean_sticky_interrupt"
+    mkdir -p "$base/a" "$base/b"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc <<EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+MOLE_CURRENT_COMMAND=clean
+MOLE_CLEAN_CANCEL_STATUS=0
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+is_path_whitelisted() { return 1; }
+get_cleanup_path_size_kb() { echo 1; }
+safe_remove() {
+    echo "REMOVE:\$1"
+    return 130
+}
+
+# Simulate an older best-effort cleanup family swallowing the first status.
+safe_clean "$base/a" "Interrupted first cleanup" || true
+safe_remove() {
+    echo "UNEXPECTED_REMOVE:\$1"
+    /bin/rm -rf "\$1"
+}
+rc=0
+safe_clean "$base/b" "Later cleanup" || rc=\$?
+[[ \$rc -eq 130 ]] || { echo "WRONG_RC:\$rc"; exit 1; }
+[[ -d "$base/a" && -d "$base/b" ]] || exit 1
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"REMOVE:$base/a"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
 @test "mo clean --dry-run skips system cleanup in non-interactive mode" {
     set_mock_sudo_uncached
     run_clean_dry_run
@@ -396,6 +521,25 @@ SCRIPT
     [[ "$output" == *"SYSTEM_CLEAN=true"* ]] || return 1
     [[ "$output" == *"MOLE_SUDO_ESTABLISHED=true"* ]] || return 1
     [[ "$output" == *"MOLE_SUDO_KEEPALIVE_PID=keepalive-pid"* ]]
+}
+
+@test "clean main restores the terminal and exits with an interrupted cleanup status" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+
+start_cleanup() { :; }
+hide_cursor() { printf 'HIDE\n'; }
+perform_cleanup() { return 130; }
+show_cursor() { printf 'SHOW\n'; }
+
+main
+SCRIPT
+
+    [ "$status" -eq 130 ]
+    [[ "$output" == *"HIDE"* ]] || return 1
+    [[ "$output" == *"SHOW"* ]]
 }
 
 @test "mo clean sudo prompt preserves a directly typed password (#1059)" {

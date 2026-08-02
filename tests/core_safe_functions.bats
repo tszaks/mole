@@ -371,6 +371,48 @@ EOF
     [ -f "$test_file" ]
 }
 
+@test "safe_remove bounds a stalled external rm" {
+    local target_file="$TEST_DIR/stalled-rm-file"
+    local mock_bin="$TEST_DIR/stalled-rm-bin"
+    local trace="$TEST_DIR/stalled-rm.trace"
+    mkdir -p "$mock_bin"
+    touch "$target_file"
+
+    cat > "$mock_bin/rm" <<'MOCK'
+#!/bin/bash
+if [[ "$*" == *"$TARGET_FILE"* ]]; then
+    printf 'rm %s\n' "$*" >> "$MOLE_RM_TRACE"
+    exec sleep 4
+fi
+exec /bin/rm "$@"
+MOCK
+    chmod +x "$mock_bin/rm"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_FILE="$target_file" \
+        PATH="$mock_bin:$PATH" MOLE_RM_TRACE="$trace" MOLE_TIMEOUT_DISK_VERIFY_SEC=1 \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+get_path_size_kb() { echo 1; }
+started=$(date +%s)
+rc=0
+safe_remove "$TARGET_FILE" true || rc=$?
+elapsed=$(( $(date +%s) - started ))
+printf 'RC=%s\nELAPSED=%s\n' "$rc" "$elapsed"
+SCRIPT
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$(< "$trace")" == *"$target_file"* ]] || return 1
+    local elapsed="${output##*ELAPSED=}"
+    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
+    [ "$elapsed" -lt 3 ]
+    [ -e "$target_file" ]
+}
+
 @test "safe_remove refuses a compiled model cache created during size probing" {
     local target_dir="$TEST_DIR/compiled-model-race"
     mkdir -p "$target_dir"
@@ -487,6 +529,55 @@ SCRIPT
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
 }
 
+@test "safe_sudo_remove bounds a stalled external sudo rm" {
+    local target_dir="$TEST_DIR/stalled-sudo-rm-target"
+    local mock_bin="$TEST_DIR/stalled-sudo-rm-bin"
+    local trace="$TEST_DIR/stalled-sudo-rm.trace"
+    mkdir -p "$target_dir" "$mock_bin"
+    touch "$target_dir/data"
+
+    cat > "$mock_bin/sudo" <<'MOCK'
+#!/bin/bash
+set -u
+[[ "${1:-}" == "-n" ]] && shift
+case "${1:-}" in
+    rm)
+        printf 'sudo-rm %s\n' "$*" >> "$MOLE_SUDO_RM_TRACE"
+        exec sleep 4
+        ;;
+    *)
+        exit 99
+        ;;
+esac
+MOCK
+    chmod +x "$mock_bin/sudo"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        PATH="$mock_bin:$PATH" MOLE_SUDO_RM_TRACE="$trace" \
+        MOLE_TIMEOUT_DISK_VERIFY_SEC=1 MO_NO_OPLOG=1 \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+started=$(date +%s)
+rc=0
+safe_sudo_remove "$TARGET_DIR" || rc=$?
+elapsed=$(( $(date +%s) - started ))
+printf 'RC=%s\nELAPSED=%s\n' "$rc" "$elapsed"
+SCRIPT
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$(< "$trace")" == *"sudo-rm rm -rf $target_dir"* ]] || return 1
+    local elapsed="${output##*ELAPSED=}"
+    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
+    [ "$elapsed" -lt 3 ]
+    [ -e "$target_dir/data" ]
+}
+
 @test "safe_sudo_remove refuses a compiled model cache created during size probing" {
     local target_dir="$TEST_DIR/compiled-model-sudo-race"
     mkdir -p "$target_dir"
@@ -498,15 +589,16 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_privileged_path_has_mutable_ancestor() { return 1; }
 oplog_enabled() { return 0; }
-run_with_timeout() {
-    mkdir -p "$TARGET_DIR/com.apple.e5rt.e5bundlecache"
-    printf '1 %s\n' "$TARGET_DIR"
-}
 sudo() {
     if [[ "${1:-}" == "-n" && "${2:-}" == "test" ]]; then
         shift 2
         command test "$@"
         return $?
+    fi
+    if [[ "${1:-}" == "-n" && "${2:-}" == "du" ]]; then
+        mkdir -p "$TARGET_DIR/com.apple.e5rt.e5bundlecache"
+        printf '1 %s\n' "$TARGET_DIR"
+        return 0
     fi
     echo "UNEXPECTED_SUDO:$*"
     return 99
@@ -650,6 +742,620 @@ SCRIPT
     [[ "$output" != *"INTERACTIVE_SUDO"* ]]
 }
 
+@test "safe_sudo_find_delete bounds a stalled sudo find" {
+    local target_dir="$TEST_DIR/sudo-find-timeout-target"
+    local mock_bin="$TEST_DIR/sudo-find-timeout-bin"
+    local trace="$TEST_DIR/sudo-find-timeout.trace"
+    mkdir -p "$target_dir" "$mock_bin"
+
+    cat > "$mock_bin/sudo" <<'MOCK'
+#!/bin/bash
+set -u
+[[ "${1:-}" == "-n" ]] && shift
+case "${1:-}" in
+    true)
+        exit 0
+        ;;
+    test)
+        shift
+        /bin/test "$@"
+        ;;
+    find)
+        shift
+        printf 'find %s\n' "$*" >> "$MOLE_SUDO_FIND_TRACE"
+        exec sleep 4
+        ;;
+    *)
+        exit 99
+        ;;
+esac
+MOCK
+    chmod +x "$mock_bin/sudo"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        PATH="$mock_bin:$PATH" MOLE_SUDO_FIND_TRACE="$trace" \
+        MOLE_TIMEOUT_DISK_VERIFY_SEC=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+started=$(date +%s)
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" || rc=$?
+elapsed=$(( $(date +%s) - started ))
+printf 'RC=%s\n' "$rc"
+printf 'ELAPSED=%s\n' "$elapsed"
+SCRIPT
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [ -f "$trace" ] || return 1
+    local trace_content
+    trace_content=$(< "$trace")
+    [[ "$trace_content" == "find $target_dir -maxdepth 1 -name *.log -type f -print0" ]] || {
+        echo "TRACE=$trace_content"
+        return 1
+    }
+    [[ "$output" == *"ELAPSED="* ]] || return 1
+    [[ "$output" == *"RC=124"* ]] || return 1
+    local elapsed="${output##*ELAPSED=}"
+    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
+    [ "$elapsed" -lt 3 ]
+}
+
+@test "safe_sudo_find_delete discards partial output when sudo find times out" {
+    local target_dir="$TEST_DIR/sudo-find-partial-timeout-target"
+    local mock_bin="$TEST_DIR/sudo-find-partial-timeout-bin"
+    local trace="$TEST_DIR/sudo-find-partial-timeout.trace"
+    mkdir -p "$target_dir" "$mock_bin"
+    touch "$target_dir/old.log"
+
+    cat > "$mock_bin/sudo" <<'MOCK'
+#!/bin/bash
+set -u
+printf '%s\n' "$*" >> "$MOLE_SUDO_FIND_TRACE"
+[[ "${1:-}" == "-n" ]] && shift
+case "${1:-}" in
+    test)
+        shift
+        /bin/test "$@"
+        ;;
+    true)
+        exit 0
+        ;;
+    find)
+        printf '%s\0' "$TARGET_DIR/old.log"
+        exec sleep 4
+        ;;
+    xargs | rm)
+        printf 'UNEXPECTED_DELETE:%s\n' "$*" >> "$MOLE_SUDO_FIND_TRACE"
+        exit 99
+        ;;
+    *)
+        exit 99
+        ;;
+esac
+MOCK
+    chmod +x "$mock_bin/sudo"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        PATH="$mock_bin:$PATH" MOLE_SUDO_FIND_TRACE="$trace" \
+        MOLE_TIMEOUT_DISK_VERIFY_SEC=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" || rc=$?
+printf 'RC=%s\n' "$rc"
+SCRIPT
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=124"* ]] || return 1
+    local trace_content
+    trace_content=$(< "$trace")
+    [[ "$trace_content" == *"-n find $target_dir -maxdepth 1 -name *.log -type f -print0"* ]] || return 1
+    [[ "$trace_content" != *"UNEXPECTED_DELETE"* ]] || return 1
+    [[ -e "$target_dir/old.log" ]]
+}
+
+@test "safe_sudo_find_delete bounds a stalled sudo batch removal" {
+    local target_dir="$TEST_DIR/sudo-batch-timeout-target"
+    local mock_bin="$TEST_DIR/sudo-batch-timeout-bin"
+    local trace="$TEST_DIR/sudo-batch-timeout.trace"
+    mkdir -p "$target_dir" "$mock_bin"
+    touch "$target_dir/old.log"
+
+    cat > "$mock_bin/sudo" <<'MOCK'
+#!/bin/bash
+set -u
+[[ "${1:-}" == "-n" ]] && shift
+case "${1:-}" in
+    test)
+        shift
+        /bin/test "$@"
+        ;;
+    true)
+        exit 0
+        ;;
+    find)
+        printf '%s\0' "$TARGET_DIR/old.log"
+        ;;
+    */stat)
+        exec "$@"
+        ;;
+    xargs)
+        printf 'xargs %s\n' "$*" >> "$MOLE_SUDO_BATCH_TRACE"
+        exec sleep 4
+        ;;
+    *)
+        exit 99
+        ;;
+esac
+MOCK
+    chmod +x "$mock_bin/sudo"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        PATH="$mock_bin:$PATH" MOLE_SUDO_BATCH_TRACE="$trace" MOLE_TIMEOUT_DISK_VERIFY_SEC=1 \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+started=$(date +%s)
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" || rc=$?
+elapsed=$(( $(date +%s) - started ))
+printf 'RC=%s\nELAPSED=%s\n' "$rc" "$elapsed"
+SCRIPT
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$(< "$trace")" == *"xargs xargs -0 /bin/sh -c"* ]] || return 1
+    local elapsed="${output##*ELAPSED=}"
+    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
+    [ "$elapsed" -lt 3 ]
+}
+
+@test "safe_sudo_find_delete stops before scanning when its deadline is exhausted" {
+    local target_dir="$TEST_DIR/sudo-deadline-target"
+    mkdir -p "$target_dir"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+sudo() {
+    printf 'SUDO:%s\n' "$*"
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        test)
+            shift
+            command test "$@"
+            ;;
+        find | xargs)
+            printf 'UNEXPECTED_WORK:%s\n' "$*"
+            return 99
+            ;;
+        *) "$@" ;;
+    esac
+}
+deadline=$SECONDS
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" "$deadline" || rc=$?
+printf 'RC=%s\nCOUNT=%s\n' "$rc" "${MOLE_SAFE_SUDO_FIND_DELETE_COUNT:-unset}"
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$output" == *"COUNT=0"* ]] || return 1
+    [[ "$output" != *"SUDO:"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_WORK"* ]]
+}
+
+@test "_mole_timeout_with_deadline clamps fractional timeouts to remaining whole seconds" {
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+SECONDS=100
+printf 'CLAMPED=%s\n' "$(_mole_timeout_with_deadline 30.5 101)"
+printf 'SHORT=%s\n' "$(_mole_timeout_with_deadline 0.5 101)"
+printf 'ZERO=%s\n' "$(_mole_timeout_with_deadline 0 101)"
+printf 'LEADING=%s\n' "$(_mole_timeout_with_deadline 08.5 101)"
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"CLAMPED=1"* ]] || return 1
+    [[ "$output" == *"SHORT=0.5"* ]] || return 1
+    [[ "$output" == *"ZERO=1"* ]] || return 1
+    [[ "$output" == *"LEADING=1"* ]]
+}
+
+@test "get_path_size_kb bounds the app metadata fast path" {
+    local app_dir="$TEST_DIR/Stalled.app"
+    local mock_bin="$TEST_DIR/stalled-mdls-bin"
+    local trace="$TEST_DIR/stalled-mdls.trace"
+    mkdir -p "$app_dir" "$mock_bin"
+
+    cat > "$mock_bin/mdls" <<'MOCK'
+#!/bin/bash
+printf 'mdls %s\n' "$*" >> "$MOLE_MDLS_TRACE"
+exec sleep 4
+MOCK
+    chmod +x "$mock_bin/mdls"
+    cat > "$mock_bin/du" <<'MOCK'
+#!/bin/bash
+printf 'UNEXPECTED_DU %s\n' "$*" >> "$MOLE_MDLS_TRACE"
+exec sleep 4
+MOCK
+    chmod +x "$mock_bin/du"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP_DIR="$app_dir" \
+        PATH="$mock_bin:$PATH" MOLE_MDLS_TRACE="$trace" \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+started=$(date +%s)
+size=$(get_path_size_kb "$APP_DIR" 1)
+elapsed=$(( $(date +%s) - started ))
+printf 'SIZE=%s\nELAPSED=%s\n' "$size" "$elapsed"
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"SIZE="* ]] || return 1
+    [[ "$(< "$trace")" == *"$app_dir"* ]] || return 1
+    [[ "$(< "$trace")" != *"UNEXPECTED_DU"* ]] || return 1
+    local elapsed="${output##*ELAPSED=}"
+    [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
+    [ "$elapsed" -lt 3 ]
+}
+
+@test "safe_remove stops when a size probe is interrupted" {
+    local app_dir="$TEST_DIR/Interrupted.app"
+    mkdir -p "$app_dir"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP_DIR="$app_dir" \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+run_with_timeout() {
+    local _duration="$1"
+    shift
+    if [[ "${1:-}" == "mdls" ]]; then
+        return 130
+    fi
+    "$@"
+}
+rm() {
+    printf 'UNEXPECTED_REMOVE:%s\n' "$*"
+    return 99
+}
+rc=0
+safe_remove "$APP_DIR" true || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ -d "$APP_DIR" ]]
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=130"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "safe_sudo_find_delete propagates interrupts from every sudo preflight" {
+    local target_dir="$TEST_DIR/sudo-preflight-interrupt-target"
+    mkdir -p "$target_dir"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+for fail_stage in initial_auth base base_auth link link_auth; do
+    true_calls=0
+    sudo() {
+        [[ "${1:-}" == "-n" ]] && shift
+        case "${1:-}" in
+            true)
+                true_calls=$((true_calls + 1))
+                if [[ "$fail_stage" == "initial_auth" && $true_calls -eq 1 ]] || \
+                    [[ "$fail_stage" == "base_auth" && $true_calls -eq 2 ]] || \
+                    [[ "$fail_stage" == "link_auth" && $true_calls -eq 2 ]]; then
+                    return 130
+                fi
+                return 0
+                ;;
+            test)
+                shift
+                if [[ "${1:-}" == "-d" ]]; then
+                    [[ "$fail_stage" == "base" ]] && return 130
+                    [[ "$fail_stage" == "base_auth" ]] && return 1
+                elif [[ "${1:-}" == "-L" ]]; then
+                    [[ "$fail_stage" == "link" ]] && return 130
+                    [[ "$fail_stage" == "link_auth" ]] && return 1
+                fi
+                command test "$@"
+                ;;
+            find | xargs | rm)
+                printf 'UNEXPECTED_PRIVILEGED_ACTION:%s\n' "$*"
+                return 99
+                ;;
+            *) return 0 ;;
+        esac
+    }
+
+    rc=0
+    safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" || rc=$?
+    printf '%s:%s\n' "$fail_stage" "$rc"
+done
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"initial_auth:130"* ]] || return 1
+    [[ "$output" == *"base:130"* ]] || return 1
+    [[ "$output" == *"base_auth:130"* ]] || return 1
+    [[ "$output" == *"link:130"* ]] || return 1
+    [[ "$output" == *"link_auth:130"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_PRIVILEGED_ACTION"* ]]
+}
+
+@test "safe_sudo_find_delete keeps a file refreshed after the initial age scan" {
+    local target_dir="$TEST_DIR/sudo-age-refresh-target"
+    local target_file="$target_dir/old.log"
+    mkdir -p "$target_dir"
+    touch "$target_file"
+    touch -t "$(date -v-8d '+%Y%m%d%H%M.%S')" "$target_file"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" TARGET_FILE="$target_file" \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        test)
+            shift
+            command test "$@"
+            ;;
+        find)
+            printf '%s\0' "$TARGET_FILE"
+            touch "$TARGET_FILE"
+            ;;
+        */stat) "$@" ;;
+        xargs)
+            shift
+            command xargs "$@"
+            ;;
+        *) "$@" ;;
+    esac
+}
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "1" "f" "1" || rc=$?
+printf 'RC=%s\nCOUNT=%s\n' "$rc" "${MOLE_SAFE_SUDO_FIND_DELETE_COUNT:-unset}"
+[[ -e "$TARGET_FILE" ]] && printf 'SURVIVED\n'
+cat "$HOME/Library/Logs/mole/operations.log" 2> /dev/null || true
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1"* ]] || return 1
+    [[ "$output" == *"COUNT=0"* ]] || return 1
+    [[ "$output" == *"SURVIVED"* ]] || return 1
+    [[ "$output" != *"REMOVED $target_file"* ]]
+}
+
+@test "safe_sudo_find_delete keeps a path replaced after identity capture" {
+    local target_dir="$TEST_DIR/sudo-identity-replace-target"
+    local target_file="$target_dir/old.log"
+    mkdir -p "$target_dir"
+    printf 'original\n' > "$target_file"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" TARGET_FILE="$target_file" \
+        MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        test)
+            shift
+            command test "$@"
+            ;;
+        find) printf '%s\0' "$TARGET_FILE" ;;
+        */stat)
+            identity=$("$@")
+            if [[ ! -e "$TARGET_DIR/replaced.marker" ]]; then
+                : > "$TARGET_DIR/replaced.marker"
+                /bin/rm -f "$TARGET_FILE"
+                printf 'replacement\n' > "$TARGET_FILE"
+            fi
+            printf '%s\n' "$identity"
+            ;;
+        xargs)
+            shift
+            command xargs "$@"
+            ;;
+        *) "$@" ;;
+    esac
+}
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" || rc=$?
+printf 'RC=%s\nCOUNT=%s\nCONTENT=%s\n' "$rc" \
+    "${MOLE_SAFE_SUDO_FIND_DELETE_COUNT:-unset}" "$(< "$TARGET_FILE")"
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1"* ]] || return 1
+    [[ "$output" == *"COUNT=0"* ]] || return 1
+    [[ "$output" == *"CONTENT=replacement"* ]]
+}
+
+@test "safe_sudo_find_delete does not run an accumulated batch after a probe timeout" {
+    local target_dir="$TEST_DIR/sudo-probe-timeout-target"
+    local first_file="$target_dir/first.log"
+    local second_file="$target_dir/second.log"
+    local marker="$target_dir/first-stat-complete"
+    mkdir -p "$target_dir"
+    touch "$first_file" "$second_file"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        FIRST_FILE="$first_file" SECOND_FILE="$second_file" MARKER="$marker" \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+MOLE_TEST_MODE=0
+MOLE_TEST_NO_AUTH=0
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+should_protect_path() { return 1; }
+is_path_whitelisted() { return 1; }
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        test) command "$@" ;;
+        find) printf '%s\0%s\0' "$FIRST_FILE" "$SECOND_FILE" ;;
+        /usr/bin/stat)
+            if [[ ! -e "$MARKER" ]]; then
+                touch "$MARKER"
+                command "$@"
+            else
+                printf 'STAT_TIMEOUT\n'
+                return 124
+            fi
+            ;;
+        xargs)
+            printf 'UNEXPECTED_BATCH\n'
+            return 99
+            ;;
+        *) command "$@" ;;
+    esac
+}
+
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ -e "$FIRST_FILE" && -e "$SECOND_FILE" ]]
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [ -e "$marker" ] || return 1
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_BATCH"* ]]
+}
+
+@test "safe_sudo_find_delete logs only acknowledged removals from a timed-out batch" {
+    local target_dir="$TEST_DIR/sudo-partial-ack-target"
+    local mock_bin="$TEST_DIR/sudo-partial-ack-bin"
+    local trace="$TEST_DIR/sudo-partial-ack.trace"
+    mkdir -p "$target_dir" "$mock_bin"
+    touch "$target_dir/a.log" "$target_dir/b.log"
+
+    cat > "$mock_bin/sudo" <<'MOCK'
+#!/bin/bash
+set -u
+[[ "${1:-}" == "-n" ]] && shift
+case "${1:-}" in
+    true) exit 0 ;;
+    test)
+        shift
+        /bin/test "$@"
+        ;;
+    find)
+        printf '%s\0' "$TARGET_DIR/a.log" "$TARGET_DIR/b.log"
+        ;;
+    */stat) exec "$@" ;;
+    xargs)
+        printf 'xargs-started\n' >> "$MOLE_PARTIAL_ACK_TRACE"
+        IFS= read -r -d '' record || exit 1
+        rest=${record#*:}
+        rest=${rest#*:}
+        path=${rest#*:}
+        /bin/rm -f -- "$path" || exit 1
+        printf '%s\0' "$path"
+        exec sleep 4
+        ;;
+    *) exit 99 ;;
+esac
+MOCK
+    chmod +x "$mock_bin/sudo"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        PATH="$mock_bin:$PATH" MOLE_PARTIAL_ACK_TRACE="$trace" \
+        MOLE_TIMEOUT_DISK_VERIFY_SEC=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" || rc=$?
+printf 'RC=%s\nCOUNT=%s\n' "$rc" "${MOLE_SAFE_SUDO_FIND_DELETE_COUNT:-unset}"
+cat "$HOME/Library/Logs/mole/operations.log" 2> /dev/null || true
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$(< "$trace")" == "xargs-started" ]] || return 1
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$output" == *"COUNT=1"* ]] || return 1
+    [ ! -e "$target_dir/a.log" ] || return 1
+    [ -e "$target_dir/b.log" ] || return 1
+    [[ "$output" == *"REMOVED $target_dir/a.log (batch)"* ]] || return 1
+    [[ "$output" != *"REMOVED $target_dir/b.log (batch)"* ]]
+}
+
+@test "safe_sudo_find_delete rejects an oversized privileged batch before deletion" {
+    local target_dir="$TEST_DIR/sudo-batch-limit-target"
+    mkdir -p "$target_dir"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        MO_NO_OPLOG=1 MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+        /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_privileged_path_has_mutable_ancestor() { return 1; }
+_mole_privileged_batch_max_items() { printf '4\n'; }
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        test)
+            shift
+            command test "$@"
+            ;;
+        find)
+            i=0
+            while [[ $i -lt 5 ]]; do
+                printf '%s\0' "$TARGET_DIR/item-$i.log"
+                i=$((i + 1))
+            done
+            ;;
+        */stat) printf '1:2:3\n' ;;
+        xargs)
+            printf 'UNEXPECTED_BATCH:%s\n' "$*"
+            return 99
+            ;;
+        *) "$@" ;;
+    esac
+}
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" "1" || rc=$?
+printf 'RC=%s\nCOUNT=%s\n' "$rc" "${MOLE_SAFE_SUDO_FIND_DELETE_COUNT:-unset}"
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1"* ]] || return 1
+    [[ "$output" == *"COUNT=0"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_BATCH"* ]]
+}
+
 @test "safe_sudo_find_delete never previews or removes active powerlog database aliases" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
@@ -665,6 +1371,10 @@ is_path_whitelisted() { return 1; }
 _mole_privileged_path_has_mutable_ancestor() { return 1; }
 record_dry_run_cleanup_target() { printf 'PREVIEW:%s\n' "$1"; }
 safe_sudo_remove() { printf 'REMOVE:%s\n' "$1"; }
+append_log_lines() {
+    shift
+    printf '%s\n' "$@"
+}
 
 sudo() {
     [[ "${1:-}" == "-n" ]] && shift
@@ -675,9 +1385,15 @@ sudo() {
         find)
             printf '%s\0' "$active_db" "$active_db-wal" "$active_db-shm" "$active_dot_alias" "$active_case_alias" "$archived_db"
             ;;
+        */stat)
+            printf '1:2:3\n'
+            ;;
         xargs)
-            while IFS= read -r -d '' removed_path; do
-                printf 'REMOVE:%s\n' "$removed_path"
+            while IFS= read -r -d '' record; do
+                rest=${record#*:}
+                rest=${rest#*:}
+                rest=${rest#*:}
+                printf '%s\0' "$rest"
             done
             ;;
         *)
@@ -694,7 +1410,7 @@ SCRIPT
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"PREVIEW:/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/ArchivedBackgroundProcessingDB.BGSQL"* ]] || return 1
-    [[ "$output" == *"REMOVE:/private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/ArchivedBackgroundProcessingDB.BGSQL"* ]] || return 1
+    [[ "$output" == *"REMOVED /private/var/db/powerlog/Library/PerfPowerTelemetry/BackgroundProcessing/ArchivedBackgroundProcessingDB.BGSQL (batch)"* ]] || return 1
     [[ "$output" != *"CurrentBackgroundProcessingDB.BGSQL"* ]] || return 1
     [[ "$output" != *"currentbackgroundprocessingdb.bgsql"* ]] || return 1
     [[ "$output" != *"/./CurrentBackgroundProcessingDB.BGSQL"* ]]
@@ -777,7 +1493,7 @@ SCRIPT
     [[ "$output" != *"INTERACTIVE_SUDO"* ]] || return 1
 }
 
-@test "safe_sudo_find_delete does not log REMOVED when sudo lapses mid-batch" {
+@test "safe_sudo_find_delete reports a failed batch without logging REMOVED" {
     local target_dir="$TEST_DIR/sudo-batch-lapsed"
     local script="$TEST_DIR/sudo-batch-lapsed-test.sh"
     mkdir -p "$target_dir"
@@ -790,9 +1506,8 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 # This test models a root-owned, non-user-writable log tree.
 _mole_privileged_path_has_mutable_ancestor() { return 1; }
 
-# Simulate a credential that dies right after the find: the batch xargs rm
-# fails, and every later sudo probe (true / test / rm) fails for the same
-# auth reason. Nothing was deleted, so no REMOVED lines may be logged.
+# Simulate a credential that dies at the batch xargs rm. Nothing was deleted,
+# so the helper must return the failure and no REMOVED lines may be logged.
 sudo() {
     if [[ "${1:-}" != "-n" ]]; then
         echo "INTERACTIVE_SUDO:$*" >&2
@@ -800,8 +1515,18 @@ sudo() {
     fi
     shift
     case "${1:-}" in
+        true)
+            return 0
+            ;;
+        test)
+            shift
+            command test "$@"
+            ;;
         find)
             printf '%s\0' "$TARGET_DIR/a.log" "$TARGET_DIR/b.log"
+            ;;
+        xargs)
+            return 1
             ;;
         *)
             return 1
@@ -825,7 +1550,7 @@ SCRIPT
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=0"* ]] || return 1
+    [[ "$output" == *"RC=1"* ]] || return 1
     [[ "$output" == *"A_SURVIVED"* ]] || return 1
     # Scope to this test's paths: the oplog HOME is shared across tests and
     # earlier batch tests legitimately log their own "(batch)" lines.
@@ -908,7 +1633,7 @@ SCRIPT
     [[ "$output" == *"A_REMOVED"* ]] || return 1
 }
 
-@test "safe_sudo_find_delete retries batch survivors through safe_sudo_remove" {
+@test "safe_sudo_find_delete reports batch failure without a second removal pass" {
     local target_dir="$TEST_DIR/sudo-batch-fallback"
     local script="$TEST_DIR/sudo-batch-fallback-test.sh"
     mkdir -p "$target_dir"
@@ -969,9 +1694,9 @@ SCRIPT
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"RC=0"* ]] || return 1
-    [[ "$output" == *"SUDO:-n xargs -0 rm -f --"* ]] || return 1
-    [[ "$output" == *"SUDO:-n rm -rf $target_dir/stuck.log"* ]] || return 1
+    [[ "$output" == *"RC=1"* ]] || return 1
+    [[ "$output" == *"SUDO:-n xargs -0 /bin/sh -c"* ]] || return 1
+    [[ "$output" != *"SUDO:-n rm -rf $target_dir/stuck.log"* ]] || return 1
     [[ "$output" != *"INTERACTIVE_SUDO"* ]] || return 1
 }
 
@@ -1010,7 +1735,9 @@ sudo() {
 }
 export -f sudo
 
-safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" || rc=$?
+printf 'RC=%s\n' "$rc"
 [[ -e "$TARGET_DIR/old.log" ]] && echo "TARGET_SURVIVED" || echo "TARGET_REMOVED"
 cat "$TRACE"
 SCRIPT
@@ -1020,6 +1747,7 @@ SCRIPT
         MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc "$script"
 
     [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=0"* ]] || return 1
     [[ "$output" == *"TARGET_REMOVED"* ]] || return 1
     [[ "$output" != *"PRIVILEGED_DELETE"* ]] || return 1
     [[ "$output" != *"SUDO:-n xargs"* ]] || return 1
@@ -1062,7 +1790,9 @@ sudo() {
 }
 export -f sudo
 
-safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f"
+rc=0
+safe_sudo_find_delete "$TARGET_DIR" "*.log" "0" "f" || rc=$?
+printf 'RC=%s\n' "$rc"
 [[ -e "$TARGET_DIR/old.log" ]] && echo "TARGET_SURVIVED" || echo "TARGET_REMOVED"
 cat "$TRACE"
 SCRIPT
@@ -1073,6 +1803,7 @@ SCRIPT
     chmod 0755 "$target_dir"
 
     [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=1"* ]] || return 1
     [[ "$output" == *"TARGET_SURVIVED"* ]] || return 1
     [[ "$output" != *"PRIVILEGED_DELETE"* ]] || return 1
     [[ "$output" != *"SUDO:-n xargs"* ]] || return 1
@@ -1138,6 +1869,45 @@ SCRIPT
 
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_find_delete '$TEST_DIR' '*.tmp' 7 'f'"
     [ "$status" -eq 0 ]
+    [ ! -e "$old_file" ] || return 1
+    [ -e "$new_file" ]
+}
+
+@test "safe_find_delete discards a timed-out partial scan" {
+    local target_dir="$TEST_DIR/find-partial-target"
+    local target_file="$target_dir/old.tmp"
+    local mock_bin="$TEST_DIR/find-partial-bin"
+    local trace="$TEST_DIR/find-partial.trace"
+    mkdir -p "$target_dir" "$mock_bin"
+    touch "$target_file"
+
+    cat > "$mock_bin/find" <<'MOCK'
+#!/bin/bash
+printf 'find %s\n' "$*" >> "$MOLE_FIND_TRACE"
+printf '%s\0' "$TARGET_FILE"
+exec sleep 4
+MOCK
+    chmod +x "$mock_bin/find"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
+        TARGET_FILE="$target_file" MOLE_FIND_TRACE="$trace" PATH="$mock_bin:$PATH" \
+        MOLE_TIMEOUT_DISK_VERIFY_SEC=1 /bin/bash --noprofile --norc <<'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+safe_remove() {
+    printf 'UNEXPECTED_DELETE:%s\n' "$1"
+    return 99
+}
+rc=0
+safe_find_delete "$TARGET_DIR" "*.tmp" "0" "f" || rc=$?
+printf 'RC=%s\n' "$rc"
+SCRIPT
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$(< "$trace")" == *"$target_dir -maxdepth 5 -name *.tmp -type f -print0"* ]] || return 1
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DELETE"* ]] || return 1
+    [ -e "$target_file" ]
 }
 
 @test "safe_find_delete works when app protection is not loaded" {

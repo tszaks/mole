@@ -864,6 +864,12 @@ _safe_clean_impl() {
     local delete_guard="$1"
     shift
 
+    local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ "${MOLE_CURRENT_COMMAND:-}" == "clean" &&
+        ("$pending_clean_cancel" -eq 124 || "$pending_clean_cancel" -ge 128) ]]; then
+        return "$pending_clean_cancel"
+    fi
+
     if [[ $# -eq 0 ]]; then
         return 0
     fi
@@ -914,6 +920,14 @@ _safe_clean_impl() {
     local skipped_count=0
     local removal_failed_count=0
     local delete_guard_stopped=0
+    local cleanup_interrupt_rc=0
+    # A guarded cleanup may bind the exact object it approved to safe_remove's
+    # final identity check. These names deliberately use dynamic scope so the
+    # callback can populate them without stdout/command-substitution races.
+    local _MOLE_SAFE_CLEAN_BOUND_PATH=""
+    local _MOLE_SAFE_CLEAN_EXPECTED_PARENT=""
+    local _MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID=""
+    local _MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID=""
     local permission_start=${MOLE_PERMISSION_DENIED_COUNT:-0}
 
     local show_scan_feedback=false
@@ -1049,6 +1063,14 @@ _safe_clean_impl() {
 
             local idx=0
             local _bytes
+            local bulk_stat_file="$temp_dir/bulk_stat"
+            local bulk_stat_rc=0
+            run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+                stat -f%z "${existing_paths[@]}" < /dev/null \
+                > "$bulk_stat_file" 2> /dev/null || bulk_stat_rc=$?
+            if [[ $bulk_stat_rc -eq 124 || $bulk_stat_rc -ge 128 ]]; then
+                cleanup_interrupt_rc=$bulk_stat_rc
+            fi
             while IFS= read -r _bytes; do
                 [[ "$_bytes" =~ ^[0-9]+$ ]] || _bytes=0
                 local _kb=$(((_bytes + 1023) / 1024))
@@ -1058,15 +1080,21 @@ _safe_clean_impl() {
                     echo "0 0" > "$temp_dir/result_${idx}"
                 fi
                 idx=$((idx + 1))
-            done < <(stat -f%z "${existing_paths[@]}" 2> /dev/null)
+            done < "$bulk_stat_file"
             while [[ $idx -lt ${#existing_paths[@]} ]]; do
                 echo "0 0" > "$temp_dir/result_${idx}"
                 idx=$((idx + 1))
             done
             for ((idx = 0; idx < ${#existing_paths[@]}; idx++)); do
                 if [[ -d "${existing_paths[$idx]}" && ! -L "${existing_paths[$idx]}" ]]; then
-                    local _dsize
-                    _dsize=$(get_cleanup_path_size_kb "${existing_paths[$idx]}")
+                    local _dsize=0
+                    local _dsize_rc=0
+                    _dsize=$(get_cleanup_path_size_kb \
+                        "${existing_paths[$idx]}") || _dsize_rc=$?
+                    if [[ $_dsize_rc -eq 124 || $_dsize_rc -ge 128 ]]; then
+                        cleanup_interrupt_rc=$_dsize_rc
+                        break
+                    fi
                     [[ "$_dsize" =~ ^[0-9]+$ ]] || _dsize=0
                     if [[ "$_dsize" -gt 0 ]]; then
                         echo "$_dsize 1" > "$temp_dir/result_${idx}"
@@ -1086,8 +1114,11 @@ _safe_clean_impl() {
             if [[ ${#existing_paths[@]} -gt 0 ]]; then
                 for path in "${existing_paths[@]}"; do
                     (
-                        local size
-                        size=$(get_cleanup_path_size_kb "$path")
+                        local size=0 size_rc=0
+                        size=$(get_cleanup_path_size_kb "$path") || size_rc=$?
+                        if [[ $size_rc -eq 124 || $size_rc -ge 128 ]]; then
+                            exit "$size_rc"
+                        fi
                         [[ ! "$size" =~ ^[0-9]+$ ]] && size=0
                         local tmp_file="$temp_dir/result_${idx}.$$"
                         if [[ "$size" -gt 0 ]]; then
@@ -1101,7 +1132,12 @@ _safe_clean_impl() {
                     idx=$((idx + 1))
 
                     if ((${#pids[@]} >= MOLE_MAX_PARALLEL_JOBS)); then
-                        wait "${pids[0]}" 2> /dev/null || true
+                        local wait_rc=0
+                        wait "${pids[0]}" 2> /dev/null || wait_rc=$?
+                        if [[ $wait_rc -eq 124 || $wait_rc -ge 128 ]]; then
+                            cleanup_interrupt_rc=$wait_rc
+                            break
+                        fi
                         pids=("${pids[@]:1}")
                         completed=$((completed + 1))
 
@@ -1114,7 +1150,11 @@ _safe_clean_impl() {
 
             if [[ ${#pids[@]} -gt 0 ]]; then
                 for pid in "${pids[@]}"; do
-                    wait "$pid" 2> /dev/null || true
+                    local wait_rc=0
+                    wait "$pid" 2> /dev/null || wait_rc=$?
+                    if [[ $wait_rc -eq 124 || $wait_rc -ge 128 ]]; then
+                        [[ $cleanup_interrupt_rc -ne 0 ]] || cleanup_interrupt_rc=$wait_rc
+                    fi
                     completed=$((completed + 1))
 
                     if [[ "$show_spinner" == "true" && -t 1 ]]; then
@@ -1122,6 +1162,15 @@ _safe_clean_impl() {
                     fi
                 done
             fi
+        fi
+
+        if [[ $cleanup_interrupt_rc -ne 0 ]]; then
+            if [[ "$show_spinner" == "true" || "$show_scan_feedback" == "true" ]]; then
+                stop_inline_spinner
+            fi
+            MOLE_CLEAN_CANCEL_STATUS=$cleanup_interrupt_rc
+            export MOLE_CLEAN_CANCEL_STATUS
+            return "$cleanup_interrupt_rc"
         fi
 
         debug_timer_end "$description: size calc" _perf_size_start
@@ -1142,18 +1191,64 @@ _safe_clean_impl() {
                 if [[ -f "$result_file" ]]; then
                     read -r size count < "$result_file" 2> /dev/null || true
                     local removed=0
+                    local action_rc=0
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        if [[ -n "$delete_guard" ]] && ! "$delete_guard" "$path"; then
-                            delete_guard_stopped=1
+                        if [[ -n "$delete_guard" ]]; then
+                            _MOLE_SAFE_CLEAN_BOUND_PATH=""
+                            _MOLE_SAFE_CLEAN_EXPECTED_PARENT=""
+                            _MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID=""
+                            _MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID=""
+                            "$delete_guard" "$path" || action_rc=$?
+                            if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                                cleanup_interrupt_rc=$action_rc
+                                break
+                            elif [[ $action_rc -ne 0 ]]; then
+                                delete_guard_stopped=1
+                                break
+                            fi
+                        fi
+                        action_rc=0
+                        local bound_parent=""
+                        local bound_parent_id=""
+                        local bound_target_id=""
+                        if [[ "$_MOLE_SAFE_CLEAN_BOUND_PATH" == "$path" ]]; then
+                            bound_parent="$_MOLE_SAFE_CLEAN_EXPECTED_PARENT"
+                            bound_parent_id="$_MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID"
+                            bound_target_id="$_MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID"
+                        fi
+                        safe_remove "$path" true "$size" "" \
+                            "$bound_parent" "$bound_parent_id" \
+                            "$bound_target_id" || action_rc=$?
+                        if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                            cleanup_interrupt_rc=$action_rc
                             break
-                        elif safe_remove "$path" true "$size"; then
+                        elif [[ $action_rc -eq 0 ]]; then
                             removed=1
                         fi
-                    elif [[ -n "$delete_guard" ]] && ! "$delete_guard" "$path"; then
-                        delete_guard_stopped=1
-                        break
-                    elif record_dry_run_cleanup_target "$path" "$size" 1 true; then
-                        removed=1
+                    else
+                        if [[ -n "$delete_guard" ]]; then
+                            _MOLE_SAFE_CLEAN_BOUND_PATH=""
+                            _MOLE_SAFE_CLEAN_EXPECTED_PARENT=""
+                            _MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID=""
+                            _MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID=""
+                            "$delete_guard" "$path" || action_rc=$?
+                            if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                                cleanup_interrupt_rc=$action_rc
+                                break
+                            elif [[ $action_rc -ne 0 ]]; then
+                                delete_guard_stopped=1
+                                break
+                            fi
+                        fi
+                        action_rc=0
+                        record_dry_run_cleanup_target \
+                            "$path" "$size" 1 true || action_rc=$?
+                        if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                            cleanup_interrupt_rc=$action_rc
+                            break
+                        elif [[ $action_rc -eq 0 ]]; then
+                            removed=1
+                        fi
                     fi
 
                     if [[ $removed -eq 1 ]]; then
@@ -1188,23 +1283,74 @@ _safe_clean_impl() {
         local idx=0
         if [[ ${#existing_paths[@]} -gt 0 ]]; then
             for path in "${existing_paths[@]}"; do
-                local size_kb
-                size_kb=$(get_cleanup_path_size_kb "$path")
+                local size_kb=0
+                local size_rc=0
+                size_kb=$(get_cleanup_path_size_kb "$path") || size_rc=$?
+                if [[ $size_rc -eq 124 || $size_rc -ge 128 ]]; then
+                    cleanup_interrupt_rc=$size_rc
+                    break
+                fi
                 [[ ! "$size_kb" =~ ^[0-9]+$ ]] && size_kb=0
 
                 local removed=0
+                local action_rc=0
                 if [[ "$DRY_RUN" != "true" ]]; then
-                    if [[ -n "$delete_guard" ]] && ! "$delete_guard" "$path"; then
-                        delete_guard_stopped=1
+                    if [[ -n "$delete_guard" ]]; then
+                        _MOLE_SAFE_CLEAN_BOUND_PATH=""
+                        _MOLE_SAFE_CLEAN_EXPECTED_PARENT=""
+                        _MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID=""
+                        _MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID=""
+                        "$delete_guard" "$path" || action_rc=$?
+                        if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                            cleanup_interrupt_rc=$action_rc
+                            break
+                        elif [[ $action_rc -ne 0 ]]; then
+                            delete_guard_stopped=1
+                            break
+                        fi
+                    fi
+                    action_rc=0
+                    local bound_parent=""
+                    local bound_parent_id=""
+                    local bound_target_id=""
+                    if [[ "$_MOLE_SAFE_CLEAN_BOUND_PATH" == "$path" ]]; then
+                        bound_parent="$_MOLE_SAFE_CLEAN_EXPECTED_PARENT"
+                        bound_parent_id="$_MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID"
+                        bound_target_id="$_MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID"
+                    fi
+                    safe_remove "$path" true "$size_kb" "" \
+                        "$bound_parent" "$bound_parent_id" \
+                        "$bound_target_id" || action_rc=$?
+                    if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                        cleanup_interrupt_rc=$action_rc
                         break
-                    elif safe_remove "$path" true "$size_kb"; then
+                    elif [[ $action_rc -eq 0 ]]; then
                         removed=1
                     fi
-                elif [[ -n "$delete_guard" ]] && ! "$delete_guard" "$path"; then
-                    delete_guard_stopped=1
-                    break
-                elif record_dry_run_cleanup_target "$path" "$size_kb" 1 true; then
-                    removed=1
+                else
+                    if [[ -n "$delete_guard" ]]; then
+                        _MOLE_SAFE_CLEAN_BOUND_PATH=""
+                        _MOLE_SAFE_CLEAN_EXPECTED_PARENT=""
+                        _MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID=""
+                        _MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID=""
+                        "$delete_guard" "$path" || action_rc=$?
+                        if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                            cleanup_interrupt_rc=$action_rc
+                            break
+                        elif [[ $action_rc -ne 0 ]]; then
+                            delete_guard_stopped=1
+                            break
+                        fi
+                    fi
+                    action_rc=0
+                    record_dry_run_cleanup_target \
+                        "$path" "$size_kb" 1 true || action_rc=$?
+                    if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                        cleanup_interrupt_rc=$action_rc
+                        break
+                    elif [[ $action_rc -eq 0 ]]; then
+                        removed=1
+                    fi
                 fi
 
                 if [[ $removed -eq 1 ]]; then
@@ -1227,6 +1373,12 @@ _safe_clean_impl() {
 
     if [[ "$show_spinner" == "true" || "$cleaning_spinner_started" == "true" || "$show_scan_feedback" == "true" ]]; then
         stop_inline_spinner
+    fi
+
+    if [[ $cleanup_interrupt_rc -ne 0 ]]; then
+        MOLE_CLEAN_CANCEL_STATUS=$cleanup_interrupt_rc
+        export MOLE_CLEAN_CANCEL_STATUS
+        return "$cleanup_interrupt_rc"
     fi
 
     local permission_end=${MOLE_PERMISSION_DENIED_COUNT:-0}
@@ -1295,6 +1447,8 @@ safe_clean_guarded() {
 start_cleanup() {
     # Set current command for operation logging
     export MOLE_CURRENT_COMMAND="clean"
+    MOLE_CLEAN_CANCEL_STATUS=0
+    export MOLE_CLEAN_CANCEL_STATUS
     log_operation_session_start "clean"
     DRY_RUN_SEEN_IDENTITIES=()
     DRY_RUN_TOTAL_PARTIAL=false
@@ -1499,16 +1653,35 @@ perform_cleanup() {
     # Allow per-section failures without aborting the full run.
     set +e
 
+    _run_cleanup_step() {
+        local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+        if [[ $pending_clean_cancel -eq 124 || $pending_clean_cancel -ge 128 ]]; then
+            return "$pending_clean_cancel"
+        fi
+        local step_rc=0
+        "$@" || step_rc=$?
+        pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+        if [[ $step_rc -eq 124 || $step_rc -ge 128 ]]; then
+            MOLE_CLEAN_CANCEL_STATUS=$step_rc
+            export MOLE_CLEAN_CANCEL_STATUS
+            return "$step_rc"
+        fi
+        if [[ $pending_clean_cancel -eq 124 || $pending_clean_cancel -ge 128 ]]; then
+            return "$pending_clean_cancel"
+        fi
+        return 0
+    }
+
     if [[ -n "$EXTERNAL_VOLUME_TARGET" ]]; then
         start_section "External volume"
-        clean_external_volume_target "$EXTERNAL_VOLUME_TARGET"
+        _run_cleanup_step clean_external_volume_target "$EXTERNAL_VOLUME_TARGET" || return $?
         end_section
     else
         # ===== 1. System =====
         if [[ "$SYSTEM_CLEAN" == "true" ]]; then
             start_section "System"
-            clean_deep_system
-            clean_local_snapshots
+            _run_cleanup_step clean_deep_system || return $?
+            _run_cleanup_step clean_local_snapshots || return $?
             end_section
         fi
 
@@ -1522,18 +1695,18 @@ perform_cleanup() {
 
         # ===== 2. User essentials =====
         start_section "User essentials"
-        clean_user_essentials
-        clean_finder_metadata
+        _run_cleanup_step clean_user_essentials || return $?
+        _run_cleanup_step clean_finder_metadata || return $?
         end_section
 
         # ===== 3. App caches (merged sandboxed and standard app caches) =====
         start_section "App caches"
-        clean_app_caches
+        _run_cleanup_step clean_app_caches || return $?
         end_section
 
         # ===== 4. Browsers =====
         start_section "Browsers"
-        clean_browsers
+        _run_cleanup_step clean_browsers || return $?
         end_section
 
         # ===== 5. Cloud & Office =====
@@ -1547,8 +1720,8 @@ perform_cleanup() {
             local ret=$?
             if [[ $ret -eq 124 ]]; then
                 log_warning "Cloud & Office cleanup timed out after 5 minutes, skipping remaining items"
-            elif [[ $ret -eq 130 ]]; then
-                return 130
+            elif [[ $ret -ge 128 ]]; then
+                return "$ret"
             else
                 log_warning "Cloud & Office cleanup failed with exit code $ret"
             fi
@@ -1557,56 +1730,56 @@ perform_cleanup() {
 
         # ===== 6. Developer tools (merged CLI and GUI tooling) =====
         start_section "Developer tools"
-        clean_developer_tools
+        _run_cleanup_step clean_developer_tools || return $?
         end_section
 
         # ===== 7. Apps & utilities =====
         start_section "Apps & utilities"
-        clean_user_gui_applications
+        _run_cleanup_step clean_user_gui_applications || return $?
         end_section
 
         # ===== 8. Virtualization =====
         start_section "Virtualization"
-        clean_virtualization_tools
+        _run_cleanup_step clean_virtualization_tools || return $?
         end_section
 
         # ===== 9. Application Support =====
         start_section "Application Support"
-        clean_application_support_logs
+        _run_cleanup_step clean_application_support_logs || return $?
         end_section
 
         # ===== 10. App leftovers =====
         start_section "App leftovers"
-        clean_orphaned_app_data
-        clean_orphaned_system_services
-        clean_orphaned_container_stubs
-        clean_stale_launch_services_registrations
-        show_user_launch_agent_hint_notice
+        _run_cleanup_step clean_orphaned_app_data || return $?
+        _run_cleanup_step clean_orphaned_system_services || return $?
+        _run_cleanup_step clean_orphaned_container_stubs || return $?
+        _run_cleanup_step clean_stale_launch_services_registrations || return $?
+        _run_cleanup_step show_user_launch_agent_hint_notice || return $?
         end_section
 
         # ===== 11. Apple Silicon =====
-        clean_apple_silicon_caches
+        _run_cleanup_step clean_apple_silicon_caches || return $?
 
         # ===== 12. Device backups & firmware =====
         # iOS backups are reported once, in the Large files section; a second
         # row here used a different size formatter and confused users.
         start_section "Device backups & firmware"
-        clean_cached_device_firmware
+        _run_cleanup_step clean_cached_device_firmware || return $?
         end_section
 
         # ===== 13. Time Machine =====
         start_section "Time Machine"
-        clean_time_machine_failed_backups
+        _run_cleanup_step clean_time_machine_failed_backups || return $?
         end_section
 
         # ===== 14. Large files =====
         start_section "Large files"
-        check_large_file_candidates
+        _run_cleanup_step check_large_file_candidates || return $?
         end_section
 
         # ===== 15. Project artifacts =====
         start_section "Project artifacts"
-        show_project_artifact_hint_notice
+        _run_cleanup_step show_project_artifact_hint_notice || return $?
         end_section
     fi
 
@@ -1818,9 +1991,10 @@ main() {
 
     start_cleanup
     hide_cursor
-    perform_cleanup
+    local cleanup_rc=0
+    perform_cleanup || cleanup_rc=$?
     show_cursor
-    exit 0
+    exit "$cleanup_rc"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

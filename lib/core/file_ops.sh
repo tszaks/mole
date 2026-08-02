@@ -32,6 +32,41 @@ if [[ -z "${MOLE_TIMEOUT_LOADED:-}" ]]; then
     # shellcheck source=lib/core/timeout.sh
     source "$_MOLE_CORE_DIR/timeout.sh"
 fi
+if [[ -z "${MOLE_TIMEOUTS_LOADED:-}" ]]; then
+    # shellcheck source=lib/core/timeouts.sh
+    source "$_MOLE_CORE_DIR/timeouts.sh"
+fi
+
+# Bound production sudo commands while keeping shell-function mocks observable
+# in tests. Timeout behavior itself must use a PATH stub so it exercises the
+# same external-command branch that users run.
+_mole_bounded_sudo() {
+    local duration="${1:-${MOLE_TIMEOUT_DISK_VERIFY_SEC:-30}}"
+    shift || true
+    [[ $# -gt 0 ]] || return 2
+    if [[ ! "$duration" =~ ^[0-9]+(\.[0-9]+)?$ || "$duration" =~ ^0+(\.0+)?$ ]]; then
+        duration=30
+    fi
+
+    if declare -F sudo > /dev/null 2>&1; then
+        sudo "$@"
+        return $?
+    fi
+
+    local sudo_bin=""
+    sudo_bin=$(command -v sudo 2> /dev/null || true)
+    [[ -n "$sudo_bin" ]] || return 127
+    run_with_timeout "$duration" "$sudo_bin" "$@"
+}
+
+_mole_bounded_sudo_until() {
+    local deadline="$1"
+    local requested="$2"
+    shift 2
+    local duration=""
+    duration=$(_mole_timeout_with_deadline "$requested" "$deadline") || return $?
+    _mole_bounded_sudo "$duration" "$@"
+}
 
 # ============================================================================
 # Utility Functions
@@ -409,14 +444,37 @@ _record_file_ops_dry_run_target() {
         size_kb="$precomputed_size_kb"
     else
         local measured_size=""
-        if measured_size=$(get_path_size_kb "$path" 2> /dev/null) && [[ "$measured_size" =~ ^[0-9]+$ ]]; then
+        local measure_rc=0
+        measured_size=$(get_path_size_kb "$path" 2> /dev/null) || measure_rc=$?
+        [[ $measure_rc -eq 124 || $measure_rc -ge 128 ]] && return "$measure_rc"
+        if [[ $measure_rc -eq 0 && "$measured_size" =~ ^[0-9]+$ ]]; then
             size_kb="$measured_size"
         else
             size_known=false
         fi
     fi
 
-    record_dry_run_cleanup_target "$path" "$size_kb" 1 "$size_known" || true
+    local record_rc=0
+    record_dry_run_cleanup_target \
+        "$path" "$size_kb" 1 "$size_known" || record_rc=$?
+    [[ $record_rc -eq 124 || $record_rc -ge 128 ]] && return "$record_rc"
+    return 0
+}
+
+# Preserve the first timeout or signal observed by a clean deletion sink. Some
+# older cleanup families intentionally treat ordinary item failures as
+# best-effort; this sticky status prevents those `|| true` paths from turning a
+# user interrupt into permission to continue deleting later targets.
+_mole_record_clean_cancellation() {
+    local status="$1"
+    if [[ "${MOLE_CURRENT_COMMAND:-}" == "clean" &&
+        ("$status" -eq 124 || "$status" -ge 128) ]]; then
+        local existing="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+        if [[ $existing -ne 124 && $existing -lt 128 ]]; then
+            MOLE_CLEAN_CANCEL_STATUS=$status
+            export MOLE_CLEAN_CANCEL_STATUS
+        fi
+    fi
 }
 
 # Safe wrapper around rm -rf with validation
@@ -424,6 +482,16 @@ safe_remove() {
     local path="$1"
     local silent="${2:-false}"
     local precomputed_size_kb="${3:-}"
+    local deadline_seconds="${4:-}"
+    local expected_parent="${5:-}"
+    local expected_parent_id="${6:-}"
+    local expected_target_id="${7:-}"
+
+    local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ "${MOLE_CURRENT_COMMAND:-}" == "clean" &&
+        ("$pending_clean_cancel" -eq 124 || "$pending_clean_cancel" -ge 128) ]]; then
+        return "$pending_clean_cancel"
+    fi
 
     # Validate path. Silent cleanup callers still need the same policy result,
     # but should not print one validation warning per skipped cache item.
@@ -460,7 +528,13 @@ safe_remove() {
 
     # Dry-run mode: log but don't delete
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
-        _record_file_ops_dry_run_target "$path" "$precomputed_size_kb"
+        local dry_record_rc=0
+        _record_file_ops_dry_run_target \
+            "$path" "$precomputed_size_kb" || dry_record_rc=$?
+        if [[ $dry_record_rc -eq 124 || $dry_record_rc -ge 128 ]]; then
+            _mole_record_clean_cancellation "$dry_record_rc"
+            return "$dry_record_rc"
+        fi
         if [[ "${MO_DEBUG:-}" == "1" ]]; then
             local file_type="file"
             [[ -d "$path" ]] && file_type="directory"
@@ -470,15 +544,27 @@ safe_remove() {
             local file_age=""
 
             if [[ -e "$path" ]]; then
-                local size_kb
-                size_kb=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
+                local size_kb=0
+                local size_rc=0
+                size_kb=$(get_path_size_kb "$path" 2> /dev/null) || size_rc=$?
+                if [[ $size_rc -eq 124 || $size_rc -ge 128 ]]; then
+                    _mole_record_clean_cancellation "$size_rc"
+                    return "$size_rc"
+                fi
+                [[ $size_rc -eq 0 ]] || size_kb=0
                 if [[ "$size_kb" -gt 0 ]]; then
                     file_size=$(bytes_to_human "$((size_kb * 1024))")
                 fi
 
                 if [[ -f "$path" || -d "$path" ]] && ! [[ -L "$path" ]]; then
-                    local mod_time
-                    mod_time=$(stat -f%m "$path" 2> /dev/null || echo "0")
+                    local mod_time=0
+                    local stat_rc=0
+                    mod_time=$(stat -f%m "$path" 2> /dev/null) || stat_rc=$?
+                    if [[ $stat_rc -eq 124 || $stat_rc -ge 128 ]]; then
+                        _mole_record_clean_cancellation "$stat_rc"
+                        return "$stat_rc"
+                    fi
+                    [[ $stat_rc -eq 0 ]] || mod_time=0
                     local now
                     now=$(date +%s 2> /dev/null || echo "0")
                     if [[ "$mod_time" -gt 0 && "$now" -gt 0 ]]; then
@@ -501,10 +587,27 @@ safe_remove() {
     local size_kb=0
     local size_human=""
     if oplog_enabled; then
-        if [[ -n "$precomputed_size_kb" && "$precomputed_size_kb" =~ ^[0-9]+$ ]]; then
-            size_kb="$precomputed_size_kb"
+        if [[ -n "$precomputed_size_kb" ]]; then
+            if [[ "$precomputed_size_kb" =~ ^[0-9]+$ ]]; then
+                size_kb="$precomputed_size_kb"
+            fi
         elif [[ -e "$path" ]]; then
-            size_kb=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
+            local size_probe_rc=0
+            local size_probe_timeout=""
+            size_probe_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+                "$deadline_seconds") || size_probe_rc=$?
+            if [[ $size_probe_rc -eq 0 ]]; then
+                size_kb=$(get_path_size_kb "$path" "$size_probe_timeout" 2> /dev/null) || size_probe_rc=$?
+            fi
+            if [[ $size_probe_rc -eq 124 ]]; then
+                _mole_record_clean_cancellation 124
+                return 124
+            fi
+            if [[ $size_probe_rc -ge 128 ]]; then
+                _mole_record_clean_cancellation "$size_probe_rc"
+                return "$size_probe_rc"
+            fi
+            [[ $size_probe_rc -eq 0 && "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
         fi
         if [[ "$size_kb" =~ ^[0-9]+$ ]] && [[ "$size_kb" -gt 0 ]]; then
             size_human=$(bytes_to_human "$((size_kb * 1024))" 2> /dev/null || echo "${size_kb}KB")
@@ -520,14 +623,38 @@ safe_remove() {
         return 1
     fi
 
+    if [[ -n "$expected_parent" ]] && ! _mole_path_matches_identity \
+        "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
+        debug_log "Refusing removal after final path identity changed: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "identity changed"
+        return 1
+    fi
+
     # Perform the deletion
     # Use || to capture the exit code so set -e won't abort on rm failures
     local error_msg
     local rm_exit=0
-    error_msg=$(rm -rf "$path" 2>&1) || rm_exit=$? # safe_remove
+    if declare -F rm > /dev/null 2>&1; then
+        error_msg=$(rm -rf "$path" 2>&1) || rm_exit=$? # safe_remove
+    else
+        local rm_timeout=""
+        rm_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+            "$deadline_seconds") || rm_exit=$?
+        if [[ $rm_exit -eq 0 ]]; then
+            error_msg=$(run_with_timeout "$rm_timeout" rm -rf "$path" < /dev/null 2>&1) || rm_exit=$? # safe_remove
+        fi
+    fi
+
+    if [[ $rm_exit -eq 124 ]]; then
+        debug_log "Removal timed out: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "removal timed out"
+        _mole_record_clean_cancellation 124
+        return 124
+    fi
 
     # Preserve interrupt semantics so callers can abort long-running deletions.
     if [[ $rm_exit -ge 128 ]]; then
+        _mole_record_clean_cancellation "$rm_exit"
         return "$rm_exit"
     fi
 
@@ -555,6 +682,15 @@ safe_remove() {
 safe_remove_symlink() {
     local path="$1"
     local use_sudo="${2:-false}"
+    local expected_parent="${3:-}"
+    local expected_parent_id="${4:-}"
+    local expected_target_id="${5:-}"
+
+    local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ "${MOLE_CURRENT_COMMAND:-}" == "clean" &&
+        ("$pending_clean_cancel" -eq 124 || "$pending_clean_cancel" -ge 128) ]]; then
+        return "$pending_clean_cancel"
+    fi
 
     if [[ ! -L "$path" ]]; then
         return 1
@@ -580,9 +716,20 @@ safe_remove_symlink() {
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
-        _record_file_ops_dry_run_target "$path"
+        local dry_record_rc=0
+        _record_file_ops_dry_run_target "$path" || dry_record_rc=$?
+        if [[ $dry_record_rc -eq 124 || $dry_record_rc -ge 128 ]]; then
+            _mole_record_clean_cancellation "$dry_record_rc"
+            return "$dry_record_rc"
+        fi
         debug_log "[DRY RUN] Would remove symlink: $path"
         return 0
+    fi
+
+    if [[ -n "$expected_parent" ]] && ! _mole_path_matches_identity \
+        "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
+        debug_log "Refusing symlink removal after final path identity changed: $path"
+        return 1
     fi
 
     local rm_exit=0
@@ -600,6 +747,10 @@ safe_remove_symlink() {
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "REMOVED" "$path" "symlink"
         return 0
     else
+        if [[ $rm_exit -eq 124 || $rm_exit -ge 128 ]]; then
+            _mole_record_clean_cancellation "$rm_exit"
+            return "$rm_exit"
+        fi
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "symlink removal failed"
         return 1
     fi
@@ -640,7 +791,18 @@ _mole_privileged_path_has_mutable_ancestor() {
                 # Under `sudo mo`, the shell's -w probe reflects root rather
                 # than the invoking user. Drop authority for the ACL check so
                 # immutable system parents do not become false positives.
-                sudo -n -u "#$invoking_uid" /bin/test -w "$probe" 2> /dev/null && return 0
+                local acl_probe_rc=0
+                _mole_bounded_sudo "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                    -n -u "#$invoking_uid" /bin/test -w "$probe" < /dev/null 2> /dev/null || acl_probe_rc=$?
+                if [[ $acl_probe_rc -eq 0 ]]; then
+                    return 0
+                fi
+                # Only test's ordinary false status proves the invoking user
+                # cannot write here. Timeout, auth, and execution failures are
+                # unknown and must classify the ancestor as mutable.
+                if [[ $acl_probe_rc -ne 1 ]]; then
+                    return 0
+                fi
             else
                 return 0
             fi
@@ -657,6 +819,16 @@ _mole_privileged_path_has_mutable_ancestor() {
 safe_sudo_remove() {
     local path="$1"
     local precomputed_size_kb="${2:-}"
+    local deadline_seconds="${3:-}"
+    local expected_parent="${4:-}"
+    local expected_parent_id="${5:-}"
+    local expected_target_id="${6:-}"
+
+    local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ "${MOLE_CURRENT_COMMAND:-}" == "clean" &&
+        ("$pending_clean_cancel" -eq 124 || "$pending_clean_cancel" -ge 128) ]]; then
+        return "$pending_clean_cancel"
+    fi
 
     if ! validate_path_for_deletion "$path"; then
         if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$path"; then
@@ -694,7 +866,8 @@ safe_sudo_remove() {
     if _mole_privileged_path_has_mutable_ancestor "$path"; then
         if [[ ${EUID:-0} -ne 0 ]]; then
             debug_log "Downgrading sudo remove below mutable parent: $path"
-            safe_remove "$path" true
+            safe_remove "$path" true "" "$deadline_seconds" \
+                "$expected_parent" "$expected_parent_id" "$expected_target_id"
             return $?
         fi
         debug_log "Refusing sudo remove below mutable parent: $path"
@@ -702,7 +875,13 @@ safe_sudo_remove() {
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
-        _record_file_ops_dry_run_target "$path" "$precomputed_size_kb"
+        local dry_record_rc=0
+        _record_file_ops_dry_run_target \
+            "$path" "$precomputed_size_kb" || dry_record_rc=$?
+        if [[ $dry_record_rc -eq 124 || $dry_record_rc -ge 128 ]]; then
+            _mole_record_clean_cancellation "$dry_record_rc"
+            return "$dry_record_rc"
+        fi
     fi
 
     if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
@@ -722,22 +901,59 @@ safe_sudo_remove() {
             local file_size=""
             local file_age=""
 
-            if sudo -n test -e "$path" 2> /dev/null; then
+            local exists_rc=0
+            _mole_bounded_sudo "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                -n test -e "$path" < /dev/null 2> /dev/null || exists_rc=$?
+            if [[ $exists_rc -eq 124 || $exists_rc -ge 128 ]]; then
+                _mole_record_clean_cancellation "$exists_rc"
+                return "$exists_rc"
+            fi
+            if [[ $exists_rc -eq 0 ]]; then
                 local size_kb=0
                 if [[ -n "$precomputed_size_kb" ]]; then
                     if [[ "$precomputed_size_kb" =~ ^[0-9]+$ ]]; then
                         size_kb="$precomputed_size_kb"
                     fi
                 else
-                    size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+                    local size_rc=0
+                    size_kb=$(_mole_bounded_sudo "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+                        -n du -skP "$path" < /dev/null 2> /dev/null | awk '{print $1}') || size_rc=$?
+                    if [[ $size_rc -eq 124 || $size_rc -ge 128 ]]; then
+                        _mole_record_clean_cancellation "$size_rc"
+                        return "$size_rc"
+                    fi
+                    [[ $size_rc -eq 0 ]] || size_kb=0
                 fi
                 if [[ "$size_kb" -gt 0 ]]; then
                     file_size=$(bytes_to_human "$((size_kb * 1024))")
                 fi
 
-                if sudo -n test -f "$path" 2> /dev/null || sudo -n test -d "$path" 2> /dev/null; then
-                    local mod_time
-                    mod_time=$(sudo -n stat -f%m "$path" 2> /dev/null || echo "0")
+                local type_probe_rc=0
+                _mole_bounded_sudo "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                    -n test -f "$path" < /dev/null 2> /dev/null || type_probe_rc=$?
+                if [[ $type_probe_rc -eq 124 || $type_probe_rc -ge 128 ]]; then
+                    _mole_record_clean_cancellation "$type_probe_rc"
+                    return "$type_probe_rc"
+                fi
+                if [[ $type_probe_rc -ne 0 ]]; then
+                    type_probe_rc=0
+                    _mole_bounded_sudo "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                        -n test -d "$path" < /dev/null 2> /dev/null || type_probe_rc=$?
+                    if [[ $type_probe_rc -eq 124 || $type_probe_rc -ge 128 ]]; then
+                        _mole_record_clean_cancellation "$type_probe_rc"
+                        return "$type_probe_rc"
+                    fi
+                fi
+                if [[ $type_probe_rc -eq 0 ]]; then
+                    local mod_time=0
+                    local stat_rc=0
+                    mod_time=$(_mole_bounded_sudo "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                        -n stat -f%m "$path" < /dev/null 2> /dev/null) || stat_rc=$?
+                    if [[ $stat_rc -eq 124 || $stat_rc -ge 128 ]]; then
+                        _mole_record_clean_cancellation "$stat_rc"
+                        return "$stat_rc"
+                    fi
+                    [[ $stat_rc -eq 0 ]] || mod_time=0
                     local now
                     now=$(date +%s 2> /dev/null || echo "0")
                     if [[ "$mod_time" -gt 0 && "$now" -gt 0 ]]; then
@@ -763,8 +979,42 @@ safe_sudo_remove() {
             if [[ "$precomputed_size_kb" =~ ^[0-9]+$ ]]; then
                 size_kb="$precomputed_size_kb"
             fi
-        elif sudo -n test -e "$path" 2> /dev/null; then
-            size_kb=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1}' || echo "0")
+        else
+            local exists_probe_rc=0
+            local exists_probe_timeout=""
+            exists_probe_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                "$deadline_seconds") || exists_probe_rc=$?
+            if [[ $exists_probe_rc -eq 0 ]]; then
+                _mole_bounded_sudo "$exists_probe_timeout" \
+                    -n test -e "$path" < /dev/null 2> /dev/null || exists_probe_rc=$?
+            fi
+            if [[ $exists_probe_rc -eq 124 ]]; then
+                _mole_record_clean_cancellation 124
+                return 124
+            fi
+            if [[ $exists_probe_rc -ge 128 ]]; then
+                _mole_record_clean_cancellation "$exists_probe_rc"
+                return "$exists_probe_rc"
+            fi
+            if [[ $exists_probe_rc -eq 0 ]]; then
+                local size_probe_rc=0
+                local size_probe_timeout=""
+                size_probe_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+                    "$deadline_seconds") || size_probe_rc=$?
+                if [[ $size_probe_rc -eq 0 ]]; then
+                    size_kb=$(_mole_bounded_sudo "$size_probe_timeout" \
+                        -n du -skP "$path" < /dev/null 2> /dev/null | awk '{print $1}') || size_probe_rc=$?
+                fi
+                if [[ $size_probe_rc -eq 124 ]]; then
+                    _mole_record_clean_cancellation 124
+                    return 124
+                fi
+                if [[ $size_probe_rc -ge 128 ]]; then
+                    _mole_record_clean_cancellation "$size_probe_rc"
+                    return "$size_probe_rc"
+                fi
+                [[ $size_probe_rc -eq 0 && "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
+            fi
         fi
         if [[ "$size_kb" =~ ^[0-9]+$ ]] && [[ "$size_kb" -gt 0 ]]; then
             size_human=$(bytes_to_human "$((size_kb * 1024))" 2> /dev/null || echo "${size_kb}KB")
@@ -781,11 +1031,33 @@ safe_sudo_remove() {
 
     local output
     local ret=0
-    output=$(sudo -n rm -rf "$path" 2>&1) || ret=$? # safe_remove
+    if [[ -n "$expected_parent" ]] && ! _mole_path_matches_identity \
+        "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
+        debug_log "Refusing privileged removal after final path identity changed: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "identity changed"
+        return 1
+    fi
+    local remove_timeout=""
+    remove_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+        "$deadline_seconds") || ret=$?
+    if [[ $ret -eq 0 ]]; then
+        output=$(_mole_bounded_sudo "$remove_timeout" \
+            -n rm -rf "$path" < /dev/null 2>&1) || ret=$? # safe_remove
+    fi
 
     if [[ $ret -eq 0 ]]; then
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "REMOVED" "$path" "$size_human"
         return 0
+    fi
+
+    if [[ $ret -eq 124 ]]; then
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "removal timed out"
+        _mole_record_clean_cancellation 124
+        return 124
+    fi
+    if [[ $ret -ge 128 ]]; then
+        _mole_record_clean_cancellation "$ret"
+        return "$ret"
     fi
 
     case "$output" in
@@ -821,7 +1093,7 @@ safe_sudo_remove() {
 # every call for forensic review. Designed for destructive paths where undo
 # matters (e.g. uninstall). Not used by cache-clean paths.
 #
-# Usage: mole_delete <path> [needs_sudo=false]
+# Usage: mole_delete <path> [needs_sudo=false] [expected_dev_inode_mtime]
 #
 # Environment:
 #   MOLE_DELETE_MODE      "permanent" (default) or "trash"; other values fail
@@ -839,6 +1111,7 @@ safe_sudo_remove() {
 mole_delete() {
     local path="$1"
     local needs_sudo="${2:-false}"
+    local expected_identity="${3:-}"
     local mode="${MOLE_DELETE_MODE:-permanent}"
 
     [[ -z "$path" ]] && return 1
@@ -894,8 +1167,9 @@ mole_delete() {
             if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
                 du_rc=1
             else
-                raw_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$path" 2> /dev/null | awk '{print $1; exit}')
-                du_rc=${PIPESTATUS[0]}
+                raw_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+                    sudo -n du -skP "$path" 2> /dev/null |
+                    awk '{print $1; exit}') || du_rc=$?
             fi
         else
             raw_size=$(get_path_size_kb "$path" 2> /dev/null) || du_rc=$?
@@ -903,13 +1177,59 @@ mole_delete() {
         if [[ "$du_rc" -eq 0 && "$raw_size" =~ ^[0-9]+$ ]]; then
             size_kb="$raw_size"
         fi
+        # Ctrl-C and other signals are cancellation, not an unknown-size
+        # measurement. Stop before any dry-run registration, Trash move, or
+        # permanent removal so the user's interrupt cannot be ignored.
+        if [[ $du_rc -eq 124 || $du_rc -ge 128 ]]; then
+            local cancel_status="interrupted"
+            [[ $du_rc -eq 124 ]] && cancel_status="timed-out"
+            _mole_delete_log "$mode" "$size_kb" "$cancel_status" "$path"
+            return "$du_rc"
+        fi
+    fi
+
+    local expected_parent=""
+    local expected_parent_id=""
+    local expected_target_id=""
+    if [[ -n "$expected_identity" ]]; then
+        if ! _mole_snapshot_path_identity "$path"; then
+            _mole_delete_log "$mode" "$size_kb" "identity-changed" "$path"
+            return 1
+        fi
+        expected_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+        expected_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+        expected_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+        local current_identity=""
+        local identity_rc=0
+        current_identity=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            "$STAT_BSD" -f%d:%i:%m "$path" 2> /dev/null) || identity_rc=$?
+        if [[ $identity_rc -eq 124 || $identity_rc -ge 128 ]]; then
+            local identity_status="interrupted"
+            [[ $identity_rc -eq 124 ]] && identity_status="timed-out"
+            _mole_delete_log "$mode" "$size_kb" "$identity_status" "$path"
+            return "$identity_rc"
+        fi
+        if [[ $identity_rc -ne 0 || "$current_identity" != "$expected_identity" ||
+            "$expected_target_id" != "${expected_identity%:*}" ||
+            "$expected_target_id" != "${current_identity%:*}" ]]; then
+            _mole_delete_log "$mode" "$size_kb" "identity-changed" "$path"
+            debug_log "Refusing deletion after selected path identity changed: $path"
+            return 1
+        fi
     fi
 
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+        local preview_rc=0
         if [[ "$size_kb" =~ ^[0-9]+$ ]]; then
-            _record_file_ops_dry_run_target "$path" "$size_kb"
+            _record_file_ops_dry_run_target "$path" "$size_kb" || preview_rc=$?
         else
-            _record_file_ops_dry_run_target "$path"
+            _record_file_ops_dry_run_target "$path" || preview_rc=$?
+        fi
+        if [[ $preview_rc -eq 124 || $preview_rc -ge 128 ]]; then
+            local preview_status="interrupted"
+            [[ $preview_rc -eq 124 ]] && preview_status="timed-out"
+            _mole_delete_log "$mode" "$size_kb" "$preview_status" "$path"
+            return "$preview_rc"
         fi
         debug_log "[DRY RUN] Would delete ($mode): $path"
         _mole_delete_log "$mode" "$size_kb" "dry-run" "$path"
@@ -927,7 +1247,9 @@ mole_delete() {
     # fail closed instead of silently switching to permanent removal.
     if [[ "$mode" == "trash" ]]; then
         local trash_rc=0
-        _mole_move_to_trash "$path" "$needs_sudo" || trash_rc=$?
+        _mole_move_to_trash "$path" "$needs_sudo" \
+            "$expected_parent" "$expected_parent_id" \
+            "$expected_target_id" || trash_rc=$?
         if [[ $trash_rc -eq 0 ]]; then
             _mole_delete_log "trash" "$size_kb" "ok" "$path"
             log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "TRASHED" "$path" "${size_kb}KB"
@@ -950,6 +1272,12 @@ mole_delete() {
             debug_log "Trash move stopped because a mutable parent was detected: $path"
             return "$MOLE_ERR_MUTABLE_PARENT"
         fi
+        if [[ $trash_rc -eq 124 || $trash_rc -ge 128 ]]; then
+            local trash_status="interrupted"
+            [[ $trash_rc -eq 124 ]] && trash_status="timed-out"
+            _mole_delete_log "trash" "$size_kb" "$trash_status" "$path"
+            return "$trash_rc"
+        fi
         _mole_delete_log "trash" "$size_kb" "trash-failed" "$path"
         log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "trash-failed"
         if [[ -z "${_MOLE_TRASH_UNAVAILABLE_WARNED:-}" ]]; then
@@ -971,16 +1299,26 @@ mole_delete() {
         # regular paths and symlinks before either helper can downgrade.
         rc=$MOLE_ERR_MUTABLE_PARENT
     elif [[ -L "$path" ]]; then
-        safe_remove_symlink "$path" "$needs_sudo" || rc=$?
+        safe_remove_symlink "$path" "$needs_sudo" \
+            "$expected_parent" "$expected_parent_id" \
+            "$expected_target_id" || rc=$?
     elif [[ "$needs_sudo" == "true" ]]; then
-        safe_sudo_remove "$path" "$size_kb" || rc=$?
+        safe_sudo_remove "$path" "$size_kb" "" \
+            "$expected_parent" "$expected_parent_id" \
+            "$expected_target_id" || rc=$?
     else
-        safe_remove "$path" "true" || rc=$?
+        safe_remove "$path" "true" "$size_kb" "" \
+            "$expected_parent" "$expected_parent_id" \
+            "$expected_target_id" || rc=$?
     fi
 
     local status_label="ok"
     if [[ $rc -eq $MOLE_ERR_MUTABLE_PARENT ]]; then
         status_label="mutable-parent"
+    elif [[ $rc -eq 124 ]]; then
+        status_label="timed-out"
+    elif [[ $rc -ge 128 ]]; then
+        status_label="interrupted"
     elif [[ $rc -ne 0 ]]; then
         status_label="error"
     fi
@@ -1041,9 +1379,14 @@ _mole_path_requires_direct_trash() {
 # for an exact one-level /Applications/*.app target selected above.
 _mole_move_app_to_trash_via_finder() {
     local path="$1"
+    local expected_parent="${2:-}"
+    local expected_parent_id="${3:-}"
+    local expected_target_id="${4:-}"
     local finder_rc=0
 
     _mole_path_is_application_bundle "$path" || return 1
+    _mole_bound_path_matches "$path" "$expected_parent" \
+        "$expected_parent_id" "$expected_target_id" || return 1
 
     run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT' || finder_rc=$?
 on run argv
@@ -1054,7 +1397,9 @@ on run argv
 end run
 APPLESCRIPT
 
-    if [[ $finder_rc -ne 0 ]] || [[ -e "$path" || -L "$path" ]]; then
+    if [[ $finder_rc -eq 124 || $finder_rc -ge 128 ]]; then
+        return "$finder_rc"
+    elif [[ $finder_rc -ne 0 ]] || [[ -e "$path" || -L "$path" ]]; then
         debug_log "Finder failed to move application to Trash: $path"
         return 1
     fi
@@ -1068,10 +1413,15 @@ APPLESCRIPT
 _mole_move_to_trash() {
     local path="$1"
     local needs_sudo="${2:-false}"
+    local expected_parent="${3:-}"
+    local expected_parent_id="${4:-}"
+    local expected_target_id="${5:-}"
 
     if [[ -n "${MOLE_TEST_TRASH_DIR:-}" ]]; then
         mkdir -p "$MOLE_TEST_TRASH_DIR" 2> /dev/null || return 1
         local dest="$MOLE_TEST_TRASH_DIR/$(basename "$path").$$.$(date +%s 2> /dev/null || echo 0)"
+        _mole_bound_path_matches "$path" "$expected_parent" \
+            "$expected_parent_id" "$expected_target_id" || return 1
         mv "$path" "$dest" 2> /dev/null
         return $?
     fi
@@ -1082,29 +1432,46 @@ _mole_move_to_trash() {
     fi
 
     if [[ "$needs_sudo" == "true" ]]; then
-        _mole_move_path_to_user_trash "$path" "$needs_sudo"
+        _mole_move_path_to_user_trash "$path" "$needs_sudo" \
+            "$expected_parent" "$expected_parent_id" "$expected_target_id"
         return $?
     fi
 
     if _mole_path_requires_direct_trash "$path"; then
         local direct_rc=0
-        _mole_move_path_to_user_trash "$path" false || direct_rc=$?
+        _mole_move_path_to_user_trash "$path" false \
+            "$expected_parent" "$expected_parent_id" \
+            "$expected_target_id" || direct_rc=$?
         if [[ $direct_rc -eq $MOLE_ERR_PRIVACY_DENIED ]] &&
             _mole_path_is_application_bundle "$path"; then
             debug_log "Direct Trash move was denied; retrying application through Finder: $path"
-            _mole_move_app_to_trash_via_finder "$path" && return 0
+            local finder_rc=0
+            _mole_move_app_to_trash_via_finder "$path" \
+                "$expected_parent" "$expected_parent_id" \
+                "$expected_target_id" || finder_rc=$?
+            [[ $finder_rc -eq 0 ]] && return 0
+            [[ $finder_rc -eq 124 || $finder_rc -ge 128 ]] && return "$finder_rc"
         fi
         return "$direct_rc"
     fi
 
     # Prefer the `trash` CLI (Homebrew formula) for normal user-owned paths.
     if command -v trash > /dev/null 2>&1; then
-        trash "$path" > /dev/null 2>&1 && return 0
+        local trash_rc=0
+        _mole_bound_path_matches "$path" "$expected_parent" \
+            "$expected_parent_id" "$expected_target_id" || return 1
+        run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+            trash "$path" > /dev/null 2>&1 || trash_rc=$?
+        [[ $trash_rc -eq 0 ]] && return 0
+        [[ $trash_rc -eq 124 || $trash_rc -ge 128 ]] && return "$trash_rc"
     fi
 
     # AppleScript fallback. Pass the path via argv so special chars (quotes,
     # backslashes) cannot break out of the quoted string.
-    osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT'
+    _mole_bound_path_matches "$path" "$expected_parent" \
+        "$expected_parent_id" "$expected_target_id" || return 1
+    run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+        osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT'
 on run argv
     set p to POSIX file (item 1 of argv)
     tell application "Finder"
@@ -1178,6 +1545,9 @@ _mole_create_privileged_trash_stage() {
 _mole_move_path_to_user_trash() {
     local path="$1"
     local needs_sudo="${2:-false}"
+    local expected_parent="${3:-}"
+    local expected_parent_id="${4:-}"
+    local expected_target_id="${5:-}"
 
     if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
         return 1
@@ -1266,7 +1636,13 @@ _mole_move_path_to_user_trash() {
         dest="$trash_dir/$base.$ts.$$.$suffix"
     done
 
-    if [[ -n "${_MOLE_TRASH_MOVE_EXPECTED_PATH:-}" && "$_MOLE_TRASH_MOVE_EXPECTED_PATH" == "$path" ]]; then
+    if [[ -n "$expected_parent" ]]; then
+        if ! _mole_path_matches_identity \
+            "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
+            debug_log "Refusing Trash move after selected path identity changed: $path"
+            return 1
+        fi
+    elif [[ -n "${_MOLE_TRASH_MOVE_EXPECTED_PATH:-}" && "$_MOLE_TRASH_MOVE_EXPECTED_PATH" == "$path" ]]; then
         if ! _mole_path_matches_identity \
             "$path" \
             "$_MOLE_TRASH_MOVE_EXPECTED_PARENT" \
@@ -1298,15 +1674,30 @@ _mole_move_path_to_user_trash() {
         # between source and staging if it fails midway.
         local source_device=""
         local stage_device=""
-        source_device=$($STAT_BSD -f%d "$path" 2> /dev/null || true)
-        stage_device=$($STAT_BSD -f%d "$stage_dir" 2> /dev/null || true)
+        local device_rc=0
+        source_device=$($STAT_BSD -f%d "$path" 2> /dev/null) || device_rc=$?
+        [[ $device_rc -eq 124 || $device_rc -ge 128 ]] && return "$device_rc"
+        if [[ $device_rc -eq 0 ]]; then
+            stage_device=$($STAT_BSD -f%d "$stage_dir" 2> /dev/null) || device_rc=$?
+        fi
+        [[ $device_rc -eq 124 || $device_rc -ge 128 ]] && return "$device_rc"
         if [[ ! "$source_device" =~ ^[0-9]+$ || "$source_device" != "$stage_device" ]]; then
             sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact empty staging directory created by mktemp above
             debug_log "Refusing cross-volume privileged Trash staging: $path"
             return 1
         fi
 
-        if ! sudo -n /bin/mv "$path" "$stage_path" 2> /dev/null; then
+        local stage_move_rc=0
+        _mole_bound_path_matches "$path" "$expected_parent" \
+            "$expected_parent_id" "$expected_target_id" || return 1
+        sudo -n /bin/mv "$path" "$stage_path" 2> /dev/null || stage_move_rc=$?
+        if [[ $stage_move_rc -ne 0 ]]; then
+            if [[ $stage_move_rc -eq 124 || $stage_move_rc -ge 128 ]]; then
+                if [[ -e "$stage_path" || -L "$stage_path" ]]; then
+                    log_error "Trash move interrupted; item preserved for recovery at: $stage_path"
+                fi
+                return "$stage_move_rc"
+            fi
             sudo -n /bin/rm -rf "$stage_dir" 2> /dev/null || true # SAFE: exact root-owned directory created by mktemp above
             debug_log "Failed to move path into immutable Trash staging: $path"
             return 1
@@ -1319,9 +1710,21 @@ _mole_move_path_to_user_trash() {
         # filesystem and can block on it. Once either payload ownership or stage
         # ownership changes, preserve on any later failure rather than
         # reintroducing user-owned content into the privileged source path.
-        if ! sudo -n /bin/chmod 700 "$stage_dir" 2> /dev/null ||
-            ! sudo -n /usr/sbin/chown -Rhx "$owner_uid:$owner_gid" "$stage_path" 2> /dev/null ||
-            ! sudo -n /usr/sbin/chown "$owner_uid:$owner_gid" "$stage_dir" 2> /dev/null; then
+        local handoff_rc=0
+        sudo -n /bin/chmod 700 "$stage_dir" 2> /dev/null || handoff_rc=$?
+        if [[ $handoff_rc -eq 0 ]]; then
+            sudo -n /usr/sbin/chown -Rhx "$owner_uid:$owner_gid" \
+                "$stage_path" 2> /dev/null || handoff_rc=$?
+        fi
+        if [[ $handoff_rc -eq 0 ]]; then
+            sudo -n /usr/sbin/chown "$owner_uid:$owner_gid" \
+                "$stage_dir" 2> /dev/null || handoff_rc=$?
+        fi
+        if [[ $handoff_rc -ne 0 ]]; then
+            if [[ $handoff_rc -eq 124 || $handoff_rc -ge 128 ]]; then
+                log_error "Trash move interrupted; item preserved for recovery at: $stage_path"
+                return "$handoff_rc"
+            fi
             log_error "Trash move failed; item preserved for recovery at: $stage_path"
             debug_log "Failed to hand Trash staging directory to invoking user"
             return 1
@@ -1334,6 +1737,14 @@ _mole_move_path_to_user_trash() {
         fi
 
         if [[ $move_rc -ne 0 || -e "$stage_path" || -L "$stage_path" ]]; then
+            if [[ $move_rc -eq 124 || $move_rc -ge 128 ]]; then
+                if [[ -e "$stage_path" || -L "$stage_path" ]]; then
+                    log_error "Trash move interrupted; item preserved for recovery at: $stage_path"
+                elif [[ -e "$dest" || -L "$dest" ]]; then
+                    debug_log "Trash move completed before interruption was observed: $dest"
+                fi
+                return "$move_rc"
+            fi
             move_rc=1
             # stage_dir is user-controlled after the ownership handoff above.
             # Never let root resolve stage_path again: it may have been replaced
@@ -1346,9 +1757,12 @@ _mole_move_path_to_user_trash() {
             sudo -n /bin/rmdir "$stage_dir" 2> /dev/null || true
         fi
     else
+        _mole_bound_path_matches "$path" "$expected_parent" \
+            "$expected_parent_id" "$expected_target_id" || return 1
         move_output=$(mv -n "$path" "$dest" 2>&1) || move_rc=$?
     fi
     if [[ $move_rc -ne 0 ]]; then
+        [[ $move_rc -eq 124 || $move_rc -ge 128 ]] && return "$move_rc"
         debug_log "Failed to move path directly to invoking user Trash: $path -> $dest: $move_output"
         case "$move_output" in
             *"Operation not permitted"* | *"operation not permitted"* | \
@@ -1391,7 +1805,7 @@ _mole_snapshot_path_identity() {
     _MOLE_PATH_SNAPSHOT_PARENT_ID=""
     _MOLE_PATH_SNAPSHOT_TARGET_ID=""
 
-    [[ -e "$path" && ! -L "$path" ]] || return 1
+    [[ -e "$path" || -L "$path" ]] || return 1
     local lexical_parent="${path%/*}"
     [[ -n "$lexical_parent" && "$lexical_parent" != "$path" ]] || lexical_parent="/"
 
@@ -1418,6 +1832,16 @@ _mole_path_matches_identity() {
     [[ "$_MOLE_PATH_SNAPSHOT_PARENT" == "$expected_parent" ]] || return 1
     [[ "$_MOLE_PATH_SNAPSHOT_PARENT_ID" == "$expected_parent_id" ]] || return 1
     [[ "$_MOLE_PATH_SNAPSHOT_TARGET_ID" == "$expected_target_id" ]]
+}
+
+_mole_bound_path_matches() {
+    local path="$1"
+    local expected_parent="${2:-}"
+    local expected_parent_id="${3:-}"
+    local expected_target_id="${4:-}"
+    [[ -z "$expected_parent" ]] && return 0
+    _mole_path_matches_identity \
+        "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id"
 }
 
 _mole_move_to_trash_batch() {
@@ -1577,10 +2001,25 @@ safe_find_delete() {
         find_args+=("-mtime" "+$age_days")
     fi
 
-    # Iterate results to respect both system protection and user whitelist.
+    local scan_file=""
+    if ! scan_file=$(create_temp_file 2> /dev/null); then
+        return 1
+    fi
+    local scan_rc=0
+    run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" find \
+        "$base_dir" "${find_args[@]}" -print0 < /dev/null > "$scan_file" 2> /dev/null || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        debug_log "Cleanup scan failed for $base_dir (status $scan_rc)"
+        return "$scan_rc"
+    fi
+
+    # Iterate only a completed result set so a timeout cannot authorize
+    # deletion of the partial prefix.
     # Per-caller whitelist gates were missed in past releases (see #710, #724,
     # #738, #744, #757); enforcing here makes the protection structural so
     # new clean_* functions get whitelist enforcement for free.
+    local delete_rc=0
     while IFS= read -r -d '' match; do
         if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$match"; then
             continue
@@ -1589,15 +2028,64 @@ safe_find_delete() {
             continue
         fi
         if [[ "${MOLE_DRY_RUN:-0}" == "1" ]] && declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
-            local match_size_kb
-            match_size_kb=$(get_path_size_kb "$match" 2> /dev/null || echo "0")
+            local match_size_kb=0
+            local match_size_rc=0
+            match_size_kb=$(get_path_size_kb "$match" 2> /dev/null) || match_size_rc=$?
+            if [[ $match_size_rc -eq 124 || $match_size_rc -ge 128 ]]; then
+                delete_rc=$match_size_rc
+                break
+            fi
+            [[ $match_size_rc -eq 0 ]] || match_size_kb=0
             [[ "$match_size_kb" =~ ^[0-9]+$ ]] || match_size_kb=0
             record_dry_run_cleanup_target "$match" "$match_size_kb" 1 true || continue
         fi
-        safe_remove "$match" true || true
-    done < <(command find "$base_dir" "${find_args[@]}" -print0 2> /dev/null < /dev/null || true)
+        local remove_rc=0
+        safe_remove "$match" true || remove_rc=$?
+        if [[ $remove_rc -eq 124 || $remove_rc -ge 128 ]]; then
+            delete_rc=$remove_rc
+            break
+        fi
+        if [[ $remove_rc -ne 0 && $delete_rc -eq 0 ]]; then
+            delete_rc=$remove_rc
+        fi
+    done < "$scan_file"
+    rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
 
+    return "$delete_rc"
+}
+
+# Run privileged find with a wall-clock budget and closed stdin.
+_mole_bounded_sudo_find() {
+    local duration="${1:-${MOLE_TIMEOUT_DISK_VERIFY_SEC:-30}}"
+    shift || true
+    [[ $# -gt 0 ]] || return 2
+    _mole_bounded_sudo "$duration" -n find "$@" < /dev/null
+}
+
+# Store a privileged scan only after the producer completed successfully. A
+# timeout or any other failure truncates the destination so callers cannot act
+# on a partial prefix.
+_mole_materialize_bounded_sudo_find() {
+    local output_file="$1"
+    local duration="$2"
+    shift 2
+    [[ $# -gt 0 ]] || return 2
+
+    : > "$output_file" || return 1
+    local scan_rc=0
+    _mole_bounded_sudo_find "$duration" "$@" > "$output_file" 2> /dev/null || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        : > "$output_file" || true
+        return "$scan_rc"
+    fi
     return 0
+}
+
+# Keep privileged batch state bounded in Bash. This is a function rather than a
+# public setting so tests can exercise the limit without exposing another user
+# knob or constructing thousands of command-substitution probes.
+_mole_privileged_batch_max_items() {
+    printf '4096\n'
 }
 
 # Safe sudo discovery and deletion
@@ -1606,11 +2094,45 @@ safe_sudo_find_delete() {
     local pattern="$2"
     local age_days="${3:-7}"
     local type_filter="${4:-f}"
+    local max_depth="${5:-5}"
+    local deadline_seconds="${6:-}"
+    local -a name_patterns=("$pattern")
+    if [[ $# -gt 6 ]]; then
+        name_patterns+=("${@:7}")
+    fi
+
+    # Callers use this count to distinguish a completed empty scan from actual
+    # cleanup. It is reset for every invocation and updated only for confirmed
+    # removals or accepted dry-run previews.
+    MOLE_SAFE_SUDO_FIND_DELETE_COUNT=0
+
+    if [[ "$type_filter" != "f" && "$type_filter" != "d" ]]; then
+        log_error "Invalid type filter: $type_filter, must be 'f' or 'd'"
+        return 1
+    fi
+    if [[ ! "$age_days" =~ ^[0-9]+$ ]]; then
+        log_error "Invalid age: $age_days, must be a non-negative integer"
+        return 1
+    fi
+    if [[ ! "$max_depth" =~ ^[1-5]$ ]]; then
+        log_error "Invalid max depth: $max_depth, must be between 1 and 5"
+        return 1
+    fi
+    if [[ -n "$deadline_seconds" && ! "$deadline_seconds" =~ ^[0-9]+$ ]]; then
+        log_error "Invalid cleanup deadline: $deadline_seconds"
+        return 1
+    fi
 
     if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
         debug_log "Skipping sudo find/delete in test mode: $base_dir"
         return 0
     fi
+
+    # An already-expired overall budget authorizes no privileged probe at all.
+    # Re-clamp every later probe because any preceding command can consume the
+    # final second of the caller's section budget.
+    _mole_timeout_with_deadline "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        "$deadline_seconds" > /dev/null || return $?
 
     # Keep the entire sudo-probing body independent of the caller's errexit
     # state. macOS 14's /bin/bash build fires the caller's errexit when a
@@ -1628,42 +2150,132 @@ safe_sudo_find_delete() {
             ;;
     esac
 
-    # Validate base directory (use sudo for permission-restricted dirs)
-    if ! sudo -n test -d "$base_dir" 2> /dev/null; then
-        debug_log "Directory does not exist, skipping: $base_dir"
-        if [[ $restore_errexit -eq 1 ]]; then
-            set -e
+    # Confirm noninteractive authorization before interpreting a failed path
+    # predicate as "not present". Otherwise an expired credential looks like an
+    # empty successful scan and callers can print a false cleanup result.
+    local sudo_rc=0
+    _mole_bounded_sudo_until "$deadline_seconds" "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        -n true < /dev/null > /dev/null 2>&1 || sudo_rc=$?
+    if [[ $sudo_rc -ne 0 ]]; then
+        [[ $restore_errexit -eq 1 ]] && set -e
+        [[ $sudo_rc -ge 128 ]] && return "$sudo_rc"
+        [[ $sudo_rc -eq 124 ]] && return 124
+        return "$MOLE_ERR_AUTH_FAILED"
+    fi
+
+    # Validate base directory (use sudo for permission-restricted dirs).
+    local base_rc=0
+    _mole_bounded_sudo_until "$deadline_seconds" "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        -n test -d "$base_dir" < /dev/null 2> /dev/null || base_rc=$?
+    if [[ $base_rc -ne 0 ]]; then
+        if [[ $base_rc -ge 128 ]]; then
+            [[ $restore_errexit -eq 1 ]] && set -e
+            return "$base_rc"
         fi
+        if [[ $base_rc -eq 124 ]]; then
+            [[ $restore_errexit -eq 1 ]] && set -e
+            return 124
+        fi
+        # `sudo test` uses status 1 both for a false predicate and for some
+        # authorization failures. Recheck credentials before calling this a
+        # missing directory; a credential may expire after the initial probe.
+        local base_auth_rc=0
+        _mole_bounded_sudo_until "$deadline_seconds" "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            -n true < /dev/null > /dev/null 2>&1 || base_auth_rc=$?
+        if [[ $base_auth_rc -ne 0 ]]; then
+            [[ $restore_errexit -eq 1 ]] && set -e
+            [[ $base_auth_rc -ge 128 ]] && return "$base_auth_rc"
+            [[ $base_auth_rc -eq 124 ]] && return 124
+            return "$MOLE_ERR_AUTH_FAILED"
+        fi
+        debug_log "Directory does not exist, skipping: $base_dir"
+        [[ $restore_errexit -eq 1 ]] && set -e
         return 0
     fi
 
-    if sudo -n test -L "$base_dir" 2> /dev/null; then
+    local link_rc=0
+    _mole_bounded_sudo_until "$deadline_seconds" "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        -n test -L "$base_dir" < /dev/null 2> /dev/null || link_rc=$?
+    if [[ $link_rc -eq 0 ]]; then
         log_error "Refusing to search symlinked directory: $base_dir"
-        if [[ $restore_errexit -eq 1 ]]; then
-            set -e
-        fi
+        [[ $restore_errexit -eq 1 ]] && set -e
         return 1
     fi
-
-    # Validate type filter
-    if [[ "$type_filter" != "f" && "$type_filter" != "d" ]]; then
-        log_error "Invalid type filter: $type_filter, must be 'f' or 'd'"
-        if [[ $restore_errexit -eq 1 ]]; then
-            set -e
+    if [[ $link_rc -eq 124 ]]; then
+        [[ $restore_errexit -eq 1 ]] && set -e
+        return 124
+    fi
+    if [[ $link_rc -ge 128 ]]; then
+        [[ $restore_errexit -eq 1 ]] && set -e
+        return "$link_rc"
+    fi
+    if [[ $link_rc -eq 1 ]]; then
+        local link_auth_rc=0
+        _mole_bounded_sudo_until "$deadline_seconds" "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            -n true < /dev/null > /dev/null 2>&1 || link_auth_rc=$?
+        if [[ $link_auth_rc -ne 0 ]]; then
+            [[ $restore_errexit -eq 1 ]] && set -e
+            [[ $link_auth_rc -ge 128 ]] && return "$link_auth_rc"
+            [[ $link_auth_rc -eq 124 ]] && return 124
+            return "$MOLE_ERR_AUTH_FAILED"
         fi
-        return 1
+    fi
+    if [[ $link_rc -ne 1 ]]; then
+        [[ $restore_errexit -eq 1 ]] && set -e
+        return "$link_rc"
     fi
 
     debug_log "Finding, sudo, in $base_dir: $pattern, age: ${age_days}d, type: $type_filter"
 
-    local find_args=("-maxdepth" "5")
-    # Skip -name if pattern is "*" (matches everything anyway, but adds overhead)
-    if [[ "$pattern" != "*" ]]; then
-        find_args+=("-name" "$pattern")
+    local find_args=("-maxdepth" "$max_depth")
+    local match_all_names=false
+    local name_pattern=""
+    for name_pattern in "${name_patterns[@]}"; do
+        if [[ "$name_pattern" == "*" ]]; then
+            match_all_names=true
+            break
+        fi
+    done
+    if [[ "$match_all_names" != "true" ]]; then
+        if [[ ${#name_patterns[@]} -eq 1 ]]; then
+            find_args+=("-name" "${name_patterns[0]}")
+        else
+            find_args+=("(")
+            local pattern_index=0
+            for ((pattern_index = 0; pattern_index < ${#name_patterns[@]}; pattern_index++)); do
+                [[ $pattern_index -gt 0 ]] && find_args+=("-o")
+                find_args+=("-name" "${name_patterns[$pattern_index]}")
+            done
+            find_args+=(")")
+        fi
     fi
     find_args+=("-type" "$type_filter")
     if [[ "$age_days" -gt 0 ]]; then
         find_args+=("-mtime" "+$age_days")
+    fi
+
+    # Materialize the completed scan before deleting anything. Process
+    # substitution cannot expose the producer's exit status, so it previously
+    # turned timeout 124 into an empty/partial successful scan and could delete
+    # the partial prefix. A failed scan now authorizes no deletion.
+    local scan_file=""
+    if ! scan_file=$(create_temp_file 2> /dev/null); then
+        [[ $restore_errexit -eq 1 ]] && set -e
+        return 1
+    fi
+    local scan_rc=0
+    local scan_timeout=""
+    scan_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+        "$deadline_seconds") || scan_rc=$?
+    if [[ $scan_rc -eq 0 ]]; then
+        _mole_materialize_bounded_sudo_find "$scan_file" "$scan_timeout" \
+            "$base_dir" "${find_args[@]}" -print0 || scan_rc=$?
+    fi
+    if [[ $scan_rc -ne 0 ]]; then
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        debug_log "Privileged cleanup scan failed for $base_dir (status $scan_rc)"
+        [[ $restore_errexit -eq 1 ]] && set -e
+        return "$scan_rc"
     fi
 
     # Iterate results to respect both system protection and user whitelist.
@@ -1677,7 +2289,20 @@ safe_sudo_find_delete() {
     # Directories and dry-run keep the single-file path so rm -rf handling
     # and preview output stay unchanged.
     local -a batch_files=()
+    local -a batch_identities=()
+    local max_batch_items=""
+    max_batch_items=$(_mole_privileged_batch_max_items)
+    [[ "$max_batch_items" =~ ^[1-9][0-9]*$ ]] || max_batch_items=4096
+    local removed_count=0
+    local delete_rc=0
+    local deadline_reached=false
+    local batch_aborted=false
     while IFS= read -r -d '' match; do
+        if [[ -n "$deadline_seconds" && $SECONDS -ge $deadline_seconds ]]; then
+            deadline_reached=true
+            delete_rc=124
+            break
+        fi
         if should_protect_path "$match"; then
             continue
         fi
@@ -1702,9 +2327,19 @@ safe_sudo_find_delete() {
             # caller's own permissions; root invocations skip the path because
             # they have no unprivileged identity to fall back to.
             if [[ ${EUID:-0} -ne 0 ]]; then
-                safe_remove "$match" true || true
+                local mutable_rc=0
+                safe_remove "$match" true "" "$deadline_seconds" || mutable_rc=$?
+                if [[ $mutable_rc -eq 0 ]]; then
+                    removed_count=$((removed_count + 1))
+                elif [[ $mutable_rc -eq 124 || $mutable_rc -ge 128 ]]; then
+                    delete_rc=$mutable_rc
+                    break
+                elif [[ $delete_rc -eq 0 ]]; then
+                    delete_rc=$mutable_rc
+                fi
             else
                 debug_log "Skipping sudo delete below mutable parent: $match"
+                [[ $delete_rc -eq 0 ]] && delete_rc=1
             fi
             continue
         fi
@@ -1712,7 +2347,18 @@ safe_sudo_find_delete() {
             local match_size_kb=0
             local match_size_known=false
             local raw_match_size=""
-            if raw_match_size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" sudo -n du -skP "$match" 2> /dev/null | awk '{print $1; exit}'); then
+            local size_timeout=""
+            local dry_size_rc=0
+            size_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+                "$deadline_seconds") || dry_size_rc=$?
+            if [[ $dry_size_rc -eq 0 ]]; then
+                raw_match_size=$(_mole_bounded_sudo "$size_timeout" \
+                    -n du -skP "$match" < /dev/null 2> /dev/null | awk '{print $1; exit}') || dry_size_rc=$?
+            fi
+            if [[ $dry_size_rc -eq 124 || $dry_size_rc -ge 128 ]]; then
+                delete_rc=$dry_size_rc
+                break
+            elif [[ $dry_size_rc -eq 0 ]]; then
                 if [[ "$raw_match_size" =~ ^[0-9]+$ ]]; then
                     match_size_kb="$raw_match_size"
                     match_size_known=true
@@ -1723,54 +2369,137 @@ safe_sudo_find_delete() {
         # -type f never emits symlinks; a path that is one now was swapped
         # after find saw it, and the single-file path refuses those.
         if [[ "$type_filter" == "f" && "${MOLE_DRY_RUN:-0}" != "1" && ! -L "$match" ]]; then
-            batch_files+=("$match")
+            local identity_timeout=""
+            local match_identity=""
+            local identity_rc=0
+            identity_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                "$deadline_seconds") || identity_rc=$?
+            if [[ $identity_rc -eq 0 ]]; then
+                match_identity=$(_mole_bounded_sudo "$identity_timeout" \
+                    -n "$STAT_BSD" -f%d:%i:%m "$match" < /dev/null 2> /dev/null) || identity_rc=$?
+            fi
+            if [[ $identity_rc -eq 124 || $identity_rc -ge 128 ]]; then
+                delete_rc=$identity_rc
+                break
+            fi
+            if [[ $identity_rc -eq 0 && "$match_identity" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]]; then
+                if [[ ${#batch_files[@]} -ge $max_batch_items ]]; then
+                    debug_log "Privileged cleanup candidate limit reached for $base_dir"
+                    delete_rc=1
+                    batch_aborted=true
+                    break
+                fi
+                batch_files+=("$match")
+                batch_identities+=("$match_identity")
+            elif [[ $delete_rc -eq 0 ]]; then
+                delete_rc=${identity_rc:-1}
+                [[ $delete_rc -ne 0 ]] || delete_rc=1
+            fi
             continue
         fi
-        safe_sudo_remove "$match" || true
-    done < <(sudo -n find "$base_dir" "${find_args[@]}" -print0 2> /dev/null || true)
-
-    if [[ ${#batch_files[@]} -gt 0 ]]; then
-        local batch_rc=0
-        printf '%s\0' "${batch_files[@]}" | sudo -n xargs -0 rm -f -- 2> /dev/null || batch_rc=$?
-
-        # Plain if, not `oplog_enabled && ...`: the short-circuit form returns
-        # 1 when the oplog is disabled and would trip set -e in callers.
-        local batch_ts=""
-        if oplog_enabled; then
-            batch_ts=$(get_timestamp)
+        local single_rc=0
+        safe_sudo_remove "$match" "" "$deadline_seconds" || single_rc=$?
+        if [[ $single_rc -eq 0 ]]; then
+            removed_count=$((removed_count + 1))
+        elif [[ $single_rc -eq 124 || $single_rc -ge 128 ]]; then
+            delete_rc=$single_rc
+            break
+        elif [[ $delete_rc -eq 0 ]]; then
+            delete_rc=$single_rc
         fi
-        # When the batch failed, confirm sudo credentials are still live
-        # before trusting the per-file probe below: with a lapsed credential
-        # `sudo -n test -e` fails for every file, which is indistinguishable
-        # from "file gone" and would log REMOVED entries for files still on
-        # disk. With dead credentials, retry everything through the
-        # single-file path so each failure is classified and logged.
-        local batch_sudo_alive=1
-        if [[ $batch_rc -ne 0 ]] && ! sudo -n true 2> /dev/null; then
-            batch_sudo_alive=0
-        fi
-        local -a removed_lines=()
-        local batch_file
-        for batch_file in "${batch_files[@]}"; do
-            if [[ $batch_rc -ne 0 ]] && { [[ $batch_sudo_alive -eq 0 ]] || sudo -n test -e "$batch_file" 2> /dev/null; }; then
-                # Survived the batch (SIP, immutable flag, permissions):
-                # retry through the single-file path so the failure is
-                # classified and logged exactly as before.
-                safe_sudo_remove "$batch_file" || true
-            elif [[ -n "$batch_ts" ]]; then
-                removed_lines+=("[$batch_ts] [${MOLE_CURRENT_COMMAND:-clean}] REMOVED $batch_file (batch)")
-            fi
-        done
-        if [[ ${#removed_lines[@]} -gt 0 ]]; then
-            append_log_lines "$OPERATIONS_LOG_FILE" "${removed_lines[@]}"
+    done < "$scan_file"
+    rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+
+    if [[ -n "$deadline_seconds" && $SECONDS -ge $deadline_seconds ]]; then
+        deadline_reached=true
+        if [[ $delete_rc -lt 128 ]]; then
+            delete_rc=124
         fi
     fi
+
+    if [[ ${#batch_files[@]} -gt 0 && "$deadline_reached" != "true" && "$batch_aborted" != "true" && $delete_rc -ne 124 && $delete_rc -lt 128 ]]; then
+        local batch_rc=0
+        local batch_result_file=""
+        local batch_timeout=""
+        if ! batch_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
+            "$deadline_seconds"); then
+            batch_rc=124
+        elif ! batch_result_file=$(create_temp_file 2> /dev/null); then
+            batch_rc=1
+        else
+            # The privileged worker acknowledges each completed unlink with a
+            # NUL-delimited path. A later failure or timeout therefore cannot
+            # erase the forensic record for an already completed prefix.
+            local -a batch_worker_records=()
+            local batch_index=0
+            for ((batch_index = 0; batch_index < ${#batch_files[@]}; batch_index++)); do
+                batch_worker_records+=("${batch_identities[$batch_index]}:${batch_files[$batch_index]}")
+            done
+            # shellcheck disable=SC2016 # $path expands inside privileged /bin/sh.
+            printf '%s\0' "${batch_worker_records[@]}" |
+                _mole_bounded_sudo "$batch_timeout" \
+                    -n xargs -0 /bin/sh -c '
+                        stat_tool=$1
+                        age_days=$2
+                        shift 2
+                        for record do
+                            dev=${record%%:*}
+                            rest=${record#*:}
+                            ino=${rest%%:*}
+                            rest=${rest#*:}
+                            mtime=${rest%%:*}
+                            path=${rest#*:}
+                            expected=$dev:$ino:$mtime
+                            if [ "$age_days" -gt 0 ]; then
+                                actual=$(/usr/bin/find "$path" -maxdepth 0 -type f -mtime "+$age_days" \
+                                    -exec "$stat_tool" -f%d:%i:%m {} \; 2>/dev/null) || continue
+                            else
+                                actual=$($stat_tool -f%d:%i:%m "$path" 2>/dev/null) || continue
+                            fi
+                            [ "$actual" = "$expected" ] || continue
+                            /bin/rm -f -- "$path" || exit 1
+                            printf "%s\0" "$path"
+                        done
+                    ' sh "$STAT_BSD" "$age_days" > "$batch_result_file" 2> /dev/null || batch_rc=$?
+
+            local batch_ts=""
+            if oplog_enabled; then
+                batch_ts=$(get_timestamp)
+            fi
+            local batch_ack_count=0
+            local -a removed_lines=()
+            local batch_file=""
+            while IFS= read -r -d '' batch_file; do
+                batch_ack_count=$((batch_ack_count + 1))
+                if [[ -n "$batch_ts" ]]; then
+                    removed_lines+=("[$batch_ts] [${MOLE_CURRENT_COMMAND:-clean}] REMOVED $batch_file (batch)")
+                fi
+            done < "$batch_result_file"
+            rm -f -- "$batch_result_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+
+            removed_count=$((removed_count + batch_ack_count))
+            if [[ ${#removed_lines[@]} -gt 0 ]]; then
+                append_log_lines "$OPERATIONS_LOG_FILE" "${removed_lines[@]}"
+            fi
+            if [[ $batch_rc -eq 0 && $batch_ack_count -ne ${#batch_files[@]} ]]; then
+                batch_rc=1
+            fi
+        fi
+
+        if [[ $batch_rc -ne 0 && $delete_rc -eq 0 ]]; then
+            delete_rc=$batch_rc
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$base_dir" \
+                "batch removal incomplete (status $batch_rc)"
+        fi
+    fi
+
+    MOLE_SAFE_SUDO_FIND_DELETE_COUNT=$removed_count
 
     if [[ $restore_errexit -eq 1 ]]; then
         set -e
     fi
 
-    return 0
+    return "$delete_rc"
 }
 
 # ============================================================================
@@ -1790,16 +2519,36 @@ safe_sudo_find_delete() {
 # under-report large bundles like Xcode.
 get_path_size_kb() {
     local path="$1"
+    local size_timeout="${2:-$MOLE_TIMEOUT_DISK_VERIFY_SEC}"
     [[ -z "$path" || ! -e "$path" ]] && {
         echo "0"
         return
     }
 
+    if [[ ! "$size_timeout" =~ ^[0-9]+(\.[0-9]+)?$ || "$size_timeout" =~ ^0+(\.0+)?$ ]]; then
+        size_timeout="$MOLE_TIMEOUT_DISK_VERIFY_SEC"
+    fi
+    local timeout_whole="${size_timeout%%.*}"
+    local timeout_budget=$((10#$timeout_whole))
+    if [[ "$size_timeout" == *.* && "${size_timeout#*.}" =~ [1-9] ]]; then
+        timeout_budget=$((timeout_budget + 1))
+    fi
+    [[ $timeout_budget -gt 0 ]] || timeout_budget=1
+    local size_deadline=$((SECONDS + timeout_budget))
+
     # For .app bundles, prefer mdls logical size as it matches Finder
     # (APFS clone/sparse files make 'du' severely underreport apps like Xcode)
     if [[ "$path" == *.app || "$path" == *.app/ ]]; then
         local mdls_size
-        mdls_size=$(mdls -name kMDItemLogicalSize -raw "$path" 2> /dev/null || true)
+        local mdls_timeout=""
+        mdls_timeout=$(_mole_timeout_with_deadline "$size_timeout" "$size_deadline") || {
+            echo "0"
+            return
+        }
+        local mdls_rc=0
+        mdls_size=$(run_with_timeout "$mdls_timeout" mdls \
+            -name kMDItemLogicalSize -raw "$path" < /dev/null 2> /dev/null) || mdls_rc=$?
+        [[ $mdls_rc -ge 128 ]] && return "$mdls_rc"
         if [[ "$mdls_size" =~ ^[0-9]+$ && "$mdls_size" -gt 0 ]]; then
             # Return in KB
             echo "$((mdls_size / 1024))"
@@ -1810,7 +2559,15 @@ get_path_size_kb() {
     # Fast path for regular files and symlinks: avoid forking 'du'.
     if [[ -f "$path" || -L "$path" ]]; then
         local bytes
-        bytes=$(stat -f%z "$path" 2> /dev/null || echo "")
+        local stat_timeout=""
+        stat_timeout=$(_mole_timeout_with_deadline "$size_timeout" "$size_deadline") || {
+            echo "0"
+            return
+        }
+        local stat_rc=0
+        bytes=$(run_with_timeout "$stat_timeout" stat \
+            -f%z "$path" < /dev/null 2> /dev/null) || stat_rc=$?
+        [[ $stat_rc -ge 128 ]] && return "$stat_rc"
         if [[ "$bytes" =~ ^[0-9]+$ ]]; then
             # Round up to whole KB to match 'du -skP' semantics.
             echo $(((bytes + 1023) / 1024))
@@ -1823,7 +2580,15 @@ get_path_size_kb() {
     # stalled SMB/FUSE mount. On timeout the size reads 0, which only
     # affects display/accounting, never deletion decisions.
     local size
-    size=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" du -skP "$path" 2> /dev/null | awk 'NR==1 {print $1; exit}' || true)
+    local du_timeout=""
+    du_timeout=$(_mole_timeout_with_deadline "$size_timeout" "$size_deadline") || {
+        echo "0"
+        return
+    }
+    local du_rc=0
+    size=$(run_with_timeout "$du_timeout" du -skP "$path" 2> /dev/null |
+        awk 'NR==1 {print $1; exit}') || du_rc=$?
+    [[ $du_rc -ge 128 ]] && return "$du_rc"
 
     if [[ "$size" =~ ^[0-9]+$ ]]; then
         echo "$size"
@@ -1866,8 +2631,11 @@ calculate_total_size() {
     done <<< "$files"
 
     for file in "${unique_paths[@]+"${unique_paths[@]}"}"; do
-        local size_kb
-        size_kb=$(get_path_size_kb "$file")
+        local size_kb=0
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$file") || size_rc=$?
+        [[ $size_rc -eq 124 || $size_rc -ge 128 ]] && return "$size_rc"
+        [[ $size_rc -eq 0 && "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
         total_kb=$((total_kb + size_kb))
     done
 

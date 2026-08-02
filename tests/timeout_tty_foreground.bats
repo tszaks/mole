@@ -49,7 +49,7 @@ setup() {
 
 @test "clean: indirect background timeout workers detach stdin from the terminal" {
 	run awk '
-		/get_cleanup_path_size_kb "\$path"/ { in_worker = 1; remaining = 12 }
+		/get_cleanup_path_size_kb "\$path"/ { in_worker = 1; remaining = 24 }
 		in_worker && /\)[[:space:]]*< \/dev\/null &/ { found = 1; exit }
 		in_worker && --remaining <= 0 { exit }
 		END { exit(found ? 0 : 1) }

@@ -52,7 +52,12 @@ opt_existing_path_size_kb() {
         return 0
     }
 
-    opt_numeric_kb "$(get_path_size_kb "$path" 2> /dev/null || echo "0")"
+    local size_kb=0
+    local size_rc=0
+    size_kb=$(get_path_size_kb "$path" 2> /dev/null) || size_rc=$?
+    [[ $size_rc -eq 124 || $size_rc -ge 128 ]] && return "$size_rc"
+    [[ $size_rc -eq 0 ]] || size_kb=0
+    opt_numeric_kb "$size_kb"
 }
 
 opt_existing_file_size_kb_strict() {
@@ -78,10 +83,16 @@ run_launchctl_unload() {
         if ! optimize_sudo_available; then
             return 0
         fi
-        sudo launchctl unload "$plist_file" 2> /dev/null || true
+        local unload_rc=0
+        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" sudo launchctl \
+            unload "$plist_file" 2> /dev/null || unload_rc=$?
     else
-        launchctl unload "$plist_file" 2> /dev/null || true
+        local unload_rc=0
+        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" launchctl \
+            unload "$plist_file" 2> /dev/null || unload_rc=$?
     fi
+    [[ $unload_rc -eq 124 || $unload_rc -ge 128 ]] && return "$unload_rc"
+    return 0
 }
 
 needs_permissions_repair() {
@@ -260,8 +271,11 @@ opt_cache_refresh() {
         [[ -e "$target_path" ]] || continue
         should_protect_path "$target_path" && continue
 
-        local size_kb
-        size_kb=$(opt_existing_path_size_kb "$target_path")
+        local size_kb=0
+        local size_rc=0
+        size_kb=$(opt_existing_path_size_kb "$target_path") || size_rc=$?
+        [[ $size_rc -eq 124 || $size_rc -ge 128 ]] && return "$size_rc"
+        [[ $size_rc -eq 0 ]] || size_kb=0
         removable_targets+=("$target_path")
         removable_sizes+=("$size_kb")
     done
@@ -284,7 +298,12 @@ opt_cache_refresh() {
 
     local index
     for index in "${!removable_targets[@]}"; do
-        if safe_remove "${removable_targets[$index]}" true "${removable_sizes[$index]}" > /dev/null 2>&1; then
+        local remove_rc=0
+        safe_remove "${removable_targets[$index]}" true \
+            "${removable_sizes[$index]}" > /dev/null 2>&1 || remove_rc=$?
+        if [[ $remove_rc -eq 124 || $remove_rc -ge 128 ]]; then
+            return "$remove_rc"
+        elif [[ $remove_rc -eq 0 ]]; then
             removed_count=$((removed_count + 1))
             cleaned_cache_size=$((cleaned_cache_size + removable_sizes[index]))
         else
@@ -336,7 +355,14 @@ opt_saved_state_cleanup() {
             optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
             return 0
         fi
-        if ! run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find "$state_dir" -type d -name "*.savedState" -mtime "+$MOLE_SAVED_STATE_AGE_DAYS" -print0 > "$scan_file" 2> /dev/null; then
+        local scan_rc=0
+        run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find "$state_dir" \
+            -type d -name "*.savedState" \
+            -mtime "+$MOLE_SAVED_STATE_AGE_DAYS" -print0 \
+            > "$scan_file" 2> /dev/null || scan_rc=$?
+        if [[ $scan_rc -ne 0 ]]; then
+            : > "$scan_file" || true
+            [[ $scan_rc -eq 124 || $scan_rc -ge 128 ]] && return "$scan_rc"
             echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to scan old saved states"
             scan_failed=1
         fi
@@ -344,7 +370,11 @@ opt_saved_state_cleanup() {
             if should_protect_path "$state_path"; then
                 continue
             fi
-            if safe_remove "$state_path" true > /dev/null 2>&1; then
+            local remove_rc=0
+            safe_remove "$state_path" true > /dev/null 2>&1 || remove_rc=$?
+            if [[ $remove_rc -eq 124 || $remove_rc -ge 128 ]]; then
+                return "$remove_rc"
+            elif [[ $remove_rc -eq 0 ]]; then
                 removed=$((removed + 1))
             else
                 remove_failed=$((remove_failed + 1))
@@ -1017,10 +1047,19 @@ opt_prune_spotlight_orphan_rules() {
                 # Only act on well-formed bundle ids; bundle_has_installed_app
                 # double-checks with mdfind and a filesystem scan, so a return of
                 # 1 means the app is genuinely gone. Anything else is kept.
-                if mole_is_reverse_dns_bundle_id "$entry" && ! bundle_has_installed_app "$entry"; then
-                    removed+=("$entry")
-                else
+                if ! mole_is_reverse_dns_bundle_id "$entry"; then
                     keep+=("$entry")
+                else
+                    local resolver_rc=0
+                    bundle_has_installed_app "$entry" \
+                        "$((SECONDS + MOLE_TIMEOUT_MEDIUM_PROBE_SEC))" || resolver_rc=$?
+                    if [[ $resolver_rc -eq 1 ]]; then
+                        removed+=("$entry")
+                    elif [[ $resolver_rc -ge 128 ]]; then
+                        return "$resolver_rc"
+                    else
+                        keep+=("$entry")
+                    fi
                 fi
                 ;;
         esac
@@ -1210,9 +1249,17 @@ opt_launch_agents_cleanup() {
         [[ -f "$plist" ]] || continue
 
         local binary=""
-        binary=$(/usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2> /dev/null || true)
+        local plist_rc=0
+        binary=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            /usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" \
+            "$plist" 2> /dev/null) || plist_rc=$?
+        [[ $plist_rc -eq 124 || $plist_rc -ge 128 ]] && return "$plist_rc"
         if [[ -z "$binary" ]]; then
-            binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2> /dev/null || true)
+            plist_rc=0
+            binary=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                /usr/libexec/PlistBuddy -c "Print :Program" \
+                "$plist" 2> /dev/null) || plist_rc=$?
+            [[ $plist_rc -eq 124 || $plist_rc -ge 128 ]] && return "$plist_rc"
         fi
 
         # Only an absolute path that is genuinely missing counts as broken.
@@ -1235,8 +1282,14 @@ opt_launch_agents_cleanup() {
     local removed_count=0
     local failed=0
     for plist in "${broken_plists[@]}"; do
-        run_launchctl_unload "$plist"
-        if safe_remove "$plist" true > /dev/null 2>&1; then
+        local unload_rc=0
+        run_launchctl_unload "$plist" || unload_rc=$?
+        [[ $unload_rc -eq 124 || $unload_rc -ge 128 ]] && return "$unload_rc"
+        local remove_rc=0
+        safe_remove "$plist" true > /dev/null 2>&1 || remove_rc=$?
+        if [[ $remove_rc -eq 124 || $remove_rc -ge 128 ]]; then
+            return "$remove_rc"
+        elif [[ $remove_rc -eq 0 ]]; then
             removed_count=$((removed_count + 1))
         else
             failed=$((failed + 1))
@@ -1323,7 +1376,14 @@ opt_shared_file_list_repair() {
         optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_FAILED"
         return 0
     fi
-    if ! run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find "$sfl_dir" \( -name "*.sfl2" -o -name "*.sfl3" \) -type f ! -path "*ApplicationRecentDocuments*" -print0 > "$scan_file" 2> /dev/null; then
+    local scan_rc=0
+    run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" find "$sfl_dir" \
+        \( -name "*.sfl2" -o -name "*.sfl3" \) -type f \
+        ! -path "*ApplicationRecentDocuments*" -print0 \
+        > "$scan_file" 2> /dev/null || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        : > "$scan_file" || true
+        [[ $scan_rc -eq 124 || $scan_rc -ge 128 ]] && return "$scan_rc"
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to scan shared file lists"
         scan_failed=1
     fi
@@ -1332,7 +1392,13 @@ opt_shared_file_list_repair() {
         # Skip recent-documents list (user data, not a cache)
         [[ "$sfl_file" == *"ApplicationRecentDocuments"* ]] && continue
         if ! plutil -lint "$sfl_file" > /dev/null 2>&1; then
-            if [[ "${MOLE_DRY_RUN:-0}" == "1" ]] || safe_remove "$sfl_file" true > /dev/null 2>&1; then
+            local remove_rc=0
+            if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+                safe_remove "$sfl_file" true > /dev/null 2>&1 || remove_rc=$?
+            fi
+            if [[ $remove_rc -eq 124 || $remove_rc -ge 128 ]]; then
+                return "$remove_rc"
+            elif [[ $remove_rc -eq 0 ]]; then
                 repaired=$((repaired + 1))
             else
                 remove_failed=$((remove_failed + 1))
@@ -1496,7 +1562,11 @@ opt_coreduet_cleanup() {
         local remove_failed=0
         for f in "$wal_file" "$shm_file"; do
             if [[ -f "$f" ]]; then
-                if safe_remove "$f" true > /dev/null 2>&1; then
+                local remove_rc=0
+                safe_remove "$f" true > /dev/null 2>&1 || remove_rc=$?
+                if [[ $remove_rc -eq 124 || $remove_rc -ge 128 ]]; then
+                    return "$remove_rc"
+                elif [[ $remove_rc -eq 0 ]]; then
                     removed_count=$((removed_count + 1))
                 else
                     remove_failed=$((remove_failed + 1))

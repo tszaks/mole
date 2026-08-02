@@ -166,6 +166,42 @@ EOF
 	[[ "$result" == "com.example.carrier.helper" ]]
 }
 
+@test "login item helper discovery discards partial results and propagates cancellation" {
+	app="$HOME/Applications/RacedCarrier.app"
+	helper="$app/Contents/Library/LoginItems/Raced Helper.app/Contents"
+	mkdir -p "$helper"
+	printf '<plist/>\n' > "$helper/Info.plist"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP="$app" \
+		HELPER_APP="${helper%/Contents}" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+run_with_timeout() {
+	local _duration="$1"
+	shift
+	if [[ "${1:-}" == "find" ]]; then
+		printf '%s\0' "$HELPER_APP"
+		return "${SCAN_RC:?}"
+	fi
+	"$@"
+}
+
+SCAN_RC=1
+result=$(discover_login_item_helper_bundle_ids "$APP")
+[[ -z "$result" ]] || exit 1
+
+SCAN_RC=130
+rc=0
+result=$(discover_login_item_helper_bundle_ids "$APP") || rc=$?
+[[ $rc -eq 130 ]] || exit 1
+[[ -z "$result" ]]
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "find_app_files preserves Xcode user data and only collects regenerable caches" {
 	mkdir -p "$HOME/Library/Developer/Xcode/DerivedData/MyApp-abc/Build"
 	mkdir -p "$HOME/Library/Developer/Xcode/iOS DeviceSupport/17.0"

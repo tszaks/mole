@@ -14,6 +14,8 @@ pkg_receipt_nonstandard_app_paths() {
         return 0
     fi
 
+    local require_complete=0
+    [[ "${1:-}" == "--require-complete" ]] && require_complete=1
     local cache_file="${MOLE_PKG_RECEIPT_CACHE_FILE:-$HOME/.cache/mole/pkg_receipt_apps_v1}"
     local cache_ttl="${MOLE_PKG_RECEIPT_CACHE_TTL:-3600}"
     local now_epoch=0
@@ -40,33 +42,66 @@ pkg_receipt_nonstandard_app_paths() {
         fi
     fi
 
-    local pkgs_output
+    local pkgs_output=""
+    local pkgs_rc=0
     if declare -f run_with_timeout > /dev/null 2>&1; then
-        pkgs_output=$(run_with_timeout "${MOLE_PKG_RECEIPT_LIST_TIMEOUT:-3}" pkgutil --pkgs 2> /dev/null || true)
+        pkgs_output=$(run_with_timeout "${MOLE_PKG_RECEIPT_LIST_TIMEOUT:-3}" \
+            pkgutil --pkgs 2> /dev/null) || pkgs_rc=$?
     else
-        pkgs_output=$(pkgutil --pkgs 2> /dev/null || true)
+        pkgs_output=$(pkgutil --pkgs 2> /dev/null) || pkgs_rc=$?
+    fi
+    if [[ $pkgs_rc -ne 0 ]]; then
+        if [[ "$require_complete" == "1" ]]; then
+            [[ $pkgs_rc -eq 124 || $pkgs_rc -ge 128 ]] && return "$pkgs_rc"
+            return 2
+        fi
+        return 0
     fi
     [[ -n "$pkgs_output" ]] || return 0
 
     local -a seen_apps=()
     local scan_start=$SECONDS
     local scan_timeout="${MOLE_PKG_RECEIPT_SCAN_TIMEOUT:-8}"
+    local scan_deadline=0
+    if [[ "$scan_timeout" =~ ^[0-9]+$ && $scan_timeout -gt 0 ]]; then
+        scan_deadline=$((scan_start + scan_timeout))
+    elif [[ "$require_complete" == "1" ]]; then
+        return 2
+    fi
     local pkg_id
     while IFS= read -r pkg_id; do
         if [[ "$scan_timeout" =~ ^[0-9]+$ && $scan_timeout -gt 0 && $((SECONDS - scan_start)) -ge $scan_timeout ]]; then
+            [[ "$require_complete" == "1" ]] && return 124
             break
         fi
 
         [[ -n "$pkg_id" ]] || continue
         [[ "$pkg_id" =~ ^com\.apple\. ]] && continue
 
-        local pkg_files
-        pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null | command grep -E '^(/usr/local/|/opt/).*\.app(/|$)' || true)
+        local pkg_files=""
+        local pkg_files_rc=0
+        if [[ "$require_complete" == "1" ]]; then
+            local remaining=$((scan_deadline - SECONDS))
+            [[ $remaining -gt 0 ]] || return 124
+            if declare -f run_with_timeout > /dev/null 2>&1; then
+                pkg_files=$(run_with_timeout "$remaining" \
+                    pkgutil --files "$pkg_id" 2> /dev/null) || pkg_files_rc=$?
+            else
+                pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null) || pkg_files_rc=$?
+            fi
+            if [[ $pkg_files_rc -ne 0 ]]; then
+                [[ $pkg_files_rc -eq 124 || $pkg_files_rc -ge 128 ]] && return "$pkg_files_rc"
+                return 2
+            fi
+        else
+            pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null || true)
+        fi
         [[ -n "$pkg_files" ]] || continue
 
         local rel_path app_path duplicate
         while IFS= read -r rel_path; do
             if [[ "$scan_timeout" =~ ^[0-9]+$ && $scan_timeout -gt 0 && $((SECONDS - scan_start)) -ge $scan_timeout ]]; then
+                [[ "$require_complete" == "1" ]] && return 124
                 break 2
             fi
 
@@ -99,7 +134,9 @@ pkg_receipt_nonstandard_app_paths() {
     done <<< "$pkgs_output"
 
     if [[ ${#seen_apps[@]} -gt 0 ]]; then
-        printf '%s\n' "${seen_apps[@]}" | sort -u
+        if ! printf '%s\n' "${seen_apps[@]}" | sort -u; then
+            [[ "$require_complete" == "1" ]] && return 2
+        fi
     fi
 
     if [[ "${MOLE_PKG_RECEIPT_CACHE_DISABLE:-0}" != "1" && -n "$cache_file" ]]; then

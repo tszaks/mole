@@ -332,6 +332,72 @@ EOF
 	[ "$(grep -c "size:$HOME/Library/Caches/com.apple.QuickLook.thumbnailcache" <<< "$output")" -eq 1 ]
 }
 
+@test "optimize scans never delete candidates from partial find output" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+saved="$HOME/Library/Saved Application State/Partial.savedState"
+shared="$HOME/Library/Application Support/com.apple.sharedfilelist/Partial.sfl3"
+mkdir -p "$saved" "${shared%/*}"
+touch "$shared"
+safe_remove() {
+    printf 'UNEXPECTED_REMOVE:%s\n' "$1"
+    return 0
+}
+run_with_timeout() {
+    shift
+    case "$*" in
+        *"Saved Application State"*) printf '%s\0' "$saved" ;;
+        *) printf '%s\0' "$shared" ;;
+    esac
+    return 73
+}
+
+optimize_task_start
+opt_saved_state_cleanup
+optimize_task_finish saved_state_cleanup
+optimize_task_start
+opt_shared_file_list_repair
+optimize_task_finish shared_file_list_repair
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "optimize saved-state cleanup propagates deletion interruption" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+
+saved="$HOME/Library/Saved Application State/Interrupted.savedState"
+mkdir -p "$saved"
+run_with_timeout() {
+    shift
+    printf '%s\0' "$saved"
+}
+should_protect_path() { return 1; }
+safe_remove() { return 130; }
+optimize_task_start
+rc=0
+opt_saved_state_cleanup || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ $rc -eq 130 ]]
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"RC=130"* ]]
+}
+
 @test "opt_quarantine_cleanup reports clean when no database" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -823,6 +889,35 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"already clean"* ]] || return 1
 	[[ "$output" != *"DEFAULTS: write"* ]]
+}
+
+@test "opt_prune_spotlight_orphan_rules propagates an interrupted app resolver" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+PLIST="$HOME/Library/Preferences/com.apple.spotlight.plist"
+mkdir -p "$(dirname "$PLIST")"
+rm -f "$PLIST"
+/usr/libexec/PlistBuddy \
+    -c "Add :EnabledPreferenceRules array" \
+    -c "Add :EnabledPreferenceRules:0 string com.example.Interrupted" \
+    "$PLIST" >/dev/null 2>&1
+defaults() {
+    case "$1" in
+        read) return 0 ;;
+        write | delete) echo "UNEXPECTED_WRITE: $*" ;;
+    esac
+}
+bundle_has_installed_app() { return 130; }
+rc=0
+opt_prune_spotlight_orphan_rules || rc=$?
+printf 'RC=%s\n' "$rc"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"RC=130"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_WRITE"* ]]
 }
 
 @test "opt_spotlight_index_optimize reports optimal when probes are fast" {

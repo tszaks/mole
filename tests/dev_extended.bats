@@ -2394,8 +2394,17 @@ EOF
 
     [ "$status" -eq 0 ] || return 1
     [[ "$output" == *"simctl could not be resolved"* ]] || return 1
-    [[ "$(cat "$HOME/simctl-selected-invalid.log")" == "$selected|--find simctl" ]] || return 1
-    [[ "$(cat "$HOME/simctl-selected-invalid.log")" != *"$candidate|"* ]] || return 1
+    local actual_calls
+    actual_calls=$(cat "$HOME/simctl-selected-invalid.log")
+    [[ -n "$actual_calls" ]] || return 1
+    local actual_call
+    while IFS= read -r actual_call; do
+        if [[ "$actual_call" != "$selected|--find simctl" ]]; then
+            printf 'unexpected simctl resolution call: %q\n' "$actual_call" >&2
+            return 1
+        fi
+    done <<< "$actual_calls"
+    [[ "$actual_calls" != *"$candidate|"* ]] || return 1
 }
 
 @test "clean_dev_mobile does not override an invalid explicit DEVELOPER_DIR (#1261)" {

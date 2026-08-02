@@ -142,6 +142,39 @@ EOF
     [[ "$result" != *"org.sparkle-project.DownloaderService"* ]]
 }
 
+@test "find_app_files discards an incomplete root but propagates cancellation" {
+    local nested="$HOME/Library/Caches/examplevendor/ExampleProduct"
+    mkdir -p "$nested"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" NESTED="$nested" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+run_with_timeout() {
+    local _duration="$1"
+    shift
+    if [[ "${1:-}" == "find" ]]; then
+        printf '%s\0' "$NESTED"
+        return "${SCAN_RC:?}"
+    fi
+    "$@"
+}
+
+SCAN_RC=1
+result=$(find_app_files "com.examplevendor.ExampleProduct" "ExampleProduct")
+[[ "$result" != *"$NESTED"* ]] || exit 1
+
+SCAN_RC=130
+rc=0
+result=$(find_app_files "com.examplevendor.ExampleProduct" "ExampleProduct") || rc=$?
+[[ $rc -eq 130 ]] || exit 1
+[[ "$result" != *"$NESTED"* ]]
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "find_app_system_files discovers bundle-id-prefixed LaunchDaemons" {
     fakebin="$HOME/fakebin"
     mkdir -p "$fakebin"
@@ -296,6 +329,21 @@ EOF
 
     [[ "$result" == *"~/preview-size-file"* ]] || return 1
     [[ "$result" == *"1KB"* ]]
+}
+
+@test "format_uninstall_preview_path propagates an interrupted size probe" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+get_path_size_kb() { return 130; }
+rc=0
+format_uninstall_preview_path "$HOME/interrupted-preview" || rc=$?
+printf 'RC=%s\n' "$rc"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=130"* ]]
 }
 
 @test "batch_uninstall_applications removes selected app data" {
@@ -549,6 +597,596 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "live same-bundle scan finds a sibling that appeared after preview" {
+    local app_root="$HOME/live-apps"
+    mkdir -p "$app_root/Selected.app/Contents" \
+        "$app_root/Setapp/NewSibling.app/Contents"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP_ROOT="$app_root" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+pkg_receipt_nonstandard_app_paths() { :; }
+
+printf '%s\n' \
+    '<?xml version="1.0" encoding="UTF-8"?>' \
+    '<plist version="1.0"><dict>' \
+    '<key>CFBundleIdentifier</key><string>com.example.live-shared</string>' \
+    '</dict></plist>' \
+    > "$APP_ROOT/Selected.app/Contents/Info.plist"
+cp "$APP_ROOT/Selected.app/Contents/Info.plist" \
+    "$APP_ROOT/Setapp/NewSibling.app/Contents/Info.plist"
+selected_apps=("0|$APP_ROOT/Selected.app|Selected|com.example.live-shared|0|Never")
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=("$APP_ROOT")
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-volumes"
+uninstall_live_bundle_has_other_install \
+    "com.example.live-shared" "$APP_ROOT/Selected.app"
+first_fingerprint="$_MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT"
+[[ -n "$first_fingerprint" && ${#_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[@]} -eq 1 ]]
+
+mkdir -p "$APP_ROOT/Utilities/AnotherSibling.app/Contents"
+cp "$APP_ROOT/Selected.app/Contents/Info.plist" \
+    "$APP_ROOT/Utilities/AnotherSibling.app/Contents/Info.plist"
+uninstall_live_bundle_has_other_install \
+    "com.example.live-shared" "$APP_ROOT/Selected.app"
+[[ ${#_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[@]} -eq 2 ]]
+[[ "$first_fingerprint" != "$_MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT" ]]
+
+mkdir -p "$HOME/external/LinkedSibling.app/Contents"
+cp "$APP_ROOT/Selected.app/Contents/Info.plist" \
+    "$HOME/external/LinkedSibling.app/Contents/Info.plist"
+ln -s "$HOME/external/LinkedSibling.app" "$APP_ROOT/LinkedSibling.app"
+uninstall_live_bundle_has_other_install \
+    "com.example.live-shared" "$APP_ROOT/Selected.app"
+[[ ${#_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[@]} -eq 3 ]]
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "live same-bundle scan accepts dot-app text in a volume ancestor" {
+    local app_root="$HOME/Backup.app-data/Applications"
+    mkdir -p "$app_root/Survivor.app/Contents" "$HOME/Selected.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP_ROOT="$app_root" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+pkg_receipt_nonstandard_app_paths() { :; }
+
+printf '%s\n' \
+    '<?xml version="1.0" encoding="UTF-8"?>' \
+    '<plist version="1.0"><dict>' \
+    '<key>CFBundleIdentifier</key><string>com.example.volume-shared</string>' \
+    '</dict></plist>' \
+    > "$APP_ROOT/Survivor.app/Contents/Info.plist"
+selected_apps=("0|$HOME/Selected.app|Selected|com.example.volume-shared|0|Never")
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=("$APP_ROOT")
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-volumes"
+uninstall_live_bundle_has_other_install \
+    "com.example.volume-shared" "$HOME/Selected.app"
+[[ ${#_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[@]} -eq 1 ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "live same-bundle scan covers exact package receipt apps" {
+    local app_root="$HOME/pkg-root"
+    mkdir -p "$app_root/one/two/three/four/Deep.app/Contents" "$HOME/Selected.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP_ROOT="$app_root" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+printf '%s\n' \
+    '<?xml version="1.0" encoding="UTF-8"?>' \
+    '<plist version="1.0"><dict>' \
+    '<key>CFBundleIdentifier</key><string>com.example.pkg-shared</string>' \
+    '</dict></plist>' \
+    > "$APP_ROOT/one/two/three/four/Deep.app/Contents/Info.plist"
+selected_apps=("0|$HOME/Selected.app|Selected|com.example.pkg-shared|0|Never")
+pkg_receipt_nonstandard_app_paths() {
+    printf '%s\n' "$APP_ROOT/one/two/three/four/Deep.app"
+}
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=()
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-volumes"
+uninstall_live_bundle_has_other_install \
+    "com.example.pkg-shared" "$HOME/Selected.app"
+[[ ${#_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[@]} -eq 1 ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "strict package receipt discovery rejects partial output" {
+    run env HOME="$HOME/pkg-partial" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+pkgutil() {
+    case "$1" in
+        --pkgs) printf 'com.example.one\ncom.example.two\n' ;;
+        --files)
+            if [[ "$2" == "com.example.one" ]]; then
+                printf 'opt/example/One.app/Contents/Info.plist\n'
+            else
+                return 124
+            fi
+            ;;
+    esac
+}
+run_with_timeout() {
+    shift
+    "$@"
+}
+
+rc=0
+output=$(MOLE_PKG_RECEIPT_CACHE_DISABLE=1 \
+    pkg_receipt_nonstandard_app_paths --require-complete) || rc=$?
+printf 'RC=%s OUTPUT=%s\n' "$rc" "$output"
+[[ $rc -eq 124 && -z "$output" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=124 OUTPUT="* ]]
+}
+
+@test "live same-bundle scan discards partial find output" {
+    local app_root="$HOME/partial-live-apps"
+    mkdir -p "$app_root/Selected.app" "$app_root/Partial.app/Contents"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP_ROOT="$app_root" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+pkg_receipt_nonstandard_app_paths() { :; }
+
+selected_apps=("0|$APP_ROOT/Selected.app|Selected|com.example.partial|0|Never")
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=("$APP_ROOT")
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-volumes"
+run_with_timeout() {
+    shift
+    if [[ "${1:-}" == "find" ]]; then
+        printf '%s\0' "$APP_ROOT/Partial.app"
+        return 73
+    fi
+    "$@"
+}
+rc=0
+uninstall_live_bundle_has_other_install \
+    "com.example.partial" "$APP_ROOT/Selected.app" || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ $rc -eq 2 ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=2"* ]]
+}
+
+@test "batch execution rejects a changed same-bundle app set before teardown" {
+    run env HOME="$HOME/live-set-race" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+pkg_receipt_nonstandard_app_paths() { :; }
+
+app_path="$HOME/Applications/Race.app"
+mkdir -p "$app_path"
+expected_identity=$(_batch_selected_app_identity "$app_path")
+preview_fingerprint=$(printf '%s' 'old-sibling-set' | base64 | tr -d '\n')
+fields=(
+    "Race" "$app_path" "unknown" "0" "" "" "false" "false" "false"
+    "" "" "" "" "guard" "$expected_identity" "com.example.race"
+    "$preview_fingerprint" "missing"
+)
+old_ifs="$IFS"
+IFS='|'
+detail="${fields[*]}"
+IFS="$old_ifs"
+
+uninstall_live_bundle_has_other_install() {
+    _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT="new-sibling-set"
+    _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=("$HOME/Applications/New.app")
+    return 0
+}
+stop_launch_services() { : > "$HOME/teardown-ran"; }
+
+app_details=("$detail")
+success_count=0
+failed_count=0
+brew_apps_removed=0
+failed_items=()
+success_items=()
+success_dock_targets=()
+system_extension_warning_apps=()
+review_only_system_leftovers=()
+review_only_system_leftover_keys=()
+running_at_uninstall_apps=()
+total_size_freed=0
+files_cleaned=0
+total_items=0
+
+_batch_execute_removals
+[[ $success_count -eq 0 && $failed_count -eq 1 ]]
+[[ "${failed_items[0]}" == *"app installation set changed after preview"* ]]
+[[ ! -e "$HOME/teardown-ran" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "batch execution rejects a selected Info.plist changed after preview" {
+    run env HOME="$HOME/selected-info-race" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+app_path="$HOME/Applications/Race.app"
+mkdir -p "$app_path/Contents"
+printf 'old bundle metadata\n' > "$app_path/Contents/Info.plist"
+touch -t 202001010000 "$app_path/Contents/Info.plist"
+expected_identity=$(_batch_selected_app_identity "$app_path")
+expected_info_identity=$(_batch_selected_app_info_identity "$app_path")
+
+fields=(
+    "Race" "$app_path" "com.example.race" "0" "" "" "false" "false" "false"
+    "" "" "" "" "none" "$expected_identity" "com.example.race" ""
+    "$expected_info_identity"
+)
+old_ifs="$IFS"
+IFS='|'
+detail="${fields[*]}"
+IFS="$old_ifs"
+
+printf 'new bundle metadata\n' > "$app_path/Contents/Info.plist"
+touch -t 202101010000 "$app_path/Contents/Info.plist"
+[[ "$(_batch_selected_app_identity "$app_path")" == "$expected_identity" ]]
+[[ "$(_batch_selected_app_info_identity "$app_path")" != "$expected_info_identity" ]]
+
+uninstall_live_bundle_has_other_install() {
+    _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT=""
+    _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=()
+    return 1
+}
+stop_launch_services() { : > "$HOME/teardown-ran"; }
+
+app_details=("$detail")
+success_count=0
+failed_count=0
+brew_apps_removed=0
+failed_items=()
+success_items=()
+success_dock_targets=()
+system_extension_warning_apps=()
+review_only_system_leftovers=()
+review_only_system_leftover_keys=()
+running_at_uninstall_apps=()
+total_size_freed=0
+files_cleaned=0
+total_items=0
+
+_batch_execute_removals
+[[ $success_count -eq 0 && $failed_count -eq 1 ]]
+[[ "${failed_items[0]}" == *"selected app changed after preview"* ]]
+[[ ! -e "$HOME/teardown-ran" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "batch scan narrows a live same-bundle plan to the selected app bundle" {
+    run env HOME="$HOME/live-bundle-only" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+pkg_receipt_nonstandard_app_paths() { :; }
+
+selected="$HOME/Applications/Selected.app"
+survivor="$HOME/Applications/Survivor.app"
+mkdir -p "$selected/Contents" "$survivor/Contents"
+for app in "$selected" "$survivor"; do
+    printf '%s\n' \
+        '<?xml version="1.0" encoding="UTF-8"?>' \
+        '<plist version="1.0"><dict>' \
+        '<key>CFBundleIdentifier</key><string>com.example.shared</string>' \
+        '</dict></plist>' > "$app/Contents/Info.plist"
+done
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+_batch_refresh_selected_app_bundle_id() { printf 'com.example.shared\n'; }
+official_uninstaller_vendor() { return 1; }
+pgrep() { return 1; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { whoami; }
+get_path_size_kb() { printf '1\n'; }
+find_app_files() { : > "$HOME/unexpected-discovery"; return 99; }
+calculate_total_size() { printf '0\n'; }
+has_sensitive_data() { return 1; }
+discover_login_item_helper_bundle_ids() { return 0; }
+
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=("$HOME/Applications")
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-volumes"
+apps_data=(
+    "0|$selected|Selected|com.example.shared|0|Never|0"
+    "0|$survivor|Changed Current Name|com.example.shared|0|Never|0"
+)
+selected_apps=("0|$selected|Selected|com.example.shared|0|Never")
+running_apps=()
+sudo_apps=()
+brew_cask_apps=()
+blocked_apps=()
+manual_removal_apps=()
+app_details=()
+total_estimated_size=0
+
+_batch_scan_app_details
+IFS='|' read -r _ _ stored_bundle _ _ _ _ _ _ _ _ _ _ stored_guard _ \
+    stored_original stored_fingerprint _ <<< "${app_details[0]}"
+[[ "$stored_bundle" == "unknown" ]]
+[[ "$stored_guard" == "guard_login" ]]
+[[ "$stored_original" == "com.example.shared" ]]
+[[ -n "$stored_fingerprint" ]]
+[[ ! -e "$HOME/unexpected-discovery" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "batch execution protects an earlier app when a later same-bundle selection changes" {
+    run env HOME="$HOME/multi-selected-race" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+pkg_receipt_nonstandard_app_paths() { :; }
+
+first="$HOME/Applications/First.app"
+second="$HOME/Applications/Second.app"
+mkdir -p "$first/Contents" "$second/Contents"
+for app in "$first" "$second"; do
+    printf '%s\n' \
+        '<?xml version="1.0" encoding="UTF-8"?>' \
+        '<plist version="1.0"><dict>' \
+        '<key>CFBundleIdentifier</key><string>com.example.shared</string>' \
+        '</dict></plist>' > "$app/Contents/Info.plist"
+    touch -t 202001010000 "$app/Contents/Info.plist"
+done
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+_batch_refresh_selected_app_bundle_id() { printf 'com.example.shared\n'; }
+official_uninstaller_vendor() { return 1; }
+pgrep() { return 1; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { whoami; }
+get_path_size_kb() { printf '1\n'; }
+find_app_files() { : > "$HOME/unexpected-discovery"; return 99; }
+calculate_total_size() { printf '0\n'; }
+has_sensitive_data() { return 1; }
+discover_login_item_helper_bundle_ids() { return 0; }
+
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=("$HOME/Applications")
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-volumes"
+apps_data=(
+    "0|$first|First|com.example.shared|0|Never|0"
+    "0|$second|Second|com.example.shared|0|Never|0"
+)
+selected_apps=(
+    "0|$first|First|com.example.shared|0|Never"
+    "0|$second|Second|com.example.shared|0|Never"
+)
+running_apps=()
+sudo_apps=()
+brew_cask_apps=()
+blocked_apps=()
+manual_removal_apps=()
+app_details=()
+total_estimated_size=0
+
+_batch_scan_app_details
+[[ ${#app_details[@]} -eq 2 ]]
+[[ ! -e "$HOME/unexpected-discovery" ]]
+
+printf '%s\n' \
+    '<?xml version="1.0" encoding="UTF-8"?>' \
+    '<plist version="1.0"><dict>' \
+    '<key>CFBundleIdentifier</key><string>com.example.replaced</string>' \
+    '</dict></plist>' > "$second/Contents/Info.plist"
+touch -t 202101010000 "$second/Contents/Info.plist"
+stop_launch_services() { : > "$HOME/teardown-ran"; }
+
+success_count=0
+failed_count=0
+brew_apps_removed=0
+failed_items=()
+success_items=()
+success_dock_targets=()
+system_extension_warning_apps=()
+review_only_system_leftovers=()
+review_only_system_leftover_keys=()
+running_at_uninstall_apps=()
+total_size_freed=0
+files_cleaned=0
+total_items=0
+
+_batch_execute_removals
+[[ $success_count -eq 0 && $failed_count -eq 2 ]]
+[[ "${failed_items[0]}" == *"app installation set changed after preview"* ]]
+[[ "${failed_items[1]}" == *"selected app changed after preview"* ]]
+[[ ! -e "$HOME/teardown-ran" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "batch execution removes stable same-bundle multi-selections" {
+    run env HOME="$HOME/multi-selected-stable" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+pkg_receipt_nonstandard_app_paths() { :; }
+
+first="$HOME/Applications/First.app"
+second="$HOME/Applications/Second.app"
+mkdir -p "$first/Contents" "$second/Contents"
+for app in "$first" "$second"; do
+    printf '%s\n' \
+        '<?xml version="1.0" encoding="UTF-8"?>' \
+        '<plist version="1.0"><dict>' \
+        '<key>CFBundleIdentifier</key><string>com.example.shared</string>' \
+        '</dict></plist>' > "$app/Contents/Info.plist"
+done
+
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+_batch_refresh_selected_app_bundle_id() { printf '%s\n' "$2"; }
+official_uninstaller_vendor() { return 1; }
+pgrep() { return 1; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { whoami; }
+get_path_size_kb() { printf '1\n'; }
+find_app_files() { : > "$HOME/unexpected-discovery"; return 99; }
+calculate_total_size() { printf '0\n'; }
+has_sensitive_data() { return 1; }
+discover_login_item_helper_bundle_ids() { return 0; }
+stop_launch_services() { :; }
+unregister_app_bundle() { :; }
+
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=("$HOME/Applications")
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-volumes"
+apps_data=(
+    "0|$first|First|com.example.shared|0|Never|0"
+    "0|$second|Second|com.example.shared|0|Never|0"
+)
+selected_apps=(
+    "0|$first|First|com.example.shared|0|Never"
+    "0|$second|Second|com.example.shared|0|Never"
+)
+running_apps=()
+sudo_apps=()
+brew_cask_apps=()
+blocked_apps=()
+manual_removal_apps=()
+app_details=()
+total_estimated_size=0
+
+_batch_scan_app_details
+[[ ${#app_details[@]} -eq 2 ]]
+[[ ! -e "$HOME/unexpected-discovery" ]]
+
+success_count=0
+failed_count=0
+brew_apps_removed=0
+failed_items=()
+success_items=()
+success_dock_targets=()
+system_extension_warning_apps=()
+review_only_system_leftovers=()
+review_only_system_leftover_keys=()
+running_at_uninstall_apps=()
+total_size_freed=0
+files_cleaned=0
+total_items=0
+
+_batch_execute_removals
+[[ $success_count -eq 2 && $failed_count -eq 0 ]]
+[[ ! -e "$first" && ! -e "$second" ]]
+
+# Dry-run records simulated success but leaves both paths in place. Those
+# still-live paths must remain in the expected fingerprint for the second app.
+export MOLE_DRY_RUN=1
+first="$HOME/Applications/DryFirst.app"
+second="$HOME/Applications/DrySecond.app"
+mkdir -p "$first/Contents" "$second/Contents"
+for app in "$first" "$second"; do
+    printf '%s\n' \
+        '<?xml version="1.0" encoding="UTF-8"?>' \
+        '<plist version="1.0"><dict>' \
+        '<key>CFBundleIdentifier</key><string>com.example.dryshared</string>' \
+        '</dict></plist>' > "$app/Contents/Info.plist"
+done
+apps_data=(
+    "0|$first|DryFirst|com.example.dryshared|0|Never|0"
+    "0|$second|DrySecond|com.example.dryshared|0|Never|0"
+)
+selected_apps=(
+    "0|$first|DryFirst|com.example.dryshared|0|Never"
+    "0|$second|DrySecond|com.example.dryshared|0|Never"
+)
+running_apps=()
+sudo_apps=()
+brew_cask_apps=()
+blocked_apps=()
+manual_removal_apps=()
+app_details=()
+total_estimated_size=0
+dry_scan_rc=0
+_batch_scan_app_details || dry_scan_rc=$?
+[[ $dry_scan_rc -eq 0 ]]
+[[ ${#app_details[@]} -eq 2 ]]
+
+success_count=0
+failed_count=0
+brew_apps_removed=0
+failed_items=()
+success_items=()
+success_dock_targets=()
+system_extension_warning_apps=()
+review_only_system_leftovers=()
+review_only_system_leftover_keys=()
+running_at_uninstall_apps=()
+total_size_freed=0
+files_cleaned=0
+total_items=0
+dry_execute_rc=0
+_batch_execute_removals || dry_execute_rc=$?
+[[ $dry_execute_rc -eq 0 ]]
+[[ $success_count -eq 2 && $failed_count -eq 0 ]]
+[[ -e "$first" && -e "$second" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
 @test "batch_uninstall_applications keeps shared bundle-id leftovers when a sibling install survives" {
     # Xcode.app and Xcode-beta.app both use com.apple.dt.Xcode. Uninstalling
     # only the beta must not delete bundle-id-keyed files still owned by the
@@ -616,7 +1254,7 @@ EOF
     # ships "Xcode"); diagnostic-report discovery keys on it, so the beta's
     # Info.plist points at the shared executable name.
     mkdir -p "$HOME/Applications/SharedName-beta.app/Contents"
-    printf '%s' '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>SharedName</string></dict></plist>' > "$HOME/Applications/SharedName-beta.app/Contents/Info.plist"
+    printf '%s' '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.sharedname</string><key>CFBundleExecutable</key><string>SharedName</string></dict></plist>' > "$HOME/Applications/SharedName-beta.app/Contents/Info.plist"
     mkdir -p "$HOME/Library/Logs/DiagnosticReports"
     touch "$HOME/Library/Logs/DiagnosticReports/SharedName-2026-07-03-101010.ips"
     # LaunchAgents referencing an install by exact path: the one pointing at
@@ -1601,6 +2239,42 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "login item helper discovery discards partial results and preserves cancellation" {
+    local app="$HOME/Applications/PartialHelpers.app"
+    local helper="$app/Contents/Library/LoginItems/Partial.app"
+    mkdir -p "$helper/Contents"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" APP="$app" HELPER="$helper" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+run_with_timeout() {
+    shift
+    if [[ "${1:-}" == "find" ]]; then
+        printf '%s\0' "$HELPER"
+        return 73
+    fi
+    "$@"
+}
+result=$(discover_login_item_helper_bundle_ids "$APP")
+[[ -z "$result" ]] || exit 1
+
+run_with_timeout() { return 130; }
+rc=0
+discover_login_item_helper_bundle_ids "$APP" > /dev/null || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ $rc -eq 130 ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=130"* ]]
+}
+
 @test "bootout_login_item_helpers never touches the com.apple namespace" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -2483,6 +3157,11 @@ stop_inline_spinner() { :; }
 uninstall_resolve_eligible_bundle_id() { printf 'com.example.Current\n'; }
 official_uninstaller_vendor() { return 1; }
 uninstall_bundle_id_has_surviving_sibling() { return 1; }
+uninstall_live_bundle_has_other_install() {
+    _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT=""
+    _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=()
+    return 1
+}
 pgrep() { return 1; }
 get_brew_cask_name() { return 1; }
 get_file_owner() { whoami; }
@@ -2512,6 +3191,49 @@ INNER
         echo "$output"
         return 1
     }
+}
+
+@test "batch scan stops before discovery when app sizing is interrupted" {
+    run env HOME="$HOME/batch-size-interrupt" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+app_path="$HOME/Applications/Interrupted.app"
+mkdir -p "$app_path"
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+_batch_refresh_selected_app_bundle_id() { printf 'com.example.Interrupted\n'; }
+official_uninstaller_vendor() { return 1; }
+uninstall_bundle_id_has_surviving_sibling() { return 1; }
+uninstall_live_bundle_has_other_install() {
+    _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT=""
+    _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=()
+    return 1
+}
+pgrep() { return 1; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { whoami; }
+get_path_size_kb() { return 130; }
+find_app_files() { printf 'UNEXPECTED_DISCOVERY\n'; return 99; }
+
+selected_apps=("0|$app_path|Interrupted|com.example.Interrupted|0|Never")
+running_apps=()
+sudo_apps=()
+brew_cask_apps=()
+blocked_apps=()
+manual_removal_apps=()
+app_details=()
+total_estimated_size=0
+rc=0
+_batch_scan_app_details || rc=$?
+printf 'RC=%s DETAILS=%s\n' "$rc" "${#app_details[@]}"
+INNER
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=130 DETAILS=0"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DISCOVERY"* ]]
 }
 
 # ---------------------------------------------------------------------------

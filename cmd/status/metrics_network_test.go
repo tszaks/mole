@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -207,5 +208,21 @@ func TestTunnelInterfaceIsNotReportedAsAProxy(t *testing.T) {
 	rendered := strings.Join(card.lines, "\n")
 	if !strings.Contains(rendered, "Tunnel") || strings.Contains(rendered, "Proxy Tunnel") {
 		t.Fatalf("tunnel must be rendered without a proxy claim: %q", rendered)
+	}
+}
+
+func TestTunnelHintDoesNotExpandProxyJSONContract(t *testing.T) {
+	encoded, err := json.Marshal(ProxyStatus{
+		Enabled:  true,
+		Type:     "TUN",
+		Host:     "utun4",
+		IsTunnel: true,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	const want = `{"enabled":true,"type":"TUN","host":"utun4"}`
+	if string(encoded) != want {
+		t.Fatalf("proxy JSON contract changed: got %s, want %s", encoded, want)
 	}
 }
