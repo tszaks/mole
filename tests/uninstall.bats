@@ -508,6 +508,47 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "uninstall_bundle_id_has_surviving_sibling compares bundle ids case-insensitively" {
+    mkdir -p "$HOME/Applications/Shared.app" "$HOME/Applications/Shared-beta.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+# The survivor's id differs from the selected app's only in case. On a default
+# APFS volume both apps read and write the SAME ~/Library/Preferences plist, so
+# a literal comparison here would let the zap wipe the survivor's settings.
+apps_data=(
+	"0|$HOME/Applications/Shared.app|Shared|com.Example.Shared|0|Never|0"
+	"0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.shared|0|Never|0"
+)
+selected_apps=("0|$HOME/Applications/Shared-beta.app|Shared-beta|com.example.shared|0|Never")
+
+uninstall_bundle_id_has_surviving_sibling "com.example.shared" "$HOME/Applications/Shared-beta.app" || {
+	echo "WRONG: case-differing survivor was not detected"
+	exit 1
+}
+
+names=$(uninstall_surviving_sibling_names "com.example.shared" "$HOME/Applications/Shared-beta.app")
+case "$names" in
+*shared*) ;;
+*)
+	echo "WRONG: case-differing survivor contributed no protected names"
+	exit 1
+	;;
+esac
+
+# A genuinely different id must still not register as a sibling.
+if uninstall_bundle_id_has_surviving_sibling "com.example.other" "$HOME/Applications/Shared-beta.app"; then
+	echo "WRONG: unrelated bundle id reported a sibling"
+	exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "batch_uninstall_applications keeps shared bundle-id leftovers when a sibling install survives" {
     # Xcode.app and Xcode-beta.app both use com.apple.dt.Xcode. Uninstalling
     # only the beta must not delete bundle-id-keyed files still owned by the

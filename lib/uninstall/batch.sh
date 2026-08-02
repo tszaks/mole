@@ -206,8 +206,11 @@ format_uninstall_preview_path() {
     # unquoted ~ in the patsub replacement, turning this into a no-op.
     local tilde='~'
     local display_path="${path/#$HOME/$tilde}"
-    local size_kb
-    size_kb=$(get_path_size_kb "$path" 2> /dev/null || echo "0")
+    local size_kb="0"
+    local size_rc=0
+    size_kb=$(get_path_size_kb "$path" 2> /dev/null) || size_rc=$?
+    [[ $size_rc -ge 128 ]] && return "$size_rc"
+    [[ $size_rc -eq 0 ]] || size_kb="0"
 
     if [[ "$size_kb" =~ ^[0-9]+$ && "$size_kb" -gt 0 ]]; then
         printf '%s %s, %s%s' "$display_path" "$GRAY" "$(bytes_to_human "$((size_kb * 1024))")" "$NC"
@@ -522,6 +525,7 @@ remove_file_list() {
             # A failed direct move leaves that item in place for manual review.
             debug_log "Trash batch stopped; unmoved paths were preserved"
         fi
+        [[ $batch_rc -ge 128 ]] && return "$batch_rc"
     fi
 
     if [[ ${#fallback_paths[@]} -gt 0 ]]; then
@@ -530,7 +534,10 @@ remove_file_list() {
             # mole_delete routes through Trash when MOLE_DELETE_MODE=trash
             # (uninstall default) and only uses safe_* permanent removal when
             # the caller explicitly selected permanent mode. See #723.
-            mole_delete "$fb" "$use_sudo" && ((++count)) || true
+            local delete_rc=0
+            mole_delete "$fb" "$use_sudo" || delete_rc=$?
+            [[ $delete_rc -ge 128 ]] && return "$delete_rc"
+            [[ $delete_rc -eq 0 ]] && count=$((count + 1))
         done
     fi
 
@@ -552,17 +559,35 @@ remove_file_list() {
 # still uses.
 # Reads apps_data and selected_apps from the caller's scope via dynamic
 # scoping; both may be unset when batch.sh is exercised standalone in tests.
+# Lowercase a bundle id for sibling comparison.
+#
+# Bundle ids are case-PRESERVING but not case-SENSITIVE for the paths a cask
+# zap stanza and the name-derived cleanup actually touch: on a default APFS
+# volume `~/Library/Preferences/com.Foo.Bar.plist` and `com.foo.bar.plist` are
+# the same file. Comparing the ids literally therefore let a survivor whose id
+# differs only in case slip the guard, and the uninstall then wiped the data
+# both apps share.
+#
+# `LC_ALL=C tr` rather than `${var,,}`: this repo still supports bash 3.2.
+uninstall_normalize_bundle_id() {
+    printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+}
+
 uninstall_bundle_id_has_surviving_sibling() {
     local bundle_id="$1"
     local app_path="$2"
 
     [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && return 1
 
-    local row other_path other_bundle
+    local bundle_id_lower
+    bundle_id_lower=$(uninstall_normalize_bundle_id "$bundle_id")
+
+    local row other_path other_bundle other_bundle_lower
     # shellcheck disable=SC2154 # apps_data is provided by bin/uninstall.sh via dynamic scope.
     for row in "${apps_data[@]+"${apps_data[@]}"}"; do
         IFS='|' read -r _ other_path _ other_bundle _ _ _ <<< "$row"
-        [[ "$other_bundle" == "$bundle_id" ]] || continue
+        other_bundle_lower=$(uninstall_normalize_bundle_id "$other_bundle")
+        [[ "$other_bundle_lower" == "$bundle_id_lower" ]] || continue
         [[ "$other_path" == "$app_path" ]] && continue
         [[ -d "$other_path" ]] || continue
 
@@ -592,10 +617,14 @@ uninstall_surviving_sibling_names() {
 
     [[ -z "$bundle_id" || "$bundle_id" == "unknown" ]] && return 0
 
-    local row other_path other_name other_bundle
+    local bundle_id_lower
+    bundle_id_lower=$(uninstall_normalize_bundle_id "$bundle_id")
+
+    local row other_path other_name other_bundle other_bundle_lower
     for row in "${apps_data[@]+"${apps_data[@]}"}"; do
         IFS='|' read -r _ other_path other_name other_bundle _ _ _ <<< "$row"
-        [[ "$other_bundle" == "$bundle_id" ]] || continue
+        other_bundle_lower=$(uninstall_normalize_bundle_id "$other_bundle")
+        [[ "$other_bundle_lower" == "$bundle_id_lower" ]] || continue
         [[ "$other_path" == "$app_path" ]] && continue
         [[ -d "$other_path" ]] || continue
 
@@ -804,7 +833,11 @@ _batch_scan_app_details() {
             continue
         fi
 
-        local app_size_kb=$(get_path_size_kb "$app_path" || echo "0")
+        local app_size_kb="0"
+        local app_size_rc=0
+        app_size_kb=$(get_path_size_kb "$app_path") || app_size_rc=$?
+        [[ $app_size_rc -ge 128 ]] && return "$app_size_rc"
+        [[ $app_size_rc -eq 0 && "$app_size_kb" =~ ^[0-9]+$ ]] || app_size_kb=0
         local related_files="" diag_user="" diag_system=""
         # system_files is a newline-separated string, not an array.
         # shellcheck disable=SC2178,SC2128
@@ -838,7 +871,11 @@ _batch_scan_app_details() {
             fi
             system_files=$(find_app_system_files "$bundle_id" "$discovery_app_name" || true)
         fi
-        local related_size_kb=$(calculate_total_size "$related_files" || echo "0")
+        local related_size_kb="0"
+        local related_size_rc=0
+        related_size_kb=$(calculate_total_size "$related_files") || related_size_rc=$?
+        [[ $related_size_rc -ge 128 ]] && return "$related_size_rc"
+        [[ $related_size_rc -eq 0 && "$related_size_kb" =~ ^[0-9]+$ ]] || related_size_kb=0
         local review_only_system_files="$system_files"
         review_only_system_files=$(append_line "$review_only_system_files" "$diag_system")
         # System-level remnants are review-only in the CLI: shown in the preview
@@ -948,25 +985,30 @@ _batch_preview_and_confirm() {
             echo "$diag_system_display"
         )
 
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $(format_uninstall_preview_path "$app_path")"
+        local preview_path=""
+        preview_path=$(format_uninstall_preview_path "$app_path") || return $?
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $preview_path"
 
         # Show all related files so users can fully review before deletion.
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
-                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $(format_uninstall_preview_path "$file")"
+                preview_path=$(format_uninstall_preview_path "$file") || return $?
+                echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $preview_path"
             fi
         done <<< "$related_files"
 
         # Show all system files so users can fully review before deletion.
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
-                echo -e "  ${BLUE}${ICON_WARNING}${NC} System: $(format_uninstall_preview_path "$file")"
+                preview_path=$(format_uninstall_preview_path "$file") || return $?
+                echo -e "  ${BLUE}${ICON_WARNING}${NC} System: $preview_path"
             fi
         done <<< "$system_files"
 
         while IFS= read -r file; do
             if [[ -n "$file" && -e "$file" ]]; then
-                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Review only: $(format_uninstall_preview_path "$file")"
+                preview_path=$(format_uninstall_preview_path "$file") || return $?
+                echo -e "  ${YELLOW}${ICON_WARNING}${NC} Review only: $preview_path"
             fi
         done <<< "$review_system_display"
     done
