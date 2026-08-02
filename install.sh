@@ -135,6 +135,11 @@ INSTALL_LOCK_PATH=""
 INSTALL_LOCK_CONTROL=""
 INSTALL_LOCK_HOLDER_PID=""
 INSTALL_LOCK_USE_SUDO=false
+# Why the last acquire_install_lock attempt failed. A bare "the lock is busy"
+# message sent one reporter reverse-engineering the ancestor check by hand
+# (#1335), so callers report the actual cause instead.
+INSTALL_LOCK_FAILURE=""
+INSTALL_LOCK_UNSAFE_ANCESTOR=""
 INSTALL_SOURCE_TMP=""
 
 ACTION="install"
@@ -247,9 +252,12 @@ install_lock_has_unsafe_ancestor() {
     local probe="$INSTALL_DIR"
     local current_uid owner_uid mode acl_listing
     current_uid=$(id -u 2> /dev/null || true)
+    INSTALL_LOCK_UNSAFE_ANCESTOR="$probe"
     [[ "$current_uid" =~ ^[0-9]+$ ]] || return 0
 
     while true; do
+        # Record the directory under inspection so a rejection can name it.
+        INSTALL_LOCK_UNSAFE_ANCESTOR="$probe"
         [[ ! -L "$probe" ]] || return 0
         owner_uid=$(/usr/bin/stat -f%u "$probe" 2> /dev/null || true)
         mode=$(/usr/bin/stat -f%Lp "$probe" 2> /dev/null || true)
@@ -275,6 +283,7 @@ install_lock_has_unsafe_ancestor() {
         probe="$parent_probe"
         [[ -n "$probe" ]] || probe="/"
     done
+    INSTALL_LOCK_UNSAFE_ANCESTOR=""
     return 1
 }
 
@@ -372,7 +381,19 @@ acquire_install_lock() {
     if [[ ${EUID:-0} -ne 0 && ! -w "$INSTALL_DIR" ]]; then
         use_sudo=true
     fi
-    install_lock_has_unsafe_ancestor "$use_sudo" && return 1
+    INSTALL_LOCK_FAILURE="busy"
+    if install_lock_has_unsafe_ancestor "$use_sudo"; then
+        INSTALL_LOCK_FAILURE="unsafe_ancestor"
+        return 1
+    fi
+    # Probe admin access before the first privileged lock step. Without this the
+    # denial surfaces as a swallowed `sudo -n` inside install_lock_prepare_dir
+    # and gets reported as a busy lock.
+    if [[ "$use_sudo" == "true" ]] &&
+        ! install_lock_command "$use_sudo" /usr/bin/true 2> /dev/null; then
+        INSTALL_LOCK_FAILURE="no_admin"
+        return 1
+    fi
     install_lock_prepare_dir "$use_sudo" || return 1
     if install_lock_command "$use_sudo" /bin/test -e "$lock_path" 2> /dev/null ||
         install_lock_command "$use_sudo" /bin/test -L "$lock_path" 2> /dev/null; then
@@ -421,6 +442,7 @@ acquire_install_lock() {
             INSTALL_LOCK_CONTROL="$control_path"
             INSTALL_LOCK_HOLDER_PID="$holder_pid"
             INSTALL_LOCK_USE_SUDO="$use_sudo"
+            INSTALL_LOCK_FAILURE=""
             return 0
         fi
         /bin/sleep 0.05
@@ -430,6 +452,25 @@ acquire_install_lock() {
     install_lock_remove_control "$control_path" "$use_sudo" || true
     wait "$holder_pid" 2> /dev/null || true
     return 1
+}
+
+# One rejection reason, one remedy. Callers must not print a bare lock message.
+report_install_lock_failure() {
+    case "$INSTALL_LOCK_FAILURE" in
+        no_admin)
+            log_error "Admin access to $INSTALL_DIR is required but not available"
+            log_error "Cache credentials first, then retry: sudo -v && mo update"
+            ;;
+        unsafe_ancestor)
+            log_error "Refusing a privileged install through ${INSTALL_LOCK_UNSAFE_ANCESTOR:-a parent directory}"
+            log_error "It is a symlink, or writable by someone other than root, so a privileged write there cannot be trusted"
+            log_error "Restore ownership, then retry: sudo chown root:wheel ${INSTALL_LOCK_UNSAFE_ANCESTOR:-<dir>} && sudo chmod go-w ${INSTALL_LOCK_UNSAFE_ANCESTOR:-<dir>}"
+            ;;
+        *)
+            log_error "The Mole installation lock for $INSTALL_DIR is held by another process"
+            log_error "Wait for that install or update to finish, then retry"
+            ;;
+    esac
 }
 
 release_install_lock() {
@@ -1392,7 +1433,7 @@ perform_install() {
     check_requirements
     create_directories
     acquire_install_lock || {
-        log_error "Could not acquire the Mole installation lock for $INSTALL_DIR"
+        report_install_lock_failure
         exit 1
     }
     install_files
@@ -1480,7 +1521,7 @@ perform_update() {
     }
     acquire_install_lock || {
         VERBOSE=$old_verbose
-        log_error "Could not acquire the Mole installation lock for $INSTALL_DIR"
+        report_install_lock_failure
         exit 1
     }
     install_files || {

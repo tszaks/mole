@@ -518,6 +518,64 @@ SCRIPT
 	grep -q "raw.githubusercontent.com/tw93/mole/V${current_version#V}/install.sh" "$curl_url_log"
 }
 
+@test "mo update aborts when the sudo session cannot reach the installer child" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local sudo_log="$TEST_ROOT/sudo.log"
+	local sudo_count="$TEST_ROOT/sudo.count"
+	local current_version
+
+	current_version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "$PROJECT_ROOT/mole" | head -1)"
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	make_update_curl_stub "$fake_bin" "$current_version"
+	chmod a-w "$manual_bin/mole"
+
+	# macOS scopes the sudo timestamp to the controlling terminal and falls back
+	# to the parent PID when there is none, so a credential this shell holds does
+	# not reach a child process. Model exactly that: the first `-n true` (the one
+	# request_sudo_access runs in-process) succeeds, the probe's child call does
+	# not. Without the guard the installer runs and fails on a swallowed sudo.
+	cat > "$fake_bin/sudo" << 'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$SUDO_LOG"
+if [[ "$*" == "-n true" ]]; then
+	count=0
+	[[ -s "$SUDO_COUNT" ]] && count=$(cat "$SUDO_COUNT")
+	count=$((count + 1))
+	printf '%s\n' "$count" > "$SUDO_COUNT"
+	[[ "$count" -eq 1 ]] || exit 1
+fi
+exit 0
+SCRIPT
+	chmod +x "$fake_bin/sudo"
+	: > "$curl_url_log"
+	: > "$sudo_log"
+	: > "$sudo_count"
+
+	run env \
+		HOME="$HOME" \
+		MOLE_TEST_MODE=0 \
+		MOLE_TEST_NO_AUTH=0 \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		SUDO_LOG="$sudo_log" \
+		SUDO_COUNT="$sudo_count" \
+		"$manual_bin/mo" update --force
+
+	chmod u+w "$manual_bin/mole"
+
+	[ "$status" -eq 1 ] || return 1
+	[[ "$output" == *"Admin access cannot be handed to the installer"* ]] || return 1
+	[[ "$output" == *"sudo -v && mo update"* ]] || return 1
+	[ ! -e "$installer_args_log" ] || return 1
+	[ "$(cat "$sudo_count")" -ge 2 ] || return 1
+}
+
 @test "installer sudo reuse uses non-interactive sudo checks" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

@@ -171,6 +171,17 @@ _update_lock_sudo() {
     sudo -n "$@"
 }
 
+# The installer, and the lock helpers above, reuse this shell's sudo session
+# through `sudo -n`. Ask a real child process whether that session reaches it
+# rather than inferring it from a TTY check: the timestamp scope is sudo's
+# decision, not ours, and the answer is the only thing that matters here.
+_update_sudo_reaches_subprocess() {
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]]; then
+        return 1
+    fi
+    /bin/sh -c 'sudo -n true' 2> /dev/null
+}
+
 _update_lock_read_owner() {
     local lock_path="$1"
     local use_sudo="$2"
@@ -1070,6 +1081,21 @@ update_mole() (
         fi
         # Start sudo keepalive to prevent cache expiration during install
         sudo_keepalive_pid=$(_start_sudo_keepalive)
+
+        # The installer runs as a child process and reuses this session through
+        # `sudo -n`. macOS scopes the sudo timestamp to the controlling
+        # terminal, and falls back to the parent PID when there is none, so in a
+        # terminal-less run (CI, cron, `ssh` without -t, an editor's shell pane)
+        # the credential this shell just obtained does not reach any child.
+        # Probe that handoff instead of guessing from `-t 0`; failing here beats
+        # failing halfway through a privileged install.
+        if ! _update_sudo_reaches_subprocess; then
+            _update_cleanup
+            rm -f "$tmp_installer"
+            log_error "Admin access cannot be handed to the installer in this environment"
+            echo -e "${ICON_REVIEW} Run ${GRAY}mo update${NC} from a terminal, or cache credentials first: ${GRAY}sudo -v && mo update${NC}"
+            exit 1
+        fi
     fi
 
     local installer_assume_sudo_auth="0"

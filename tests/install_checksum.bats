@@ -742,6 +742,10 @@ if acquire_install_lock; then
 	echo "UNEXPECTED_WRITABLE_PARENT_ACL_ACCEPTED"
 	exit 1
 fi
+# A refusal must name its own cause. Reporting an ancestor rejection as a busy
+# lock is what sent #1335 reverse-engineering the check by hand.
+[[ "$INSTALL_LOCK_FAILURE" == "unsafe_ancestor" ]] || exit 1
+[[ "$INSTALL_LOCK_UNSAFE_ANCESTOR" == "$INSTALL_DIR" ]] || exit 1
 /bin/chmod -N "$INSTALL_DIR"
 acl_rule="everyone deny writeattr,file_inherit,directory_inherit"
 /bin/chmod +a "$acl_rule" "$INSTALL_DIR"
@@ -756,6 +760,7 @@ if acquire_install_lock; then
 	echo "UNEXPECTED_CONCURRENT_INSTALL_LOCK"
 	exit 1
 fi
+[[ "$INSTALL_LOCK_FAILURE" == "busy" ]] || exit 1
 release_install_lock
 [[ -f "$lock_path" ]] || exit 1
 
@@ -840,7 +845,13 @@ declare -f acquire_install_lock | grep -q '/usr/bin/lockf'
 ! grep -q 'trap cleanup_tmp EXIT' "$PROJECT_ROOT/install.sh"
 grep -q "trap 'cleanup_installer' EXIT" "$PROJECT_ROOT/install.sh"
 ! grep -qF 'Another Mole installation or update is already writing' "$PROJECT_ROOT/install.sh"
-grep -qF 'Could not acquire the Mole installation lock for' "$PROJECT_ROOT/install.sh"
+# Both call sites route through the reporter, and each cause keeps its own
+# remedy. A single catch-all lock message is the regression being pinned.
+! grep -qF 'Could not acquire the Mole installation lock for' "$PROJECT_ROOT/install.sh"
+[[ "$(grep -c 'report_install_lock_failure$' "$PROJECT_ROOT/install.sh")" -eq 2 ]] || exit 1
+grep -qF 'Cache credentials first, then retry: sudo -v && mo update' "$PROJECT_ROOT/install.sh"
+grep -qF 'Refusing a privileged install through' "$PROJECT_ROOT/install.sh"
+grep -qF 'is held by another process' "$PROJECT_ROOT/install.sh"
 EOF
 
 	[ "$status" -eq 0 ] || {
