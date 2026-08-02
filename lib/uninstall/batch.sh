@@ -212,7 +212,7 @@ format_uninstall_preview_path() {
     local size_kb="0"
     local size_rc=0
     size_kb=$(get_path_size_kb "$path" 2> /dev/null) || size_rc=$?
-    [[ $size_rc -ge 128 ]] && return "$size_rc"
+    [[ $size_rc -eq 124 || $size_rc -ge 128 ]] && return "$size_rc"
     [[ $size_rc -eq 0 ]] || size_kb="0"
 
     if [[ "$size_kb" =~ ^[0-9]+$ && "$size_kb" -gt 0 ]]; then
@@ -730,6 +730,7 @@ _uninstall_live_candidate_is_selected() {
 _uninstall_live_candidate_is_nested_app() {
     local root="$1"
     local candidate="$2"
+    [[ "$candidate" == "$root" ]] && return 1
     local relative="${candidate#"$root"/}"
     [[ "$relative" != "$candidate" ]] || return 0
     local parent="${relative%/*}"
@@ -930,7 +931,10 @@ uninstall_live_bundle_has_other_install() {
         _uninstall_materialize_complete_find0 "$volume_roots_file" \
             "$deadline_seconds" "$_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT" \
             -mindepth 2 -maxdepth 2 \
-            -type d -name Applications || volume_scan_rc=$?
+            \( \
+            \( -type d -name Applications \) -o \
+            \( \( -type d -o -type l \) -name '*.app' \) \
+            \) || volume_scan_rc=$?
         if [[ $volume_scan_rc -ne 0 ]]; then
             rm -f -- "$volume_roots_file" "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp files created above
             [[ $volume_scan_rc -eq 124 || $volume_scan_rc -ge 128 ]] && return "$volume_scan_rc"
@@ -1413,7 +1417,7 @@ _batch_scan_app_details() {
         local app_size_kb="0"
         local app_size_rc=0
         app_size_kb=$(get_path_size_kb "$app_path") || app_size_rc=$?
-        [[ $app_size_rc -ge 128 ]] && return "$app_size_rc"
+        [[ $app_size_rc -eq 124 || $app_size_rc -ge 128 ]] && return "$app_size_rc"
         [[ $app_size_rc -eq 0 && "$app_size_kb" =~ ^[0-9]+$ ]] || app_size_kb=0
         local related_files="" diag_user="" diag_system=""
         # system_files is a newline-separated string, not an array.
@@ -1465,7 +1469,7 @@ _batch_scan_app_details() {
         local related_size_kb="0"
         local related_size_rc=0
         related_size_kb=$(calculate_total_size "$related_files") || related_size_rc=$?
-        [[ $related_size_rc -ge 128 ]] && return "$related_size_rc"
+        [[ $related_size_rc -eq 124 || $related_size_rc -ge 128 ]] && return "$related_size_rc"
         [[ $related_size_rc -eq 0 && "$related_size_kb" =~ ^[0-9]+$ ]] || related_size_kb=0
         local review_only_system_files="$system_files"
         review_only_system_files=$(append_line "$review_only_system_files" "$diag_system")

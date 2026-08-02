@@ -803,7 +803,7 @@ write_install_channel_metadata() {
     local install_receipt="${3:-}"
     local metadata_file="$CONFIG_DIR/install_channel"
 
-    if [[ -n "$install_receipt" && ! "$install_receipt" =~ ^heal-[0-9]+-[0-9]+-[0-9]+$ ]]; then
+    if [[ -n "$install_receipt" && ! "$install_receipt" =~ ^(heal|update)-[0-9]+-[0-9]+-[0-9]+$ ]]; then
         return 1
     fi
 

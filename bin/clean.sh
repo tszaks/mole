@@ -24,6 +24,9 @@ source "$SCRIPT_DIR/../lib/clean/user.sh"
 
 SYSTEM_CLEAN=false
 DRY_RUN=false
+if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
+    DRY_RUN=true
+fi
 PROTECT_FINDER_METADATA=false
 EXTERNAL_VOLUME_TARGET=""
 IS_M_SERIES=$([[ "$(uname -m)" == "arm64" ]] && echo "true" || echo "false")

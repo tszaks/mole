@@ -204,7 +204,10 @@ clean_xcode_derived_data() {
                 dry_run_stopped_reason=$(_xcode_cleanup_skip_reason "$xcode_state")
                 break
             fi
-            dir_size_kb=$(get_path_size_kb "$dir" 2> /dev/null || echo 0)
+            local size_rc=0
+            dir_size_kb=$(get_path_size_kb "$dir" 2> /dev/null) || size_rc=$?
+            [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+            [[ $size_rc -eq 0 ]] || return "$size_rc"
             [[ "$dir_size_kb" =~ ^[0-9]+$ ]] || dir_size_kb=0
             xcode_state=0
             _xcode_cleanup_process_state || xcode_state=$?
@@ -250,7 +253,10 @@ clean_xcode_derived_data() {
         fi
 
         local dir_size_kb=0
-        dir_size_kb=$(get_path_size_kb "$dir" 2> /dev/null || echo 0)
+        local size_rc=0
+        dir_size_kb=$(get_path_size_kb "$dir" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         [[ "$dir_size_kb" =~ ^[0-9]+$ ]] || dir_size_kb=0
 
         # Sizing is timeout-bounded but can still take long enough for a build
@@ -376,7 +382,7 @@ clean_xcode_tools() {
                 "Xcode build products" \
                 ~/Library/Developer/Xcode/Products/* \
                 "Xcode build products" || return 0
-            clean_xcode_derived_data
+            clean_xcode_derived_data || return $?
         else
             if [[ $xcode_state -eq 2 ]]; then
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode cache/build products · skipped (process state unknown)"
@@ -819,7 +825,7 @@ clean_download_managers() {
     safe_clean ~/Library/Caches/com.downie.Downie-* "Downie cache"
     safe_clean ~/Library/Caches/com.folx.*/* "Folx cache"
     safe_clean ~/Library/Caches/com.charlessoft.pacifist/* "Pacifist cache"
-    clean_neatdm_stale_segments
+    clean_neatdm_stale_segments || return $?
 }
 # Neat Download Manager: clean stale incomplete download segments.
 # History database (NeatDB.db) is never touched; only numbered segment
@@ -855,8 +861,11 @@ clean_neatdm_stale_segments() {
     [[ ${#stale_dirs[@]} -eq 0 ]] && return 0
 
     for seg_dir in "${stale_dirs[@]}"; do
-        local size_kb
-        size_kb=$(get_path_size_kb "$seg_dir")
+        local size_kb=""
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$seg_dir") || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
         if [[ "$DRY_RUN" != "true" ]]; then
@@ -1014,7 +1023,7 @@ clean_user_gui_applications() {
     clean_productivity_apps
     clean_media_players
     clean_video_players
-    clean_download_managers
+    clean_download_managers || return $?
     clean_gaming_platforms
     clean_translation_apps
     clean_screenshot_tools

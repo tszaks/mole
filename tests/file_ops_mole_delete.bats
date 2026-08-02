@@ -1260,8 +1260,8 @@ EOF
     # Regression: the primary sizing du (file_ops.sh get_path_size_kb) ran
     # WITHOUT run_with_timeout while every sibling call site was bounded, so
     # one stalled SMB/FUSE mount wedged a parallel scan worker forever. The
-    # stub du sleeps far past the 1s override; a bounded helper returns "0"
-    # quickly, an unbounded one trips the bats timeout.
+    # stub du sleeps far past the 1s override; a bounded helper returns the
+    # timeout status quickly, while an unbounded one trips the bats timeout.
     local stub_dir="$SANDBOX/stub-bin"
     mkdir -p "$stub_dir"
     cat > "$stub_dir/du" <<'STUB'
@@ -1286,8 +1286,8 @@ get_path_size_kb "$victim_dir"
 EOF
     elapsed=$((SECONDS - started))
 
-    [ "$status" -eq 0 ]
-    [ "$output" = "0" ] || return 1
+    [ "$status" -eq 124 ]
+    [ -z "$output" ] || return 1
     # Generous ceiling: 1s timeout + escalation grace, never 30s.
     [ "$elapsed" -lt 10 ] || return 1
 }

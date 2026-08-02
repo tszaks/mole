@@ -2541,14 +2541,14 @@ get_path_size_kb() {
     if [[ "$path" == *.app || "$path" == *.app/ ]]; then
         local mdls_size
         local mdls_timeout=""
-        mdls_timeout=$(_mole_timeout_with_deadline "$size_timeout" "$size_deadline") || {
-            echo "0"
-            return
-        }
+        local mdls_deadline_rc=0
+        mdls_timeout=$(_mole_timeout_with_deadline \
+            "$size_timeout" "$size_deadline") || mdls_deadline_rc=$?
+        [[ $mdls_deadline_rc -eq 0 ]] || return "$mdls_deadline_rc"
         local mdls_rc=0
         mdls_size=$(run_with_timeout "$mdls_timeout" mdls \
             -name kMDItemLogicalSize -raw "$path" < /dev/null 2> /dev/null) || mdls_rc=$?
-        [[ $mdls_rc -ge 128 ]] && return "$mdls_rc"
+        [[ $mdls_rc -eq 124 || $mdls_rc -ge 128 ]] && return "$mdls_rc"
         if [[ "$mdls_size" =~ ^[0-9]+$ && "$mdls_size" -gt 0 ]]; then
             # Return in KB
             echo "$((mdls_size / 1024))"
@@ -2560,14 +2560,14 @@ get_path_size_kb() {
     if [[ -f "$path" || -L "$path" ]]; then
         local bytes
         local stat_timeout=""
-        stat_timeout=$(_mole_timeout_with_deadline "$size_timeout" "$size_deadline") || {
-            echo "0"
-            return
-        }
+        local stat_deadline_rc=0
+        stat_timeout=$(_mole_timeout_with_deadline \
+            "$size_timeout" "$size_deadline") || stat_deadline_rc=$?
+        [[ $stat_deadline_rc -eq 0 ]] || return "$stat_deadline_rc"
         local stat_rc=0
         bytes=$(run_with_timeout "$stat_timeout" stat \
             -f%z "$path" < /dev/null 2> /dev/null) || stat_rc=$?
-        [[ $stat_rc -ge 128 ]] && return "$stat_rc"
+        [[ $stat_rc -eq 124 || $stat_rc -ge 128 ]] && return "$stat_rc"
         if [[ "$bytes" =~ ^[0-9]+$ ]]; then
             # Round up to whole KB to match 'du -skP' semantics.
             echo $(((bytes + 1023) / 1024))
@@ -2577,18 +2577,18 @@ get_path_size_kb() {
 
     # Bounded like every other du call site (hints/project/caches): an
     # unbounded walk here wedges one parallel sizing worker forever on a
-    # stalled SMB/FUSE mount. On timeout the size reads 0, which only
-    # affects display/accounting, never deletion decisions.
+    # stalled SMB/FUSE mount. A timeout is cancellation, not a zero-byte
+    # measurement, because callers may feed the result into a deletion plan.
     local size
     local du_timeout=""
-    du_timeout=$(_mole_timeout_with_deadline "$size_timeout" "$size_deadline") || {
-        echo "0"
-        return
-    }
+    local du_deadline_rc=0
+    du_timeout=$(_mole_timeout_with_deadline \
+        "$size_timeout" "$size_deadline") || du_deadline_rc=$?
+    [[ $du_deadline_rc -eq 0 ]] || return "$du_deadline_rc"
     local du_rc=0
     size=$(run_with_timeout "$du_timeout" du -skP "$path" 2> /dev/null |
         awk 'NR==1 {print $1; exit}') || du_rc=$?
-    [[ $du_rc -ge 128 ]] && return "$du_rc"
+    [[ $du_rc -eq 124 || $du_rc -ge 128 ]] && return "$du_rc"
 
     if [[ "$size" =~ ^[0-9]+$ ]]; then
         echo "$size"

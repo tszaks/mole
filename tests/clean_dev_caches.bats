@@ -519,6 +519,34 @@ EOF
     [[ "$output" != *"swap.img"* ]]
 }
 
+@test "clean_dev_docker stops before BuildX cleanup when OrbStack sizing times out" {
+    local orb_data="$HOME/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data"
+    mkdir -p "$orb_data"
+    touch "$orb_data/data.img.raw"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false \
+        MOLE_CURRENT_COMMAND=clean MOLE_CLEAN_CANCEL_STATUS=0 \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "UNEXPECTED_BUILDX:$2|$1"; }
+get_path_size_kb() { return 124; }
+note_activity() { :; }
+debug_log() { :; }
+set +e
+clean_dev_docker
+rc=$?
+set -e
+printf 'RC=%s CANCEL=%s\n' "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+[[ $rc -eq 124 && $MOLE_CLEAN_CANCEL_STATUS -eq 124 ]]
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=124 CANCEL=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_BUILDX"* ]]
+}
+
 @test "clean_dev_docker no longer depends on whitelist to avoid prune" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -643,7 +671,7 @@ clean_codex_runtimes
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Codex runtimes · manual review"* ]] || return 1
+    [[ "$output" == *"Codex runtimes · manual review (1M)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:Codex CLI runtimes|$HOME/.cache/codex-runtimes/codex-primary-runtime"* ]]
 }
 
@@ -1301,6 +1329,40 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Flutter build cache (.dart_tool)"* ]] || return 1
     [[ "$output" == *"Flutter build cache (build/)"* ]]
+}
+
+@test "project cache processing stops after a Python size timeout" {
+    local python_root="$HOME/Code/A"
+    local next_root="$HOME/Code/B"
+    mkdir -p "$python_root/__pycache__" "$next_root/.next/cache"
+    touch "$python_root/__pycache__/module.pyc" "$next_root/.next/cache/output"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false \
+        MOLE_CURRENT_COMMAND=clean MOLE_CLEAN_CANCEL_STATUS=0 \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/caches.sh"
+matches_file=$(mktemp)
+printf '%s\t%s\n' "$HOME/Code/A" "$HOME/Code/A/__pycache__" > "$matches_file"
+printf '%s\t%s\n' "$HOME/Code/B" "$HOME/Code/B/.next" >> "$matches_file"
+get_path_size_kb() { return 124; }
+safe_clean() { echo "UNEXPECTED_CONTINUATION:$2|$1"; }
+safe_remove() { echo "UNEXPECTED_DELETE:$1"; }
+
+set +e
+process_project_cache_matches "$matches_file"
+rc=$?
+set -e
+rm -f "$matches_file"
+printf 'RC=%s CANCEL=%s\n' "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+[[ $rc -eq 124 && $MOLE_CLEAN_CANCEL_STATUS -eq 124 ]]
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=124 CANCEL=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CONTINUATION"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DELETE"* ]]
 }
 
 @test "clean_dev_misc includes Chrome DevTools MCP cache when server not running" {

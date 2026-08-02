@@ -2642,6 +2642,63 @@ EOF
     [[ "$output" != *"removed 1"* ]] || return 1
 }
 
+@test "clean_dev_mobile stops before simctl delete when unavailable-device sizing times out" {
+    local case_home="$HOME/simctl-size-timeout"
+    local udid="ABCDEF01-2345-6789-ABCD-EF0123456789"
+    mkdir -p "$case_home/Library/Developer/CoreSimulator/Devices/$udid"
+
+    run env HOME="$case_home" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false \
+        MOLE_CURRENT_COMMAND=clean MOLE_CLEAN_CANCEL_STATUS=0 \
+        SIMCTL_CALL_LOG="$case_home/simctl-calls.log" \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+check_android_ndk() { :; }
+clean_xcode_documentation_cache() { :; }
+clean_xcode_system_coresimulator_caches() { :; }
+clean_xcode_simulator_runtime_volumes() { :; }
+clean_xcode_xctest_devices() { :; }
+clean_xcode_device_support() { :; }
+safe_clean() { :; }
+note_activity() { :; }
+debug_log() { :; }
+xcrun() { :; }
+_resolve_simctl_developer_dir() {
+    _MOLE_SIMCTL_DEVELOPER_DIR="$HOME/Xcode.app/Contents/Developer"
+    _MOLE_SIMCTL_RESOLUTION_STATUS="ready"
+}
+_run_simctl() {
+    shift
+    printf '%s\n' "$*" >> "$SIMCTL_CALL_LOG"
+    case "$*" in
+        "list devices") return 0 ;;
+        "list devices unavailable")
+            printf '    iPhone 12 (ABCDEF01-2345-6789-ABCD-EF0123456789) (Shutdown) (unavailable)\n'
+            return 0
+            ;;
+        "delete unavailable") return 0 ;;
+    esac
+    return 1
+}
+get_path_size_kb() { return 124; }
+
+set +e
+clean_dev_mobile
+rc=$?
+set -e
+printf 'RC=%s CANCEL=%s\n' "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+[[ $rc -eq 124 && $MOLE_CLEAN_CANCEL_STATUS -eq 124 ]]
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=124 CANCEL=124"* ]] || return 1
+    [[ -f "$case_home/simctl-calls.log" ]] || return 1
+    if grep -q '^delete unavailable$' "$case_home/simctl-calls.log"; then
+        return 1
+    fi
+}
+
 @test "clean_dev_ai_agents protects the copilot version pointed at by ~/.local/bin/copilot" {
     local copilot_root="$HOME/.copilot/pkg/universal"
     local bin_dir="$HOME/.local/bin"
@@ -2671,4 +2728,38 @@ EOF
     [[ "$output" == *"/1.0.5|GitHub Copilot CLI old version"* ]] || return 1
     [[ "$output" != *"/1.0.32|"* ]] || return 1
     [[ "$output" != *"/1.0.34|"* ]]
+}
+
+@test "developer cleanup stops before later tools after agent inventory cancellation" {
+    run env HOME="$HOME/developer-aggregate-timeout" PROJECT_ROOT="$PROJECT_ROOT" \
+        MOLE_CURRENT_COMMAND=clean /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+mkdir -p "$HOME"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+stop_section_spinner() { :; }
+for fn in \
+    clean_dev_npm clean_dev_python clean_dev_go clean_dev_mise clean_dev_rust \
+    check_rust_toolchains clean_dev_ruby clean_dev_perl clean_dev_docker \
+    clean_dev_cloud clean_dev_nix clean_dev_shell clean_dev_frontend \
+    clean_project_caches clean_dev_mobile clean_dev_jvm \
+    clean_dev_jetbrains_toolbox clean_dev_jetbrains_logs; do
+    eval "$fn() { :; }"
+done
+clean_dev_ai_agents() {
+    _mole_record_clean_cancellation 124
+    return 124
+}
+clean_dev_other_langs() { echo "UNEXPECTED_LATER_DELETE"; }
+set +e
+clean_developer_tools
+rc=$?
+set -e
+printf 'DEVELOPER_RC:%s CANCEL:%s\n' "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+[[ $rc -eq 124 && $MOLE_CLEAN_CANCEL_STATUS -eq 124 ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DEVELOPER_RC:124 CANCEL:124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_LATER_DELETE"* ]]
 }

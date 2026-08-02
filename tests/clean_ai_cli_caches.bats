@@ -704,6 +704,151 @@ EOF
     assert_output_not_contains "WRONG_PLANNED_KEEP"
 }
 
+@test "versioned agent cleanup discards a partial inventory when find fails" {
+    local isolated_home="$HOME/agent-partial-inventory"
+    local versions_root="$isolated_home/versions"
+    local fake_bin="$isolated_home/fake-bin"
+    mkdir -p "$versions_root/1.0" "$versions_root/2.0" "$versions_root/3.0" "$fake_bin"
+    touch -t 202604010000 "$versions_root/1.0"
+    touch -t 202604100000 "$versions_root/2.0"
+    touch -t 202604200000 "$versions_root/3.0"
+    cat > "$fake_bin/find" <<'EOF'
+#!/bin/bash
+root="$1"
+printf '%s\0' "$root/1.0" "$root/2.0" "$root/3.0"
+exit 73
+EOF
+    chmod +x "$fake_bin/find"
+
+    run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        PATH="$fake_bin:/usr/bin:/bin" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+note_activity() { :; }
+safe_clean() { echo "UNEXPECTED_DELETE:$1"; }
+set +e
+clean_versioned_agent_root "$HOME/versions" "Agent old version" 1
+rc=$?
+set -e
+printf 'SCAN_RC:%s\n' "$rc"
+[[ $rc -eq 73 ]]
+EOF
+
+    assert_run_success
+    assert_output_contains "SCAN_RC:73"
+    assert_output_not_contains "UNEXPECTED_DELETE"
+}
+
+@test "versioned agent delete guard rejects repeated partial active inventories" {
+    local isolated_home="$HOME/agent-partial-active-inventory"
+    local versions_root="$isolated_home/versions"
+    local bin_dir="$isolated_home/bin"
+    mkdir -p "$versions_root/1.0" "$versions_root/2.0" "$versions_root/3.0" "$bin_dir"
+    touch "$versions_root/1.0/agent" "$versions_root/2.0/agent" "$versions_root/3.0/agent"
+    touch -t 202604010000 "$versions_root/1.0"
+    touch -t 202604100000 "$versions_root/2.0"
+    touch -t 202604200000 "$versions_root/3.0"
+    ln -s "$versions_root/3.0/agent" "$bin_dir/agent"
+
+    run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+root="$HOME/versions"
+scan_count=0
+_materialize_versioned_agent_entries() {
+    local versions_root="$1"
+    local output_file="$2"
+    scan_count=$((scan_count + 1))
+    if [[ $scan_count -eq 1 || $scan_count -eq 3 ]]; then
+        printf '%s\0' "$versions_root/1.0" "$versions_root/2.0" > "$output_file"
+        return 73
+    fi
+    command find "$versions_root" -mindepth 1 -maxdepth 1 \
+        \( -type f -o -type d \) -print0 > "$output_file"
+}
+_MOLE_VERSIONED_AGENT_GUARD_ROOT="$root"
+_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK="$HOME/bin/agent"
+_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED=false
+_MOLE_VERSIONED_AGENT_GUARD_KEEP=1
+set +e
+_versioned_agent_delete_guard_allows "$root/1.0"
+rc=$?
+set -e
+printf 'GUARD_RC:%s\n' "$rc"
+[[ $rc -eq 73 ]]
+EOF
+
+    assert_run_success
+    assert_output_contains "GUARD_RC:73"
+}
+
+@test "versioned agent inventory has a wall-clock timeout" {
+    local isolated_home="$HOME/agent-inventory-timeout"
+    local versions_root="$isolated_home/versions"
+    local fake_bin="$isolated_home/fake-bin"
+    mkdir -p "$versions_root/1.0" "$fake_bin"
+    cat > "$fake_bin/find" <<'EOF'
+#!/bin/bash
+sleep 30
+EOF
+    chmod +x "$fake_bin/find"
+
+    local started=$SECONDS
+    run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        PATH="$fake_bin:/usr/bin:/bin" MOLE_TIMEOUT_DISK_VERIFY_SEC=1 \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+set +e
+_plan_versioned_agent_cleanup_targets "$HOME/versions" 1
+rc=$?
+set -e
+printf 'INVENTORY_RC:%s\n' "$rc"
+[[ $rc -eq 124 ]]
+EOF
+    local elapsed=$((SECONDS - started))
+
+    assert_run_success
+    assert_output_contains "INVENTORY_RC:124"
+    [ "$elapsed" -lt 10 ]
+}
+
+@test "versioned agent stat probes share the inventory deadline" {
+    local isolated_home="$HOME/agent-stat-timeout"
+    local versions_root="$isolated_home/versions"
+    local fake_bin="$isolated_home/fake-bin"
+    mkdir -p "$versions_root/1.0" "$fake_bin"
+    cat > "$fake_bin/stat" <<'EOF'
+#!/bin/bash
+sleep 30
+EOF
+    chmod +x "$fake_bin/stat"
+
+    local started=$SECONDS
+    run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        PATH="$fake_bin:/usr/bin:/bin" MOLE_TIMEOUT_DISK_VERIFY_SEC=1 \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+set +e
+_plan_versioned_agent_cleanup_targets "$HOME/versions" 1
+rc=$?
+set -e
+printf 'STAT_RC:%s\n' "$rc"
+[[ $rc -eq 124 ]]
+EOF
+    local elapsed=$((SECONDS - started))
+
+    assert_run_success
+    assert_output_contains "STAT_RC:124"
+    [ "$elapsed" -lt 10 ]
+}
+
 @test "versioned agent cleanup rechecks the active symlink after sizing" {
     local isolated_home="$HOME/agent-active-symlink-race"
     local versions_root="$isolated_home/.local/share/claude/versions"
@@ -751,13 +896,13 @@ get_cleanup_path_size_kb() {
     : > "$HOME/arm-active-plan-race"
     echo 1
 }
-stat() {
+_versioned_agent_entry_mtime() {
     if [[ -e "$HOME/arm-active-plan-race" && ! -e "$HOME/flipped-active-plan-race" ]]; then
         : > "$HOME/flipped-active-plan-race"
         rm -f "$HOME/.local/bin/claude"
         ln -s "$HOME/.local/share/claude/versions/1.0/claude" "$HOME/.local/bin/claude"
     fi
-    command stat "$@"
+    command stat -f%m "$1"
 }
 safe_remove() { echo "UNEXPECTED_DELETE:$1"; return 0; }
 clean_dev_ai_agents
@@ -853,12 +998,12 @@ get_cleanup_path_size_kb() {
     : > "$HOME/arm-sdk-plan-race"
     echo 1
 }
-stat() {
+_versioned_agent_entry_mtime() {
     if [[ -e "$HOME/arm-sdk-plan-race" && ! -e "$HOME/flipped-sdk-plan-race" ]]; then
         : > "$HOME/flipped-sdk-plan-race"
         echo "2.1.140" > "$HOME/Library/Application Support/Claude/claude-code-vm/.sdk-version"
     fi
-    command stat "$@"
+    command stat -f%m "$1"
 }
 safe_remove() { echo "UNEXPECTED_DELETE:$1"; return 0; }
 clean_claude_desktop_bundled_versions 1

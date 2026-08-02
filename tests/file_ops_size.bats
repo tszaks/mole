@@ -150,3 +150,31 @@ EOF
     [ "$status" -eq 0 ]
     [ "$output" = "5" ]
 }
+
+@test "get_path_size_kb propagates metadata stat and du timeouts" {
+    mkdir -p "$SANDBOX/Stalled.app" "$SANDBOX/stalled-dir"
+    printf 'x\n' > "$SANDBOX/stalled-file"
+
+    run env PROJECT_ROOT="$PROJECT_ROOT" SANDBOX="$SANDBOX" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+run_with_timeout() { return 124; }
+
+for target in "$SANDBOX/Stalled.app" "$SANDBOX/stalled-file" "$SANDBOX/stalled-dir"; do
+    size=""
+    rc=0
+    size=$(get_path_size_kb "$target") || rc=$?
+    printf 'RC=%s SIZE=%s TARGET=%s\n' "$rc" "$size" "${target##*/}"
+    [[ $rc -eq 124 && -z "$size" ]] || exit 1
+done
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=124 SIZE= TARGET=Stalled.app"* ]] || return 1
+    [[ "$output" == *"RC=124 SIZE= TARGET=stalled-file"* ]] || return 1
+    [[ "$output" == *"RC=124 SIZE= TARGET=stalled-dir"* ]]
+}

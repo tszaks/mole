@@ -445,6 +445,33 @@ EOF
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
+@test "safe_clean propagates a real directory size timeout before deletion" {
+    local base="$HOME/safe-clean-real-timeout"
+    mkdir -p "$base/candidate"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 \
+        /bin/bash --noprofile --norc <<EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+MOLE_CURRENT_COMMAND=clean
+run_with_timeout() { return 124; }
+safe_remove() { echo "UNEXPECTED_REMOVE:\$1"; return 0; }
+
+rc=0
+safe_clean "$base/candidate" "Timed out directory" || rc=\$?
+printf 'RC=%s CANCEL=%s\n' "\$rc" "\${MOLE_CLEAN_CANCEL_STATUS:-0}"
+[[ -d "$base/candidate" ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"RC=124 CANCEL=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
 @test "mo clean --dry-run skips system cleanup in non-interactive mode" {
     set_mock_sudo_uncached
     run_clean_dry_run
@@ -452,6 +479,18 @@ EOF
     [[ "$output" == *"Dry Run Mode"* ]] || return 1
     [[ "$output" == *"sudo -v && mo clean --dry-run"* ]]
     [[ "$output" != *"system preview included"* ]]
+}
+
+@test "MOLE_DRY_RUN enables the complete clean preview without deleting Trash" {
+    mkdir -p "$HOME/.Trash"
+    printf 'keep\n' > "$HOME/.Trash/env-dry-run-sentinel"
+
+    run env HOME="$HOME" MOLE_TEST_MODE=1 MOLE_DRY_RUN=1 \
+        "$PROJECT_ROOT/mole" clean
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Dry Run Mode"* ]] || return 1
+    [[ -f "$HOME/.Trash/env-dry-run-sentinel" ]]
 }
 
 @test "mo clean --dry-run does not probe sudo in test mode" {

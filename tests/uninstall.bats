@@ -331,19 +331,22 @@ EOF
     [[ "$result" == *"1KB"* ]]
 }
 
-@test "format_uninstall_preview_path propagates an interrupted size probe" {
+@test "format_uninstall_preview_path propagates timed out and interrupted size probes" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/uninstall/batch.sh"
-get_path_size_kb() { return 130; }
-rc=0
-format_uninstall_preview_path "$HOME/interrupted-preview" || rc=$?
-printf 'RC=%s\n' "$rc"
+get_path_size_kb() { return "$SIZE_RC"; }
+for SIZE_RC in 124 130; do
+    rc=0
+    format_uninstall_preview_path "$HOME/interrupted-preview" || rc=$?
+    printf 'SIZE_RC=%s RC=%s\n' "$SIZE_RC" "$rc"
+done
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"RC=130"* ]]
+    [[ "$output" == *"SIZE_RC=124 RC=124"* ]] || return 1
+    [[ "$output" == *"SIZE_RC=130 RC=130"* ]]
 }
 
 @test "batch_uninstall_applications removes selected app data" {
@@ -668,6 +671,43 @@ _MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-volumes"
 uninstall_live_bundle_has_other_install \
     "com.example.volume-shared" "$HOME/Selected.app"
 [[ ${#_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[@]} -eq 1 ]]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "live same-bundle scan finds an app at a mounted volume root" {
+    local volumes_root="$HOME/Volumes"
+    local survivor="$volumes_root/Example/Survivor.app"
+    mkdir -p "$survivor/Contents" "$HOME/Selected.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        VOLUMES_ROOT="$volumes_root" SURVIVOR="$survivor" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+pkg_receipt_nonstandard_app_paths() { :; }
+
+printf '%s\n' \
+    '<?xml version="1.0" encoding="UTF-8"?>' \
+    '<plist version="1.0"><dict>' \
+    '<key>CFBundleIdentifier</key><string>com.example.volume-root</string>' \
+    '</dict></plist>' \
+    > "$SURVIVOR/Contents/Info.plist"
+selected_apps=("0|$HOME/Selected.app|Selected|com.example.volume-root|0|Never")
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=()
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$VOLUMES_ROOT"
+live_rc=0
+uninstall_live_bundle_has_other_install \
+    "com.example.volume-root" "$HOME/Selected.app" || live_rc=$?
+printf 'LIVE_RC=%s PATHS=%s\n' "$live_rc" "${#_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[@]}"
+[[ $live_rc -eq 0 ]]
+[[ ${#_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[@]} -eq 1 ]]
+[[ "${_MOLE_UNINSTALL_LIVE_SIBLING_PATHS[0]}" == "$SURVIVOR" ]]
 EOF
 
     [ "$status" -eq 0 ] || {
@@ -3234,6 +3274,105 @@ INNER
     [ "$status" -eq 0 ] || return 1
     [[ "$output" == *"RC=130 DETAILS=0"* ]] || return 1
     [[ "$output" != *"UNEXPECTED_DISCOVERY"* ]]
+}
+
+@test "batch uninstall stops before discovery and teardown when app sizing times out" {
+    run env HOME="$HOME/batch-size-timeout" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+app_path="$HOME/Applications/TimedOut.app"
+mkdir -p "$app_path"
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+_batch_refresh_selected_app_bundle_id() { printf 'com.example.TimedOut\n'; }
+official_uninstaller_vendor() { return 1; }
+uninstall_bundle_id_has_surviving_sibling() { return 1; }
+uninstall_live_bundle_has_other_install() {
+    _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT=""
+    _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=()
+    return 1
+}
+pgrep() { return 1; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { whoami; }
+get_path_size_kb() { return 124; }
+find_app_files() { echo "UNEXPECTED_DISCOVERY"; return 99; }
+stop_launch_services() { echo "UNEXPECTED_TEARDOWN"; }
+unregister_app_bundle() { echo "UNEXPECTED_TEARDOWN"; }
+remove_login_item() { echo "UNEXPECTED_TEARDOWN"; }
+force_kill_app() { echo "UNEXPECTED_TEARDOWN"; }
+mole_delete() { echo "UNEXPECTED_DELETE"; }
+
+selected_apps=("0|$app_path|TimedOut|com.example.TimedOut|0|Never")
+files_cleaned=0
+total_items=0
+total_size_cleaned=0
+rc=0
+batch_uninstall_applications || rc=$?
+printf 'RC=%s\n' "$rc"
+[[ $rc -eq 124 ]]
+INNER
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DISCOVERY"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_TEARDOWN"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DELETE"* ]]
+}
+
+@test "batch scan stops before creating a plan when related-file sizing times out" {
+    run env HOME="$HOME/batch-related-size-timeout" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+app_path="$HOME/Applications/TimedOut.app"
+related_path="$HOME/Library/Caches/com.example.TimedOut"
+mkdir -p "$app_path" "$related_path"
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+_batch_refresh_selected_app_bundle_id() { printf 'com.example.TimedOut\n'; }
+official_uninstaller_vendor() { return 1; }
+uninstall_bundle_id_has_surviving_sibling() { return 1; }
+uninstall_live_bundle_has_other_install() {
+    _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT=""
+    _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=()
+    return 1
+}
+pgrep() { return 1; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { whoami; }
+get_path_size_kb() {
+    if [[ "$1" == "$app_path" ]]; then
+        printf '1\n'
+        return 0
+    fi
+    return 124
+}
+find_app_files() { printf '%s\n' "$related_path"; }
+get_diagnostic_report_paths_for_app() { return 0; }
+find_app_system_files() { return 0; }
+
+selected_apps=("0|$app_path|TimedOut|com.example.TimedOut|0|Never")
+running_apps=()
+sudo_apps=()
+brew_cask_apps=()
+blocked_apps=()
+manual_removal_apps=()
+app_details=()
+total_estimated_size=0
+rc=0
+_batch_scan_app_details || rc=$?
+printf 'RC=%s DETAILS=%s\n' "$rc" "${#app_details[@]}"
+[[ $rc -eq 124 && ${#app_details[@]} -eq 0 ]]
+INNER
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=124 DETAILS=0"* ]]
 }
 
 # ---------------------------------------------------------------------------

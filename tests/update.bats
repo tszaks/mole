@@ -109,9 +109,26 @@ if [[ -n "\$out" ]]; then
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
 printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
-	if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
+if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
 	printf '%s\n' "\${MOLE_ASSUME_SUDO_AUTH:-}" > "\$INSTALLER_SUDO_AUTH_LOG"
 fi
+prefix=""
+config=""
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+		--prefix) prefix="\$2"; shift 2 ;;
+		--config) config="\$2"; shift 2 ;;
+		*) shift ;;
+	esac
+done
+mkdir -p "\$prefix" "\$config/bin"
+printf '#!/bin/bash\necho "Mole version %s"\n' "\${MOLE_VERSION#V}" > "\$prefix/mole.next"
+printf '#!/bin/bash\nexit 0\n' > "\$config/bin/analyze-go"
+cp "\$config/bin/analyze-go" "\$config/bin/status-go"
+chmod +x "\$prefix/mole.next" "\$config/bin/analyze-go" "\$config/bin/status-go"
+mv "\$prefix/mole.next" "\$prefix/mole"
+printf 'CHANNEL=stable\nINSTALL_RECEIPT=%s\n' "\${MOLE_INSTALL_RECEIPT:-}" > "\$config/install_channel"
+rm -f "\$config/.helper_install_incomplete"
 echo "Updated to latest version, \${MOLE_VERSION#V}"
 INSTALLER
 	exit 0
@@ -154,14 +171,32 @@ done
 if [[ -n "\$out" ]]; then
 	cat > "\$out" <<'INSTALLER'
 #!/usr/bin/env bash
-	printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
-	printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
-	if [[ -n "\${INSTALLER_COMMIT_LOG:-}" ]]; then
-		printf '%s\n' "\${MOLE_INSTALL_COMMIT:-}" > "\$INSTALLER_COMMIT_LOG"
-	fi
-	if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
+printf '%s\n' "\$*" > "\$INSTALLER_ARGS_LOG"
+printf '%s\n' "\${MOLE_VERSION:-}" > "\$INSTALLER_VERSION_LOG"
+if [[ -n "\${INSTALLER_COMMIT_LOG:-}" ]]; then
+	printf '%s\n' "\${MOLE_INSTALL_COMMIT:-}" > "\$INSTALLER_COMMIT_LOG"
+fi
+if [[ -n "\${INSTALLER_SUDO_AUTH_LOG:-}" ]]; then
 	printf '%s\n' "\${MOLE_ASSUME_SUDO_AUTH:-}" > "\$INSTALLER_SUDO_AUTH_LOG"
 fi
+prefix=""
+config=""
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+		--prefix) prefix="\$2"; shift 2 ;;
+		--config) config="\$2"; shift 2 ;;
+		*) shift ;;
+	esac
+done
+mkdir -p "\$prefix" "\$config/bin"
+printf '#!/bin/bash\necho "Mole version nightly"\n' > "\$prefix/mole.next"
+printf '#!/bin/bash\nexit 0\n' > "\$config/bin/analyze-go"
+cp "\$config/bin/analyze-go" "\$config/bin/status-go"
+chmod +x "\$prefix/mole.next" "\$config/bin/analyze-go" "\$config/bin/status-go"
+mv "\$prefix/mole.next" "\$prefix/mole"
+printf 'CHANNEL=nightly\nCOMMIT_HASH=%s\nINSTALL_RECEIPT=%s\n' \
+	"\${MOLE_INSTALL_COMMIT:0:7}" "\${MOLE_INSTALL_RECEIPT:-}" > "\$config/install_channel"
+rm -f "\$config/.helper_install_incomplete"
 echo "Updated to latest version, \${MOLE_VERSION#V}"
 INSTALLER
 	exit 0
@@ -699,9 +734,15 @@ while [[ \$# -gt 0 ]]; do
 	esac
 done
 printf '%s|%s|%s\n' "\${MOLE_VERSION:-}" "\$prefix" "\$config" >> "\$HEAL_LOG"
+mkdir -p "\$prefix" "\$config/bin"
 printf '#!/bin/bash\necho "Mole version %s"\n' "\${MOLE_VERSION#V}" > "\$prefix/mole.healed"
+printf '#!/bin/bash\nexit 0\n' > "\$config/bin/analyze-go"
+cp "\$config/bin/analyze-go" "\$config/bin/status-go"
 chmod +x "\$prefix/mole.healed"
+chmod +x "\$config/bin/analyze-go" "\$config/bin/status-go"
 mv "\$prefix/mole.healed" "\$prefix/mole"
+printf 'CHANNEL=stable\nINSTALL_RECEIPT=%s\n' "\${MOLE_INSTALL_RECEIPT:-}" > "\$config/install_channel"
+rm -f "\$config/.helper_install_incomplete"
 HEAL
 	exit 0
 fi
@@ -714,6 +755,90 @@ fi
 printf 'VERSION="%s"\n' "$latest_version"
 SCRIPT
 	chmod +x "$bin_dir/curl"
+}
+
+make_false_success_curl_stub() {
+	local bin_dir="$1"
+	cat > "$bin_dir/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+out=""
+url=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-o) out="$2"; shift 2 ;;
+		http*://*) url="$1"; shift ;;
+		*) shift ;;
+	esac
+done
+
+if [[ -n "$out" ]]; then
+	cat > "$out" <<'INSTALLER'
+#!/usr/bin/env bash
+echo "Updated to latest version, ${MOLE_VERSION#V}"
+exit 0
+INSTALLER
+	exit 0
+fi
+
+if [[ "$url" == *"api.github.com/repos/tw93/mole/commits/main"* ]]; then
+	printf '{"sha":"%s"}\n' "$FALSE_SUCCESS_COMMIT"
+	exit 0
+fi
+if [[ "$url" == *"api.github.com"* ]]; then
+	printf '{"tag_name":"%s"}\n' "$FALSE_SUCCESS_VERSION"
+	exit 0
+fi
+if [[ "$url" == *"/main/install.sh"* ]]; then
+	exit 22
+fi
+printf 'VERSION="%s"\n' "$FALSE_SUCCESS_VERSION"
+SCRIPT
+	chmod +x "$bin_dir/curl"
+}
+
+@test "mo update rejects staged installer success when the stable generation did not change" {
+	local manual_bin="$TEST_ROOT/false-stable/bin"
+	local manual_config="$TEST_ROOT/false-stable/config"
+	local fake_bin="$TEST_ROOT/false-stable/fake-bin"
+	local current_version
+	current_version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "$PROJECT_ROOT/mole" | head -1)"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "0.0.1"
+	make_false_success_curl_stub "$fake_bin"
+
+	run env HOME="$HOME" PATH="$fake_bin:/usr/bin:/bin" \
+		FALSE_SUCCESS_VERSION="$current_version" \
+		FALSE_SUCCESS_COMMIT="abc1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+		"$manual_bin/mo" update
+
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
+	[[ "$output" == *"Update failed"* ]] || return 1
+	[[ "$output" != *"Updated to latest version"* ]] || return 1
+	[ "$("$manual_bin/mole" --version | awk 'NF {print $NF; exit}')" = "0.0.1" ]
+}
+
+@test "mo update rejects staged installer success when nightly receipt and commit stay stale" {
+	local manual_bin="$TEST_ROOT/false-nightly/bin"
+	local manual_config="$TEST_ROOT/false-nightly/config"
+	local fake_bin="$TEST_ROOT/false-nightly/fake-bin"
+	local latest_commit="abc1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	printf 'CHANNEL=nightly\nCOMMIT_HASH=deadbee\nINSTALL_RECEIPT=old-receipt\n' > "$manual_config/install_channel"
+	make_false_success_curl_stub "$fake_bin"
+
+	run env HOME="$HOME" PATH="$fake_bin:/usr/bin:/bin" \
+		FALSE_SUCCESS_VERSION="1.49.0" FALSE_SUCCESS_COMMIT="$latest_commit" \
+		"$manual_bin/mo" update --nightly
+
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
+	[[ "$output" == *"Nightly update failed"* ]] || return 1
+	[[ "$output" != *"Updated to latest version"* ]] || return 1
+	grep -qFx 'COMMIT_HASH=deadbee' "$manual_config/install_channel"
 }
 
 @test "mo update self-heals with a direct reinstall when the staged installer fails (#1297)" {
@@ -1010,7 +1135,7 @@ if _update_lock_remove_control "/tmp/not-a-mole-control" false "$lock_path"; the
 	echo "UNEXPECTED_AMBIENT_CONTROL_REMOVAL"
 	exit 1
 fi
-declare -f _update_self_heal_reinstall | grep -q '_update_acquire_lock'
+declare -f _update_verify_installed_generation | grep -q '_update_acquire_lock'
 INNER
 
 	[ "$status" -eq 0 ] || {
@@ -1029,9 +1154,11 @@ INNER
 @test "nightly commit lookup and self-heal fall back to wget" {
 	run env HOME="$HOME/wget-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
-mkdir -p "$HOME/config" "$HOME/bin"
+mkdir -p "$HOME/config/bin" "$HOME/bin"
 printf '#!/bin/bash\necho "Mole version 0.0.1"\n' > "$HOME/bin/mole"
-chmod +x "$HOME/bin/mole"
+printf '#!/bin/bash\nexit 0\n' > "$HOME/config/bin/analyze-go"
+cp "$HOME/config/bin/analyze-go" "$HOME/config/bin/status-go"
+chmod +x "$HOME/bin/mole" "$HOME/config/bin/analyze-go" "$HOME/config/bin/status-go"
 source "$PROJECT_ROOT/lib/core/common.sh"
 VERSION="0.0.1"
 SCRIPT_DIR="$HOME/config"
@@ -1083,9 +1210,11 @@ INNER
 @test "nightly self-heal accepts a fresh receipt without reusing a stale commit when HEAD is unknown" {
 	run env HOME="$HOME/unknown-head-self-heal" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
-mkdir -p "$HOME/config" "$HOME/bin"
+mkdir -p "$HOME/config/bin" "$HOME/bin"
 printf '#!/bin/bash\necho "Mole version 0.0.1"\n' > "$HOME/bin/mole"
-chmod +x "$HOME/bin/mole"
+printf '#!/bin/bash\nexit 0\n' > "$HOME/config/bin/analyze-go"
+cp "$HOME/config/bin/analyze-go" "$HOME/config/bin/status-go"
+chmod +x "$HOME/bin/mole" "$HOME/config/bin/analyze-go" "$HOME/config/bin/status-go"
 printf 'CHANNEL=nightly\nCOMMIT_HASH=deadbee\nINSTALL_RECEIPT=old-receipt\n' > "$HOME/config/install_channel"
 source "$PROJECT_ROOT/lib/core/common.sh"
 VERSION="0.0.1"

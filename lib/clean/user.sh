@@ -108,7 +108,10 @@ clean_trash() {
                     continue
                 fi
                 local trash_item_kb
-                trash_item_kb=$(get_path_size_kb "$trash_item" 2> /dev/null || echo "0")
+                local size_rc=0
+                trash_item_kb=$(get_path_size_kb "$trash_item" 2> /dev/null) || size_rc=$?
+                [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+                [[ $size_rc -eq 0 ]] || return "$size_rc"
                 [[ "$trash_item_kb" =~ ^[0-9]+$ ]] || trash_item_kb=0
                 if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
                     record_dry_run_cleanup_target "$trash_item" "$trash_item_kb" 1 true || continue
@@ -239,7 +242,13 @@ _clean_mail_downloads() {
                 spinner_active=true
             fi
             local dir_size_kb=0
-            dir_size_kb=$(get_path_size_kb "$target_path")
+            local size_rc=0
+            dir_size_kb=$(get_path_size_kb "$target_path") || size_rc=$?
+            if [[ $size_rc -ne 0 ]]; then
+                _mole_record_clean_cancellation "$size_rc"
+                [[ "$spinner_active" == "true" ]] && stop_section_spinner
+                return "$size_rc"
+            fi
             if ! [[ "$dir_size_kb" =~ ^[0-9]+$ ]]; then
                 dir_size_kb=0
             fi
@@ -253,7 +262,13 @@ _clean_mail_downloads() {
             while IFS= read -r -d '' file_path; do
                 if [[ -f "$file_path" ]]; then
                     local file_size_kb
-                    file_size_kb=$(get_path_size_kb "$file_path")
+                    size_rc=0
+                    file_size_kb=$(get_path_size_kb "$file_path") || size_rc=$?
+                    if [[ $size_rc -ne 0 ]]; then
+                        _mole_record_clean_cancellation "$size_rc"
+                        [[ "$spinner_active" == "true" ]] && stop_section_spinner
+                        return "$size_rc"
+                    fi
                     local remove_rc=1
                     if [[ "$dry_run_mode" == "true" ]]; then
                         if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
@@ -404,8 +419,11 @@ _clean_chromium_old_versions() {
                 [[ $process_state -eq 2 ]] && stopped_reason="process state unknown"
                 break
             fi
-            local size_kb
-            size_kb=$(get_path_size_kb "$dir" || echo 0)
+            local size_kb=""
+            local size_rc=0
+            size_kb=$(get_path_size_kb "$dir") || size_rc=$?
+            [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+            [[ $size_rc -eq 0 ]] || return "$size_rc"
             size_kb="${size_kb:-0}"
             process_state=0
             "$running_probe" || process_state=$?
@@ -654,8 +672,11 @@ clean_edge_updater_old_versions() {
     local cleaned_any=false
     local stopped_reason=""
     for dir in "${cleanable_dirs[@]}"; do
-        local size_kb
-        size_kb=$(get_path_size_kb "$dir" || echo 0)
+        local size_kb=""
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$dir") || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         size_kb="${size_kb:-0}"
         process_state=0
         is_microsoft_edge_running || process_state=$?
@@ -873,13 +894,16 @@ clean_app_caches() {
     local _ng_state
     _ng_state=$(shopt -p nullglob || true)
     shopt -s nullglob
+    local container_rc=0
     for container_dir in "$containers_dir"/*; do
         [[ -d "$container_dir/Data/Library/Caches" ]] || continue
-        process_container_cache "$container_dir"
+        process_container_cache "$container_dir" || container_rc=$?
+        [[ $container_rc -eq 0 ]] || break
     done
     # eval: restore shopt state captured by $(shopt -p)
     eval "$_ng_state"
     stop_section_spinner
+    [[ $container_rc -eq 0 ]] || return "$container_rc"
 
     if [[ "$found_any" == "true" ]]; then
         if [[ "$DRY_RUN" == "true" ]]; then
@@ -907,8 +931,8 @@ clean_app_caches() {
         note_activity
     fi
 
-    clean_group_container_caches
-    clean_handoff_pasteboard_cache
+    clean_group_container_caches || return $?
+    clean_handoff_pasteboard_cache || return $?
 }
 
 # Handoff / Universal Clipboard staging cache. useractivityd is supposed to
@@ -933,8 +957,11 @@ clean_handoff_pasteboard_cache() {
         if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
             continue
         fi
-        local item_kb
-        item_kb=$(get_path_size_kb "$item" 2> /dev/null || echo 0)
+        local item_kb=""
+        local size_rc=0
+        item_kb=$(get_path_size_kb "$item" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         [[ "$item_kb" =~ ^[0-9]+$ ]] || item_kb=0
         if [[ "$DRY_RUN" == "true" ]]; then
             if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
@@ -1004,19 +1031,27 @@ process_container_cache() {
             if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
                 continue
             fi
-            if declare -f register_dry_run_cleanup_target > /dev/null 2>&1; then
-                register_dry_run_cleanup_target "$item" || continue
-            fi
-
             local item_size_kb=0
             local size_known=false
             if [[ "$precise_size_used" -lt "$precise_size_limit" ]]; then
-                item_size_kb=$(get_path_size_kb "$item" 2> /dev/null || echo "0")
+                local size_rc=0
+                item_size_kb=$(get_path_size_kb "$item" 2> /dev/null) || size_rc=$?
+                if [[ $size_rc -ne 0 ]]; then
+                    _mole_record_clean_cancellation "$size_rc"
+                    # eval: restore shopt state captured by $(shopt -p)
+                    eval "$_nullglob_state"
+                    eval "$_dotglob_state"
+                    return "$size_rc"
+                fi
                 [[ "$item_size_kb" =~ ^[0-9]+$ ]] || item_size_kb=0
                 precise_size_used=$((precise_size_used + 1))
                 size_known=true
             else
                 total_size_partial=true
+            fi
+
+            if declare -f register_dry_run_cleanup_target > /dev/null 2>&1; then
+                register_dry_run_cleanup_target "$item" || continue
             fi
 
             if declare -f append_dry_run_cleanup_target > /dev/null 2>&1; then
@@ -1034,8 +1069,11 @@ process_container_cache() {
     fi
 
     if [[ "$item_count" -le 100 && "$precise_size_used" -lt "$precise_size_limit" ]]; then
-        local size
-        size=$(get_path_size_kb "$cache_dir" 2> /dev/null || echo "0")
+        local size=""
+        local size_rc=0
+        size=$(get_path_size_kb "$cache_dir" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         [[ "$size" =~ ^[0-9]+$ ]] || size=0
         total_size=$((total_size + size))
         precise_size_used=$((precise_size_used + 1))
@@ -1185,8 +1223,11 @@ clean_group_container_caches() {
                     if should_protect_path "$item" 2> /dev/null || is_path_whitelisted "$item" 2> /dev/null; then
                         continue
                     fi
-                    local item_size
-                    item_size=$(get_path_size_kb "$item" 2> /dev/null) || item_size=0
+                    local item_size=""
+                    local size_rc=0
+                    item_size=$(get_path_size_kb "$item" 2> /dev/null) || size_rc=$?
+                    [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+                    [[ $size_rc -eq 0 ]] || return "$size_rc"
                     [[ "$item_size" =~ ^[0-9]+$ ]] || item_size=0
                     if [[ "$DRY_RUN" == "true" ]]; then
                         if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
@@ -1352,8 +1393,11 @@ clean_external_volume_target() {
             continue
         fi
 
-        local size_kb
-        size_kb=$(get_path_size_kb "$target_path" 2> /dev/null || echo "0")
+        local size_kb=""
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$target_path" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
         if [[ "$DRY_RUN" == "true" ]]; then
@@ -1382,8 +1426,11 @@ clean_external_volume_target() {
             continue
         fi
 
-        local size_kb
-        size_kb=$(get_path_size_kb "$metadata_file" 2> /dev/null || echo "0")
+        local size_kb=""
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$metadata_file" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
 
         if [[ "$DRY_RUN" == "true" ]]; then
@@ -1625,10 +1672,10 @@ clean_browsers() {
     safe_clean ~/Library/Caches/Comet/* "Comet cache"
     safe_clean ~/Library/Caches/com.kagi.kagimacOS/* "Orion cache"
     safe_clean ~/Library/Caches/zen/* "Zen cache"
-    clean_chrome_old_versions
-    clean_edge_old_versions
-    clean_edge_updater_old_versions
-    clean_brave_old_versions
+    clean_chrome_old_versions || return $?
+    clean_edge_old_versions || return $?
+    clean_edge_updater_old_versions || return $?
+    clean_brave_old_versions || return $?
     # QQ Browser 3 (Chromium-based).
     if [[ -d ~/Library/Application\ Support/QQBrowser3 ]]; then
         safe_clean ~/Library/Caches/com.tencent.QQBrowser3/* "QQ Browser cache"
@@ -1751,7 +1798,10 @@ clean_tart_caches() {
     command -v tart > /dev/null 2>&1 || return 0
 
     local cache_size_kb=0
-    cache_size_kb=$(get_path_size_kb "$cache_root" 2> /dev/null || echo 0)
+    local size_rc=0
+    cache_size_kb=$(get_path_size_kb "$cache_root" 2> /dev/null) || size_rc=$?
+    [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+    [[ $size_rc -eq 0 ]] || return "$size_rc"
     [[ "$cache_size_kb" =~ ^[0-9]+$ ]] || cache_size_kb=0
     [[ "$cache_size_kb" -gt 0 ]] || return 0
 
@@ -1816,7 +1866,10 @@ clean_tart_caches() {
     fi
 
     local remaining_kb=0
-    remaining_kb=$(get_path_size_kb "$cache_root" 2> /dev/null || echo 0)
+    size_rc=0
+    remaining_kb=$(get_path_size_kb "$cache_root" 2> /dev/null) || size_rc=$?
+    [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+    [[ $size_rc -eq 0 ]] || return "$size_rc"
     [[ "$remaining_kb" =~ ^[0-9]+$ ]] || remaining_kb=0
     local reclaimed_kb=$((cache_size_kb - remaining_kb))
     [[ "$reclaimed_kb" -ge 0 ]] || reclaimed_kb=0
@@ -2225,8 +2278,11 @@ clean_cached_device_firmware() {
         if is_path_whitelisted "$ipsw"; then
             return 0
         fi
-        local size_kb
-        size_kb=$(get_path_size_kb "$ipsw" || echo 0)
+        local size_kb=""
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$ipsw") || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         size_kb="${size_kb:-0}"
         if [[ "$DRY_RUN" == "true" ]]; then
             if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
@@ -2249,7 +2305,7 @@ clean_cached_device_firmware() {
     for dir in "${shallow_dirs[@]}"; do
         [[ -d "$dir" ]] || continue
         while IFS= read -r -d '' ipsw; do
-            _process_ipsw_file "$ipsw"
+            _process_ipsw_file "$ipsw" || return $?
         done < <(command find "$dir" -maxdepth 1 -type f -name "*.ipsw" -print0 2> /dev/null)
     done
 
@@ -2257,7 +2313,7 @@ clean_cached_device_firmware() {
         for dir in "${configurator_dirs[@]}"; do
             [[ -d "$dir" ]] || continue
             while IFS= read -r -d '' ipsw; do
-                _process_ipsw_file "$ipsw"
+                _process_ipsw_file "$ipsw" || return $?
             done < <(command find "$dir" -type f -name "*.ipsw" -print0 2> /dev/null)
         done
     fi
@@ -2321,11 +2377,14 @@ report_agent_worktree_candidates() {
         "$HOME/GitHub" "$HOME/Workspace" "$HOME/Repos"
         "$HOME/Development" "$HOME/www" "$HOME/src"
     )
-    local root container size_kb
+    local root container size_kb size_rc
     for root in "${roots[@]}"; do
         [[ -d "$root" ]] || continue
         while IFS= read -r -d '' container; do
-            size_kb=$(get_path_size_kb "$container" 2> /dev/null || echo 0)
+            size_rc=0
+            size_kb=$(get_path_size_kb "$container" 2> /dev/null) || size_rc=$?
+            [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+            [[ $size_rc -eq 0 ]] || return "$size_rc"
             [[ "$size_kb" =~ ^[0-9]+$ ]] || size_kb=0
             [[ "$size_kb" -ge "$threshold_kb" ]] || continue
             echo -e "  ${YELLOW}${ICON_REVIEW}${NC} AI agent worktrees · ${GREEN}$(bytes_to_human "$((size_kb * 1024))")${NC} · ${GRAY}$(format_path_link "$container")${NC}"
@@ -2339,6 +2398,7 @@ report_agent_worktree_candidates() {
 check_large_file_candidates() {
     local threshold_kb=$((1024 * 1024)) # 1GB
     local found_any=false
+    local size_rc=0
 
     _large_candidate_size_kb() {
         local path="$1"
@@ -2384,7 +2444,13 @@ check_large_file_candidates() {
     local mail_dir="$HOME/Library/Mail"
     if [[ -d "$mail_dir" ]]; then
         local mail_kb
-        mail_kb=$(get_path_size_kb "$mail_dir")
+        size_rc=0
+        mail_kb=$(get_path_size_kb "$mail_dir") || size_rc=$?
+        if [[ $size_rc -ne 0 ]]; then
+            _mole_record_clean_cancellation "$size_rc"
+            stop_section_spinner
+            return "$size_rc"
+        fi
         if [[ "$mail_kb" -ge "$threshold_kb" ]]; then
             local mail_human
             mail_human=$(bytes_to_human "$((mail_kb * 1024))")
@@ -2395,7 +2461,13 @@ check_large_file_candidates() {
     local mail_downloads="$HOME/Library/Mail Downloads"
     if [[ -d "$mail_downloads" ]]; then
         local downloads_kb
-        downloads_kb=$(get_path_size_kb "$mail_downloads")
+        size_rc=0
+        downloads_kb=$(get_path_size_kb "$mail_downloads") || size_rc=$?
+        if [[ $size_rc -ne 0 ]]; then
+            _mole_record_clean_cancellation "$size_rc"
+            stop_section_spinner
+            return "$size_rc"
+        fi
         if [[ "$downloads_kb" -ge "$threshold_kb" ]]; then
             local downloads_human
             downloads_human=$(bytes_to_human "$((downloads_kb * 1024))")
@@ -2407,7 +2479,13 @@ check_large_file_candidates() {
     for installer_path in /Applications/Install\ macOS*.app; do
         if [[ -e "$installer_path" ]]; then
             local installer_kb
-            installer_kb=$(get_path_size_kb "$installer_path")
+            size_rc=0
+            installer_kb=$(get_path_size_kb "$installer_path") || size_rc=$?
+            if [[ $size_rc -ne 0 ]]; then
+                _mole_record_clean_cancellation "$size_rc"
+                stop_section_spinner
+                return "$size_rc"
+            fi
             if [[ "$installer_kb" -gt 0 ]]; then
                 local installer_human
                 installer_human=$(bytes_to_human "$((installer_kb * 1024))")
@@ -2419,7 +2497,13 @@ check_large_file_candidates() {
     local updates_dir="$HOME/Library/Updates"
     if [[ -d "$updates_dir" ]]; then
         local updates_kb
-        updates_kb=$(get_path_size_kb "$updates_dir")
+        size_rc=0
+        updates_kb=$(get_path_size_kb "$updates_dir") || size_rc=$?
+        if [[ $size_rc -ne 0 ]]; then
+            _mole_record_clean_cancellation "$size_rc"
+            stop_section_spinner
+            return "$size_rc"
+        fi
         if [[ "$updates_kb" -ge "$threshold_kb" ]]; then
             local updates_human
             updates_human=$(bytes_to_human "$((updates_kb * 1024))")

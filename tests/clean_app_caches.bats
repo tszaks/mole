@@ -1212,3 +1212,30 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" != *"Raycast"* ]] && [[ "$output" != *"raycast"* ]]
 }
+
+@test "Xcode DerivedData cleanup propagates a size timeout before deletion" {
+    local isolated_home="$HOME/xcode-derived-timeout"
+    mkdir -p "$isolated_home/Library/Developer/Xcode/DerivedData/App-abc"
+
+    run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        MOLE_CURRENT_COMMAND=clean /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+DRY_RUN=false
+MOLE_CLEAN_CANCEL_STATUS=0
+_xcode_cleanup_process_state() { return 1; }
+get_path_size_kb() { return 124; }
+safe_remove() { echo "UNEXPECTED_DELETE:$1"; }
+set +e
+clean_xcode_derived_data
+rc=$?
+set -e
+printf 'SIZE_RC:%s CANCEL:%s\n' "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+[[ $rc -eq 124 && $MOLE_CLEAN_CANCEL_STATUS -eq 124 ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SIZE_RC:124 CANCEL:124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DELETE"* ]]
+}

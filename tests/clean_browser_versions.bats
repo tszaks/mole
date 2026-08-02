@@ -832,3 +832,33 @@ EOF
     # Should exit gracefully with no cleanup output
     [[ "$output" != *"Edge old versions"* ]]
 }
+
+@test "browser cleanup stops after an old-version size timeout" {
+    local isolated_home="$HOME/browser-aggregate-timeout"
+    mkdir -p "$isolated_home"
+
+    run env HOME="$isolated_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        MOLE_CURRENT_COMMAND=clean /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+safe_clean() { :; }
+clean_service_worker_cache() { :; }
+pgrep() { return 1; }
+clean_chrome_old_versions() {
+    _mole_record_clean_cancellation 124
+    return 124
+}
+clean_edge_old_versions() { echo "UNEXPECTED_EDGE_CLEAN"; }
+set +e
+clean_browsers
+rc=$?
+set -e
+printf 'BROWSER_RC:%s CANCEL:%s\n' "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+[[ $rc -eq 124 && $MOLE_CLEAN_CANCEL_STATUS -eq 124 ]]
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"BROWSER_RC:124 CANCEL:124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_EDGE_CLEAN"* ]]
+}

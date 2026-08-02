@@ -908,10 +908,15 @@ grep -q '^CHANNEL=nightly$' "$CONFIG_DIR/install_channel" || { echo "WRONG: nigh
 grep -q '^COMMIT_HASH=deadbeef$' "$CONFIG_DIR/install_channel" || { echo "WRONG: nightly commit"; exit 1; }
 grep -q '^INSTALL_RECEIPT=heal-123-456-789$' "$CONFIG_DIR/install_channel" || { echo "WRONG: install receipt missing"; exit 1; }
 
+if ! write_install_channel_metadata "stable" "" "update-123-456-789"; then
+	echo "WRONG: update receipt rejected"; exit 1
+fi
+grep -q '^INSTALL_RECEIPT=update-123-456-789$' "$CONFIG_DIR/install_channel" || { echo "WRONG: update receipt missing"; exit 1; }
+
 if write_install_channel_metadata "nightly" "badcafe" $'heal-valid\nCOMMIT_HASH=forged'; then
 	echo "WRONG: malformed receipt accepted"; exit 1
 fi
-grep -q '^COMMIT_HASH=deadbeef$' "$CONFIG_DIR/install_channel" || { echo "WRONG: rejected receipt changed metadata"; exit 1; }
+grep -q '^CHANNEL=stable$' "$CONFIG_DIR/install_channel" || { echo "WRONG: rejected receipt changed metadata"; exit 1; }
 
 # No leftover temp files.
 if ls "$CONFIG_DIR"/install_channel.?????? 2>/dev/null | grep -q .; then

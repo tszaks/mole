@@ -1003,13 +1003,18 @@ MOCK
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 started=$(date +%s)
+set +e
 size=$(get_path_size_kb "$APP_DIR" 1)
+size_rc=$?
+set -e
 elapsed=$(( $(date +%s) - started ))
-printf 'SIZE=%s\nELAPSED=%s\n' "$size" "$elapsed"
+printf 'SIZE=%s\nRC=%s\nELAPSED=%s\n' "$size" "$size_rc" "$elapsed"
+[[ $size_rc -eq 124 ]]
 SCRIPT
 
     [ "$status" -eq 0 ] || return 1
     [[ "$output" == *"SIZE="* ]] || return 1
+    [[ "$output" == *"RC=124"* ]] || return 1
     [[ "$(< "$trace")" == *"$app_dir"* ]] || return 1
     [[ "$(< "$trace")" != *"UNEXPECTED_DU"* ]] || return 1
     local elapsed="${output##*ELAPSED=}"

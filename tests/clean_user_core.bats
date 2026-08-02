@@ -1441,6 +1441,44 @@ EOF
     [[ "$output" == *"SIZE_CALLS=2"* ]]
 }
 
+@test "clean_app_caches stops before deleting when a container size probe times out" {
+    local container="$HOME/Library/Containers/com.example.timeout/Data/Library/Caches"
+    mkdir -p "$container"
+    touch "$container/payload"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false \
+        MOLE_CURRENT_COMMAND=clean MOLE_CLEAN_CANCEL_STATUS=0 \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+safe_clean() { :; }
+safe_remove() { echo "UNEXPECTED_DELETE:$1"; }
+clean_support_app_data() { :; }
+clean_group_container_caches() { echo "UNEXPECTED_CONTINUATION"; }
+clean_handoff_pasteboard_cache() { echo "UNEXPECTED_CONTINUATION"; }
+note_activity() { :; }
+get_path_size_kb() { return 124; }
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+
+set +e
+clean_app_caches
+rc=$?
+set -e
+printf 'RC=%s CANCEL=%s\n' "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+[[ $rc -eq 124 && $MOLE_CLEAN_CANCEL_STATUS -eq 124 ]]
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=124 CANCEL=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DELETE"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CONTINUATION"* ]]
+}
+
 # Regression for discussion #583: the only Dia row used to be
 # ~/Library/Caches/company.thebrowser.dia, which on a real install holds nothing
 # but Sentry crash state. The actual Chromium caches live under

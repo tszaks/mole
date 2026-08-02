@@ -458,7 +458,10 @@ clean_dev_docker() {
     if command -v orb > /dev/null 2>&1 || command -v orbctl > /dev/null 2>&1 || [[ -d "$HOME/.orbstack" || -n "$orb_data" ]]; then
         local orb_size=0
         if [[ -n "$orb_data" ]]; then
-            orb_size=$(get_path_size_kb "$orb_data" 2> /dev/null || echo 0)
+            local size_rc=0
+            orb_size=$(get_path_size_kb "$orb_data" 2> /dev/null) || size_rc=$?
+            [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+            [[ $size_rc -eq 0 ]] || return "$size_rc"
             [[ "$orb_size" =~ ^[0-9]+$ ]] || orb_size=0
         fi
         note_activity
@@ -1071,8 +1074,11 @@ clean_xcode_system_coresimulator_caches() {
             if should_protect_path "$entry" || is_path_whitelisted "$entry" || holds_compiled_model_cache "$entry"; then
                 continue
             fi
-            local entry_size_kb
-            entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null || echo 0)
+            local entry_size_kb=""
+            local size_rc=0
+            entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null) || size_rc=$?
+            [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+            [[ $size_rc -eq 0 ]] || return "$size_rc"
             [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
 
             process_state=0
@@ -1130,8 +1136,11 @@ clean_xcode_system_coresimulator_caches() {
             skipped_count=$((skipped_count + 1))
             continue
         fi
-        local entry_size_kb
-        entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null || echo 0)
+        local entry_size_kb=""
+        local size_rc=0
+        entry_size_kb=$(get_path_size_kb "$entry" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
         [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
 
         # A bounded size probe can still overlap Simulator startup. Recheck
@@ -1345,7 +1354,10 @@ clean_xcode_device_support() {
                     if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry" || holds_compiled_model_cache "$stale_entry"; then
                         continue
                     fi
-                    entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null || echo 0)
+                    local size_rc=0
+                    entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null) || size_rc=$?
+                    [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+                    [[ $size_rc -eq 0 ]] || return "$size_rc"
                     [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
 
                     process_state=0
@@ -1392,7 +1404,10 @@ clean_xcode_device_support() {
                     if should_protect_path "$stale_entry" || is_path_whitelisted "$stale_entry" || holds_compiled_model_cache "$stale_entry"; then
                         continue
                     fi
-                    entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null || echo 0)
+                    local size_rc=0
+                    entry_size_kb=$(get_path_size_kb "$stale_entry" 2> /dev/null) || size_rc=$?
+                    [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+                    [[ $size_rc -eq 0 ]] || return "$size_rc"
                     [[ "$entry_size_kb" =~ ^[0-9]+$ ]] || entry_size_kb=0
 
                     # The size probe may consume the full disk-verification
@@ -1913,10 +1928,10 @@ _debug_simctl_probe_stderr() {
 
 clean_dev_mobile() {
     check_android_ndk
-    clean_xcode_documentation_cache
-    clean_xcode_system_coresimulator_caches
-    clean_xcode_simulator_runtime_volumes
-    clean_xcode_xctest_devices
+    clean_xcode_documentation_cache || return $?
+    clean_xcode_system_coresimulator_caches || return $?
+    clean_xcode_simulator_runtime_volumes || return $?
+    clean_xcode_xctest_devices || return $?
 
     if command -v xcrun > /dev/null 2>&1; then
         _resolve_simctl_developer_dir || true
@@ -2022,7 +2037,13 @@ clean_dev_mobile() {
                     for udid in "${unavailable_udids[@]}"; do
                         local simulator_device_path="$HOME/Library/Developer/CoreSimulator/Devices/$udid"
                         if [[ -d "$simulator_device_path" ]]; then
-                            unavailable_size_kb=$((unavailable_size_kb + $(get_path_size_kb "$simulator_device_path")))
+                            local simulator_size_kb=""
+                            local size_rc=0
+                            simulator_size_kb=$(get_path_size_kb "$simulator_device_path") || size_rc=$?
+                            [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+                            [[ $size_rc -eq 0 ]] || return "$size_rc"
+                            [[ "$simulator_size_kb" =~ ^[0-9]+$ ]] || simulator_size_kb=0
+                            unavailable_size_kb=$((unavailable_size_kb + simulator_size_kb))
                         fi
                     done
                 fi
@@ -2034,7 +2055,10 @@ clean_dev_mobile() {
                             local unavailable_path="$HOME/Library/Developer/CoreSimulator/Devices/$unavailable_udid"
                             [[ -d "$unavailable_path" ]] || continue
                             local unavailable_path_size_kb
-                            unavailable_path_size_kb=$(get_path_size_kb "$unavailable_path" 2> /dev/null || echo "0")
+                            size_rc=0
+                            unavailable_path_size_kb=$(get_path_size_kb "$unavailable_path" 2> /dev/null) || size_rc=$?
+                            [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+                            [[ $size_rc -eq 0 ]] || return "$size_rc"
                             [[ "$unavailable_path_size_kb" =~ ^[0-9]+$ ]] || unavailable_path_size_kb=0
                             if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
                                 record_dry_run_cleanup_target "$unavailable_path" "$unavailable_path_size_kb" 1 true || true
@@ -2119,9 +2143,9 @@ clean_dev_mobile() {
     # Old iOS/watchOS/tvOS DeviceSupport versions (debug symbols for connected devices).
     # Each iOS version creates a 1-3 GB folder of debug symbols. Only the versions
     # matching currently used devices are needed; older ones regenerate on device connect.
-    clean_xcode_device_support ~/Library/Developer/Xcode/iOS\ DeviceSupport "iOS DeviceSupport"
-    clean_xcode_device_support ~/Library/Developer/Xcode/watchOS\ DeviceSupport "watchOS DeviceSupport"
-    clean_xcode_device_support ~/Library/Developer/Xcode/tvOS\ DeviceSupport "tvOS DeviceSupport"
+    clean_xcode_device_support ~/Library/Developer/Xcode/iOS\ DeviceSupport "iOS DeviceSupport" || return $?
+    clean_xcode_device_support ~/Library/Developer/Xcode/watchOS\ DeviceSupport "watchOS DeviceSupport" || return $?
+    clean_xcode_device_support ~/Library/Developer/Xcode/tvOS\ DeviceSupport "tvOS DeviceSupport" || return $?
     # Simulator runtime caches.
     _xcode_safe_clean_guarded \
         _coresimulator_delete_guard_allows \
@@ -2304,6 +2328,42 @@ _MOLE_VERSIONED_AGENT_CLEANUP_TARGETS=()
 _MOLE_VERSIONED_AGENT_RETENTION_TARGETS=()
 _MOLE_VERSIONED_AGENT_ACTIVE_PATH=""
 
+_versioned_agent_scan_deadline() {
+    local timeout_seconds="${1:-$MOLE_TIMEOUT_DISK_VERIFY_SEC}"
+    [[ "$timeout_seconds" =~ ^[0-9]+(\.[0-9]+)?$ ]] || timeout_seconds="$MOLE_TIMEOUT_DISK_VERIFY_SEC"
+    local timeout_whole="${timeout_seconds%%.*}"
+    local timeout_budget=$((10#$timeout_whole))
+    if [[ "$timeout_seconds" == *.* && "${timeout_seconds#*.}" =~ [1-9] ]]; then
+        timeout_budget=$((timeout_budget + 1))
+    fi
+    [[ $timeout_budget -gt 0 ]] || timeout_budget=1
+    printf '%s\n' "$((SECONDS + timeout_budget))"
+}
+
+_materialize_versioned_agent_entries() {
+    local versions_root="$1"
+    local output_file="$2"
+    local timeout_seconds="${3:-$MOLE_TIMEOUT_DISK_VERIFY_SEC}"
+    : > "$output_file" || return 1
+
+    local scan_rc=0
+    run_with_timeout "$timeout_seconds" find "$versions_root" -mindepth 1 -maxdepth 1 \
+        \( -type f -o -type d \) -print0 \
+        < /dev/null > "$output_file" 2> /dev/null || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        : > "$output_file" || true
+        return "$scan_rc"
+    fi
+    return 0
+}
+
+_versioned_agent_entry_mtime() {
+    local entry="$1"
+    local timeout_seconds="$2"
+    run_with_timeout "$timeout_seconds" stat \
+        -f%m "$entry" < /dev/null 2> /dev/null
+}
+
 _plan_versioned_agent_cleanup_targets() {
     local versions_root="$1"
     local keep_previous="$2"
@@ -2316,18 +2376,53 @@ _plan_versioned_agent_cleanup_targets() {
 
     local -a entries=()
     local -a entry_mtimes=()
+    local scan_deadline=""
+    scan_deadline=$(_versioned_agent_scan_deadline)
+    local scan_timeout=""
+    local deadline_rc=0
+    scan_timeout=$(_mole_timeout_with_deadline \
+        "$MOLE_TIMEOUT_DISK_VERIFY_SEC" "$scan_deadline") || deadline_rc=$?
+    [[ $deadline_rc -eq 0 ]] || return "$deadline_rc"
+    local scan_file=""
+    scan_file=$(create_temp_file) || return 1
+    local scan_rc=0
+    _materialize_versioned_agent_entries \
+        "$versions_root" "$scan_file" "$scan_timeout" || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        return "$scan_rc"
+    fi
+
     local entry
+    local inventory_rc=0
     while IFS= read -r -d '' entry; do
         local name
         name=$(basename "$entry")
         [[ "$name" == .* ]] && continue
         [[ ! "$name" =~ ^[0-9] ]] && continue
         entries+=("$entry")
-        local mtime
-        mtime=$(stat -f%m "$entry" 2> /dev/null || echo "0")
-        [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+        local mtime=""
+        local stat_rc=0
+        local stat_timeout=""
+        stat_timeout=$(_mole_timeout_with_deadline \
+            "$MOLE_TIMEOUT_DISK_VERIFY_SEC" "$scan_deadline") || stat_rc=$?
+        if [[ $stat_rc -eq 0 ]]; then
+            mtime=$(_versioned_agent_entry_mtime \
+                "$entry" "$stat_timeout") || stat_rc=$?
+        fi
+        if [[ $stat_rc -ne 0 || ! "$mtime" =~ ^[0-9]+$ ]]; then
+            inventory_rc=$stat_rc
+            [[ $inventory_rc -ne 0 ]] || inventory_rc=1
+            break
+        fi
         entry_mtimes+=("$mtime")
-    done < <(command find "$versions_root" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -print0 2> /dev/null)
+    done < "$scan_file"
+    rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+    if [[ $inventory_rc -ne 0 ]]; then
+        _MOLE_VERSIONED_AGENT_CLEANUP_TARGETS=()
+        _MOLE_VERSIONED_AGENT_RETENTION_TARGETS=()
+        return "$inventory_rc"
+    fi
 
     [[ ${#entries[@]} -le "$keep_previous" ]] && return 0
 
@@ -2390,7 +2485,25 @@ _resolve_versioned_agent_active_path() {
     target_parent=$(cd "$target_parent" 2> /dev/null && pwd -P) || return 2
     target="$target_parent/$target_name"
 
+    local scan_deadline=""
+    scan_deadline=$(_versioned_agent_scan_deadline)
+    local scan_timeout=""
+    local deadline_rc=0
+    scan_timeout=$(_mole_timeout_with_deadline \
+        "$MOLE_TIMEOUT_DISK_VERIFY_SEC" "$scan_deadline") || deadline_rc=$?
+    [[ $deadline_rc -eq 0 ]] || return "$deadline_rc"
+    local scan_file=""
+    scan_file=$(create_temp_file) || return 2
+    local scan_rc=0
+    _materialize_versioned_agent_entries \
+        "$versions_root" "$scan_file" "$scan_timeout" || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        return "$scan_rc"
+    fi
+
     local entry entry_resolved entry_parent entry_name
+    local found_active=false
     while IFS= read -r -d '' entry; do
         if [[ -d "$entry" ]]; then
             entry_resolved=$(cd "$entry" 2> /dev/null && pwd -P) || continue
@@ -2403,11 +2516,14 @@ _resolve_versioned_agent_active_path() {
         case "$target/" in
             "$entry_resolved"/*)
                 _MOLE_VERSIONED_AGENT_ACTIVE_PATH="$entry"
-                return 0
+                found_active=true
+                break
                 ;;
         esac
-    done < <(command find "$versions_root" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -print0 2> /dev/null)
+    done < "$scan_file"
+    rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
 
+    [[ "$found_active" == "true" ]] && return 0
     return 2
 }
 
@@ -2426,24 +2542,36 @@ _versioned_agent_delete_guard_allows() {
         _resolve_versioned_agent_active_path \
             "$_MOLE_VERSIONED_AGENT_GUARD_ROOT" \
             "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" || active_status=$?
+        if [[ $active_status -eq 124 || $active_status -ge 128 ]]; then
+            _MOLE_VERSIONED_AGENT_GUARD_REASON="inventory interrupted"
+            return "$active_status"
+        fi
         if [[ $active_status -eq 0 ]]; then
             active_path="$_MOLE_VERSIONED_AGENT_ACTIVE_PATH"
-        elif [[ $active_status -eq 2 ]]; then
-            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version unknown"
-            return 1
-        elif [[ "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED" == "true" ]]; then
+        elif [[ $active_status -eq 1 && "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED" != "true" ]]; then
+            : # This agent currently has no active launcher symlink to preserve.
+        elif [[ $active_status -eq 1 ]]; then
             _MOLE_VERSIONED_AGENT_GUARD_REASON="active version changed"
             return 1
+        else
+            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version unknown"
+            return "$active_status"
         fi
     fi
 
     # An updater can switch the launcher or install a newer version while size
     # is being measured. Re-plan and authorize this exact target at the delete
     # boundary so neither the active version nor the new retention set is lost.
+    local plan_rc=0
     _plan_versioned_agent_cleanup_targets \
         "$_MOLE_VERSIONED_AGENT_GUARD_ROOT" \
         "$_MOLE_VERSIONED_AGENT_GUARD_KEEP" \
-        "$active_path"
+        "$active_path" || plan_rc=$?
+    if [[ $plan_rc -ne 0 ]]; then
+        _MOLE_VERSIONED_AGENT_GUARD_REASON="inventory unknown"
+        [[ $plan_rc -eq 124 || $plan_rc -ge 128 ]] && return "$plan_rc"
+        return 1
+    fi
 
     if [[ -n "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" ]]; then
         local verified_active_path=""
@@ -2451,9 +2579,17 @@ _versioned_agent_delete_guard_allows() {
         _resolve_versioned_agent_active_path \
             "$_MOLE_VERSIONED_AGENT_GUARD_ROOT" \
             "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" || verified_active_status=$?
+        if [[ $verified_active_status -eq 124 || $verified_active_status -ge 128 ]]; then
+            _MOLE_VERSIONED_AGENT_GUARD_REASON="inventory interrupted"
+            return "$verified_active_status"
+        fi
         [[ $verified_active_status -ne 0 ]] || verified_active_path="$_MOLE_VERSIONED_AGENT_ACTIVE_PATH"
-        if [[ $verified_active_status -eq 2 ]]; then
+        if [[ $verified_active_status -ne 0 && $verified_active_status -ne 1 ]]; then
             _MOLE_VERSIONED_AGENT_GUARD_REASON="active version unknown"
+            return "$verified_active_status"
+        fi
+        if [[ $verified_active_status -eq 1 && "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED" == "true" ]]; then
+            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version changed"
             return 1
         fi
         if [[ $verified_active_status -ne $active_status || "$verified_active_path" != "$active_path" ]]; then
@@ -2486,7 +2622,15 @@ clean_versioned_agent_root() {
     local active_path="${4:-}"
     local active_symlink="${5:-}"
 
-    _plan_versioned_agent_cleanup_targets "$versions_root" "$keep_previous" "$active_path"
+    local plan_rc=0
+    _plan_versioned_agent_cleanup_targets \
+        "$versions_root" "$keep_previous" "$active_path" || plan_rc=$?
+    if [[ $plan_rc -ne 0 ]]; then
+        _MOLE_VERSIONED_AGENT_GUARD_REASON="inventory unknown"
+        [[ $plan_rc -eq 124 || $plan_rc -ge 128 ]] && return "$plan_rc"
+        _report_versioned_agent_guard_stop "$label"
+        return "$plan_rc"
+    fi
     [[ ${#_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]} -gt 0 ]] || return 0
 
     _MOLE_VERSIONED_AGENT_GUARD_ROOT="$versions_root"
@@ -2511,7 +2655,10 @@ clean_versioned_agent_root() {
 
     local target
     for target in "${_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]}"; do
-        if ! _versioned_agent_delete_guard_allows "$target"; then
+        local guard_rc=0
+        _versioned_agent_delete_guard_allows "$target" || guard_rc=$?
+        if [[ $guard_rc -ne 0 ]]; then
+            [[ $guard_rc -eq 124 || $guard_rc -ge 128 ]] && return "$guard_rc"
             _report_versioned_agent_guard_stop "$label"
             return 0
         fi
@@ -2530,13 +2677,25 @@ count_versioned_agent_entries() {
         return 0
     }
 
+    local scan_timeout="$MOLE_TIMEOUT_DISK_VERIFY_SEC"
+    local scan_file=""
+    scan_file=$(create_temp_file) || return 1
+    local scan_rc=0
+    _materialize_versioned_agent_entries \
+        "$versions_root" "$scan_file" "$scan_timeout" || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+        rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        return "$scan_rc"
+    fi
+
     while IFS= read -r -d '' entry; do
         local name
         name=$(basename "$entry")
         [[ "$name" == .* ]] && continue
         [[ ! "$name" =~ ^[0-9] ]] && continue
         count=$((count + 1))
-    done < <(command find "$versions_root" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -print0 2> /dev/null)
+    done < "$scan_file"
+    rm -f -- "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
 
     echo "$count"
 }
@@ -2609,10 +2768,16 @@ _claude_desktop_delete_guard_allows() {
 
     # A staged update can change which previous version retention should keep
     # while size is being measured. Re-plan and authorize this exact target.
+    local plan_rc=0
     _plan_versioned_agent_cleanup_targets \
         "$_MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT" \
         "$_MOLE_CLAUDE_DESKTOP_GUARD_KEEP" \
-        "$_MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT/$current_sdk"
+        "$_MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT/$current_sdk" || plan_rc=$?
+    if [[ $plan_rc -ne 0 ]]; then
+        _MOLE_CLAUDE_DESKTOP_GUARD_REASON="inventory unknown"
+        [[ $plan_rc -eq 124 || $plan_rc -ge 128 ]] && return "$plan_rc"
+        return 1
+    fi
 
     # Re-read the SDK marker and active entries after retention planning. The
     # planner walks and stats every version, which gives an updater time to
@@ -2658,7 +2823,10 @@ _claude_desktop_safe_clean_guarded() {
         local index target
         for ((index = 0; index < cleanup_arg_count - 1; index++)); do
             target="${cleanup_args[$index]}"
-            if ! _claude_desktop_delete_guard_allows "$target"; then
+            local guard_rc=0
+            _claude_desktop_delete_guard_allows "$target" || guard_rc=$?
+            if [[ $guard_rc -ne 0 ]]; then
+                [[ $guard_rc -eq 124 || $guard_rc -ge 128 ]] && return "$guard_rc"
                 if [[ "$_MOLE_CLAUDE_DESKTOP_GUARD_REASON" == "Claude Desktop started" ]]; then
                     _defer_dev_cleanup_family "Claude Desktop"
                 else
@@ -2708,9 +2876,11 @@ clean_claude_desktop_bundled_versions() {
         local versions_root="${spec%%|*}"
         [[ -d "$versions_root" ]] || continue
 
-        local version_count
-        version_count=$(count_versioned_agent_entries "$versions_root")
-        [[ "$version_count" =~ ^[0-9]+$ ]] || version_count=0
+        local version_count=""
+        local count_rc=0
+        version_count=$(count_versioned_agent_entries "$versions_root") || count_rc=$?
+        [[ $count_rc -eq 0 ]] || return "$count_rc"
+        [[ "$version_count" =~ ^[0-9]+$ ]] || return 1
         if [[ "$version_count" -gt 1 ]]; then
             has_multiple_versions=true
             break
@@ -2751,7 +2921,10 @@ clean_claude_desktop_bundled_versions() {
     for spec in "${desktop_specs[@]}"; do
         local versions_root="${spec%%|*}"
         [[ -d "$versions_root" ]] || continue
-        _plan_versioned_agent_cleanup_targets "$versions_root" "$keep_previous" "$versions_root/$sdk_version"
+        local plan_rc=0
+        _plan_versioned_agent_cleanup_targets \
+            "$versions_root" "$keep_previous" "$versions_root/$sdk_version" || plan_rc=$?
+        [[ $plan_rc -eq 0 ]] || return "$plan_rc"
         if [[ ${#_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]} -gt 0 ]]; then
             has_retention_target=true
         fi
@@ -2770,7 +2943,10 @@ clean_claude_desktop_bundled_versions() {
             local versions_root="${spec%%|*}"
             local label="${spec#*|}"
             [[ -d "$versions_root" ]] || continue
-            _plan_versioned_agent_cleanup_targets "$versions_root" "$keep_previous" "$versions_root/$sdk_version"
+            local plan_rc=0
+            _plan_versioned_agent_cleanup_targets \
+                "$versions_root" "$keep_previous" "$versions_root/$sdk_version" || plan_rc=$?
+            [[ $plan_rc -eq 0 ]] || return "$plan_rc"
             [[ ${#_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]} -gt 0 ]] || continue
             if declare -f safe_clean_guarded > /dev/null 2>&1; then
                 safe_clean_guarded \
@@ -2801,22 +2977,29 @@ clean_claude_desktop_bundled_versions() {
         local label="${spec#*|}"
         [[ -d "$versions_root" ]] || continue
 
-        local version_count
-        version_count=$(count_versioned_agent_entries "$versions_root")
-        [[ "$version_count" =~ ^[0-9]+$ ]] || version_count=0
+        local version_count=""
+        local count_rc=0
+        version_count=$(count_versioned_agent_entries "$versions_root") || count_rc=$?
+        [[ $count_rc -eq 0 ]] || return "$count_rc"
+        [[ "$version_count" =~ ^[0-9]+$ ]] || return 1
         [[ "$version_count" -le 1 ]] && continue
 
-        _plan_versioned_agent_cleanup_targets "$versions_root" "$keep_previous" "$versions_root/$sdk_version"
+        local plan_rc=0
+        _plan_versioned_agent_cleanup_targets \
+            "$versions_root" "$keep_previous" "$versions_root/$sdk_version" || plan_rc=$?
+        [[ $plan_rc -eq 0 ]] || return "$plan_rc"
         [[ ${#_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]} -gt 0 ]] || continue
 
         _MOLE_CLAUDE_DESKTOP_GUARD_SUPPORT="$claude_support"
         _MOLE_CLAUDE_DESKTOP_GUARD_SDK_VERSION="$sdk_version"
         _MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT="$versions_root"
         _MOLE_CLAUDE_DESKTOP_GUARD_KEEP="$keep_previous"
+        local clean_rc=0
         _claude_desktop_safe_clean_guarded \
             "$label" \
             "${_MOLE_VERSIONED_AGENT_RETENTION_TARGETS[@]}" \
-            "$label" || return 0
+            "$label" || clean_rc=$?
+        [[ $clean_rc -eq 0 || $clean_rc -eq 1 ]] || return "$clean_rc"
     done
 }
 
@@ -2844,6 +3027,7 @@ clean_dev_ai_agents() {
             local active_status=0
             _resolve_versioned_agent_active_path "$versions_root" "$active_symlink" || active_status=$?
             if [[ $active_status -ne 0 ]]; then
+                [[ $active_status -eq 124 || $active_status -ge 128 ]] && return "$active_status"
                 if [[ ! -e "$active_symlink" ]]; then
                     echo -e "  ${GRAY}${ICON_WARNING}${NC} $label · skipped (active symlink broken)"
                 else
@@ -2860,7 +3044,8 @@ clean_dev_ai_agents() {
             fi
         fi
 
-        clean_versioned_agent_root "$versions_root" "$label" "$keep_previous" "$active_path" "$active_symlink"
+        clean_versioned_agent_root \
+            "$versions_root" "$label" "$keep_previous" "$active_path" "$active_symlink" || return $?
     done
 
     clean_claude_desktop_bundled_versions "$keep_previous"
@@ -3381,17 +3566,23 @@ is_codex_runtime_stale() {
 
 _codex_runtime_size_human() {
     local target="$1"
+    local output_var="$2"
     local size_kb=0
 
     if declare -f get_path_size_kb > /dev/null 2>&1; then
-        size_kb=$(get_path_size_kb "$target" 2> /dev/null || echo 0)
+        local size_rc=0
+        size_kb=$(get_path_size_kb "$target" 2> /dev/null) || size_rc=$?
+        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
+        [[ $size_rc -eq 0 ]] || return "$size_rc"
     fi
 
+    local formatted_size
     if declare -f bytes_to_human > /dev/null 2>&1; then
-        bytes_to_human "$((size_kb * 1024))"
+        formatted_size=$(bytes_to_human "$((size_kb * 1024))")
     else
-        printf '%s KB' "$size_kb"
+        formatted_size="${size_kb} KB"
     fi
+    printf -v "$output_var" '%s' "$formatted_size"
 }
 
 _codex_runtime_delete_guard_allows() {
@@ -3483,8 +3674,8 @@ clean_codex_runtimes() {
         return 0
     fi
 
-    local size_human
-    size_human=$(_codex_runtime_size_human "$runtime_root")
+    local size_human=""
+    _codex_runtime_size_human "$runtime_root" size_human || return $?
     echo -e "  ${GRAY}${ICON_REVIEW}${NC} Codex runtimes · manual review (${size_human})"
     note_activity
 
@@ -3764,60 +3955,90 @@ clean_dev_haskell() {
 clean_dev_ocaml() {
     safe_clean ~/.opam/download-cache/* "Opam cache"
 }
+
+_run_developer_cleanup_step() {
+    local strict=false
+    if [[ "${1:-}" == "--strict" ]]; then
+        strict=true
+        shift
+    fi
+
+    local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ $pending_clean_cancel -eq 124 || $pending_clean_cancel -ge 128 ]]; then
+        return "$pending_clean_cancel"
+    fi
+
+    local step_rc=0
+    "$@" || step_rc=$?
+    if [[ $step_rc -eq 124 || $step_rc -ge 128 ]]; then
+        _mole_record_clean_cancellation "$step_rc"
+        return "$step_rc"
+    fi
+
+    pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ $pending_clean_cancel -eq 124 || $pending_clean_cancel -ge 128 ]]; then
+        return "$pending_clean_cancel"
+    fi
+    [[ "$strict" == "true" && $step_rc -ne 0 ]] && return "$step_rc"
+    return 0
+}
+
 # Main developer tools cleanup sequence.
 clean_developer_tools() {
     stop_section_spinner
 
     # CLI tools and languages
-    clean_dev_npm
-    clean_dev_python
-    clean_dev_go
-    clean_dev_mise
-    clean_dev_rust
-    check_rust_toolchains
-    clean_dev_ruby
-    clean_dev_perl
-    clean_dev_docker
-    clean_dev_cloud
-    clean_dev_nix
-    clean_dev_shell
-    clean_dev_frontend
-    clean_project_caches
-    clean_dev_mobile
-    clean_dev_jvm
-    clean_dev_jetbrains_toolbox
-    clean_dev_jetbrains_logs
-    clean_dev_ai_agents
-    clean_dev_other_langs
-    clean_dev_cicd
-    clean_dev_database
-    clean_dev_api_tools
-    clean_dev_network
-    clean_dev_misc
-    clean_dev_elixir
-    clean_dev_haskell
-    clean_dev_ocaml
+    _run_developer_cleanup_step clean_dev_npm || return $?
+    _run_developer_cleanup_step clean_dev_python || return $?
+    _run_developer_cleanup_step clean_dev_go || return $?
+    _run_developer_cleanup_step clean_dev_mise || return $?
+    _run_developer_cleanup_step clean_dev_rust || return $?
+    _run_developer_cleanup_step check_rust_toolchains || return $?
+    _run_developer_cleanup_step clean_dev_ruby || return $?
+    _run_developer_cleanup_step clean_dev_perl || return $?
+    _run_developer_cleanup_step clean_dev_docker || return $?
+    _run_developer_cleanup_step clean_dev_cloud || return $?
+    _run_developer_cleanup_step clean_dev_nix || return $?
+    _run_developer_cleanup_step clean_dev_shell || return $?
+    _run_developer_cleanup_step clean_dev_frontend || return $?
+    _run_developer_cleanup_step clean_project_caches || return $?
+    _run_developer_cleanup_step --strict clean_dev_mobile || return $?
+    _run_developer_cleanup_step clean_dev_jvm || return $?
+    _run_developer_cleanup_step clean_dev_jetbrains_toolbox || return $?
+    _run_developer_cleanup_step clean_dev_jetbrains_logs || return $?
+    _run_developer_cleanup_step --strict clean_dev_ai_agents || return $?
+    _run_developer_cleanup_step clean_dev_other_langs || return $?
+    _run_developer_cleanup_step clean_dev_cicd || return $?
+    _run_developer_cleanup_step clean_dev_database || return $?
+    _run_developer_cleanup_step clean_dev_api_tools || return $?
+    _run_developer_cleanup_step clean_dev_network || return $?
+    _run_developer_cleanup_step clean_dev_misc || return $?
+    _run_developer_cleanup_step clean_dev_elixir || return $?
+    _run_developer_cleanup_step clean_dev_haskell || return $?
+    _run_developer_cleanup_step clean_dev_ocaml || return $?
 
     # GUI developer applications
-    clean_xcode_tools
-    clean_code_editors
+    _run_developer_cleanup_step --strict clean_xcode_tools || return $?
+    _run_developer_cleanup_step clean_code_editors || return $?
 
     # Homebrew: only blanket-clean downloads/. Wiping api/ (JSON that needs a
     # network re-download) and bootsnap/ (recompiled Ruby) leaves brew silent
     # for ~94s before its first output on the next run.
-    safe_clean ~/Library/Caches/Homebrew/downloads/* "Homebrew cache"
+    _run_developer_cleanup_step \
+        safe_clean ~/Library/Caches/Homebrew/downloads/* "Homebrew cache" || return $?
     local brew_lock_dirs=(
         "/opt/homebrew/var/homebrew/locks"
         "/usr/local/var/homebrew/locks"
     )
     for lock_dir in "${brew_lock_dirs[@]}"; do
         if [[ -d "$lock_dir" && -w "$lock_dir" ]]; then
-            safe_clean "$lock_dir"/* "Homebrew lock files"
+            _run_developer_cleanup_step \
+                safe_clean "$lock_dir"/* "Homebrew lock files" || return $?
         elif [[ -d "$lock_dir" ]]; then
             if find "$lock_dir" -mindepth 1 -maxdepth 1 -print -quit 2> /dev/null | grep -q .; then
                 debug_log "Skipping read-only Homebrew locks in $lock_dir"
             fi
         fi
     done
-    clean_homebrew
+    _run_developer_cleanup_step clean_homebrew || return $?
 }

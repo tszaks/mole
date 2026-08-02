@@ -297,6 +297,99 @@ _update_release_lock() {
     UPDATE_LOCK_ACQUIRED=false
 }
 
+_update_new_install_receipt() {
+    local prefix="${1:-update}"
+    printf '%s-%s-%s-%s\n' "$prefix" "$(date +%s)" "$$" "${RANDOM:-0}"
+}
+
+_MOLE_UPDATE_VERIFIED_VERSION=""
+_MOLE_UPDATE_VERIFIED_COMMIT=""
+
+# An installer exit status is not release proof. Re-open the installed
+# generation under the same target-adjacent lock and bind its metadata to this
+# exact attempt before any success message is shown.
+_update_verify_installed_generation() {
+    local update_ref="$1"
+    local install_dir="$2"
+    local config_dir="$3"
+    local mole_path="$4"
+    local expected_commit="${5:-}"
+    local expected_receipt="$6"
+
+    _MOLE_UPDATE_VERIFIED_VERSION=""
+    _MOLE_UPDATE_VERIFIED_COMMIT=""
+
+    local verification_lock=""
+    local lock_uses_sudo="false"
+    lock_uses_sudo=$(_update_lock_mode_for_install_dir "$install_dir") || return 1
+    verification_lock=$(_update_lock_path "$install_dir")
+    _update_acquire_lock "$verification_lock" "$lock_uses_sudo" || return 1
+
+    local lock_control="$UPDATE_LOCK_CONTROL"
+    local lock_holder_pid="$UPDATE_LOCK_HOLDER_PID"
+    local lock_acquired="$UPDATE_LOCK_ACQUIRED"
+    local verification_status=0
+    local installed_channel=""
+    local installed_receipt=""
+    local repair_reason=""
+    installed_channel=$(MOLE_CONFIG_DIR="$config_dir" get_install_channel 2> /dev/null || true)
+    installed_receipt=$(MOLE_CONFIG_DIR="$config_dir" get_install_receipt 2> /dev/null || true)
+    repair_reason=$(MOLE_CONFIG_DIR="$config_dir" manual_install_repair_reason 2> /dev/null || true)
+
+    if [[ "$installed_receipt" != "$expected_receipt" || -n "$repair_reason" ]]; then
+        verification_status=1
+    elif [[ "$update_ref" == "main" ]]; then
+        local installed_commit=""
+        local version_output=""
+        local probe_rc=0
+        installed_commit=$(MOLE_CONFIG_DIR="$config_dir" get_install_commit 2> /dev/null || true)
+        version_output=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            "$mole_path" --version 2> /dev/null) || probe_rc=$?
+        if [[ "$installed_channel" != "nightly" || $probe_rc -ne 0 || -z "$version_output" ]]; then
+            verification_status=1
+        fi
+        if [[ $verification_status -eq 0 && "$expected_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            if [[ ! "$installed_commit" =~ ^[0-9a-f]{7,40}$ ||
+                "${installed_commit:0:7}" != "${expected_commit:0:7}" ]]; then
+                verification_status=1
+            fi
+        fi
+        if [[ $verification_status -eq 0 && "$installed_commit" =~ ^[0-9a-f]{7,40}$ ]]; then
+            _MOLE_UPDATE_VERIFIED_COMMIT="${installed_commit:0:7}"
+        fi
+    else
+        local installed_version=""
+        local version_output=""
+        local probe_rc=0
+        version_output=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            "$mole_path" --version 2> /dev/null) || probe_rc=$?
+        if [[ $probe_rc -eq 0 ]]; then
+            installed_version=$(printf '%s\n' "$version_output" | awk 'NF {print $NF; exit}')
+        fi
+        if [[ "$installed_channel" != "stable" || "$installed_version" != "${update_ref#V}" ]]; then
+            verification_status=1
+        else
+            _MOLE_UPDATE_VERIFIED_VERSION="$installed_version"
+        fi
+    fi
+
+    _update_release_lock "$verification_lock" "$lock_uses_sudo" \
+        "$lock_control" "$lock_holder_pid" "$lock_acquired"
+    return "$verification_status"
+}
+
+_update_print_verified_success() {
+    local update_ref="$1"
+    local success_label="$2"
+    if [[ "$update_ref" == "main" && -n "$_MOLE_UPDATE_VERIFIED_COMMIT" ]]; then
+        printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${_MOLE_UPDATE_VERIFIED_COMMIT}"
+    elif [[ "$update_ref" == "main" ]]; then
+        printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}"
+    else
+        printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${_MOLE_UPDATE_VERIFIED_VERSION}"
+    fi
+}
+
 # Last-resort self-heal for a failed staged install. The staged path runs
 # through local bootstrap code (temp file, registry, exec) that is frozen on
 # the user's machine, which is exactly what a broken installed version cannot
@@ -313,7 +406,8 @@ _update_self_heal_reinstall() {
     local success_label="$6"
     local expected_commit="${7:-}"
     local install_commit=""
-    local install_receipt="heal-$(date +%s)-$$-${RANDOM:-0}"
+    local install_receipt=""
+    install_receipt=$(_update_new_install_receipt heal)
 
     if [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]; then
         install_commit="$expected_commit"
@@ -350,51 +444,10 @@ _update_self_heal_reinstall() {
         return 1
     fi
 
-    local verification_lock
-    local lock_uses_sudo
-    lock_uses_sudo=$(_update_lock_mode_for_install_dir "$install_dir") || return 1
-    verification_lock=$(_update_lock_path "$install_dir")
-    _update_acquire_lock "$verification_lock" "$lock_uses_sudo" || return 1
-
-    local verification_status=0
-    if [[ "$update_ref" == "main" ]]; then
-        local installed_commit=""
-        local installed_receipt=""
-        installed_commit=$(MOLE_CONFIG_DIR="$config_dir" get_install_commit 2> /dev/null || true)
-        installed_receipt=$(MOLE_CONFIG_DIR="$config_dir" get_install_receipt 2> /dev/null || true)
-        # The per-attempt receipt binds metadata to this exact installer run;
-        # an older valid commit can no longer make a partial reinstall pass.
-        if [[ "$installed_receipt" != "$install_receipt" ]] ||
-            ! run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$mole_path" --version > /dev/null 2>&1; then
-            verification_status=1
-        fi
-        if [[ "$verification_status" -eq 0 && -n "$install_commit" ]]; then
-            if [[ ! "$installed_commit" =~ ^[0-9a-f]{7,40}$ ||
-                "${installed_commit:0:7}" != "${install_commit:0:7}" ]]; then
-                verification_status=1
-            fi
-        fi
-        if [[ "$verification_status" -eq 0 && "$installed_commit" =~ ^[0-9a-f]{7,40}$ ]]; then
-            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_commit:0:7}"
-        elif [[ "$verification_status" -eq 0 ]]; then
-            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}"
-        fi
-    else
-        # Claim stable success only when the installed binary reports the target
-        # version. Trusting installer output would repeat the V1.47.1 false success.
-        local installed_version=""
-        installed_version=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-            "$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || true)
-        if [[ "$installed_version" != "${update_ref#V}" ]]; then
-            verification_status=1
-        else
-            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${installed_version}"
-        fi
-    fi
-
-    _update_release_lock "$verification_lock" "$lock_uses_sudo" \
-        "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
-    return "$verification_status"
+    _update_verify_installed_generation \
+        "$update_ref" "$install_dir" "$config_dir" "$mole_path" \
+        "$install_commit" "$install_receipt" || return 1
+    _update_print_verified_success "$update_ref" "$success_label"
 }
 
 _update_print_manual_reinstall() {
@@ -1050,7 +1103,7 @@ update_mole() (
             fi
             if [[ -z "$new_version" ]]; then
                 new_version=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-                    "$mole_path" --version 2> /dev/null | awk 'NR==1 && NF {print $NF}' || true)
+                    "$mole_path" --version 2> /dev/null | awk 'NF {print $NF; exit}' || true)
             fi
             if [[ -z "$new_version" ]]; then
                 new_version="$fallback_version"
@@ -1068,10 +1121,33 @@ update_mole() (
         config_dir="$HOME/.config/mole"
     fi
 
+    _run_staged_installer() {
+        local update_ref="$1"
+        local expected_commit="${2:-}"
+        shift 2
+        local install_receipt=""
+        install_receipt=$(_update_new_install_receipt update)
+
+        local installer_rc=0
+        install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" \
+            MOLE_VERSION="$update_ref" MOLE_INSTALL_COMMIT="$expected_commit" \
+            MOLE_INSTALL_RECEIPT="$install_receipt" \
+            "$tmp_installer" --prefix "$install_dir" --config "$config_dir" "$@" 2>&1) || installer_rc=$?
+        [[ $installer_rc -eq 0 ]] || return "$installer_rc"
+
+        _update_verify_installed_generation \
+            "$update_ref" "$install_dir" "$config_dir" "$mole_path" \
+            "$expected_commit" "$install_receipt"
+    }
+
+    _print_failed_installer_output() {
+        printf '%s\n' "$install_output" |
+            sed '/Updated to latest version/d; /Already on latest version/d' |
+            tail -10 >&2
+    }
+
     if [[ "$nightly_update" == "true" ]]; then
-        if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="main" \
-            MOLE_INSTALL_COMMIT="$latest_commit" \
-            "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+        if _run_staged_installer "main" "$latest_commit"; then
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -1079,13 +1155,13 @@ update_mole() (
                 rm -f "$tmp_installer"
                 _update_cleanup
                 log_error "Nightly update failed"
-                echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+                _print_failed_installer_output
                 _update_print_manual_reinstall "main" "$install_dir" "$config_dir"
                 exit 1
             fi
         fi
     elif [[ "$force_update" == "true" || "$switch_to_stable_channel" == "true" || "$repair_install" == "true" ]]; then
-        if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+        if _run_staged_installer "$update_tag" ""; then
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
             if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -1093,16 +1169,16 @@ update_mole() (
                 rm -f "$tmp_installer"
                 _update_cleanup
                 log_error "Update failed"
-                echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+                _print_failed_installer_output
                 _update_print_manual_reinstall "$update_tag" "$install_dir" "$config_dir"
                 exit 1
             fi
         fi
     else
-        if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" --update 2>&1); then
+        if _run_staged_installer "$update_tag" "" --update; then
             process_install_output "$install_output" "$latest" "$final_success_label"
         else
-            if install_output=$(MOLE_ASSUME_SUDO_AUTH="$installer_assume_sudo_auth" MOLE_VERSION="$update_tag" "$tmp_installer" --prefix "$install_dir" --config "$config_dir" 2>&1); then
+            if _run_staged_installer "$update_tag" ""; then
                 process_install_output "$install_output" "$latest" "$final_success_label"
             else
                 if [[ -t 1 ]]; then stop_inline_spinner; fi
@@ -1110,7 +1186,7 @@ update_mole() (
                     rm -f "$tmp_installer"
                     _update_cleanup
                     log_error "Update failed"
-                    echo "$install_output" | tail -10 >&2 # Show last 10 lines of error
+                    _print_failed_installer_output
                     _update_print_manual_reinstall "$update_tag" "$install_dir" "$config_dir"
                     exit 1
                 fi
