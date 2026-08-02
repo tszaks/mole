@@ -239,6 +239,26 @@ if [[ -n "$out" ]]; then
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$INSTALLER_ARGS_LOG"
 printf '%s\n' "${MOLE_INSTALL_COMMIT:-}" > "$INSTALLER_COMMIT_LOG"
+prefix=""
+config=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--prefix) prefix="$2"; shift 2 ;;
+		--config) config="$2"; shift 2 ;;
+		*) shift ;;
+	esac
+done
+mkdir -p "$prefix" "$config/bin"
+printf '#!/bin/bash\necho "Mole version nightly"\n' > "$prefix/mole.next"
+printf '#!/bin/bash\nexit 0\n' > "$config/bin/analyze-go"
+cp "$config/bin/analyze-go" "$config/bin/status-go"
+chmod +x "$prefix/mole.next" "$config/bin/analyze-go" "$config/bin/status-go"
+mv "$prefix/mole.next" "$prefix/mole"
+# Nightly success is bound to a per-attempt receipt plus the resolved commit.
+# A stub that skips them is rejected by _update_verify_installed_generation.
+printf 'CHANNEL=nightly\nCOMMIT_HASH=%s\nINSTALL_RECEIPT=%s\n' \
+	"${MOLE_INSTALL_COMMIT:0:7}" "${MOLE_INSTALL_RECEIPT:-}" > "$config/install_channel"
+rm -f "$config/.helper_install_incomplete"
 echo "Updated to latest version, ${MOLE_VERSION#V}"
 INSTALLER
 	exit 0
