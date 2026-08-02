@@ -177,6 +177,67 @@ SCRIPT
 	chmod +x "$bin_dir/curl"
 }
 
+make_nightly_api_failure_stubs() {
+	local bin_dir="$1"
+	local latest_commit="${2:-}"
+	cat > "$bin_dir/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+out=""
+url=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-o)
+			out="$2"
+			shift 2
+			;;
+		http*://*)
+			url="$1"
+			shift
+			;;
+		*) shift ;;
+	esac
+done
+[[ -n "$url" ]] && printf '%s\n' "$url" >> "$CURL_URL_LOG"
+
+if [[ -n "$out" ]]; then
+	cat > "$out" <<'INSTALLER'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$INSTALLER_ARGS_LOG"
+printf '%s\n' "${MOLE_INSTALL_COMMIT:-}" > "$INSTALLER_COMMIT_LOG"
+echo "Updated to latest version, ${MOLE_VERSION#V}"
+INSTALLER
+	exit 0
+fi
+
+exit 22
+SCRIPT
+	cat > "$bin_dir/git" <<SCRIPT
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\$GIT_ARGS_LOG"
+if [[ -n "\${GIT_CONFIG_PARAMETERS:-}" || -n "\${GIT_EXEC_PATH:-}" ]]; then
+	[[ -n "\${GIT_POISON_LOG:-}" ]] && : > "\$GIT_POISON_LOG"
+	printf 'badc0de0000000000000000000000000000000000\trefs/heads/main\n'
+	exit 0
+fi
+if [[ -n "\${GIT_ENV_LOG:-}" ]]; then
+	printf '%s|%s|%s|%s|%s|%s|%s\n' \
+		"\${GIT_TERMINAL_PROMPT:-}" "\${GIT_ASKPASS:-}" "\${SSH_ASKPASS:-}" \
+		"\${GIT_CONFIG_NOSYSTEM:-}" "\${GIT_CONFIG_GLOBAL:-}" \
+		"\${GIT_CONFIG_COUNT:-}" "\${LC_ALL:-}" > "\$GIT_ENV_LOG"
+fi
+if [[ -n "$latest_commit" ]]; then
+	printf '%s\trefs/heads/main\n' "$latest_commit"
+	case "\${GIT_STUB_MODE:-success}" in
+		nonzero) exit 1 ;;
+		hang) sleep 30 ;;
+	esac
+	exit 0
+fi
+exit 1
+SCRIPT
+	chmod +x "$bin_dir/curl" "$bin_dir/git"
+}
+
 @test "mo update repairs missing helpers at the current stable version (#1193)" {
 	local manual_bin="$TEST_ROOT/manual/bin"
 	local manual_config="$TEST_ROOT/manual/config"
@@ -402,6 +463,152 @@ SCRIPT
 	if grep -q "raw.githubusercontent.com/tw93/mole/main/install.sh" "$curl_url_log"; then
 		return 1
 	fi
+}
+
+@test "mo update --nightly falls back to git when the commit API is unavailable" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local git_args_log="$TEST_ROOT/git.args"
+	local git_env_log="$TEST_ROOT/git.env"
+	local git_poison_log="$TEST_ROOT/git.poison"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local latest_commit="e31d46faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	make_nightly_api_failure_stubs "$fake_bin" "$latest_commit"
+	printf 'CHANNEL=nightly\nCOMMIT_HASH=e31d46f\n' > "$manual_config/install_channel"
+	: > "$curl_url_log"
+	: > "$git_args_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		GIT_ARGS_LOG="$git_args_log" \
+		GIT_ENV_LOG="$git_env_log" \
+		GIT_POISON_LOG="$git_poison_log" \
+		GIT_CONFIG_PARAMETERS=poison-rewrite \
+		GIT_EXEC_PATH="$TEST_ROOT/untrusted-git-exec" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		"$manual_bin/mo" update --nightly
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Already on latest nightly, e31d46f"* ]] || return 1
+	[ ! -e "$installer_args_log" ] || return 1
+	[ ! -e "$git_poison_log" ] || return 1
+	grep -qF 'ls-remote https://github.com/tw93/mole.git refs/heads/main' "$git_args_log" || return 1
+	[ "$(cat "$git_env_log")" = '0|/usr/bin/false|/usr/bin/false|1|/dev/null|0|C' ] || return 1
+	grep -qF -- '-c credential.helper= -c core.askPass=/usr/bin/false' "$git_args_log" || return 1
+	grep -qF -- '-c protocol.allow=never -c protocol.https.allow=always -c http.sslVerify=true -C /' "$git_args_log" || return 1
+	if grep -q 'raw.githubusercontent.com/tw93/mole/main/install.sh' "$curl_url_log"; then
+		return 1
+	fi
+}
+
+@test "mo update --nightly refuses an unforced reinstall when HEAD is unknown" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local git_args_log="$TEST_ROOT/git.args"
+	local installer_args_log="$TEST_ROOT/installer.args"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	make_nightly_api_failure_stubs "$fake_bin" ""
+	printf 'CHANNEL=nightly\n' > "$manual_config/install_channel"
+	: > "$curl_url_log"
+	: > "$git_args_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		GIT_ARGS_LOG="$git_args_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		"$manual_bin/mo" update --nightly
+
+	[ "$status" -eq 1 ] || return 1
+	[[ "$output" == *"Unable to resolve latest nightly commit"* ]] || return 1
+	[[ "$output" == *"mo update --nightly --force"* ]] || return 1
+	[ ! -e "$installer_args_log" ] || return 1
+	grep -qF 'ls-remote https://github.com/tw93/mole.git refs/heads/main' "$git_args_log" || return 1
+	if grep -q 'raw.githubusercontent.com/tw93/mole/main/install.sh' "$curl_url_log"; then
+		return 1
+	fi
+}
+
+@test "mo update --nightly rejects partial output from a failed or timed-out git probe" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local git_args_log="$TEST_ROOT/git.args"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local latest_commit="f42c0debbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	local mode start elapsed
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	make_nightly_api_failure_stubs "$fake_bin" "$latest_commit"
+	printf 'CHANNEL=nightly\nCOMMIT_HASH=deadbee\n' > "$manual_config/install_channel"
+
+	for mode in nonzero hang; do
+		: > "$curl_url_log"
+		: > "$git_args_log"
+		rm -f "$installer_args_log"
+		start=$SECONDS
+		run env \
+			HOME="$HOME" \
+			PATH="$fake_bin:/usr/bin:/bin" \
+			MOLE_TIMEOUT_MEDIUM_PROBE_SEC=0.2 \
+			GIT_STUB_MODE="$mode" \
+			CURL_URL_LOG="$curl_url_log" \
+			GIT_ARGS_LOG="$git_args_log" \
+			INSTALLER_ARGS_LOG="$installer_args_log" \
+			"$manual_bin/mo" update --nightly
+		elapsed=$((SECONDS - start))
+
+		[ "$status" -eq 1 ] || return 1
+		[[ "$output" == *"Unable to resolve latest nightly commit"* ]] || return 1
+		[ ! -e "$installer_args_log" ] || return 1
+		[ "$elapsed" -lt 5 ] || return 1
+	done
+}
+
+@test "mo update --nightly forwards the git-resolved commit to the installer" {
+	local manual_bin="$TEST_ROOT/manual/bin"
+	local manual_config="$TEST_ROOT/manual/config"
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local git_args_log="$TEST_ROOT/git.args"
+	local installer_args_log="$TEST_ROOT/installer.args"
+	local installer_commit_log="$TEST_ROOT/installer.commit"
+	local latest_commit="f42c0debbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	mkdir -p "$fake_bin"
+	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
+	make_nightly_api_failure_stubs "$fake_bin" "$latest_commit"
+	printf 'CHANNEL=nightly\nCOMMIT_HASH=deadbee\n' > "$manual_config/install_channel"
+	: > "$curl_url_log"
+	: > "$git_args_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		CURL_URL_LOG="$curl_url_log" \
+		GIT_ARGS_LOG="$git_args_log" \
+		INSTALLER_ARGS_LOG="$installer_args_log" \
+		INSTALLER_COMMIT_LOG="$installer_commit_log" \
+		"$manual_bin/mo" update --nightly
+
+	[ "$status" -eq 0 ] || return 1
+	[ -f "$installer_args_log" ] || return 1
+	[ "$(cat "$installer_commit_log")" = "$latest_commit" ] || return 1
+	grep -q 'raw.githubusercontent.com/tw93/mole/main/install.sh' "$curl_url_log" || return 1
 }
 
 @test "mo update --nightly --force reinstalls even when the installed commit is current" {

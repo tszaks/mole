@@ -632,7 +632,48 @@ get_latest_commit_from_github() {
     fi
     sha=$(printf '%s\n' "$response" |
         grep '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/') || sha=""
-    echo "$sha"
+    if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+        printf '%s\n' "$sha"
+        return 0
+    fi
+
+    # The unauthenticated API can be rate-limited even while ordinary GitHub
+    # access works. Keep the fallback bounded and accept only main's exact SHA.
+    if command -v git > /dev/null 2>&1; then
+        # Ignore ambient credential helpers and URL rewrites: this public,
+        # read-only probe must resolve the literal GitHub remote or fail.
+        if response=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" \
+            /usr/bin/env \
+            -u GIT_CONFIG_PARAMETERS \
+            -u GIT_EXEC_PATH \
+            -u GIT_DIR \
+            -u GIT_WORK_TREE \
+            -u GIT_COMMON_DIR \
+            -u GIT_CONFIG \
+            -u GIT_PROXY_COMMAND \
+            -u GIT_SSH \
+            -u GIT_SSH_COMMAND \
+            -u GIT_SSL_NO_VERIFY \
+            GIT_TERMINAL_PROMPT=0 \
+            GIT_ASKPASS=/usr/bin/false \
+            SSH_ASKPASS=/usr/bin/false \
+            GIT_CONFIG_NOSYSTEM=1 \
+            GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_CONFIG_COUNT=0 \
+            LC_ALL=C \
+            git -c credential.helper= -c core.askPass=/usr/bin/false \
+            -c protocol.allow=never -c protocol.https.allow=always \
+            -c http.sslVerify=true -C / \
+            ls-remote https://github.com/tw93/mole.git refs/heads/main \
+            2> /dev/null); then
+            sha=$(printf '%s\n' "$response" |
+                awk '$2 == "refs/heads/main" { print $1; exit }')
+        else
+            sha=""
+        fi
+    fi
+    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || sha=""
+    printf '%s\n' "$sha"
 }
 
 mole_update_message_cache_is_current() {
@@ -878,6 +919,13 @@ update_mole() (
 
         latest_commit=$(get_latest_commit_from_github)
         if [[ "$force_update" != "true" ]]; then
+            if [[ ! "$latest_commit" =~ ^[0-9a-f]{40}$ ]]; then
+                log_error "Unable to resolve latest nightly commit. No update was installed."
+                echo -e "${ICON_REVIEW} Check GitHub access and try again."
+                echo -e "${ICON_REVIEW} To explicitly reinstall anyway: ${GRAY}mo update --nightly --force${NC}"
+                exit 1
+            fi
+
             local installed_commit
             installed_commit=$(get_install_commit)
 
