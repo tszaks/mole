@@ -563,6 +563,68 @@ SCRIPT
 	fi
 }
 
+@test "background nightly checks skip the git fallback while explicit lookups retain it" {
+	local fake_bin="$TEST_ROOT/fake-bin"
+	local curl_url_log="$TEST_ROOT/curl.urls"
+	local git_args_log="$TEST_ROOT/git.args"
+	local lookup_scope_log="$TEST_ROOT/lookup.scope"
+	local latest_commit="e31d46faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	mkdir -p "$fake_bin"
+	make_nightly_api_failure_stubs "$fake_bin" "$latest_commit"
+	: > "$curl_url_log"
+	: > "$git_args_log"
+
+	run env \
+		HOME="$HOME" \
+		PATH="$fake_bin:/usr/bin:/bin" \
+		PROJECT_ROOT="$PROJECT_ROOT" \
+		LATEST_COMMIT="$latest_commit" \
+		CURL_URL_LOG="$curl_url_log" \
+		GIT_ARGS_LOG="$git_args_log" \
+		LOOKUP_SCOPE_LOG="$lookup_scope_log" \
+		/bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+mkdir -p "$HOME/config"
+source "$PROJECT_ROOT/lib/core/common.sh"
+VERSION="0.0.1"
+SCRIPT_DIR="$HOME/config"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+background_commit=$(get_latest_commit_from_github api-only)
+[[ -z "$background_commit" ]] || exit 1
+[[ ! -s "$GIT_ARGS_LOG" ]] || exit 1
+
+explicit_commit=$(get_latest_commit_from_github)
+[[ "$explicit_commit" == "$LATEST_COMMIT" ]] || exit 1
+grep -qF 'ls-remote https://github.com/tw93/mole.git refs/heads/main' "$GIT_ARGS_LOG"
+
+get_install_channel() {
+	printf 'nightly\n'
+}
+get_install_commit() {
+	printf 'e31d46f\n'
+}
+get_latest_commit_from_github() {
+	printf '%s\n' "${1:-}" > "$LOOKUP_SCOPE_LOG"
+	printf '\n'
+}
+check_for_updates
+
+attempt=0
+while [[ ! -s "$LOOKUP_SCOPE_LOG" && "$attempt" -lt 100 ]]; do
+	sleep 0.01
+	attempt=$((attempt + 1))
+done
+[[ "$(cat "$LOOKUP_SCOPE_LOG")" == "api-only" ]] || exit 1
+INNER
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+}
+
 @test "mo update --nightly refuses an unforced reinstall when HEAD is unknown" {
 	local manual_bin="$TEST_ROOT/manual/bin"
 	local manual_config="$TEST_ROOT/manual/config"
