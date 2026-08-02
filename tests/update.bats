@@ -922,14 +922,59 @@ fi
 _update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
 [[ -f "$lock_path" ]] || exit 1
 
-/usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sleep 0.3 &
+holder_ready="$HOME/update-lock-holder.ready"
+holder_ready_tmp="$holder_ready.tmp"
+external_holder=""
+holder_child_pid=""
+cleanup_external_holder() {
+	local child_pid
+	if [[ "$holder_child_pid" =~ ^[0-9]+$ ]]; then
+		kill "$holder_child_pid" 2> /dev/null || true
+	fi
+	if [[ "$external_holder" =~ ^[0-9]+$ ]]; then
+		for child_pid in $(/usr/bin/pgrep -P "$external_holder" 2> /dev/null || true); do
+			kill "$child_pid" 2> /dev/null || true
+		done
+		kill "$external_holder" 2> /dev/null || true
+		wait "$external_holder" 2> /dev/null || true
+	fi
+	unlink "$holder_ready" 2> /dev/null || true
+	unlink "$holder_ready_tmp" 2> /dev/null || true
+}
+trap cleanup_external_holder EXIT
+/usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c '
+	printf "%s\n" "$$" > "$1" || exit 1
+	mv "$1" "$2" || exit 1
+	exec /bin/sleep 30
+' sh "$holder_ready_tmp" "$holder_ready" &
 external_holder=$!
-/bin/sleep 0.05
+for _ in {1..200}; do
+	if [[ -s "$holder_ready" ]]; then
+		holder_child_pid=$(cat "$holder_ready")
+		if [[ "$holder_child_pid" =~ ^[0-9]+$ ]] &&
+			kill -0 "$external_holder" 2> /dev/null &&
+			kill -0 "$holder_child_pid" 2> /dev/null; then
+			break
+		fi
+		holder_child_pid=""
+	fi
+	kill -0 "$external_holder" 2> /dev/null || break
+	/bin/sleep 0.01
+done
+if [[ ! "$holder_child_pid" =~ ^[0-9]+$ ]]; then
+	exit 1
+fi
+external_lock_bypassed=false
 if _update_acquire_lock "$lock_path"; then
+	external_lock_bypassed=true
+	_update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
+fi
+cleanup_external_holder
+trap - EXIT
+if [[ "$external_lock_bypassed" == "true" ]]; then
 	echo "UNEXPECTED_EXTERNAL_LOCK_BYPASS"
 	exit 1
 fi
-wait "$external_holder"
 _update_acquire_lock "$lock_path"
 _update_release_lock "$lock_path" false "$UPDATE_LOCK_CONTROL" "$UPDATE_LOCK_HOLDER_PID" "$UPDATE_LOCK_ACQUIRED"
 [[ -f "$lock_path" ]] || exit 1
