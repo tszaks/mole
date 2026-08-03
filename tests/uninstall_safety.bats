@@ -560,3 +560,56 @@ EOF
 		return 1
 	}
 }
+
+@test "a receipt scan that outlives its budget degrades to indeterminate, not a dead run" {
+	# Receipt enumeration is machine-wide: 274 receipts with one holding
+	# 22k paths blew the shared deadline and the resulting 124 ended the
+	# whole uninstall with nothing on screen (#1340). Out of budget is an
+	# incomplete scan, so it must land on the same partial verdict an
+	# unreadable path produces, never abort the run.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+root="$HOME/live-roots"
+mkdir -p "$root"
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=("$root")
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-such-volumes"
+pkg_receipt_nonstandard_app_paths() { return 124; }
+
+rc=0
+uninstall_live_bundle_has_other_install \
+    "com.example.selected" "$root/Selected.app" || rc=$?
+[[ "$rc" -eq "$MOLE_UNINSTALL_SCAN_PARTIAL" ]] || { echo "RC:$rc want $MOLE_UNINSTALL_SCAN_PARTIAL"; exit 1; }
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+}
+
+@test "a signal during the receipt scan still cancels the uninstall" {
+	# Only deadline timeouts degrade to the partial verdict. A signal is
+	# the user cancelling, and must keep propagating unchanged.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+root="$HOME/live-roots"
+mkdir -p "$root"
+_MOLE_UNINSTALL_LIVE_APP_ROOTS=("$root")
+_MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="$HOME/no-such-volumes"
+pkg_receipt_nonstandard_app_paths() { return 130; }
+
+rc=0
+uninstall_live_bundle_has_other_install \
+    "com.example.selected" "$root/Selected.app" || rc=$?
+[[ "$rc" -eq 130 ]] || { echo "RC:$rc want 130"; exit 1; }
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+}
