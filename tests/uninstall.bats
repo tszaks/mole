@@ -2508,6 +2508,7 @@ EOF
     touch "$HOME/.local/bin/mole"
     touch "$HOME/.local/bin/mo"
     mkdir -p "$HOME/.config/mole" "$HOME/.cache/mole" "$HOME/Library/Logs/mole"
+    echo "~/protected" > "$HOME/.config/mole/whitelist"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -2545,11 +2546,13 @@ printf '\n' | "$PROJECT_ROOT/mole" remove
 EOF
 
     [ "$status" -eq 0 ]
-    [ ! -f "$HOME/.local/bin/mole" ]
-    [ ! -f "$HOME/.local/bin/mo" ]
-    [ ! -d "$HOME/.config/mole" ]
-    [ ! -d "$HOME/.cache/mole" ]
-    [ ! -d "$HOME/Library/Logs/mole" ]
+    [ ! -f "$HOME/.local/bin/mole" ] || return 1
+    [ ! -f "$HOME/.local/bin/mo" ] || return 1
+    [ ! -d "$HOME/.config/mole" ] || return 1
+    [ ! -d "$HOME/.cache/mole" ] || return 1
+    [ ! -d "$HOME/Library/Logs/mole" ] || return 1
+    # Config is user-authored state and must survive in the Trash (#1346).
+    [ -f "$HOME/.Trash/mole-config/whitelist" ] || return 1
 }
 
 @test "remove_mole dry-run keeps manual binaries and caches" {
