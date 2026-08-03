@@ -384,3 +384,29 @@ find_app_files 'invalid_bundle' ''"
     result=$(find_app_files "unknown" "Other")
     [[ "$result" != *"CamelCaseApp"* ]] || return 1
 }
+
+@test "bundle-leaf variants refuse a leaf that does not extend the display name" {
+    # Safety review collision classes: a wrapper or fork whose bundle leaf
+    # names ANOTHER product must derive nothing, even though the leaf clears
+    # every size floor. The dirs exist here, so a miss is a real exclusion.
+    mkdir -p "$HOME/Library/Application Support/Google Chrome"
+    mkdir -p "$HOME/Library/Application Support/GoogleChrome"
+    mkdir -p "$HOME/Library/Application Support/Telegram Desktop"
+    mkdir -p "$HOME/Library/Application Support/AddressBook"
+    mkdir -p "$HOME/Library/Application Support/AyuGram Desktop"
+
+    result=$(find_app_files "com.wrapper.GoogleChrome" "My Chrome SSB")
+    [[ "$result" != *"Google Chrome"* ]] || return 1
+    [[ "$result" != *"GoogleChrome"* ]] || return 1
+
+    result=$(find_app_files "org.acmefork.TelegramDesktop" "64Gram")
+    [[ "$result" != *"Telegram Desktop"* ]] || return 1
+
+    result=$(find_app_files "com.acme.AddressBook" "Acme Contacts Sync")
+    [[ "$result" != *"Application Support/AddressBook"* ]] || return 1
+
+    # Positive control in the same world: the leaf that extends its own
+    # display name still derives, so the negatives above are not vacuous.
+    result=$(find_app_files "one.ayugram.AyuGramDesktop" "AyuGram")
+    [[ "$result" =~ "Application Support/AyuGram Desktop" ]] || return 1
+}

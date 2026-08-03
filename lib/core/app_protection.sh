@@ -1018,44 +1018,42 @@ find_app_files() {
     # A bundle id's last segment often names the data directory more precisely
     # than the display name: tdesktop forks ship as "AyuGram" with bundle
     # one.ayugram.AyuGramDesktop and write to "Application Support/AyuGram
-    # Desktop", which no display-name variant reaches. Derive exact-name
-    # variants from that segment only under narrow evidence: a valid
-    # reverse-DNS id, a segment of at least 8 characters with a camel-case
-    # transition (so the split yields two or more words), never equal to the
-    # display name, and literal paths only, no globs.
-    if [[ "$bundle_id_valid" == "true" ]]; then
+    # Desktop", which no display-name variant reaches. The leaf alone is NOT
+    # enough evidence: a wrapper carrying com.wrapper.GoogleChrome or a fork
+    # named 64Gram carrying org.fork.TelegramDesktop would synthesize another
+    # product's live data directory. So the derivation requires the leaf to
+    # EXTEND the display name itself: a valid reverse-DNS id, a leaf of eight
+    # or more characters with a camel transition, starting with the no-space
+    # display name (case-insensitive, APFS is too) and continuing at an
+    # uppercase-or-digit word boundary. Only two literal-path variants come
+    # out: the raw leaf and the split that keeps the display name intact.
+    if [[ "$bundle_id_valid" == "true" && ${#app_name} -ge 3 ]]; then
         local bundle_leaf="${bundle_id##*.}"
-        if [[ ${#bundle_leaf} -ge 8 && "$bundle_leaf" != "$app_name" &&
-            "$bundle_leaf" =~ [a-z][A-Z] ]]; then
-            local bundle_leaf_spaced
-            bundle_leaf_spaced=$(printf '%s' "$bundle_leaf" |
-                sed -E 's/([A-Z]+)([A-Z][a-z])/\1 \2/g; s/([a-z0-9])([A-Z])/\1 \2/g')
-            # The full split breaks the display name itself apart
-            # ("AyuGramDesktop" becomes "Ayu Gram Desktop"), but the real
-            # directory keeps it intact: "AyuGram Desktop". When the leaf
-            # starts with the display name, also derive the variant that
-            # splits only the remainder.
-            local bundle_leaf_name_split=""
-            local app_name_nospace="${app_name// /}"
-            if [[ -n "$app_name_nospace" && "$bundle_leaf" == "$app_name_nospace"?* ]]; then
-                local bundle_leaf_rest="${bundle_leaf#"$app_name_nospace"}"
-                if [[ "$bundle_leaf_rest" =~ ^[A-Z] ]]; then
-                    bundle_leaf_rest=$(printf '%s' "$bundle_leaf_rest" |
-                        sed -E 's/([A-Z]+)([A-Z][a-z])/\1 \2/g; s/([a-z0-9])([A-Z])/\1 \2/g')
-                    bundle_leaf_name_split="$app_name $bundle_leaf_rest"
-                fi
+        local app_name_nospace="${app_name// /}"
+        local bundle_leaf_lower app_name_nospace_lower
+        bundle_leaf_lower=$(printf '%s' "$bundle_leaf" | tr '[:upper:]' '[:lower:]')
+        app_name_nospace_lower=$(printf '%s' "$app_name_nospace" | tr '[:upper:]' '[:lower:]')
+        if [[ ${#bundle_leaf} -ge 8 && ${#app_name_nospace} -ge 3 &&
+            "$bundle_leaf" != "$app_name" &&
+            "$bundle_leaf" =~ [a-z][A-Z] &&
+            "$bundle_leaf_lower" == "$app_name_nospace_lower"?* ]]; then
+            local bundle_leaf_rest="${bundle_leaf:${#app_name_nospace}}"
+            if [[ "$bundle_leaf_rest" =~ ^[A-Z0-9] ]]; then
+                local bundle_leaf_rest_spaced
+                bundle_leaf_rest_spaced=$(printf '%s' "$bundle_leaf_rest" |
+                    sed -E 's/([A-Z]+)([A-Z][a-z])/\1 \2/g; s/([a-z0-9])([A-Z])/\1 \2/g')
+                local bundle_leaf_variant
+                for bundle_leaf_variant in "$bundle_leaf" "$app_name $bundle_leaf_rest_spaced"; do
+                    [[ "$bundle_leaf_variant" != "$app_name" ]] || continue
+                    user_patterns+=(
+                        "$HOME/Library/Application Support/$bundle_leaf_variant"
+                        "$HOME/Library/Caches/$bundle_leaf_variant"
+                        "$HOME/Library/Logs/$bundle_leaf_variant"
+                        "$HOME/Library/Preferences/$bundle_leaf_variant.plist"
+                        "$HOME/Library/Saved Application State/$bundle_leaf_variant.savedState"
+                    )
+                done
             fi
-            local bundle_leaf_variant
-            for bundle_leaf_variant in "$bundle_leaf" "$bundle_leaf_spaced" "$bundle_leaf_name_split"; do
-                [[ -n "$bundle_leaf_variant" && "$bundle_leaf_variant" != "$app_name" ]] || continue
-                user_patterns+=(
-                    "$HOME/Library/Application Support/$bundle_leaf_variant"
-                    "$HOME/Library/Caches/$bundle_leaf_variant"
-                    "$HOME/Library/Logs/$bundle_leaf_variant"
-                    "$HOME/Library/Preferences/$bundle_leaf_variant.plist"
-                    "$HOME/Library/Saved Application State/$bundle_leaf_variant.savedState"
-                )
-            done
         fi
     fi
 
