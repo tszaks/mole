@@ -199,6 +199,16 @@ _clean_mail_downloads() {
             local size_rc=0
             dir_size_kb=$(get_path_size_kb "$target_path") || size_rc=$?
             if [[ $size_rc -ne 0 ]]; then
+                if [[ $size_rc -eq 124 ]]; then
+                    # A stalled or unreadable Mail Downloads directory (e.g. a
+                    # protected app container) must not end the whole run:
+                    # skip this one target and keep cleaning.
+                    [[ "$spinner_active" == "true" ]] && stop_section_spinner
+                    spinner_active=false
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Mail Downloads · skipped (sizing timed out)"
+                    note_activity
+                    continue
+                fi
                 _mole_record_clean_cancellation "$size_rc"
                 [[ "$spinner_active" == "true" ]] && stop_section_spinner
                 return "$size_rc"
@@ -219,6 +229,10 @@ _clean_mail_downloads() {
                     size_rc=0
                     file_size_kb=$(get_path_size_kb "$file_path") || size_rc=$?
                     if [[ $size_rc -ne 0 ]]; then
+                        if [[ $size_rc -eq 124 ]]; then
+                            debug_log "Mail attachment sizing timed out, skipping: $file_path"
+                            continue
+                        fi
                         _mole_record_clean_cancellation "$size_rc"
                         [[ "$spinner_active" == "true" ]] && stop_section_spinner
                         return "$size_rc"
