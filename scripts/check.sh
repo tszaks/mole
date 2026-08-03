@@ -229,6 +229,25 @@ find lib -name "*.sh" | while read -r script; do
 done
 echo -e "${GREEN}${ICON_SUCCESS} Syntax check passed${NC}\n"
 
+# Same body, different name. Grep cannot see this class once the variables have
+# been renamed, and review reads the copies as separate helpers, so it needs a
+# gate rather than a habit. Run with --list to inspect every group.
+#
+# python3 is a hard requirement here, not an optional tool like shfmt: six Bats
+# files already fail without it, so a developer who can run the suite can run
+# this. Mole itself never shells out to python3, so this stays a dev-only need.
+if ! command -v python3 > /dev/null 2>&1; then
+    echo -e "${RED}${ICON_ERROR} python3 not installed; it is required by the test suite and this check${NC}\n"
+    exit 1
+fi
+if ! duplication_output=$(python3 "$SCRIPT_DIR/audit_function_duplication.py" 2>&1); then
+    printf '%s\n' "$duplication_output"
+    echo -e "${RED}${ICON_ERROR} Duplicate shell function bodies found${NC}\n"
+    exit 1
+fi
+printf '%s\n' "$duplication_output"
+echo -e "${GREEN}${ICON_SUCCESS} Function duplication check passed${NC}\n"
+
 diagnostic_guidance_files=(AGENTS.md README.md .claude/skills/*/SKILL.md)
 if ! diagnostic_guidance_output=$(check_diagnostic_guidance "${diagnostic_guidance_files[@]}"); then
     [[ -n "$diagnostic_guidance_output" ]] && printf '%s\n' "$diagnostic_guidance_output"

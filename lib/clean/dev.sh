@@ -727,20 +727,28 @@ _coresimulator_booted_device_state() {
     return 1
 }
 
-_coresimulator_activity_state() {
+# Bracket the booted-device probe with the same process check on both sides.
+# That structured probe can take several seconds, which is long enough for
+# simctl or xcodebuild to start; without the second check the guard would
+# authorize a deletion on evidence gathered before the build began.
+# Returns the probe tri-state: 0 running, 1 not running, 2 unknown.
+_probe_simulator_activity() {
+    local process_probe="$1"
     local state=0
-    _coresimulator_cache_process_running || state=$?
+    "$process_probe" || state=$?
     [[ $state -eq 1 ]] || return "$state"
 
     state=0
     _coresimulator_booted_device_state || state=$?
     [[ $state -eq 1 ]] || return "$state"
 
-    # The structured probe can take several seconds. Close that window before
-    # authorizing deletion in case simctl or xcodebuild started meanwhile.
     state=0
-    _coresimulator_cache_process_running || state=$?
+    "$process_probe" || state=$?
     return "$state"
+}
+
+_coresimulator_activity_state() {
+    _probe_simulator_activity _coresimulator_cache_process_running
 }
 
 _xcode_xctest_devices_process_running() {
@@ -791,17 +799,7 @@ _coresimulator_delete_guard_allows() {
 }
 
 _xctest_devices_activity_state() {
-    local state=0
-    _xcode_xctest_devices_process_running || state=$?
-    [[ $state -eq 1 ]] || return "$state"
-
-    state=0
-    _coresimulator_booted_device_state || state=$?
-    [[ $state -eq 1 ]] || return "$state"
-
-    state=0
-    _xcode_xctest_devices_process_running || state=$?
-    return "$state"
+    _probe_simulator_activity _xcode_xctest_devices_process_running
 }
 
 _xctest_devices_delete_guard_allows() {

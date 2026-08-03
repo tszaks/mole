@@ -663,25 +663,25 @@ get_install_channel() {
     esac
 }
 
-get_install_commit() {
-    # Try user config dir first (matches install.sh behavior), fallback to SCRIPT_DIR
+# Read one field out of the install channel receipt, empty when absent.
+# User config dir first (matches install.sh), then the install directory.
+_read_install_channel_field() {
+    local key="$1"
     local channel_file="${MOLE_CONFIG_DIR:-$HOME/.config/mole}/install_channel"
     if [[ ! -f "$channel_file" ]]; then
         channel_file="$SCRIPT_DIR/install_channel"
     fi
     if [[ -f "$channel_file" ]]; then
-        sed -n 's/^COMMIT_HASH=\(.*\)$/\1/p' "$channel_file" | head -1
+        sed -n "s/^${key}=\(.*\)$/\1/p" "$channel_file" | head -1
     fi
 }
 
+get_install_commit() {
+    _read_install_channel_field COMMIT_HASH
+}
+
 get_install_receipt() {
-    local channel_file="${MOLE_CONFIG_DIR:-$HOME/.config/mole}/install_channel"
-    if [[ ! -f "$channel_file" ]]; then
-        channel_file="$SCRIPT_DIR/install_channel"
-    fi
-    if [[ -f "$channel_file" ]]; then
-        sed -n 's/^INSTALL_RECEIPT=\(.*\)$/\1/p' "$channel_file" | head -1
-    fi
+    _read_install_channel_field INSTALL_RECEIPT
 }
 
 get_latest_commit_from_github() {
