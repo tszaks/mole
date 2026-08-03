@@ -28,14 +28,6 @@ _xcode_cleanup_skip_reason() {
     fi
 }
 
-_defer_app_cache_family() {
-    if declare -f defer_cleanup_family > /dev/null 2>&1; then
-        defer_cleanup_family "$1"
-    else
-        debug_log "Deferred cleanup while active: $1"
-    fi
-}
-
 _app_cache_cleanup_targets_exist() {
     local target
     for target in "$@"; do
@@ -111,9 +103,9 @@ _final_cut_pro_delete_guard_allows() {
 
 _defer_app_cache_guard_family() {
     case "$1" in
-        _simulator_app_cache_delete_guard_allows) _defer_app_cache_family "Simulator" ;;
-        _final_cut_pro_delete_guard_allows) _defer_app_cache_family "Final Cut Pro" ;;
-        *) _defer_app_cache_family "Xcode" ;;
+        _simulator_app_cache_delete_guard_allows) mole_defer_cleanup_family "Simulator" ;;
+        _final_cut_pro_delete_guard_allows) mole_defer_cleanup_family "Final Cut Pro" ;;
+        *) mole_defer_cleanup_family "Xcode" ;;
     esac
 }
 
@@ -181,7 +173,7 @@ clean_xcode_derived_data() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · skipped (process state unknown)"
             note_activity
         else
-            _defer_app_cache_family "Xcode"
+            mole_defer_cleanup_family "Xcode"
         fi
         return 0
     fi
@@ -234,7 +226,7 @@ clean_xcode_derived_data() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · stopped (${dry_run_stopped_reason})"
                 note_activity
             else
-                _defer_app_cache_family "Xcode"
+                mole_defer_cleanup_family "Xcode"
             fi
         fi
         return 0
@@ -291,7 +283,7 @@ clean_xcode_derived_data() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode DerivedData · stopped (${stopped_reason})"
             note_activity
         else
-            _defer_app_cache_family "Xcode"
+            mole_defer_cleanup_family "Xcode"
         fi
     fi
 }
@@ -330,7 +322,7 @@ clean_xcode_tools() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Simulator caches · skipped (process state unknown)"
                 note_activity
             else
-                _defer_app_cache_family "Simulator"
+                mole_defer_cleanup_family "Simulator"
             fi
         fi
     fi
@@ -373,7 +365,7 @@ clean_xcode_tools() {
                     echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode build products/DerivedData · stopped (process state unknown)"
                     note_activity
                 else
-                    _defer_app_cache_family "Xcode"
+                    mole_defer_cleanup_family "Xcode"
                 fi
                 return 0
             fi
@@ -388,7 +380,7 @@ clean_xcode_tools() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode cache/build products · skipped (process state unknown)"
                 note_activity
             else
-                _defer_app_cache_family "Xcode"
+                mole_defer_cleanup_family "Xcode"
             fi
         fi
     fi
@@ -606,7 +598,7 @@ clean_final_cut_pro_generated_caches() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Final Cut Pro generated caches · skipped (process state unknown)"
             note_activity
         else
-            _defer_app_cache_family "Final Cut Pro"
+            mole_defer_cleanup_family "Final Cut Pro"
         fi
         return 0
     fi

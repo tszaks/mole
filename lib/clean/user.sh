@@ -2,14 +2,6 @@
 # User Data Cleanup Module
 set -euo pipefail
 
-_defer_user_cleanup_family() {
-    if declare -f defer_cleanup_family > /dev/null 2>&1; then
-        defer_cleanup_family "$1"
-    else
-        debug_log "Deferred cleanup while active: $1"
-    fi
-}
-
 _user_cleanup_targets_exist() {
     local target
     for target in "$@"; do
@@ -57,7 +49,7 @@ _user_safe_clean_process_guarded() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_USER_PROCESS_GUARD_REASON})"
                 note_activity
             else
-                _defer_user_cleanup_family "$family"
+                mole_defer_cleanup_family "$family"
             fi
             return 1
         fi
@@ -72,7 +64,7 @@ _user_safe_clean_process_guarded() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_USER_PROCESS_GUARD_REASON})"
             note_activity
         else
-            _defer_user_cleanup_family "$family"
+            mole_defer_cleanup_family "$family"
         fi
         return 1
     fi
@@ -406,7 +398,7 @@ _clean_chromium_old_versions() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} ${label} old versions · skipped (process state unknown)"
                 note_activity
             else
-                _defer_user_cleanup_family "$label"
+                mole_defer_cleanup_family "$label"
             fi
             return 0
         fi
@@ -480,7 +472,7 @@ _clean_chromium_old_versions() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} ${label} old versions · stopped (${stopped_reason})"
             note_activity
         else
-            _defer_user_cleanup_family "$label"
+            mole_defer_cleanup_family "$label"
         fi
     fi
 }
@@ -662,7 +654,7 @@ clean_edge_updater_old_versions() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Edge updater old versions · skipped (process state unknown)"
             note_activity
         else
-            _defer_user_cleanup_family "Edge"
+            mole_defer_cleanup_family "Edge"
         fi
         return 0
     fi
@@ -723,7 +715,7 @@ clean_edge_updater_old_versions() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Edge updater old versions · stopped (${stopped_reason})"
             note_activity
         else
-            _defer_user_cleanup_family "Edge"
+            mole_defer_cleanup_family "Edge"
         fi
     fi
 }
@@ -1503,7 +1495,7 @@ clean_browsers() {
         # re-downloaded on demand and often multiple GB (#1179).
         _clean_chrome_profile_caches_guarded || true
     elif [[ $chrome_state -eq 0 && "$chrome_support_has_targets" == "true" ]]; then
-        _defer_user_cleanup_family "Chrome"
+        mole_defer_cleanup_family "Chrome"
     elif [[ "$chrome_support_has_targets" == "true" ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome profile caches · skipped (process state unknown)"
         note_activity
@@ -1639,7 +1631,7 @@ clean_browsers() {
     _user_cleanup_targets_exist "$HOME/Library/Application Support/Firefox/Profiles"/*/cache2/* && firefox_profile_cache_targets=true
     if [[ $firefox_state -eq 0 ]]; then
         if [[ "$firefox_cache_targets" == "true" || "$firefox_profile_cache_targets" == "true" ]]; then
-            _defer_user_cleanup_family "Firefox"
+            mole_defer_cleanup_family "Firefox"
         fi
     elif [[ $firefox_state -eq 1 ]]; then
         _clean_firefox_caches_guarded || true
@@ -1704,7 +1696,7 @@ clean_cloud_storage() {
         if _user_cleanup_targets_exist \
             "$HOME/Library/Caches/com.getdropbox.dropbox" \
             "$HOME/Library/Caches"/com.dropbox.*; then
-            _defer_user_cleanup_family "Dropbox"
+            mole_defer_cleanup_family "Dropbox"
         fi
     elif [[ $dropbox_state -eq 1 ]]; then
         _clean_dropbox_caches_guarded || true
@@ -1718,7 +1710,7 @@ clean_cloud_storage() {
     _google_drive_process_state || google_drive_state=$?
     if [[ $google_drive_state -eq 0 ]]; then
         if _user_cleanup_targets_exist "$HOME/Library/Caches/com.google.GoogleDrive"; then
-            _defer_user_cleanup_family "Google Drive"
+            mole_defer_cleanup_family "Google Drive"
         fi
     elif [[ $google_drive_state -eq 1 ]]; then
         _user_safe_clean_process_guarded \
@@ -1738,7 +1730,7 @@ clean_cloud_storage() {
     _onedrive_process_state || onedrive_state=$?
     if [[ $onedrive_state -eq 0 ]]; then
         if _user_cleanup_targets_exist "$HOME/Library/Caches/com.microsoft.OneDrive"; then
-            _defer_user_cleanup_family "OneDrive"
+            mole_defer_cleanup_family "OneDrive"
         fi
     elif [[ $onedrive_state -eq 1 ]]; then
         _user_safe_clean_process_guarded \
@@ -1822,7 +1814,7 @@ clean_tart_caches() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Tart caches · skipped (process state unknown)"
             note_activity
         else
-            _defer_user_cleanup_family "Tart"
+            mole_defer_cleanup_family "Tart"
         fi
         return 0
     fi
@@ -1848,7 +1840,7 @@ clean_tart_caches() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Tart caches · stopped (process state unknown)"
             note_activity
         else
-            _defer_user_cleanup_family "Tart"
+            mole_defer_cleanup_family "Tart"
         fi
         return 0
     elif run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" tart prune --entries caches --older-than "$MOLE_ORPHAN_AGE_DAYS" > /dev/null 2>&1; then

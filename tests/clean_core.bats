@@ -1371,3 +1371,44 @@ EOF
     [[ "$output" == *"Nothing to clean"* ]] || return 1
     [[ "$output" != *"Category total"* ]] || return 1
 }
+
+@test "cleanup libs share one engine-absent shim instead of forking their own" {
+    # bin/clean.sh owns the deferred-family ledger and is the only production
+    # entry point that sources lib/clean/*, so a cleanup lib reaches it through
+    # a `declare -f` probe. Three byte-identical copies of that probe grew in
+    # dev.sh, user.sh, and app_caches.sh before it was hoisted into
+    # mole_defer_cleanup_family. Pin the shape so a fourth cannot appear: a
+    # forked copy drifts silently, and this one sits on the path that decides
+    # whether a running app's cache is left alone.
+    local shim_definitions
+    shim_definitions=$(command grep -rn 'declare -f defer_cleanup_family' "$PROJECT_ROOT/lib" | wc -l | tr -d ' ')
+    [ "$shim_definitions" -eq 1 ] || {
+        echo "expected exactly one defer shim in lib/, found $shim_definitions:"
+        command grep -rn 'declare -f defer_cleanup_family' "$PROJECT_ROOT/lib"
+        return 1
+    }
+    command grep -rn 'declare -f defer_cleanup_family' "$PROJECT_ROOT/lib" | command grep -q 'lib/core/base.sh' || {
+        echo "the defer shim moved out of lib/core/base.sh"
+        return 1
+    }
+}
+
+@test "engine-absent cleanup fallbacks stay at their audited count" {
+    # Each `declare -f safe_clean_guarded` branch is a second, degraded copy of
+    # the delete guard: production always has bin/clean.sh loaded and never runs
+    # them, while standalone Bats cases always do. That split is tolerated for
+    # the ten audited sites and must not grow, because every new one is another
+    # place the guarded and unguarded verdicts can disagree without a user ever
+    # exercising the branch that was reviewed.
+    #
+    # Adding cleanup code? Call safe_clean_guarded directly and let the test
+    # provide it, rather than hand-rolling an eleventh fallback. Lowering this
+    # baseline after removing one is expected; raising it needs a stated reason.
+    local fallbacks
+    fallbacks=$(command grep -rn 'declare -f safe_clean_guarded' "$PROJECT_ROOT/lib" | wc -l | tr -d ' ')
+    [ "$fallbacks" -eq 10 ] || {
+        echo "engine-absent fallback count is $fallbacks, audited baseline is 10:"
+        command grep -rn 'declare -f safe_clean_guarded' "$PROJECT_ROOT/lib"
+        return 1
+    }
+}

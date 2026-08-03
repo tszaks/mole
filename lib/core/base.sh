@@ -1110,3 +1110,24 @@ is_ansi_supported() {
             ;;
     esac
 }
+
+# Record that a cleanup family was skipped because the app was running, so the
+# clean summary can tell the user which apps to quit and re-run.
+#
+# `defer_cleanup_family` is the real ledger and lives in bin/clean.sh, which is
+# the only production entry point that sources lib/clean/*. A cleanup lib
+# sourced on its own (every standalone Bats case) has no ledger, so this drops
+# the family into the debug log instead of failing.
+#
+# This is NOT one of the three-way-forked helpers documented above start_section:
+# there is exactly one implementation and callers must not fork their own. Three
+# byte-identical copies of it grew in lib/clean/{dev,user,app_caches}.sh before
+# it landed here, which is the reason it is a shared function rather than a
+# convention. `tests/clean_core.bats` pins that they do not come back.
+mole_defer_cleanup_family() {
+    if declare -f defer_cleanup_family > /dev/null 2>&1; then
+        defer_cleanup_family "$1"
+    else
+        debug_log "Deferred cleanup while active: $1"
+    fi
+}

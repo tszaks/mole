@@ -593,7 +593,7 @@ clean_xcode_documentation_cache() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Xcode"
+            mole_defer_cleanup_family "Xcode"
         fi
         return 0
     fi
@@ -674,7 +674,7 @@ clean_xcode_documentation_cache() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode documentation cache · stopped (${stop_reason})"
             note_activity
         else
-            _defer_dev_cleanup_family "Xcode"
+            mole_defer_cleanup_family "Xcode"
         fi
     fi
 }
@@ -852,14 +852,6 @@ _xctest_devices_delete_guard_allows() {
     return 1
 }
 
-_defer_dev_cleanup_family() {
-    if declare -f defer_cleanup_family > /dev/null 2>&1; then
-        defer_cleanup_family "$1"
-    else
-        debug_log "Deferred cleanup while active: $1"
-    fi
-}
-
 _dev_process_delete_guard_allows() {
     local process_state=0
     "$_MOLE_DEV_PROCESS_GUARD_PROBE" || process_state=$?
@@ -881,7 +873,7 @@ _dev_report_process_guard_stop() {
         echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${reason})"
         note_activity
     else
-        _defer_dev_cleanup_family "$family"
+        mole_defer_cleanup_family "$family"
     fi
 }
 
@@ -951,9 +943,9 @@ _xcode_safe_clean_guarded() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
                 note_activity
             elif [[ "$delete_guard" == "_coresimulator_delete_guard_allows" ]]; then
-                _defer_dev_cleanup_family "Simulator"
+                mole_defer_cleanup_family "Simulator"
             else
-                _defer_dev_cleanup_family "Xcode"
+                mole_defer_cleanup_family "Xcode"
             fi
             return 1
         fi
@@ -968,9 +960,9 @@ _xcode_safe_clean_guarded() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
             note_activity
         elif [[ "$delete_guard" == "_coresimulator_delete_guard_allows" ]]; then
-            _defer_dev_cleanup_family "Simulator"
+            mole_defer_cleanup_family "Simulator"
         else
-            _defer_dev_cleanup_family "Xcode"
+            mole_defer_cleanup_family "Xcode"
         fi
         return 1
     fi
@@ -1008,7 +1000,7 @@ clean_xcode_xctest_devices() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode XCTestDevices · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Xcode"
+            mole_defer_cleanup_family "Xcode"
         fi
         return 0
     fi
@@ -1054,7 +1046,7 @@ clean_xcode_system_coresimulator_caches() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Simulator"
+            mole_defer_cleanup_family "Simulator"
         fi
         return 0
     fi
@@ -1105,7 +1097,7 @@ clean_xcode_system_coresimulator_caches() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · stopped (${stop_reason})"
                 note_activity
             else
-                _defer_dev_cleanup_family "Simulator"
+                mole_defer_cleanup_family "Simulator"
             fi
         fi
         return 0
@@ -1192,7 +1184,7 @@ clean_xcode_system_coresimulator_caches() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode Simulator system cache · stopped (${stop_reason})"
             note_activity
         else
-            _defer_dev_cleanup_family "Simulator"
+            mole_defer_cleanup_family "Simulator"
         fi
     fi
 }
@@ -1272,7 +1264,7 @@ clean_xcode_device_support() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Xcode"
+            mole_defer_cleanup_family "Xcode"
         fi
         return 0
     fi
@@ -1384,7 +1376,7 @@ clean_xcode_device_support() {
                         echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${dry_stop_reason})"
                         note_activity
                     else
-                        _defer_dev_cleanup_family "Xcode"
+                        mole_defer_cleanup_family "Xcode"
                     fi
                     return 0
                 fi
@@ -1441,7 +1433,7 @@ clean_xcode_device_support() {
                         echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${stop_reason})"
                         note_activity
                     else
-                        _defer_dev_cleanup_family "Xcode"
+                        mole_defer_cleanup_family "Xcode"
                     fi
                     return 0
                 fi
@@ -1487,7 +1479,7 @@ clean_xcode_device_support() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${stop_reason})"
                 note_activity
             else
-                _defer_dev_cleanup_family "Xcode"
+                mole_defer_cleanup_family "Xcode"
             fi
             return 0
         fi
@@ -2191,7 +2183,7 @@ clean_dev_jvm() {
         local gradle_state=0
         gradle_daemon_running || gradle_state=$?
         if [[ $gradle_state -eq 0 ]]; then
-            _defer_dev_cleanup_family "Gradle"
+            mole_defer_cleanup_family "Gradle"
         elif [[ $gradle_state -eq 1 ]]; then
             _dev_safe_clean_process_guarded \
                 gradle_daemon_running \
@@ -2828,7 +2820,7 @@ _claude_desktop_safe_clean_guarded() {
             if [[ $guard_rc -ne 0 ]]; then
                 [[ $guard_rc -eq 124 || $guard_rc -ge 128 ]] && return "$guard_rc"
                 if [[ "$_MOLE_CLAUDE_DESKTOP_GUARD_REASON" == "Claude Desktop started" ]]; then
-                    _defer_dev_cleanup_family "Claude Desktop"
+                    mole_defer_cleanup_family "Claude Desktop"
                 else
                     echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLAUDE_DESKTOP_GUARD_REASON})"
                     note_activity
@@ -2844,7 +2836,7 @@ _claude_desktop_safe_clean_guarded() {
     safe_clean_guarded _claude_desktop_delete_guard_allows "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
         if [[ "$_MOLE_CLAUDE_DESKTOP_GUARD_REASON" == "Claude Desktop started" ]]; then
-            _defer_dev_cleanup_family "Claude Desktop"
+            mole_defer_cleanup_family "Claude Desktop"
         else
             echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLAUDE_DESKTOP_GUARD_REASON})"
             note_activity
@@ -2967,7 +2959,7 @@ clean_claude_desktop_bundled_versions() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Claude Desktop bundled Claude Code · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Claude Desktop"
+            mole_defer_cleanup_family "Claude Desktop"
         fi
         return 0
     fi
@@ -3197,7 +3189,7 @@ _codex_desktop_safe_clean_guarded() {
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
                 note_activity
             else
-                _defer_dev_cleanup_family "Codex"
+                mole_defer_cleanup_family "Codex"
             fi
             return 1
         fi
@@ -3212,7 +3204,7 @@ _codex_desktop_safe_clean_guarded() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
             note_activity
         else
-            _defer_dev_cleanup_family "Codex"
+            mole_defer_cleanup_family "Codex"
         fi
         return 1
     fi
@@ -3263,7 +3255,7 @@ clean_codex_desktop_caches() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop caches · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Codex"
+            mole_defer_cleanup_family "Codex"
         fi
         return 0
     fi
@@ -3476,7 +3468,7 @@ clean_codex_desktop_staging() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Codex"
+            mole_defer_cleanup_family "Codex"
         fi
         return 0
     fi
@@ -3488,14 +3480,14 @@ clean_codex_desktop_staging() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (updater state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Codex"
+            mole_defer_cleanup_family "Codex"
         fi
         return 0
     fi
 
     local open_file_state=0
     if codex_sparkle_staging_has_open_files "$staging_root"; then
-        _defer_dev_cleanup_family "Codex"
+        mole_defer_cleanup_family "Codex"
         return 0
     else
         open_file_state=$?
@@ -3518,7 +3510,7 @@ clean_codex_desktop_staging() {
                 "staging entry changed")
                     debug_log "Codex Desktop staging entry changed before cleanup: $stale_entry"
                     ;;
-                *) _defer_dev_cleanup_family "Codex" ;;
+                *) mole_defer_cleanup_family "Codex" ;;
             esac
             return 0
         fi
@@ -3624,7 +3616,7 @@ _codex_runtime_safe_clean_guarded() {
 
     if [[ $guarded_rc -eq 75 ]]; then
         if [[ "$_MOLE_CODEX_RUNTIME_GUARD_REASON" == "Codex started" ]]; then
-            _defer_dev_cleanup_family "Codex"
+            mole_defer_cleanup_family "Codex"
         else
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex runtimes · stopped (${_MOLE_CODEX_RUNTIME_GUARD_REASON})"
             note_activity
@@ -3669,7 +3661,7 @@ clean_codex_runtimes() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex runtimes · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Codex"
+            mole_defer_cleanup_family "Codex"
         fi
         return 0
     fi
@@ -3768,7 +3760,7 @@ clean_antigravity_caches() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Antigravity/Gemini caches · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Antigravity/Gemini"
+            mole_defer_cleanup_family "Antigravity/Gemini"
         fi
         return 0
     fi
@@ -3819,7 +3811,7 @@ clean_chrome_devtools_mcp_caches() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Chrome DevTools MCP caches · skipped (process state unknown)"
             note_activity
         else
-            _defer_dev_cleanup_family "Chrome DevTools MCP"
+            mole_defer_cleanup_family "Chrome DevTools MCP"
         fi
         return 0
     fi
