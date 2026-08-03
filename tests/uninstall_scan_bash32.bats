@@ -46,7 +46,7 @@ sourceable_uninstall_sh() {
 	local out="$1"
 	awk -v script_dir="$PROJECT_ROOT/bin" '
 		/^SCRIPT_DIR=/ { print "SCRIPT_DIR=\"" script_dir "\""; next }
-		/^main "\$@"/ { print "# main skipped by test"; next }
+		/main "\$@"/ { print "# main skipped by test"; next }
 		{ print }
 	' "$PROJECT_ROOT/bin/uninstall.sh" > "$out"
 }

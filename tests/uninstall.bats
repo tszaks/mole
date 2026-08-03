@@ -2787,10 +2787,11 @@ drain_pending_input() {
 }
 select_apps_for_uninstall() {
     printf 'select\n' >> "$trace_file"
+    _MOLE_MENU_USER_QUIT=1
     return 1
 }
 
-eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^main()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 
 main
 
@@ -2841,10 +2842,11 @@ select_apps_for_uninstall() {
     [[ "${MOLE_ALT_SCREEN_ACTIVE:-}" == "1" ]]
     [[ "${MOLE_MANAGED_ALT_SCREEN:-}" == "1" ]]
     printf 'select\n' >> "$trace_file"
+    _MOLE_MENU_USER_QUIT=1
     return 1
 }
 
-eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^main()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 
 main
 
@@ -3140,11 +3142,12 @@ select_apps_for_uninstall() {
         selected_apps=("${apps_data[0]}")
         return 0
     fi
+    _MOLE_MENU_USER_QUIT=1
     return 1
 }
 
 eval "$(sed -n '/^uninstall_inventory_can_reuse_cached_apps()/,/^}/p' "$PROJECT_ROOT/bin/uninstall.sh")"
-eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^main()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 
 printf '\n' | main
 
@@ -3439,10 +3442,11 @@ load_applications() { return 0; }
 drain_pending_input() { :; }
 select_apps_for_uninstall() {
     printf 'delete_mode=%s\n' "${MOLE_DELETE_MODE:-unset}"
+    _MOLE_MENU_USER_QUIT=1
     return 1
 }
 
-eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^main()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 main
 INNER
 
@@ -3472,10 +3476,11 @@ load_applications() { return 0; }
 drain_pending_input() { :; }
 select_apps_for_uninstall() {
     printf 'delete_mode=%s\n' "${MOLE_DELETE_MODE:-unset}"
+    _MOLE_MENU_USER_QUIT=1
     return 1
 }
 
-eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^main()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 main --permanent
 INNER
 
@@ -3521,7 +3526,7 @@ get_brew_cask_name() { return 1; }
 # and our sed slice only pulls list-related helpers + main().
 uninstall_normalize_size_display() { local s="${1:-}"; [[ -z "$s" || "$s" == "0" || "$s" == "Unknown" ]] && echo "N/A" || echo "$s"; }
 
-eval "$(sed -n '/^uninstall_list_json_escape()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^uninstall_list_json_escape()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 # Force text mode by simulating a TTY for stdout via /dev/tty redirect not
 # available in bats; instead pipe through a wrapper that fakes -t 1. Simplest:
 # call the function directly so [[ -t 1 ]] uses bash's stdout (the bats pipe).
@@ -3569,7 +3574,7 @@ get_brew_cask_name() { return 1; }
 # and our sed slice only pulls list-related helpers + main().
 uninstall_normalize_size_display() { local s="${1:-}"; [[ -z "$s" || "$s" == "0" || "$s" == "Unknown" ]] && echo "N/A" || echo "$s"; }
 
-eval "$(sed -n '/^uninstall_list_json_escape()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^uninstall_list_json_escape()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 main --list
 INNER
 
@@ -3611,7 +3616,7 @@ get_brew_cask_name() { return 1; }
 # and our sed slice only pulls list-related helpers + main().
 uninstall_normalize_size_display() { local s="${1:-}"; [[ -z "$s" || "$s" == "0" || "$s" == "Unknown" ]] && echo "N/A" || echo "$s"; }
 
-eval "$(sed -n '/^uninstall_list_json_escape()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^uninstall_list_json_escape()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 main --list
 INNER
 
@@ -3649,7 +3654,7 @@ is_homebrew_available() { return 0; }
 get_brew_cask_name() { printf '%s' "visual-studio-code"; return 0; }
 uninstall_normalize_size_display() { local s="${1:-}"; [[ -z "$s" || "$s" == "0" || "$s" == "Unknown" ]] && echo "N/A" || echo "$s"; }
 
-eval "$(sed -n '/^uninstall_list_json_escape()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+eval "$(sed -n '/^uninstall_list_json_escape()/,/main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
 main --list
 INNER
 
