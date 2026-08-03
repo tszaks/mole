@@ -710,6 +710,44 @@ EOF
 	[[ "$output" != *"safe_rm: refusing to remove non-temp path"* ]] || return 1
 }
 
+@test "installer source temp stays removable by safe_rm when TMPDIR is unset" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+unset TMPDIR
+log_error() { printf 'ERROR:%s\n' "$*"; }
+stop_line_spinner() { :; }
+release_install_lock() { :; }
+
+eval "$(sed -n '/^safe_rm() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+eval "$(sed -n '/^cleanup_installer() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+
+# Evaluate install.sh's own source-download mktemp lines with TMPDIR unset,
+# then run the same EXIT-trap cleanup path against the created directory.
+tmp_lines="$(sed -n '/mktemp -d/{p;n;p;q;}' "$PROJECT_ROOT/install.sh" | sed 's/^[[:space:]]*//')"
+eval "$tmp_lines"
+source_tmp="$INSTALL_SOURCE_TMP"
+printf 'downloaded source\n' > "$source_tmp/payload"
+cleanup_installer
+
+[[ -z "$INSTALL_SOURCE_TMP" ]] || exit 1
+[[ ! -e "$source_tmp" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"safe_rm: refusing to remove non-temp path"* ]] || return 1
+}
+
+@test "source download mktemp template derives from TMPDIR" {
+	run grep -qE 'mktemp -d "\$\{TMPDIR:-/tmp\}/mole\.XXXXXX"' "$PROJECT_ROOT/install.sh"
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+}
+
 @test "standalone installer serializes writers with the stable install lock" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

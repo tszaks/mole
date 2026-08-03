@@ -622,7 +622,7 @@ resolve_source_dir() {
     fi
 
     local tmp
-    tmp="$(mktemp -d)"
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/mole.XXXXXX")"
     INSTALL_SOURCE_TMP="$tmp"
 
     local branch="${MOLE_VERSION:-}"
