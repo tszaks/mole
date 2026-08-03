@@ -909,6 +909,12 @@ verify_release_asset_checksum() {
     local result=1
     local attestation_status=2
 
+    # The checksums fetch and the attestation check are separate network round
+    # trips that can take several seconds each. With nothing on screen this is
+    # the longest silent stretch of an install and reads as a hang, so keep a
+    # spinner up until the first real line prints.
+    start_line_spinner "Verifying ${asset_name}..."
+
     if download_release_checksums "$tag" "$checksums_file" > /dev/null 2>&1; then
         # Anchor the SHA256SUMS file to its GitHub Actions build-provenance
         # attestation before reading checksums from it. If gh is available,
@@ -918,12 +924,14 @@ verify_release_asset_checksum() {
         attestation_status=$?
 
         if [[ "$attestation_status" -eq 1 ]]; then
+            stop_line_spinner
             log_error "Release attestation verification failed for ${asset_name}"
             rm -f "$checksums_file"
             return 1
         fi
 
         if [[ "$attestation_status" -eq 2 && "${MOLE_REQUIRE_ATTESTATION:-0}" == "1" ]]; then
+            stop_line_spinner
             log_error "MOLE_REQUIRE_ATTESTATION=1 set but gh CLI unavailable or unauthenticated"
             rm -f "$checksums_file"
             return 1
@@ -934,11 +942,13 @@ verify_release_asset_checksum() {
         if [[ -n "$expected" && -n "$actual" && "$expected" == "$actual" ]]; then
             result=0
             if [[ "$attestation_status" -eq 0 ]]; then
+                stop_line_spinner
                 log_success "Verified ${asset_name} (sha256 + attestation)"
             fi
         fi
     fi
 
+    stop_line_spinner
     rm -f "$checksums_file"
     return "$result"
 }
