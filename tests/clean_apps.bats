@@ -245,18 +245,14 @@ source "$PROJECT_ROOT/lib/clean/apps.sh"
 # so this one exercises a real scan rather than reading a stale cache.
 rm -f "$HOME/.cache/mole/installed_apps_cache"
 
-# Create a fake .app with a plist that has no CFBundleIdentifier
+# A plist that cannot be parsed at all. This is the case that has to fail
+# closed: the app may well have a CFBundleIdentifier that simply could not be
+# read, and leaving that id out of the installed list is what turns a live
+# app's data into an apparent orphan. A plist that parses and merely lacks the
+# key is a different thing and is covered by its own test, since a bundle with
+# no id owns no bundle-id-named leftovers and cannot be mistaken for one.
 mkdir -p "$HOME/Applications/FakeApp.app/Contents"
-cat > "$HOME/Applications/FakeApp.app/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key>
-    <string>FakeApp</string>
-</dict>
-</plist>
-PLIST
+printf 'not a property list at all' > "$HOME/Applications/FakeApp.app/Contents/Info.plist"
 
 # Create a valid .app alongside it
 mkdir -p "$HOME/Applications/GoodApp.app/Contents"
@@ -2612,4 +2608,47 @@ EOF
     [[ "$output" != *"unbound variable"* ]] || return 1
     # Whitelisted orphan must be filtered out, so nothing is reported for removal.
     [[ "$output" != *"Would remove orphaned service"* ]] || return 1
+}
+
+@test "installed-app scan reads wrapped bundles and tolerates a missing bundle id" {
+	# Same two shapes that broke the uninstall scan: an iOS app on Apple
+	# Silicon keeps its plist under Wrapper/<name>.app, and vendor launchers
+	# ship one with no CFBundleIdentifier. Both used to fail the scan closed,
+	# which skipped App leftovers entirely. A plist that will not parse still
+	# must fail closed, because there the id may exist and be unreadable.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+
+apps="$HOME/Applications"
+rm -rf "$apps"; mkdir -p "$apps/Good.app/Contents" "$apps/Wrapped.app/Wrapper/Inner.app" "$apps/NoId.app/Contents"
+plist() {
+	cat > "$1" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>$2</dict></plist>
+PLIST
+}
+plist "$apps/Good.app/Contents/Info.plist" '<key>CFBundleIdentifier</key><string>com.example.good</string>'
+plist "$apps/Wrapped.app/Wrapper/Inner.app/Info.plist" '<key>CFBundleIdentifier</key><string>com.example.wrapped</string>'
+plist "$apps/NoId.app/Contents/Info.plist" '<key>CFBundleExecutable</key><string>run.sh</string>'
+
+debug_log() { :; }
+scan_installed_apps "$HOME/installed.txt" || { echo "SCAN_FAILED"; exit 1; }
+grep -Fxq "com.example.good" "$HOME/installed.txt" || { echo "MISSING_GOOD"; exit 1; }
+grep -Fxq "com.example.wrapped" "$HOME/installed.txt" || { echo "MISSING_WRAPPED"; exit 1; }
+
+# A plist that cannot be parsed still fails the scan closed.
+printf 'not a plist' > "$apps/NoId.app/Contents/Info.plist"
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+if scan_installed_apps "$HOME/installed2.txt"; then
+	echo "CORRUPT_NOT_FAILED"; exit 1
+fi
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
 }

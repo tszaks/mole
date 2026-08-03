@@ -212,11 +212,45 @@ scan_installed_apps() {
             fi
             while IFS= read -r app_path; do
                 [[ -n "$app_path" ]] || continue
+                # The wrapped payload inside an iOS app is the same install as
+                # the bundle containing it, and the outer one already reports
+                # that id. Enumerating it separately only produced a bundle
+                # whose plist is not under Contents/, which then failed the
+                # scan. Helper bundles nested elsewhere are left alone.
+                case "$app_path" in
+                    */Wrapper/*.app) continue ;;
+                esac
                 local plist_path="$app_path/Contents/Info.plist"
+                # iOS and iPadOS apps installed on Apple Silicon have no
+                # Contents/ at all; their plist sits under Wrapper/<name>.app.
+                # Reading only the Contents/ path made every one of them look
+                # unreadable, and because an incomplete app list cannot
+                # authorize orphan decisions, one of them skipped the whole
+                # App leftovers section.
+                if [[ ! -f "$plist_path" ]]; then
+                    local wrapped_plist=""
+                    for wrapped_plist in "$app_path"/Wrapper/*.app/Info.plist; do
+                        if [[ -f "$wrapped_plist" ]]; then
+                            plist_path="$wrapped_plist"
+                            break
+                        fi
+                    done
+                fi
                 local bundle_id=""
                 if [[ ! -f "$plist_path" || ! -r "$plist_path" ]] ||
                     ! bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$plist_path" 2> /dev/null) ||
                     [[ -z "$bundle_id" || "$bundle_id" == "missing value" ]]; then
+                    # A plist that parses and simply carries no
+                    # CFBundleIdentifier is an answer, not a failed read.
+                    # Vendor uninstallers and Steam launchers ship those, and a
+                    # bundle with no id owns no bundle-id-named leftovers, so
+                    # leaving it out of the list cannot invent an orphan.
+                    # Anything that will not parse still fails the scan closed,
+                    # because there the id may exist and simply be unreadable,
+                    # which is what would turn a live app's data into an orphan.
+                    if [[ -f "$plist_path" ]] && /usr/bin/plutil -lint "$plist_path" > /dev/null 2>&1; then
+                        continue
+                    fi
                     printf '%s\n' "$app_path" >> "$scan_tmp_dir/scan_failures.list"
                     exit 1
                 fi
