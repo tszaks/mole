@@ -1675,116 +1675,123 @@ perform_cleanup() {
         return 0
     }
 
-    if [[ -n "$EXTERNAL_VOLUME_TARGET" ]]; then
-        start_section "External volume"
-        _run_cleanup_step clean_external_volume_target "$EXTERNAL_VOLUME_TARGET" || return $?
-        end_section
-    else
-        # ===== 1. System =====
-        if [[ "$SYSTEM_CLEAN" == "true" ]]; then
-            start_section "System"
-            _run_cleanup_step clean_deep_system || return $?
-            _run_cleanup_step clean_local_snapshots || return $?
+    local cleanup_cancel_rc=0
+    # Sections run inside a function so a cancelled step (timeout/signal,
+    # exit 124+) stops the remaining sections but still falls through to the
+    # final summary instead of returning from perform_cleanup with no output.
+    run_clean_sections() {
+        if [[ -n "$EXTERNAL_VOLUME_TARGET" ]]; then
+            start_section "External volume"
+            _run_cleanup_step clean_external_volume_target "$EXTERNAL_VOLUME_TARGET" || return $?
+            end_section
+        else
+            # ===== 1. System =====
+            if [[ "$SYSTEM_CLEAN" == "true" ]]; then
+                start_section "System"
+                _run_cleanup_step clean_deep_system || return $?
+                _run_cleanup_step clean_local_snapshots || return $?
+                end_section
+            fi
+
+            if [[ ${#WHITELIST_WARNINGS[@]} -gt 0 ]]; then
+                flush_idle_section_slot
+                echo ""
+                for warning in "${WHITELIST_WARNINGS[@]}"; do
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Whitelist: $warning"
+                done
+            fi
+
+            # ===== 2. User essentials =====
+            start_section "User essentials"
+            _run_cleanup_step clean_user_essentials || return $?
+            _run_cleanup_step clean_finder_metadata || return $?
+            end_section
+
+            # ===== 3. App caches (merged sandboxed and standard app caches) =====
+            start_section "App caches"
+            _run_cleanup_step clean_app_caches || return $?
+            end_section
+
+            # ===== 4. Browsers =====
+            start_section "Browsers"
+            _run_cleanup_step clean_browsers || return $?
+            end_section
+
+            # ===== 5. Cloud & Office =====
+            start_section "Cloud & Office"
+            # Force shell fallback so timeout runs in this shell context.
+            # The Cloud/Office cleaners rely on helpers (safe_clean, whitelist checks)
+            # defined in this script and sourced modules.
+            if run_with_shell_timeout 300 run_cloud_and_office_cleanup; then
+                : # completed successfully
+            else
+                local ret=$?
+                if [[ $ret -eq 124 ]]; then
+                    log_warning "Cloud & Office cleanup timed out after 5 minutes, skipping remaining items"
+                elif [[ $ret -ge 128 ]]; then
+                    return "$ret"
+                else
+                    log_warning "Cloud & Office cleanup failed with exit code $ret"
+                fi
+            fi
+            end_section
+
+            # ===== 6. Developer tools (merged CLI and GUI tooling) =====
+            start_section "Developer tools"
+            _run_cleanup_step clean_developer_tools || return $?
+            end_section
+
+            # ===== 7. Apps & utilities =====
+            start_section "Apps & utilities"
+            _run_cleanup_step clean_user_gui_applications || return $?
+            end_section
+
+            # ===== 8. Virtualization =====
+            start_section "Virtualization"
+            _run_cleanup_step clean_virtualization_tools || return $?
+            end_section
+
+            # ===== 9. Application Support =====
+            start_section "Application Support"
+            _run_cleanup_step clean_application_support_logs || return $?
+            end_section
+
+            # ===== 10. App leftovers =====
+            start_section "App leftovers"
+            _run_cleanup_step clean_orphaned_app_data || return $?
+            _run_cleanup_step clean_orphaned_system_services || return $?
+            _run_cleanup_step clean_orphaned_container_stubs || return $?
+            _run_cleanup_step clean_stale_launch_services_registrations || return $?
+            _run_cleanup_step show_user_launch_agent_hint_notice || return $?
+            end_section
+
+            # ===== 11. Apple Silicon =====
+            _run_cleanup_step clean_apple_silicon_caches || return $?
+
+            # ===== 12. Device backups & firmware =====
+            # iOS backups are reported once, in the Large files section; a second
+            # row here used a different size formatter and confused users.
+            start_section "Device backups & firmware"
+            _run_cleanup_step clean_cached_device_firmware || return $?
+            end_section
+
+            # ===== 13. Time Machine =====
+            start_section "Time Machine"
+            _run_cleanup_step clean_time_machine_failed_backups || return $?
+            end_section
+
+            # ===== 14. Large files =====
+            start_section "Large files"
+            _run_cleanup_step check_large_file_candidates || return $?
+            end_section
+
+            # ===== 15. Project artifacts =====
+            start_section "Project artifacts"
+            _run_cleanup_step show_project_artifact_hint_notice || return $?
             end_section
         fi
-
-        if [[ ${#WHITELIST_WARNINGS[@]} -gt 0 ]]; then
-            flush_idle_section_slot
-            echo ""
-            for warning in "${WHITELIST_WARNINGS[@]}"; do
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} Whitelist: $warning"
-            done
-        fi
-
-        # ===== 2. User essentials =====
-        start_section "User essentials"
-        _run_cleanup_step clean_user_essentials || return $?
-        _run_cleanup_step clean_finder_metadata || return $?
-        end_section
-
-        # ===== 3. App caches (merged sandboxed and standard app caches) =====
-        start_section "App caches"
-        _run_cleanup_step clean_app_caches || return $?
-        end_section
-
-        # ===== 4. Browsers =====
-        start_section "Browsers"
-        _run_cleanup_step clean_browsers || return $?
-        end_section
-
-        # ===== 5. Cloud & Office =====
-        start_section "Cloud & Office"
-        # Force shell fallback so timeout runs in this shell context.
-        # The Cloud/Office cleaners rely on helpers (safe_clean, whitelist checks)
-        # defined in this script and sourced modules.
-        if run_with_shell_timeout 300 run_cloud_and_office_cleanup; then
-            : # completed successfully
-        else
-            local ret=$?
-            if [[ $ret -eq 124 ]]; then
-                log_warning "Cloud & Office cleanup timed out after 5 minutes, skipping remaining items"
-            elif [[ $ret -ge 128 ]]; then
-                return "$ret"
-            else
-                log_warning "Cloud & Office cleanup failed with exit code $ret"
-            fi
-        fi
-        end_section
-
-        # ===== 6. Developer tools (merged CLI and GUI tooling) =====
-        start_section "Developer tools"
-        _run_cleanup_step clean_developer_tools || return $?
-        end_section
-
-        # ===== 7. Apps & utilities =====
-        start_section "Apps & utilities"
-        _run_cleanup_step clean_user_gui_applications || return $?
-        end_section
-
-        # ===== 8. Virtualization =====
-        start_section "Virtualization"
-        _run_cleanup_step clean_virtualization_tools || return $?
-        end_section
-
-        # ===== 9. Application Support =====
-        start_section "Application Support"
-        _run_cleanup_step clean_application_support_logs || return $?
-        end_section
-
-        # ===== 10. App leftovers =====
-        start_section "App leftovers"
-        _run_cleanup_step clean_orphaned_app_data || return $?
-        _run_cleanup_step clean_orphaned_system_services || return $?
-        _run_cleanup_step clean_orphaned_container_stubs || return $?
-        _run_cleanup_step clean_stale_launch_services_registrations || return $?
-        _run_cleanup_step show_user_launch_agent_hint_notice || return $?
-        end_section
-
-        # ===== 11. Apple Silicon =====
-        _run_cleanup_step clean_apple_silicon_caches || return $?
-
-        # ===== 12. Device backups & firmware =====
-        # iOS backups are reported once, in the Large files section; a second
-        # row here used a different size formatter and confused users.
-        start_section "Device backups & firmware"
-        _run_cleanup_step clean_cached_device_firmware || return $?
-        end_section
-
-        # ===== 13. Time Machine =====
-        start_section "Time Machine"
-        _run_cleanup_step clean_time_machine_failed_backups || return $?
-        end_section
-
-        # ===== 14. Large files =====
-        start_section "Large files"
-        _run_cleanup_step check_large_file_candidates || return $?
-        end_section
-
-        # ===== 15. Project artifacts =====
-        start_section "Project artifacts"
-        _run_cleanup_step show_project_artifact_hint_notice || return $?
-        end_section
-    fi
+    }
+    run_clean_sections || cleanup_cancel_rc=$?
 
     # ===== Final summary =====
     flush_idle_section_slot
@@ -1798,13 +1805,34 @@ perform_cleanup() {
 
     local summary_heading=""
     local summary_status="success"
-    if [[ "$DRY_RUN" == "true" ]]; then
+    if [[ $cleanup_cancel_rc -eq 124 ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            summary_heading="Dry run cancelled"
+        else
+            summary_heading="Cleanup cancelled"
+        fi
+        summary_status="warning"
+    elif [[ $cleanup_cancel_rc -ge 128 ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            summary_heading="Dry run interrupted"
+        else
+            summary_heading="Cleanup interrupted"
+        fi
+        summary_status="warning"
+    elif [[ "$DRY_RUN" == "true" ]]; then
         summary_heading="Dry run complete - no changes made"
     else
         summary_heading="Cleanup complete"
     fi
 
     local -a summary_details=()
+    if [[ $cleanup_cancel_rc -ne 0 ]]; then
+        if [[ $cleanup_cancel_rc -eq 124 ]]; then
+            summary_details+=("${GRAY}${ICON_WARNING}${NC} Cancelled: a scan or size check timed out (exit 124). Remaining cleanup was skipped.")
+        elif [[ $cleanup_cancel_rc -ge 128 ]]; then
+            summary_details+=("${GRAY}${ICON_WARNING}${NC} Cancelled: a cleanup step was interrupted (exit $cleanup_cancel_rc). Remaining cleanup was skipped.")
+        fi
+    fi
 
     # Emit one "Free space" line, with the measured delta in parentheses when
     # available. $1 is the free space in KB captured before cleanup started.
@@ -1930,6 +1958,8 @@ perform_cleanup() {
 
     print_summary_block "$summary_heading" "${summary_details[@]}"
     printf '\n'
+
+    return "$cleanup_cancel_rc"
 }
 
 run_with_shell_timeout() {
