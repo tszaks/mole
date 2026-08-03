@@ -613,3 +613,24 @@ EOF
 		return 1
 	}
 }
+
+@test "execution-time partial acceptance is gated on an empty deletion plan" {
+	# guard_login alone does not prove a bundle-only plan: the
+	# surviving-sibling name-collision path sets it while keeping
+	# name-keyed leftovers in encoded_files. If the partial re-check
+	# acceptance ever drops the empty-deletion-list gate, a sibling
+	# hidden behind the unreadable part of a partial re-scan could lose
+	# name-keyed data without the fingerprint defense.
+	local window
+	window=$(command grep -A2 'live_sibling_rc -eq \$MOLE_UNINSTALL_SCAN_PARTIAL &&' \
+		"$PROJECT_ROOT/lib/uninstall/batch.sh")
+	# Positive control: the acceptance branch must exist at all.
+	printf '%s\n' "$window" | command grep -q 'guard_login' || {
+		echo "acceptance branch not found"
+		return 1
+	}
+	printf '%s\n' "$window" | command grep -q -- '-z "\$encoded_files"' || {
+		echo "gate missing the empty-plan check"
+		return 1
+	}
+}

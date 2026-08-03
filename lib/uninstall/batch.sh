@@ -1839,14 +1839,18 @@ _batch_execute_removals() {
                     suggestion="Select the app again and review the new removal plan"
                 fi
             elif [[ $live_sibling_rc -eq $MOLE_UNINSTALL_SCAN_PARTIAL &&
-                "$sibling_guard" == "guard_login" ]]; then
+                "$sibling_guard" == "guard_login" &&
+                -z "$encoded_files" ]]; then
                 # The preview already narrowed this plan to the selected app
                 # bundle alone because the scan could not prove absence. The
                 # re-check hitting the same doubt confirms that state rather
                 # than contradicting it, and a plan with no shared teardown
                 # has nothing a live sibling could lose. Refusing here is what
                 # made a deterministically slow or unreadable machine unable
-                # to uninstall anything at all (#1340).
+                # to uninstall anything at all (#1340). guard_login alone is
+                # not that proof: the surviving-sibling name-collision path
+                # sets it while keeping name-keyed leftovers, so the empty
+                # deletion list is the evidence that authorizes proceeding.
                 :
             elif [[ $live_sibling_rc -ge 128 ]]; then
                 return "$live_sibling_rc"
