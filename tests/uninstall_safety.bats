@@ -508,3 +508,55 @@ EOF
 	}
 	[[ "$output" != *"RESULTS_DISCARDED"* ]] || return 1
 }
+
+@test "wrapped iOS bundles and id-less bundles do not make the sibling scan unknown (#1339)" {
+	# Two bundle shapes that are ordinary installs, not mysteries: an iOS app
+	# on Apple Silicon keeps its plist under Wrapper/<name>.app, and vendor
+	# uninstallers ship a plist with no CFBundleIdentifier at all. Both read as
+	# "unknown" before, and one of either anywhere on the machine aborted the
+	# uninstall of every other app.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+apps="$HOME/sibling-shapes"
+mkdir -p "$apps/Wrapped.app/Wrapper/Inner.app" "$apps/NoId.app/Contents" "$apps/Broken.app/Contents"
+cat > "$apps/Wrapped.app/Wrapper/Inner.app/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.wrapped</string></dict></plist>
+PLIST
+cat > "$apps/NoId.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleExecutable</key><string>run.sh</string></dict></plist>
+PLIST
+printf 'not a plist' > "$apps/Broken.app/Contents/Info.plist"
+
+live_paths=(); live_records=()
+deadline=$((SECONDS + 30))
+
+# The wrapped bundle's real id must be found, so it matches when it should.
+rc=0
+_uninstall_collect_live_sibling_candidate "$apps/Wrapped.app" "/nowhere.app" \
+    "com.example.wrapped" "$deadline" true || rc=$?
+[[ "$rc" -eq 0 ]] || { echo "WRAPPED_RC:$rc want 0"; exit 1; }
+
+# No CFBundleIdentifier is an answer: it cannot be a sibling.
+rc=0
+_uninstall_collect_live_sibling_candidate "$apps/NoId.app" "/nowhere.app" \
+    "com.example.wrapped" "$deadline" true || rc=$?
+[[ "$rc" -eq 1 ]] || { echo "NOID_RC:$rc want 1"; exit 1; }
+
+# A plist that will not parse is still unknown, and must stay that way.
+rc=0
+_uninstall_collect_live_sibling_candidate "$apps/Broken.app" "/nowhere.app" \
+    "com.example.wrapped" "$deadline" true || rc=$?
+[[ "$rc" -eq 2 ]] || { echo "BROKEN_RC:$rc want 2"; exit 1; }
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+}

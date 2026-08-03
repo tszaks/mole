@@ -876,8 +876,22 @@ _uninstall_collect_live_sibling_candidate() {
     _uninstall_live_candidate_is_selected "$app" "$selected_path" && return 1
     local info="$app/Contents/Info.plist"
     if [[ ! -f "$info" ]]; then
-        [[ "$missing_info_is_unknown" == true ]] && return 2
-        return 1
+        # iOS and iPadOS apps installed on Apple Silicon have no Contents/ at
+        # all: the real plist sits at Wrapper/<name>.app/Info.plist. Reading
+        # only the Contents/ path classified every one of them as unreadable,
+        # and a single such app aborted the uninstall of every other app on
+        # the machine (#1339). They are ordinary installs, not a mystery.
+        local wrapped=""
+        for wrapped in "$app"/Wrapper/*.app/Info.plist; do
+            if [[ -f "$wrapped" ]]; then
+                info="$wrapped"
+                break
+            fi
+        done
+        if [[ ! -f "$info" ]]; then
+            [[ "$missing_info_is_unknown" == true ]] && return 2
+            return 1
+        fi
     fi
 
     local plist_timeout=""
@@ -892,6 +906,22 @@ _uninstall_collect_live_sibling_candidate() {
     fi
     if [[ $plist_rc -ne 0 || -z "$app_bundle" ]]; then
         [[ $plist_rc -eq 124 || $plist_rc -ge 128 ]] && return "$plist_rc"
+        # A plist that parses and simply carries no CFBundleIdentifier is a
+        # complete answer, not a failed probe: vendor uninstallers and Steam
+        # launchers ship bundles like that, and one with no id cannot share an
+        # id with the target. Ask plutil whether the file parsed rather than
+        # reading its exit code, which is 1 for a missing key, a corrupt file,
+        # and an unreadable file alike (measured), or its message, which is
+        # prose. Only a file that will not parse stays unknown.
+        local lint_rc=0
+        local lint_timeout=""
+        if lint_timeout=$(_mole_timeout_with_deadline \
+            "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$deadline_seconds"); then
+            run_with_timeout "$lint_timeout" plutil -lint "$info" \
+                > /dev/null 2>&1 || lint_rc=$?
+            [[ $lint_rc -eq 124 || $lint_rc -ge 128 ]] && return "$lint_rc"
+            [[ $lint_rc -eq 0 ]] && return 1
+        fi
         return 2
     fi
     [[ "$(uninstall_normalize_bundle_id "$app_bundle")" == "$bundle_id_lower" ]] || return 1
