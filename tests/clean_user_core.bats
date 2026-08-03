@@ -1606,7 +1606,7 @@ EOF
         echo "$output"
         return 1
     }
-    [[ "$output" == *"☞"* ]] &&
+    [[ "$output" == *"⊙"* ]] &&
         [[ "$output" == *"Xcode DerivedData"* ]] &&
         [[ "$output" == *"Simulator data"* ]] &&
         [[ "$output" == *"Docker Desktop data"* ]] || {
