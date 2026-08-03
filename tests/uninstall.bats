@@ -2508,7 +2508,7 @@ EOF
     touch "$HOME/.local/bin/mole"
     touch "$HOME/.local/bin/mo"
     mkdir -p "$HOME/.config/mole" "$HOME/.cache/mole" "$HOME/Library/Logs/mole"
-    echo "~/protected" > "$HOME/.config/mole/whitelist"
+    echo "protected-entry" > "$HOME/.config/mole/whitelist"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PATH="/usr/bin:/bin" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
