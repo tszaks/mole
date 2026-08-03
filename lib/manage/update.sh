@@ -716,6 +716,7 @@ get_install_receipt() {
 }
 
 get_latest_commit_from_github() {
+    local lookup_scope="${1:-allow-git-fallback}"
     local response=""
     local sha=""
     if command -v curl > /dev/null 2>&1; then
@@ -729,6 +730,13 @@ get_latest_commit_from_github() {
         grep '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' | head -1 | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/') || sha=""
     if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
         printf '%s\n' "$sha"
+        return 0
+    fi
+
+    # Background notices are best-effort and should not spawn a Git process.
+    # Explicit update paths retain the bounded fallback below.
+    if [[ "$lookup_scope" == "api-only" ]]; then
+        printf '\n'
         return 0
     fi
 
@@ -817,7 +825,7 @@ check_for_updates() {
                 # Nightly: compare commit hashes instead of version numbers
                 local installed_commit latest_commit
                 installed_commit=$(get_install_commit)
-                latest_commit=$(get_latest_commit_from_github)
+                latest_commit=$(get_latest_commit_from_github api-only)
 
                 if [[ -n "$installed_commit" && -n "$latest_commit" && "${installed_commit:0:7}" != "${latest_commit:0:7}" ]]; then
                     printf "\nNew nightly commit %s available, run %smo update --nightly%s\n\n" "${latest_commit:0:7}" "$GREEN" "$NC" > "$msg_cache"
