@@ -67,7 +67,7 @@ The method: for each predicate, list every way the subject can legitimately exis
 Protection that lives at the call site instead of in the funnel will be missing from the next call site.
 
 - `should_protect_path` ran only inside the real-clean branch, so `--dry-run` promised to remove files the real run silently skipped (`cfe14601`).
-- The user whitelist was consulted per caller, so `clean_user_caches` simply forgot it. The fix hoisted the check into `safe_find_delete` and `safe_sudo_find_delete` next to the existing protection gate, so future callers get it for free (`5498edd1`).
+- The user whitelist was consulted per caller, so one `clean_*` function simply forgot it on a system sweep. The fix hoisted the check into `safe_find_delete` and `safe_sudo_find_delete` next to the existing protection gate, so future callers get it for free (`5498edd1`). The forgetful caller has since been renamed; the commit names it, and this line deliberately does not, because a dead symbol here reads as a stale catalog.
 - A Raycast v2 exclusion existed in one place but not in the `find` predicates that actually ran (`452e194d`).
 - `_safe_clean_impl` ran its delete guard only on the real branch, so dry-run previewed (and counted) items an active-process guard would refuse at the same moment. The guard must run after protected, whitelisted, compiled-cache, and missing targets are filtered, but before any preview registration; otherwise dry-run can report a stopped cleanup whose real candidate set is empty (`3f42ad39`).
 

@@ -225,3 +225,16 @@ EOF
     run grep -q 'Homebrew Core PR is workflow-driven' "$PROJECT_ROOT/.claude/skills/release-notes/SKILL.md"
     [ "$status" -eq 0 ]
 }
+
+@test "no shell function shares another's body under a different name" {
+    # This gate also lives in check.sh, but CI runs scripts/test.sh and never
+    # check.sh, so without this case it could not block a pull request. The
+    # class it catches is invisible to grep: the copies that matter have
+    # already had their variables renamed, which is why review reads them as
+    # separate helpers. Run the script with --list to inspect every group.
+    run python3 "$PROJECT_ROOT/scripts/audit_function_duplication.py"
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
