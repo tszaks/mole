@@ -240,7 +240,7 @@ remove_mole() {
             config_trash_n=$((config_trash_n + 1))
         done
         if ! mkdir -p "$HOME/.Trash" 2> /dev/null ||
-            ! mv -f "$HOME/.config/mole" "$config_trash" < /dev/null 2> /dev/null; then
+            ! mv -f "$HOME/.config/mole" "$config_trash" 2> /dev/null; then
             has_error=true
             log_warning "Could not move ~/.config/mole to Trash; left in place"
         fi
