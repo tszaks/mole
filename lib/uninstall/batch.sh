@@ -694,6 +694,13 @@ _MOLE_UNINSTALL_LIVE_APP_ROOTS=(
 )
 _MOLE_UNINSTALL_LIVE_VOLUMES_ROOT="/Volumes"
 
+# A same-bundle scan that ran but could not read every path. Distinct from both
+# success and failure on purpose: the listing it produced is real, so it can
+# still prove a sibling exists, but it can never prove one does not. Callers
+# must treat it as "a sibling may be there" and narrow the plan accordingly.
+# 3 is safe to add to the 0/1/124/128+ set these scans already speak.
+readonly MOLE_UNINSTALL_SCAN_PARTIAL=3
+
 _uninstall_materialize_complete_find0() {
     local output_file="$1"
     local deadline_seconds="$2"
@@ -705,14 +712,29 @@ _uninstall_materialize_complete_find0() {
     scan_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" \
         "$deadline_seconds") || scan_rc=$?
     if [[ $scan_rc -eq 0 ]]; then
+        # Keep find's stderr. It is the only way to tell "could not read one
+        # path" apart from "did not run": find exits 1 for an unreadable
+        # subdirectory even though it traversed and printed everything else,
+        # and macOS 26 hands out that error routinely under TCC. Discarding it
+        # made every such run look like a dead scan, which aborted the whole
+        # uninstall over a directory that had nothing to do with the app
+        # (#1339, #1340).
+        local scan_errors=""
+        scan_errors=$(create_temp_file) || return 2
         run_with_timeout "$scan_timeout" find "$@" -print0 \
-            < /dev/null > "$output_file" 2> /dev/null || scan_rc=$?
+            < /dev/null > "$output_file" 2> "$scan_errors" || scan_rc=$?
+        if [[ $scan_rc -eq 1 && -s "$scan_errors" ]]; then
+            # Partial view: the listing is real but not exhaustive, so it can
+            # support "something is there" and never "nothing is there".
+            scan_rc="$MOLE_UNINSTALL_SCAN_PARTIAL"
+        fi
+        rm -f -- "$scan_errors" 2> /dev/null || true # SAFE: exact tracked temp file created above
     fi
-    if [[ $scan_rc -ne 0 ]]; then
+    if [[ $scan_rc -ne 0 && $scan_rc -ne $MOLE_UNINSTALL_SCAN_PARTIAL ]]; then
         : > "$output_file" || true
         return "$scan_rc"
     fi
-    return 0
+    return "$scan_rc"
 }
 
 _uninstall_live_candidate_is_selected() {
@@ -899,6 +921,7 @@ uninstall_live_bundle_has_other_install() {
     local deadline_seconds=$((SECONDS + (2 * MOLE_TIMEOUT_DISK_VERIFY_SEC)))
     local bundle_id_lower
     bundle_id_lower=$(uninstall_normalize_bundle_id "$bundle_id")
+    local scan_indeterminate=false
     local scan_file=""
     scan_file=$(create_temp_file) || return 2
     local pkg_paths_file=""
@@ -935,7 +958,11 @@ uninstall_live_bundle_has_other_install() {
             \( -type d -name Applications \) -o \
             \( \( -type d -o -type l \) -name '*.app' \) \
             \) || volume_scan_rc=$?
-        if [[ $volume_scan_rc -ne 0 ]]; then
+        if [[ $volume_scan_rc -eq $MOLE_UNINSTALL_SCAN_PARTIAL ]]; then
+            # Some volume was unreadable. Keep the roots we did see and carry
+            # the doubt forward: absence can no longer be proven from here.
+            scan_indeterminate=true
+        elif [[ $volume_scan_rc -ne 0 ]]; then
             rm -f -- "$volume_roots_file" "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp files created above
             [[ $volume_scan_rc -eq 124 || $volume_scan_rc -ge 128 ]] && return "$volume_scan_rc"
             return 2
@@ -963,7 +990,12 @@ uninstall_live_bundle_has_other_install() {
         _uninstall_materialize_complete_find0 "$scan_file" \
             "$deadline_seconds" "$root" -maxdepth 3 \
             \( -type d -o -type l \) -name '*.app' || scan_rc=$?
-        if [[ $scan_rc -ne 0 ]]; then
+        if [[ $scan_rc -eq $MOLE_UNINSTALL_SCAN_PARTIAL ]]; then
+            # Unreadable subpaths under an app root. The apps this listing did
+            # find are still real, so keep going and let the doubt decide the
+            # verdict at the end rather than discarding the whole scan.
+            scan_indeterminate=true
+        elif [[ $scan_rc -ne 0 ]]; then
             [[ $scan_rc -eq 124 || $scan_rc -ge 128 ]] && result=$scan_rc || result=2
             break
         fi
@@ -1008,6 +1040,12 @@ uninstall_live_bundle_has_other_install() {
         local IFS=$'\n'
         _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT="${live_records[*]}"
         _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=("${live_paths[@]}")
+    fi
+    # Absence is a claim only an exhaustive scan can make. A partial one that
+    # found nothing means "not seen", which for a delete decision has to read
+    # as "may exist" so the caller keeps the narrow plan.
+    if [[ "$scan_indeterminate" == true && "$result" -eq 1 ]]; then
+        result="$MOLE_UNINSTALL_SCAN_PARTIAL"
     fi
     return "$result"
 }
@@ -1298,6 +1336,14 @@ _batch_scan_app_details() {
             live_sibling_present=true
         elif [[ $live_sibling_rc -eq 1 ]]; then
             : # Complete absence proof; the empty fingerprint is authoritative.
+        elif [[ $live_sibling_rc -eq $MOLE_UNINSTALL_SCAN_PARTIAL ]]; then
+            # The scan ran but could not read every path, so it cannot rule a
+            # sibling out. Treat that exactly like finding one: narrow the plan
+            # and keep going. Aborting here is what left `mo uninstall` exiting
+            # 1 with a debug-only line for apps whose scan touched anything TCC
+            # protects (#1339, #1340).
+            live_sibling_present=true
+            log_warning "$(printf "%s: some paths could not be read, so shared leftovers are left in place" "$app_name")"
         elif [[ $live_sibling_rc -eq 124 || $live_sibling_rc -ge 128 ]]; then
             return "$live_sibling_rc"
         else

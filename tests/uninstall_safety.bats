@@ -475,3 +475,36 @@ EOF
 	[[ "$result" == *"CrashReporter/TestApp_CCCC-DDDD.plist"* ]] || { echo "missed CrashReporter plist 2"; exit 1; }
 	[[ "$result" != *"OtherApp_EEEE-FFFF.plist"* ]] || { echo "leaked unrelated CrashReporter plist"; exit 1; }
 }
+
+@test "an unreadable path makes the same-bundle scan indeterminate, never absent" {
+	# find exits 1 for a subdirectory it cannot read even though it printed
+	# everything else, and macOS hands that out routinely under TCC. Treating
+	# it as a dead scan aborted the whole uninstall (#1339, #1340). Treating it
+	# as proven absence would be worse: the caller would then tear down
+	# leftovers a sibling install still needs. It has to be its own verdict.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+root="$HOME/scan-roots"
+mkdir -p "$root/readable/Some.app" "$root/blocked/inner"
+chmod 000 "$root/blocked"
+trap 'chmod 755 "$root/blocked" 2>/dev/null || true' EXIT
+
+out="$(create_temp_file)"
+rc=0
+_uninstall_materialize_complete_find0 "$out" "$((SECONDS + 30))" \
+    "$root" -maxdepth 3 \( -type d -o -type l \) -name '*.app' || rc=$?
+
+[[ "$rc" -eq "$MOLE_UNINSTALL_SCAN_PARTIAL" ]] || { echo "RC:$rc want $MOLE_UNINSTALL_SCAN_PARTIAL"; exit 1; }
+# The listing it did produce must survive: discarding it is what turned a
+# readable-but-incomplete scan into a total failure.
+grep -qa "Some.app" "$out" || { echo "RESULTS_DISCARDED"; exit 1; }
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"RESULTS_DISCARDED"* ]] || return 1
+}
