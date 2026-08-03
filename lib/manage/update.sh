@@ -229,7 +229,14 @@ _update_acquire_lock() {
     elif [[ -e "$lock_path" || -L "$lock_path" ]]; then
         [[ -f "$lock_path" && ! -L "$lock_path" ]] || return 1
     fi
-    [[ -x /usr/bin/lockf ]] || return 1
+    # Same mutex choice as install.sh: prefer the kernel lock, fall back to an
+    # atomic mkdir where /usr/bin/lockf was never shipped (#1348). Requiring it
+    # made `mo update` unusable on every macOS before it existed.
+    local mutex_dir=""
+    if [[ ! -x /usr/bin/lockf ]]; then
+        [[ -x /bin/mkdir ]] || return 1
+        mutex_dir="$(dirname "$lock_path")/holder"
+    fi
     _update_lock_current_shell_pid owner_pid || return 1
     owner_start=$(_update_lock_process_start "$owner_pid")
     [[ -n "$owner_start" ]] || return 1
@@ -241,34 +248,58 @@ _update_acquire_lock() {
     token="$owner_pid|$owner_start|${control_path##*.}"
 
     # shellcheck disable=SC2016 # The lock-holder shell expands these values.
-    if [[ "$use_sudo" == "true" ]]; then
-        _update_lock_sudo /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c '
-            token="$1"; owner_pid="$2"; owner_start="$3"; lock_path="$4"; control_path="$5"
-            [ -f "$control_path" ] || exit 1
-            printf "%s\n" "$token" > "$lock_path" || exit 1
-            while [ -f "$control_path" ]; do
-                kill -0 "$owner_pid" 2>/dev/null || break
-                current_start=$(LC_ALL=C /bin/ps -p "$owner_pid" -o lstart= 2>/dev/null |
+    local holder_script='
+        token="$1"; owner_pid="$2"; owner_start="$3"; lock_path="$4"; control_path="$5"; mutex_dir="$6"
+        [ -f "$control_path" ] || exit 1
+        if [ -n "$mutex_dir" ] && ! /bin/mkdir "$mutex_dir" 2>/dev/null; then
+            previous=$(/bin/cat "$lock_path" 2>/dev/null || true)
+            previous_pid=${previous%%|*}
+            previous_rest=${previous#*|}
+            previous_start=${previous_rest%%|*}
+            owner_gone=1
+            if [ -n "$previous_pid" ] && kill -0 "$previous_pid" 2>/dev/null; then
+                current_start=$(LC_ALL=C /bin/ps -p "$previous_pid" -o lstart= 2>/dev/null |
                     /usr/bin/sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" | /usr/bin/head -1)
-                [ "$current_start" = "$owner_start" ] || break
-                /bin/sleep 0.1
-            done
-            /bin/rm -f "$control_path" # SAFE: exact mktemp-created update lock control file.
-        ' sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" &
+                if [ "$current_start" = "$previous_start" ]; then
+                    owner_gone=0
+                fi
+            fi
+            [ "$owner_gone" = 1 ] || exit 1
+            /bin/rmdir "$mutex_dir" 2>/dev/null || exit 1
+            /bin/mkdir "$mutex_dir" 2>/dev/null || exit 1
+        fi
+        if ! printf "%s\n" "$token" > "$lock_path"; then
+            [ -n "$mutex_dir" ] && /bin/rmdir "$mutex_dir" 2>/dev/null
+            exit 1
+        fi
+        while [ -f "$control_path" ]; do
+            kill -0 "$owner_pid" 2>/dev/null || break
+            current_start=$(LC_ALL=C /bin/ps -p "$owner_pid" -o lstart= 2>/dev/null |
+                /usr/bin/sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" | /usr/bin/head -1)
+            [ "$current_start" = "$owner_start" ] || break
+            /bin/sleep 0.1
+        done
+        /bin/rm -f "$control_path" # SAFE: exact mktemp-created update lock control file.
+        [ -n "$mutex_dir" ] && /bin/rmdir "$mutex_dir" 2>/dev/null
+        exit 0
+    '
+    # Spelled out rather than built as a command array: an empty array expanded
+    # under `set -u` is an unbound-variable error on the bash 3.2 macOS ships,
+    # and the empty one would have been the mkdir path this exists to enable.
+    if [[ -n "$mutex_dir" ]]; then
+        if [[ "$use_sudo" == "true" ]]; then
+            _update_lock_sudo /bin/sh -c "$holder_script" \
+                sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" "$mutex_dir" &
+        else
+            /bin/sh -c "$holder_script" \
+                sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" "$mutex_dir" &
+        fi
+    elif [[ "$use_sudo" == "true" ]]; then
+        _update_lock_sudo /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c "$holder_script" \
+            sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" "" &
     else
-        /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c '
-            token="$1"; owner_pid="$2"; owner_start="$3"; lock_path="$4"; control_path="$5"
-            [ -f "$control_path" ] || exit 1
-            printf "%s\n" "$token" > "$lock_path" || exit 1
-            while [ -f "$control_path" ]; do
-                kill -0 "$owner_pid" 2>/dev/null || break
-                current_start=$(LC_ALL=C /bin/ps -p "$owner_pid" -o lstart= 2>/dev/null |
-                    /usr/bin/sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" | /usr/bin/head -1)
-                [ "$current_start" = "$owner_start" ] || break
-                /bin/sleep 0.1
-            done
-            /bin/rm -f "$control_path" # SAFE: exact mktemp-created update lock control file.
-        ' sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" &
+        /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c "$holder_script" \
+            sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" "" &
     fi
     holder_pid=$!
 

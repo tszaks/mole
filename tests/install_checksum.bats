@@ -1082,3 +1082,110 @@ EOF
 
 	[ "$status" -eq 0 ]
 }
+
+@test "teardown never turns a finished install into a failure" {
+	# cleanup_installer runs from the EXIT trap under `set -e`, so a refusal
+	# inside it used to become the script's exit status and report a verified
+	# install as failed (#1343). The refusal still prints; it just no longer
+	# decides the verdict.
+	run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+log_error() { printf 'ERROR:%s\n' "$*"; }
+stop_line_spinner() { :; }
+release_install_lock() { :; }
+eval "$(sed -n '/^cleanup_installer() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+
+# A path safe_rm must refuse, standing in for any future refusal.
+safe_rm() { log_error "safe_rm: refusing to remove non-temp path: $1"; return 1; }
+INSTALL_SOURCE_TMP="/not/a/temp/path"
+trap 'cleanup_installer' EXIT
+exit 0
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"refusing to remove"* ]] || return 1
+}
+
+@test "the source temp dir and safe_rm agree on the temp root" {
+	# A bare `mktemp -d` ignores TMPDIR on macOS, so the creator and the
+	# remover disagreed whenever TMPDIR was unset or pointed elsewhere.
+	# Assert the behaviour, not the template: create the dir the way the
+	# installer does, then hand it to the real safe_rm.
+	run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+log_error() { printf 'ERROR:%s\n' "$*"; }
+eval "$(sed -n '/^safe_rm() {/,/^}/p' "$PROJECT_ROOT/install.sh")"
+# Anchor on the assignment, not the phrase: a comment that merely mentions
+# `mktemp -d` would otherwise be picked up and eval'd to nothing.
+mktemp_line=$(grep -m1 -E '^[[:space:]]*tmp="\$\(mktemp -d' "$PROJECT_ROOT/install.sh" | sed 's/^[[:space:]]*//')
+[[ -n "$mktemp_line" ]] || { echo "NO_MKTEMP_LINE"; exit 1; }
+
+for scenario in unset darwin slash; do
+    case "$scenario" in
+        unset)  unset TMPDIR ;;
+        darwin) TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)"; export TMPDIR ;;
+        slash)  TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)"; TMPDIR="${TMPDIR%/}/"; export TMPDIR ;;
+    esac
+    eval "$mktemp_line"
+    [[ -d "$tmp" ]] || { echo "NO_DIR:$scenario"; exit 1; }
+    safe_rm "$tmp" || { echo "REFUSED:$scenario"; exit 1; }
+    [[ ! -e "$tmp" ]] || { echo "LEFT_BEHIND:$scenario"; exit 1; }
+done
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"REFUSED"* ]] || return 1
+}
+
+@test "the install lock still works where /usr/bin/lockf was never shipped" {
+	# lockf only ships with newer macOS. Requiring it made both install and
+	# update exit before writing a file on every older release (#1348), so the
+	# absent case falls back to an atomic mkdir. Simulate absence by pointing
+	# the check at a path that cannot exist.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+patched="$HOME/install-nolockf.sh"
+sed 's#/usr/bin/lockf#/usr/bin/lockf_absent_for_test#g' "$PROJECT_ROOT/install.sh" > "$patched"
+
+INSTALL_DIR="$HOME/install"
+INSTALL_LOCK_FAILURE=""
+INSTALL_LOCK_UNSAFE_ANCESTOR=""
+INSTALL_LOCK_UNSAFE_ANCESTOR_REASON=""
+INSTALL_LOCK_PATH=""; INSTALL_LOCK_CONTROL=""; INSTALL_LOCK_HOLDER_PID=""; INSTALL_LOCK_USE_SUDO=false
+log_error() { printf 'ERROR:%s\n' "$*"; }
+# awk, not sed: a BSD sed address built from a function name trips over the
+# parentheses for some of these, and the failure is a silent missing function.
+for fn in install_lock_command install_lock_has_unsafe_ancestor install_lock_prepare_dir \
+	install_lock_read_owner install_lock_remove_control install_lock_process_start \
+	install_lock_current_shell_pid install_lock_reauthenticate acquire_install_lock \
+	release_install_lock; do
+	body="$(awk -v f="$fn" 'index($0, f "()")==1{p=1} p{print} p&&/^}$/{exit}' "$patched")"
+	[[ -n "$body" ]] || { echo "NO_BODY:$fn"; exit 1; }
+	eval "$body"
+done
+
+acquire_install_lock || { echo "ACQUIRE_FAILED:$INSTALL_LOCK_FAILURE"; exit 1; }
+mutex="$INSTALL_DIR/.mole-update.lock/holder"
+[[ -d "$mutex" ]] || { echo "NO_MUTEX_HELD"; exit 1; }
+
+# A second acquire must be refused while this one holds the mutex.
+( acquire_install_lock ) && { echo "DOUBLE_ACQUIRE"; exit 1; }
+
+release_install_lock
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	[[ -d "$mutex" ]] || break
+	/bin/sleep 0.1
+done
+[[ ! -d "$mutex" ]] || { echo "MUTEX_LEAKED"; exit 1; }
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"DOUBLE_ACQUIRE"* ]] || return 1
+	[[ "$output" != *"MUTEX_LEAKED"* ]] || return 1
+}

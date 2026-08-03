@@ -441,9 +441,20 @@ acquire_install_lock() {
         ! install_lock_command "$use_sudo" /bin/test -L "$lock_path" 2> /dev/null || return 1
         INSTALL_LOCK_FAILURE="busy"
     fi
+    # /usr/bin/lockf gives a kernel lock the OS drops even if the holder is
+    # killed -9, so prefer it. It only ships with newer macOS, and requiring it
+    # made both install and update exit before writing a single file on every
+    # older release (#1348). Where it is absent, an atomic mkdir inside the lock
+    # directory provides the same mutual exclusion; what it does not provide is
+    # release-on-death, so that path reclaims a mutex whose recorded owner is
+    # provably gone. Only a system with neither is refused.
+    local mutex_dir=""
     if [[ ! -x /usr/bin/lockf ]]; then
-        INSTALL_LOCK_FAILURE="no_lockf"
-        return 1
+        if [[ ! -x /bin/mkdir ]]; then
+            INSTALL_LOCK_FAILURE="no_mutex"
+            return 1
+        fi
+        mutex_dir="$INSTALL_DIR/.mole-update.lock/holder"
     fi
     install_lock_current_shell_pid owner_pid || return 1
     owner_start=$(install_lock_process_start "$owner_pid")
@@ -452,17 +463,41 @@ acquire_install_lock() {
     token="$owner_pid|$owner_start|${control_path##*.}"
 
     # shellcheck disable=SC2016 # The lock-holder shell expands these values.
-    install_lock_command "$use_sudo" /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c '
+    local holder_script='
         token="$1"
         owner_pid="$2"
         owner_start="$3"
         lock_path="$4"
         control_path="$5"
+        mutex_dir="$6"
         current_start=""
         if [ ! -f "$control_path" ]; then
             exit 1
         fi
-        printf "%s\n" "$token" > "$lock_path" || exit 1
+        if [ -n "$mutex_dir" ] && ! /bin/mkdir "$mutex_dir" 2>/dev/null; then
+            # Occupied. Reclaim only against proof the recorded owner is gone:
+            # a live pid whose start time still matches is a real concurrent
+            # writer, and a reused pid is why the start time is compared too.
+            previous=$(/bin/cat "$lock_path" 2>/dev/null || true)
+            previous_pid=${previous%%|*}
+            previous_rest=${previous#*|}
+            previous_start=${previous_rest%%|*}
+            owner_gone=1
+            if [ -n "$previous_pid" ] && kill -0 "$previous_pid" 2>/dev/null; then
+                current_start=$(LC_ALL=C /bin/ps -p "$previous_pid" -o lstart= 2>/dev/null |
+                    /usr/bin/sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//" | /usr/bin/head -1)
+                if [ "$current_start" = "$previous_start" ]; then
+                    owner_gone=0
+                fi
+            fi
+            [ "$owner_gone" = 1 ] || exit 1
+            /bin/rmdir "$mutex_dir" 2>/dev/null || exit 1
+            /bin/mkdir "$mutex_dir" 2>/dev/null || exit 1
+        fi
+        if ! printf "%s\n" "$token" > "$lock_path"; then
+            [ -n "$mutex_dir" ] && /bin/rmdir "$mutex_dir" 2>/dev/null
+            exit 1
+        fi
         while [ -f "$control_path" ]; do
             kill -0 "$owner_pid" 2>/dev/null || break
             current_start=$(LC_ALL=C /bin/ps -p "$owner_pid" -o lstart= 2>/dev/null |
@@ -471,7 +506,16 @@ acquire_install_lock() {
             /bin/sleep 0.1
         done
         /bin/rm -f "$control_path" # SAFE: exact mktemp-created install lock control file.
-    ' sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" &
+        [ -n "$mutex_dir" ] && /bin/rmdir "$mutex_dir" 2>/dev/null
+        exit 0
+    '
+    if [[ -n "$mutex_dir" ]]; then
+        install_lock_command "$use_sudo" /bin/sh -c "$holder_script" \
+            sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" "$mutex_dir" &
+    else
+        install_lock_command "$use_sudo" /usr/bin/lockf -k -s -t 0 -w "$lock_path" /bin/sh -c "$holder_script" \
+            sh "$token" "$owner_pid" "$owner_start" "$lock_path" "$control_path" "" &
+    fi
     holder_pid=$!
 
     while [[ "$attempt" -lt 100 ]]; do
@@ -547,9 +591,9 @@ report_install_lock_failure() {
             log_error "$INSTALL_DIR/.mole-update.lock/kernel.lock is not a regular file"
             log_error "Remove it, then retry: sudo rm -f $INSTALL_DIR/.mole-update.lock/kernel.lock"
             ;;
-        no_lockf)
-            log_error "/usr/bin/lockf is missing, so concurrent installs cannot be kept apart"
-            log_error "It ships with macOS; restore it from a healthy system or reinstall macOS, then retry"
+        no_mutex)
+            log_error "Neither /usr/bin/lockf nor /bin/mkdir is usable, so concurrent installs cannot be kept apart"
+            log_error "Check that /bin and /usr/bin are intact, then retry: ls -l /bin/mkdir /usr/bin/lockf"
             ;;
         *)
             log_error "Another install or update is running, wait for it to finish and retry"
@@ -571,7 +615,13 @@ cleanup_installer() {
     stop_line_spinner 2> /dev/null || true
     release_install_lock
     if [[ -n "$INSTALL_SOURCE_TMP" ]]; then
-        safe_rm "$INSTALL_SOURCE_TMP"
+        # Teardown never decides the exit status. This runs from the EXIT trap
+        # under `set -e`, so a refusal here used to turn a finished, verified
+        # install into exit 1 and every caller that checks the status, package
+        # managers included, read it as a failed install (#1343). safe_rm still
+        # prints why it refused; it just no longer overrides the verdict the
+        # install itself already reached.
+        safe_rm "$INSTALL_SOURCE_TMP" || true
         INSTALL_SOURCE_TMP=""
     fi
 }
@@ -622,7 +672,12 @@ resolve_source_dir() {
     fi
 
     local tmp
-    tmp="$(mktemp -d)"
+    # Derive the directory from the same TMPDIR safe_rm gates on. A bare
+    # `mktemp -d` ignores TMPDIR on macOS and always lands in the Darwin
+    # per-user temp dir, so with TMPDIR unset the two disagreed and cleanup
+    # refused to remove what the installer had just created (#1343). Homebrew
+    # strips TMPDIR from the environment, which made that deterministic there.
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/mole.XXXXXX")"
     INSTALL_SOURCE_TMP="$tmp"
 
     local branch="${MOLE_VERSION:-}"
