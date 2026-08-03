@@ -1231,6 +1231,16 @@ stop_uninstall_interactive_screen() {
     unset MOLE_ALT_SCREEN_ACTIVE MOLE_MANAGED_ALT_SCREEN
 }
 
+# Surface an abort during scan/load/selection instead of returning to the
+# prompt as if the run had succeeded. Interactive mode renders on an alternate
+# screen, so the reason has to be printed after the screen is restored (#1339).
+uninstall_abort() {
+    local reason="$1"
+    stop_uninstall_interactive_screen
+    show_cursor
+    log_error "Uninstall aborted: $reason"
+}
+
 # Cleanup: restore cursor and kill keepalive.
 cleanup() {
     local exit_code="${1:-$?}"
@@ -1350,13 +1360,16 @@ uninstall_list_json_escape() {
 uninstall_list_apps() {
     local apps_file=""
     if ! apps_file=$(scan_applications); then
+        uninstall_abort "could not complete the application scan"
         return 1
     fi
     if [[ ! -f "$apps_file" ]]; then
+        uninstall_abort "application scan produced no list"
         return 1
     fi
     if ! load_applications "$apps_file"; then
         rm -f "$apps_file"
+        uninstall_abort "no applications available for uninstallation"
         return 1
     fi
     rm -f "$apps_file"
@@ -1520,16 +1533,16 @@ main() {
     if [[ ${#app_name_args[@]} -gt 0 ]]; then
         local apps_file=""
         if ! apps_file=$(scan_applications); then
-            show_cursor
+            uninstall_abort "could not complete the application scan"
             return 1
         fi
         if [[ ! -f "$apps_file" ]]; then
-            show_cursor
+            uninstall_abort "application scan produced no list"
             return 1
         fi
         if ! load_applications "$apps_file"; then
             rm -f "$apps_file"
-            show_cursor
+            uninstall_abort "no applications available for uninstallation"
             return 1
         fi
 
@@ -1605,7 +1618,16 @@ main() {
                 rm -f "$cached_apps_file" 2> /dev/null || true
             fi
 
+            local scan_abort_reason=""
             if ! apps_file=$(scan_applications); then
+                scan_abort_reason="could not complete the application scan"
+            elif [[ ! -f "$apps_file" ]]; then
+                scan_abort_reason="application scan produced no list"
+            fi
+            if [[ -n "$scan_abort_reason" ]]; then
+                uninstall_abort "$scan_abort_reason"
+                rm -f "$apps_file"
+                [[ "$apps_file" == "$cached_apps_file" ]] && cached_apps_file=""
                 return 1
             fi
 
@@ -1613,13 +1635,10 @@ main() {
             cached_inventory_fingerprint=$(uninstall_app_inventory_fingerprint 2> /dev/null || echo "")
         fi
 
-        if [[ ! -f "$apps_file" ]]; then
-            return 1
-        fi
-
         if ! load_applications "$apps_file"; then
             rm -f "$apps_file"
             [[ "$apps_file" == "$cached_apps_file" ]] && cached_apps_file=""
+            uninstall_abort "no applications available for uninstallation"
             return 1
         fi
 
@@ -1634,12 +1653,10 @@ main() {
         set -e
 
         if [[ $exit_code -ne 0 ]]; then
-            stop_uninstall_interactive_screen
-            show_cursor
+            uninstall_abort "application selection did not complete"
             rm -f "$apps_file"
             [[ "$apps_file" == "$cached_apps_file" ]] && cached_apps_file=""
-
-            return 0
+            return 1
         fi
 
         stop_uninstall_interactive_screen
@@ -1769,4 +1786,6 @@ main() {
     done
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

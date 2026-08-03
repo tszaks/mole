@@ -560,3 +560,69 @@ EOF
 		return 1
 	}
 }
+
+@test "interactive scan failure is a visible abort, not a silent success (#1339)" {
+	# The interactive loop used to return to the prompt with nothing on screen
+	# when the scan could not complete; the session then read as a successful
+	# run with zero operations. The abort must be printed after the alternate
+	# screen is restored, and the command must fail.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/uninstall.sh"
+
+# No real machine scanning or terminal in this test.
+scan_applications() { return 1; }
+start_uninstall_interactive_screen() { :; }
+stop_uninstall_interactive_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+
+main
+EOF
+
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"Uninstall aborted: could not complete the application scan"* ]]
+}
+
+@test "failed app selection aborts visibly instead of returning success (#1339)" {
+	# Q/EOF in the selector used to exit 0 with nothing printed. Whatever the
+	# reason, the run ended without an uninstall, so it must not read as a
+	# successful session.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/uninstall.sh"
+
+fake_apps_list="$HOME/fake-apps"
+printf '0|/tmp/Fake.app|Fake|com.example.fake|1KB|Today|1\n' > "$fake_apps_list"
+scan_applications() { printf '%s\n' "$fake_apps_list"; }
+load_applications() {
+	apps_data=("0|/tmp/Fake.app|Fake|com.example.fake|1KB|Today|1")
+	selection_state=(false)
+	return 0
+}
+select_apps_for_uninstall() { return 1; }
+start_uninstall_interactive_screen() { :; }
+stop_uninstall_interactive_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+
+main
+EOF
+
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"Uninstall aborted: application selection did not complete"* ]]
+}
+
+@test "uninstall --list surfaces a failed scan instead of a bare exit (#1339)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/uninstall.sh"
+
+scan_applications() { return 1; }
+
+uninstall_list_apps
+EOF
+
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"Uninstall aborted: could not complete the application scan"* ]]
+}
