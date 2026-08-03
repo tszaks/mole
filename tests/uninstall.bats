@@ -786,6 +786,42 @@ EOF
     [[ "$output" == *"RC=124 OUTPUT="* ]]
 }
 
+@test "non-strict receipt discovery bounds each pkgutil file listing" {
+	local mock_bin="$HOME/mock-pkgutil-bin"
+	mkdir -p "$mock_bin"
+	cat > "$mock_bin/pkgutil" <<'MOCK'
+#!/bin/bash
+case "$1" in
+    --pkgs) printf 'com.example.big\ncom.example.after\n' ;;
+    --files) exec sleep 30 ;;
+esac
+MOCK
+	chmod +x "$mock_bin/pkgutil"
+
+	run env HOME="$HOME/pkg-bound" PROJECT_ROOT="$PROJECT_ROOT" \
+		PATH="$mock_bin:/usr/bin:/bin" \
+		MOLE_PKG_RECEIPT_CACHE_DISABLE=1 \
+		MOLE_PKG_RECEIPT_SCAN_TIMEOUT=1 \
+		MOLE_PKG_RECEIPT_LIST_TIMEOUT=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+started=$(date +%s)
+rc=0
+output=$(pkg_receipt_nonstandard_app_paths) || rc=$?
+elapsed=$(( $(date +%s) - started ))
+printf 'RC=%s ELAPSED=%s OUTPUT=%s\n' "$rc" "$elapsed" "$output"
+[[ $elapsed -lt 8 ]]
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"RC=0 "* ]] || return 1
+	[[ "$output" == *" OUTPUT=" ]]
+}
+
 @test "live same-bundle scan discards partial find output" {
     local app_root="$HOME/partial-live-apps"
     mkdir -p "$app_root/Selected.app" "$app_root/Partial.app/Contents"
