@@ -852,11 +852,43 @@ grep -q "trap 'cleanup_installer' EXIT" "$PROJECT_ROOT/install.sh"
 # remedy. A single catch-all lock message is the regression being pinned.
 ! grep -qF 'Could not acquire the Mole installation lock for' "$PROJECT_ROOT/install.sh"
 [[ "$(grep -c 'report_install_lock_failure$' "$PROJECT_ROOT/install.sh")" -eq 2 ]] || exit 1
-grep -qF 'Cache credentials first, then retry: sudo -v && mo update' "$PROJECT_ROOT/install.sh"
-grep -qF 'Refusing a privileged install through' "$PROJECT_ROOT/install.sh"
-grep -qF 'is not a regular file' "$PROJECT_ROOT/install.sh"
-grep -qF 'is not usable' "$PROJECT_ROOT/install.sh"
-grep -qF 'is held by another process' "$PROJECT_ROOT/install.sh"
+# Pin the reason codes, not the wording. Pinning a sentence is what let the
+# first fix swap one vague message for another and lock it in as a
+# requirement, so assert instead that every cause the code can raise reaches a
+# branch of its own, and that each branch says what happened and what to run.
+for lock_reason in $(grep -oE 'INSTALL_LOCK_FAILURE="[a-z_]+"' "$PROJECT_ROOT/install.sh" |
+    sed 's/.*="//;s/"//' | sort -u); do
+    [[ "$lock_reason" == "busy" ]] && continue
+    grep -qE "^[[:space:]]+${lock_reason}\)\$" "$PROJECT_ROOT/install.sh" || {
+        echo "MISSING_LOCK_BRANCH:$lock_reason"
+        exit 1
+    }
+done
+# The ancestor check refuses for five independent reasons and each needs a
+# different command: chown does not clear an ACL, chmod does not undo a
+# symlink. One shared sentence sends the user to run something inert.
+for ancestor_reason in $(grep -oE 'INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="[a-z_]+"' "$PROJECT_ROOT/install.sh" |
+    sed 's/.*="//;s/"//' | sort -u); do
+    grep -qE "^[[:space:]]+${ancestor_reason}\)\$" "$PROJECT_ROOT/install.sh" || {
+        echo "MISSING_ANCESTOR_BRANCH:$ancestor_reason"
+        exit 1
+    }
+done
+# Every branch that speaks to the user tells them what to run next. Checked on
+# leaf branches only: `unsafe_ancestor)` just opens a nested case and its
+# children carry the messages, so a branch with no log_error of its own is a
+# delegator, not a silent refusal.
+awk '/^report_install_lock_failure\(\)/{inside=1; next}
+     inside && /^\}$/{inside=0}
+     inside && /^[[:space:]]+[a-z_*]+\)$/{
+         if (name != "" && errors > 0 && !next_step) {print "NO_NEXT_STEP:" name; bad=1}
+         name=$1; errors=0; next_step=0; next
+     }
+     inside && /log_error/{errors++; if ($0 ~ /retry/) next_step=1}
+     END{
+         if (name != "" && errors > 0 && !next_step) {print "NO_NEXT_STEP:" name; bad=1}
+         exit bad
+     }' "$PROJECT_ROOT/install.sh" || exit 1
 # A lapsed session gets one terminal-bound retry, and never a silent prompt on
 # captured stdio or a hang where there is no terminal to ask on.
 grep -qF 'sudo -v < /dev/tty > /dev/tty 2> /dev/tty' "$PROJECT_ROOT/install.sh"

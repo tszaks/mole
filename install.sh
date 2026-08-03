@@ -140,6 +140,11 @@ INSTALL_LOCK_USE_SUDO=false
 # (#1335), so callers report the actual cause instead.
 INSTALL_LOCK_FAILURE=""
 INSTALL_LOCK_UNSAFE_ANCESTOR=""
+# Which of the ancestor check's five independent rejections fired. They need
+# different commands: chown does not clear an ACL and chmod does not turn a
+# symlink into a directory, so one shared "it is writable" sentence sends the
+# user to run something that changes nothing and retry into the same refusal.
+INSTALL_LOCK_UNSAFE_ANCESTOR_REASON=""
 INSTALL_SOURCE_TMP=""
 
 ACTION="install"
@@ -253,37 +258,48 @@ install_lock_has_unsafe_ancestor() {
     local current_uid owner_uid mode acl_listing
     current_uid=$(id -u 2> /dev/null || true)
     INSTALL_LOCK_UNSAFE_ANCESTOR="$probe"
+    INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="unreadable"
     [[ "$current_uid" =~ ^[0-9]+$ ]] || return 0
 
     while true; do
         # Record the directory under inspection so a rejection can name it.
         INSTALL_LOCK_UNSAFE_ANCESTOR="$probe"
+        INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="symlink"
         [[ ! -L "$probe" ]] || return 0
         owner_uid=$(/usr/bin/stat -f%u "$probe" 2> /dev/null || true)
         mode=$(/usr/bin/stat -f%Lp "$probe" 2> /dev/null || true)
+        INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="unreadable"
         [[ "$owner_uid" =~ ^[0-9]+$ && "$mode" =~ ^[0-7]+$ ]] || return 0
         if [[ "$use_sudo" == "true" || ${EUID:-0} -eq 0 ]]; then
+            INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="not_root_owned"
             [[ "$owner_uid" -eq 0 ]] || return 0
+            INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="writable"
             (((8#$mode & 0022) == 0)) || return 0
         elif [[ "$owner_uid" -ne 0 && "$owner_uid" -ne "$current_uid" ]]; then
+            INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="foreign_owner"
             return 0
         else
             # A regular installer already writes through this tree. Accept
             # group-writable prefixes, but keep world-writable paths closed.
+            INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="writable"
             (((8#$mode & 0002) == 0)) || return 0
         fi
+        INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="unreadable"
         acl_listing=$(/bin/ls -lde "$probe" 2> /dev/null) || return 0
+        INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="acl"
         if printf '%s\n' "$acl_listing" |
             /usr/bin/grep -Eq '^[[:space:]]+[0-9]+:.*[[:space:]]allow[[:space:]]'; then
             return 0
         fi
         [[ "$probe" == "/" ]] && break
         local parent_probe="${probe%/*}"
+        INSTALL_LOCK_UNSAFE_ANCESTOR_REASON="unreadable"
         [[ "$parent_probe" != "$probe" ]] || return 0
         probe="$parent_probe"
         [[ -n "$probe" ]] || probe="/"
     done
     INSTALL_LOCK_UNSAFE_ANCESTOR=""
+    INSTALL_LOCK_UNSAFE_ANCESTOR_REASON=""
     return 1
 }
 
@@ -484,33 +500,59 @@ acquire_install_lock() {
 
 # One rejection reason, one remedy. Callers must not print a bare lock message.
 report_install_lock_failure() {
+    local install_lock_dir
     case "$INSTALL_LOCK_FAILURE" in
         no_admin)
             log_error "Admin access to $INSTALL_DIR is required but not available"
             log_error "Cache credentials first, then retry: sudo -v && mo update"
             ;;
         unsafe_ancestor)
-            log_error "Refusing a privileged install through ${INSTALL_LOCK_UNSAFE_ANCESTOR:-a parent directory}"
-            log_error "It is a symlink, or writable by someone other than root, so a privileged write there cannot be trusted"
-            log_error "Restore ownership, then retry: sudo chown root:wheel ${INSTALL_LOCK_UNSAFE_ANCESTOR:-<dir>} && sudo chmod go-w ${INSTALL_LOCK_UNSAFE_ANCESTOR:-<dir>}"
+            install_lock_dir="${INSTALL_LOCK_UNSAFE_ANCESTOR:-<dir>}"
+            case "$INSTALL_LOCK_UNSAFE_ANCESTOR_REASON" in
+                symlink)
+                    log_error "$install_lock_dir is a symlink, so a privileged write through it cannot be trusted"
+                    log_error "See where it points, install under a real directory, then retry: ls -ld $install_lock_dir"
+                    ;;
+                not_root_owned)
+                    log_error "$install_lock_dir is not owned by root, so a privileged write there cannot be trusted"
+                    log_error "Restore ownership, then retry: sudo chown root:wheel $install_lock_dir"
+                    ;;
+                foreign_owner)
+                    log_error "$install_lock_dir is owned by neither root nor you"
+                    log_error "Take ownership, then retry: sudo chown $(id -un) $install_lock_dir"
+                    ;;
+                acl)
+                    log_error "$install_lock_dir carries an ACL that grants access beyond its mode"
+                    log_error "Clear it, then retry: sudo chmod -N $install_lock_dir"
+                    ;;
+                unreadable)
+                    log_error "$install_lock_dir could not be inspected, so it cannot be cleared for a privileged write"
+                    log_error "Look at it, then retry: sudo ls -lde $install_lock_dir"
+                    ;;
+                writable)
+                    log_error "$install_lock_dir is writable by someone other than root"
+                    log_error "Close it, then retry: sudo chmod go-w $install_lock_dir"
+                    ;;
+                *)
+                    log_error "$install_lock_dir cannot be trusted for a privileged write"
+                    log_error "Inspect it, then retry: sudo ls -lde $install_lock_dir"
+                    ;;
+            esac
             ;;
         lock_dir)
-            log_error "The lock directory $INSTALL_DIR/.mole-update.lock is not usable"
-            log_error "It must be a plain directory owned by the installing user with no ACL and no group or world access"
-            log_error "Inspect it, remove it if it is stale, then retry: sudo ls -lde $INSTALL_DIR/.mole-update.lock"
+            log_error "$INSTALL_DIR/.mole-update.lock is not a usable lock directory"
+            log_error "Inspect it, then retry: sudo ls -lde $INSTALL_DIR/.mole-update.lock"
             ;;
         lock_path)
-            log_error "The lock file $INSTALL_DIR/.mole-update.lock/kernel.lock is not a regular file"
-            log_error "Refusing to open a symlink or device in its place"
+            log_error "$INSTALL_DIR/.mole-update.lock/kernel.lock is not a regular file"
             log_error "Remove it, then retry: sudo rm -f $INSTALL_DIR/.mole-update.lock/kernel.lock"
             ;;
         no_lockf)
             log_error "/usr/bin/lockf is missing, so concurrent installs cannot be kept apart"
-            log_error "Restore it from macOS, then retry"
+            log_error "It ships with macOS; restore it from a healthy system or reinstall macOS, then retry"
             ;;
         *)
-            log_error "The Mole installation lock for $INSTALL_DIR is held by another process"
-            log_error "Wait for that install or update to finish, then retry"
+            log_error "Another install or update is running, wait for it to finish and retry"
             ;;
     esac
 }

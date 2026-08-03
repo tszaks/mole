@@ -1,6 +1,6 @@
 ---
 name: bugs
-description: "Mole's project-specific defect catalog: eleven recurring bug shapes, grep probes, and regression guards. Use when reviewing, auditing, debugging, or accepting a contributed PR in Mole. Not for generic review workflow or unrelated repositories."
+description: "Mole's project-specific defect catalog: twelve recurring bug shapes, grep probes, and regression guards. Use when reviewing, auditing, debugging, or accepting a contributed PR in Mole. Not for generic review workflow or unrelated repositories."
 ---
 
 # Mole bug patterns
@@ -15,7 +15,7 @@ Use this project-specific catalog after reading the current diff and code. Gener
 
   > What does this produce when the probe is denied, the app is installed in a place the probe does not look, the machine is slow but healthy, or the cache was written by the previous release?
 
-## The eleven archetypes
+## The twelve archetypes
 
 Ranked by how often they recur. Walk the ones the area touches and write down present / absent / unsure for each. "Absent" is a result worth reporting.
 
@@ -32,6 +32,7 @@ Ranked by how often they recur. Walk the ones the area touches and write down pr
 | 9 | Two paths computing the same number differently | find every total, assert they agree | `3cbafed7` `7a996aa5` |
 | 10 | Silence read as a freeze | walk each section for a >1s gap with no spinner | `8f064707` `c4258f5e` |
 | 11 | Test that cannot fail | grep bare `[[ ]]` assertions, then verify red-green | `1b127787` `4db8a0d8` `20392444` |
+| 12 | A gate that cannot say why it refused | count distinct `return 1` causes against distinct messages | `e2020772` `926c2efa` `46f5ba77` |
 
 ### 1. Deletion candidate built from a weak name signal
 
@@ -176,6 +177,28 @@ Four other ways a test here has passed vacuously:
 - The asserted string does not exist. A Maven test asserted the absence of "Maven repository cache" when the real label is "Maven local repository", so it passed even if protection regressed.
 
 The rule: end every assertion with `|| return 1`, include a positive control proving the negative assertions are not vacuous, and verify red-green by reverting the fix and watching the test fail.
+
+### 12. A gate that cannot say why it refused
+
+A guard with many independent failure causes and one message. The user cannot act, and the maintainer cannot triage, so the report arrives as "it does not work" and the fix targets whichever wording was quoted.
+
+`acquire_install_lock` refused for an untrusted ancestor, a denied `sudo -n`, an unusable lock directory, a lock path replaced by a symlink or fifo, a missing `/usr/bin/lockf`, and genuine contention. All printed one line about the lock being unavailable. Counting the causes is the probe, but do not quote the count here: it moves with every refactor, and a number this file cannot measure reads as rot the next time someone checks it. Three things followed, and each is worth checking for separately:
+
+- **The reporter did the triage.** #1335 reverse-engineered `install_lock_has_unsafe_ancestor` by hand from the source to learn why a plain install failed.
+- **A new gate silently downgraded an older diagnosis.** `d4a4b80c` already printed the actionable `Cache credentials first, then retry: sudo -v && mo update` for a missing admin session. `e2020772` put the lock in front of it, hit the same condition first, and reported it as a busy lock. Nothing failed; the diagnosis just got worse. When adding a gate ahead of an existing failure path, read what the old path said and keep the new one at least as actionable.
+- **The test suite pinned the regression.** `926c2efa` replaced one catch-all string with another and added `grep -qF 'Could not acquire the Mole installation lock for'` as a source invariant, making the vague message a requirement. Pin reason codes, never a catch-all string.
+
+Swallowed stderr is what hides this class during debugging: the privileged steps ran under `2> /dev/null`, so no run of the real command ever showed the underlying `sudo` error. Static reading went in circles until a differential probe (same code with and without a controlling terminal) isolated it in one run.
+
+```bash
+# Distinct failure causes vs distinct messages, per gate.
+command grep -c 'return 1' install.sh
+command grep -c 'log_error' install.sh
+# Any privileged step whose stderr cannot reach the user.
+command grep -rn 'sudo .*2> */dev/null' install.sh lib/
+```
+
+For each gate, list every reachable `return 1` and name the message and the remedy a user gets from it. Two causes sharing one message is the defect; a cause whose remedy is "reinstall" when reinstalling re-enters the same gate is the same defect wearing a fix.
 
 ## Three methods that produced most of the finds
 
