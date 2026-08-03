@@ -490,3 +490,48 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"|$app_path|Plain|com.example.Plain|"* ]]
 }
+
+@test "receipt discovery survives its first candidate on /bin/bash 3.2 (#1354)" {
+	# The seen_apps dedup loop ran over "${seen_apps[@]}" while the array
+	# was still empty for the first candidate; bash 3.2 under set -u
+	# aborts that expansion, the scan subshell died, and the uninstall
+	# spinner span forever. The candidate prefixes are fixed system paths,
+	# so the harness rewrites them into the test HOME (same pattern as
+	# sourceable_uninstall_sh) and leaves the loop under test untouched.
+	local mock_bin="$HOME/mock-pkgutil"
+	mkdir -p "$mock_bin" "$HOME/usr-local/Example.app/Contents"
+	cat > "$mock_bin/pkgutil" << MOCK
+#!/bin/bash
+case "\$1" in
+    --pkgs) printf 'com.example.tool\n' ;;
+    --files) printf '${HOME#/}/usr-local/Example.app/Contents/Info.plist\n' ;;
+esac
+MOCK
+	chmod +x "$mock_bin/pkgutil"
+
+	# The copy must rename the load guard too: common.sh already sourced the
+	# real file, and the readonly guard would silently keep the original
+	# function, turning this test into a no-op against the wrong code.
+	sed -e "s|/usr/local/\*.app|$HOME/usr-local/*.app|g" \
+		-e 's|MOLE_PKG_RECEIPTS_LOADED|MOLE_PKG_RECEIPTS_TEST_LOADED|g' \
+		"$PROJECT_ROOT/lib/core/pkg_receipts.sh" > "$HOME/pkg_receipts_test.sh"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+		PATH="$mock_bin:/usr/bin:/bin" \
+		MOLE_PKG_RECEIPT_CACHE_DISABLE=1 /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$HOME/pkg_receipts_test.sh"
+
+rc=0
+out=$(pkg_receipt_nonstandard_app_paths) || rc=$?
+printf 'RC=%s OUT=%s\n' "$rc" "$out"
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"unbound variable"* ]] || return 1
+	[[ "$output" == *"RC=0 OUT=$HOME/usr-local/Example.app"* ]] || return 1
+}

@@ -132,7 +132,9 @@ pkg_receipt_nonstandard_app_paths() {
 
             duplicate=false
             local seen
-            for seen in "${seen_apps[@]}"; do
+            # First candidate runs with seen_apps still empty, and bash 3.2
+            # under set -u aborts on an empty-array expansion (#1354).
+            for seen in ${seen_apps[@]+"${seen_apps[@]}"}; do
                 if [[ "$seen" == "$app_path" ]]; then
                     duplicate=true
                     break
