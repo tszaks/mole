@@ -161,7 +161,25 @@ SHIM
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         PATH="$SHIM_DIR:$PATH" MOLE_TIMEOUT_DISK_VERIFY_SEC=2 \
-        /bin/bash --noprofile --norc "$PROJECT_ROOT/bin/clean.sh" --debug
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+# Stub every other section so the run reaches the summary quickly; only
+# clean_user_essentials (which contains _clean_mail_downloads) stays real.
+for fn in clean_finder_metadata clean_app_caches clean_browsers \
+    run_cloud_and_office_cleanup clean_developer_tools \
+    clean_user_gui_applications clean_virtualization_tools \
+    clean_application_support_logs clean_orphaned_app_data \
+    clean_orphaned_system_services clean_orphaned_container_stubs \
+    clean_stale_launch_services_registrations show_user_launch_agent_hint_notice \
+    clean_apple_silicon_caches clean_cached_device_firmware \
+    clean_time_machine_failed_backups check_large_file_candidates \
+    show_project_artifact_hint_notice; do
+    eval "$fn() { return 0; }"
+done
+run_with_shell_timeout() { return 0; }
+perform_cleanup
+EOF
 
     rm -rf "$SHIM_DIR"
 
