@@ -939,8 +939,11 @@ _uninstall_collect_live_sibling_candidate() {
 }
 
 # Return 0 for one or more other live installs, 1 only for a complete
-# proof of absence, 2 for incomplete/unknown state, and preserve
-# timeout/signals. A successful scan always refreshes the fingerprint globals.
+# proof of absence, 2 for incomplete/unknown state, and preserve signals.
+# A deadline timeout degrades to MOLE_UNINSTALL_SCAN_PARTIAL: out of budget
+# means the scan is incomplete, not that the user cancelled, and machine-wide
+# work such as receipt enumeration can outlive the budget on a healthy Mac
+# (#1340). A successful scan always refreshes the fingerprint globals.
 uninstall_live_bundle_has_other_install() {
     local bundle_id="$1"
     local selected_path="$2"
@@ -963,9 +966,16 @@ uninstall_live_bundle_has_other_install() {
     local pkg_scan_rc=0
     _uninstall_materialize_complete_pkg_apps "$pkg_paths_file" \
         "$deadline_seconds" || pkg_scan_rc=$?
-    if [[ $pkg_scan_rc -ne 0 ]]; then
+    if [[ $pkg_scan_rc -eq 124 ]]; then
+        # Receipt enumeration walks every pkgutil receipt on the machine, and
+        # a single vendor receipt can hold tens of thousands of paths, so it
+        # can outlive the budget on a healthy Mac (#1340). That is the same
+        # doubt as an unreadable path: the receipts we did not reach may name
+        # a sibling, so carry the doubt forward instead of ending the run.
+        scan_indeterminate=true
+    elif [[ $pkg_scan_rc -ne 0 ]]; then
         rm -f -- "$scan_file" "$pkg_paths_file" 2> /dev/null || true # SAFE: exact tracked temp files created above
-        [[ $pkg_scan_rc -eq 124 || $pkg_scan_rc -ge 128 ]] && return "$pkg_scan_rc"
+        [[ $pkg_scan_rc -ge 128 ]] && return "$pkg_scan_rc"
         return 2
     fi
 
@@ -988,13 +998,14 @@ uninstall_live_bundle_has_other_install() {
             \( -type d -name Applications \) -o \
             \( \( -type d -o -type l \) -name '*.app' \) \
             \) || volume_scan_rc=$?
-        if [[ $volume_scan_rc -eq $MOLE_UNINSTALL_SCAN_PARTIAL ]]; then
-            # Some volume was unreadable. Keep the roots we did see and carry
-            # the doubt forward: absence can no longer be proven from here.
+        if [[ $volume_scan_rc -eq $MOLE_UNINSTALL_SCAN_PARTIAL || $volume_scan_rc -eq 124 ]]; then
+            # Some volume was unreadable, or the budget ran out before every
+            # volume was listed. Keep the roots we did see and carry the
+            # doubt forward: absence can no longer be proven from here.
             scan_indeterminate=true
         elif [[ $volume_scan_rc -ne 0 ]]; then
             rm -f -- "$volume_roots_file" "$scan_file" 2> /dev/null || true # SAFE: exact tracked temp files created above
-            [[ $volume_scan_rc -eq 124 || $volume_scan_rc -ge 128 ]] && return "$volume_scan_rc"
+            [[ $volume_scan_rc -ge 128 ]] && return "$volume_scan_rc"
             return 2
         fi
         local volume_root
@@ -1075,6 +1086,12 @@ uninstall_live_bundle_has_other_install() {
     # found nothing means "not seen", which for a delete decision has to read
     # as "may exist" so the caller keeps the narrow plan.
     if [[ "$scan_indeterminate" == true && "$result" -eq 1 ]]; then
+        result="$MOLE_UNINSTALL_SCAN_PARTIAL"
+    fi
+    # A per-root or per-candidate probe that ran out of budget is the same
+    # incomplete scan, not a user cancellation: nothing above maps 124 to a
+    # key press. Signals returned earlier stay untouched.
+    if [[ "$result" -eq 124 ]]; then
         result="$MOLE_UNINSTALL_SCAN_PARTIAL"
     fi
     return "$result"
@@ -1374,9 +1391,13 @@ _batch_scan_app_details() {
             # protects (#1339, #1340).
             live_sibling_present=true
             log_warning "$(printf "%s: some paths could not be read, so shared leftovers are left in place" "$app_name")"
-        elif [[ $live_sibling_rc -eq 124 || $live_sibling_rc -ge 128 ]]; then
+        elif [[ $live_sibling_rc -ge 128 ]]; then
             return "$live_sibling_rc"
         else
+            # This refusal ends the whole batch, so it must say so on the
+            # normal screen: the debug-only line left users with a silent
+            # exit and no way to report the cause (#1340).
+            log_error "Could not verify whether other installs share ${app_name}'s bundle id; nothing was removed"
             debug_log "Could not complete the live same-bundle scan for $app_name"
             return 1
         fi
@@ -1817,7 +1838,21 @@ _batch_execute_removals() {
                     reason="the app installation set changed after preview"
                     suggestion="Select the app again and review the new removal plan"
                 fi
-            elif [[ $live_sibling_rc -eq 124 || $live_sibling_rc -ge 128 ]]; then
+            elif [[ $live_sibling_rc -eq $MOLE_UNINSTALL_SCAN_PARTIAL &&
+                "$sibling_guard" == "guard_login" &&
+                -z "$encoded_files" ]]; then
+                # The preview already narrowed this plan to the selected app
+                # bundle alone because the scan could not prove absence. The
+                # re-check hitting the same doubt confirms that state rather
+                # than contradicting it, and a plan with no shared teardown
+                # has nothing a live sibling could lose. Refusing here is what
+                # made a deterministically slow or unreadable machine unable
+                # to uninstall anything at all (#1340). guard_login alone is
+                # not that proof: the surviving-sibling name-collision path
+                # sets it while keeping name-keyed leftovers, so the empty
+                # deletion list is the evidence that authorizes proceeding.
+                :
+            elif [[ $live_sibling_rc -ge 128 ]]; then
                 return "$live_sibling_rc"
             else
                 reason="unable to verify other apps with the same bundle id"
@@ -2494,6 +2529,11 @@ batch_uninstall_applications() {
     fi
     if [[ $_scan_rc -eq 124 || $_scan_rc -ge 128 ]]; then
         _abort_uninstall_batch
+        # A signal already echoed through the INT/TERM trap; a timeout has
+        # said nothing yet, and a silent exit is unreportable (#1340).
+        if [[ $_scan_rc -eq 124 ]]; then
+            log_error "The uninstall scan timed out before finishing; nothing was removed"
+        fi
         return "$_scan_rc"
     elif [[ $_scan_rc -ne 0 ]]; then
         _abort_uninstall_batch

@@ -94,7 +94,18 @@ pkg_receipt_nonstandard_app_paths() {
                 return 2
             fi
         else
-            pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null || true)
+            if [[ $scan_deadline -gt 0 ]]; then
+                local remaining=$((scan_deadline - SECONDS))
+                [[ $remaining -gt 0 ]] || break
+                if declare -f run_with_timeout > /dev/null 2>&1; then
+                    pkg_files=$(run_with_timeout "$remaining" \
+                        pkgutil --files "$pkg_id" 2> /dev/null || true)
+                else
+                    pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null || true)
+                fi
+            else
+                pkg_files=$(pkgutil --files "$pkg_id" 2> /dev/null || true)
+            fi
         fi
         [[ -n "$pkg_files" ]] || continue
 

@@ -114,6 +114,11 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$SRC_PATH"
 
+# Skip the real pkgutil receipt scan: it walks every package on the host and
+# can take longer than this test's watchdog on machines with large receipt
+# databases. The regression under test is the empty app_data_tuples guard.
+pkg_receipt_nonstandard_app_paths() { return 0; }
+
 # Restrict the discovered search dirs to our sandboxed Applications folder
 # so scan_applications does not pick up real /Applications and dilute the
 # all-cached condition we are exercising.
