@@ -726,6 +726,7 @@ EOF
 	# hidden behind the unreadable part of a partial re-scan could lose
 	# name-keyed data without the fingerprint defense.
 	local window
+	# shellcheck disable=SC2016 # the \$ patterns are literal source text
 	window=$(command grep -A2 'live_sibling_rc -eq \$MOLE_UNINSTALL_SCAN_PARTIAL &&' \
 		"$PROJECT_ROOT/lib/uninstall/batch.sh")
 	# Positive control: the acceptance branch must exist at all.
@@ -733,6 +734,7 @@ EOF
 		echo "acceptance branch not found"
 		return 1
 	}
+	# shellcheck disable=SC2016 # the \$ pattern is literal source text
 	printf '%s\n' "$window" | command grep -q -- '-z "\$encoded_files"' || {
 		echo "gate missing the empty-plan check"
 		return 1
