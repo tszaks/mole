@@ -497,6 +497,9 @@ func formatDiskMetaLine(d DiskStatus) string {
 	if d.Fstype != "" {
 		parts = append(parts, strings.ToUpper(d.Fstype))
 	}
+	if d.Purgeable > 0 {
+		parts = append(parts, humanBytesShort(d.Purgeable)+" purgeable")
+	}
 	return fmt.Sprintf("Total  %s", strings.Join(parts, " · "))
 }
 

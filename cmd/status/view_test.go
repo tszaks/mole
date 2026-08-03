@@ -783,6 +783,21 @@ func TestRenderDiskCardAddsMetaLineForSingleDisk(t *testing.T) {
 	}
 }
 
+func TestRenderDiskCardMetaLineShowsPurgeable(t *testing.T) {
+	card := renderDiskCard([]DiskStatus{{
+		UsedPercent: 64.9,
+		Used:        1226 << 30,
+		Total:       926 << 30,
+		Fstype:      "apfs",
+		Purgeable:   141 << 30,
+	}}, DiskIOStatus{}, 0, false)
+
+	meta := stripANSI(card.lines[1])
+	if meta != "Total  926G · APFS · 141G purgeable" {
+		t.Fatalf("renderDiskCard() meta line = %q, want %q", meta, "Total  926G · APFS · 141G purgeable")
+	}
+}
+
 func TestRenderDiskCardDoesNotAddMetaLineForMultipleDisks(t *testing.T) {
 	card := renderDiskCard([]DiskStatus{
 		{UsedPercent: 28.4, Used: 263 << 30, Total: 926 << 30, Fstype: "apfs"},
