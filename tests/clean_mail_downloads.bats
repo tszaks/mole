@@ -49,9 +49,9 @@ _clean_mail_downloads
 echo "RC=$?"
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]]
-    [[ "$output" == *"RC=0"* ]]
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]] || return 1
+    [[ "$output" == *"RC=0"* ]] || return 1
 }
 
 @test "mail dir sizing timeout (124) skips one dir and still cleans the other" {
@@ -83,10 +83,10 @@ _clean_mail_downloads
 echo "RC=$?"
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"REMOVE:$HOME/Library/Mail Downloads/old.bin"* ]]
-    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]]
-    [[ "$output" == *"RC=0"* ]]
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"REMOVE:$HOME/Library/Mail Downloads/old.bin"* ]] || return 1
+    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]] || return 1
+    [[ "$output" == *"RC=0"* ]] || return 1
 }
 
 @test "mail attachment sizing timeout (124) skips the file without aborting" {
@@ -115,10 +115,10 @@ _clean_mail_downloads
 echo "RC=$?"
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Mail attachment sizing timed out, skipping"* ]]
-    [[ "$output" != *"REMOVE:"* ]]
-    [[ "$output" == *"RC=0"* ]]
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Mail attachment sizing timed out, skipping"* ]] || return 1
+    [[ "$output" != *"REMOVE:"* ]] || return 1
+    [[ "$output" == *"RC=0"* ]] || return 1
 }
 
 @test "mail dir sizing signal (130) still cancels the run" {
@@ -137,8 +137,8 @@ _clean_mail_downloads
 echo "RC=$?"
 EOF
 
-    [ "$status" -eq 130 ]
-    [[ "$output" != *"skipped (sizing timed out)"* ]]
+    [ "$status" -eq 130 ] || return 1
+    [[ "$output" != *"skipped (sizing timed out)"* ]] || return 1
 }
 
 @test "mo clean completes when the Mail Downloads du stalls (#1344)" {
@@ -183,7 +183,7 @@ EOF
 
     rm -rf "$SHIM_DIR"
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"Cleanup complete"* ]]
-    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]]
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Cleanup complete"* ]] || return 1
+    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]] || return 1
 }
