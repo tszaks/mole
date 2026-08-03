@@ -72,6 +72,11 @@ paginated_multi_select() {
     local title="$1"
     shift
     local -a items=("$@")
+    # A deliberate quit and a real failure both leave through return 1, and
+    # callers deciding between "user cancelled" and "selection broke" need to
+    # tell them apart. Reset here so a stale value from a previous menu can
+    # never masquerade as this run's answer.
+    _MOLE_MENU_USER_QUIT=0
     local external_alt_screen=false
     if [[ "${MOLE_MANAGED_ALT_SCREEN:-}" == "1" || "${MOLE_MANAGED_ALT_SCREEN:-}" == "true" ]]; then
         external_alt_screen=true
@@ -663,6 +668,7 @@ paginated_multi_select() {
                     top_index=0
                     need_full_redraw=true
                 else
+                    _MOLE_MENU_USER_QUIT=1
                     _pm_cleanup
                     return 1
                 fi

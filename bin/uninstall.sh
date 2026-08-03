@@ -1653,9 +1653,17 @@ main() {
         set -e
 
         if [[ $exit_code -ne 0 ]]; then
-            uninstall_abort "application selection did not complete"
             rm -f "$apps_file"
             [[ "$apps_file" == "$cached_apps_file" ]] && cached_apps_file=""
+            if [[ "${_MOLE_MENU_USER_QUIT:-0}" == "1" ]]; then
+                # A deliberate q is a cancel, not a failure: leave quietly
+                # with success, matching mole's other cancel flows. Only a
+                # selector that broke gets the visible abort below.
+                stop_uninstall_interactive_screen
+                show_cursor
+                return 0
+            fi
+            uninstall_abort "application selection did not complete"
             return 1
         fi
 
@@ -1786,6 +1794,7 @@ main() {
     done
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    main "$@"
-fi
+# Run only when executed; sourcing loads definitions for tests. Kept on one
+# line because test harnesses slice this file with sed/awk anchored on the
+# `main "$@"` sentinel, and a multi-line guard leaves them an unclosed `if`.
+[[ "${BASH_SOURCE[0]}" != "$0" ]] || main "$@"

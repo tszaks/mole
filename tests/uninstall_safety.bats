@@ -585,9 +585,10 @@ EOF
 }
 
 @test "failed app selection aborts visibly instead of returning success (#1339)" {
-	# Q/EOF in the selector used to exit 0 with nothing printed. Whatever the
-	# reason, the run ended without an uninstall, so it must not read as a
-	# successful session.
+	# EOF or a broken selector used to exit 0 with nothing printed, so the
+	# session read as successful with zero operations. A selector that did
+	# not complete for any reason other than a deliberate quit must say so
+	# and fail. The deliberate-quit case is pinned separately below.
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/bin/uninstall.sh"
@@ -611,6 +612,43 @@ EOF
 
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"Uninstall aborted: application selection did not complete"* ]]
+}
+
+@test "a deliberate quit in the selector stays a quiet cancel, not an abort" {
+	# Pressing q is the documented way to leave the selector, matching
+	# mole's other cancel flows (mo remove ESC exits 0 silently). Only a
+	# selector that broke may print the abort and fail; the menu marks the
+	# difference through _MOLE_MENU_USER_QUIT.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/uninstall.sh"
+
+fake_apps_list="$HOME/fake-apps"
+printf '0|/tmp/Fake.app|Fake|com.example.fake|1KB|Today|1\n' > "$fake_apps_list"
+scan_applications() { printf '%s\n' "$fake_apps_list"; }
+load_applications() {
+	apps_data=("0|/tmp/Fake.app|Fake|com.example.fake|1KB|Today|1")
+	selection_state=(false)
+	return 0
+}
+select_apps_for_uninstall() {
+	_MOLE_MENU_USER_QUIT=1
+	return 1
+}
+start_uninstall_interactive_screen() { :; }
+stop_uninstall_interactive_screen() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+
+main
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"Uninstall aborted"* ]] || return 1
+	[ "$status" -eq 0 ]
 }
 
 @test "uninstall --list surfaces a failed scan instead of a bare exit (#1339)" {
