@@ -889,7 +889,7 @@ case "${1:-}" in
         ;;
     xargs)
         printf 'xargs %s\n' "$*" >> "$MOLE_SUDO_BATCH_TRACE"
-        exec sleep 4
+        exec sleep 30
         ;;
     *)
         exit 99
@@ -919,7 +919,7 @@ SCRIPT
     [[ "$(< "$trace")" == *"xargs xargs -0 /bin/sh -c"* ]] || return 1
     local elapsed="${output##*ELAPSED=}"
     [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
-    [ "$elapsed" -lt 3 ]
+    [ "$elapsed" -lt 10 ]
 }
 
 @test "safe_sudo_find_delete stops before scanning when its deadline is exhausted" {

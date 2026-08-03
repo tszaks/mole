@@ -2331,6 +2331,10 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
 
+# Pin the app-existence probe: the hardcoded example bundle id may match an
+# app that is actually installed on the developer's machine.
+_container_stub_app_exists() { return 1; }
+
 # Stub container: only the metadata plist, no Data/ subdir
 stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
 mkdir -p "$stub"
@@ -2368,6 +2372,10 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+# Pin the app-existence probe: the hardcoded example bundle id may match an
+# app that is actually installed on the developer's machine.
+_container_stub_app_exists() { return 1; }
 
 stub="$HOME/Library/Containers/com.macpaw.CleanMyMac-mas"
 mkdir -p "$stub"

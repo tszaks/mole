@@ -1678,6 +1678,50 @@ clean_orphaned_system_services() {
 # Orphaned container stubs
 # ============================================================================
 
+# Whether a stub container's app is still installed anywhere Mole scans.
+# Defined at file scope so callers and tests can pin it deterministically.
+_container_stub_app_exists() {
+    local bundle_id="$1"
+    local app_path="$2"
+
+    [[ -d "$app_path" || -e "$app_path" ]] && return 0
+
+    local app_name
+    app_name=$(basename "$app_path")
+    case "$app_path" in
+        /Applications/*)
+            [[ -d "$HOME/Applications/$app_name" ]] && return 0
+            [[ -d "/Applications/Setapp/$app_name" ]] && return 0
+            [[ -d "$HOME/Library/Application Support/Setapp/Applications/$app_name" ]] && return 0
+            ;;
+    esac
+
+    if mole_is_reverse_dns_bundle_id "$bundle_id"; then
+        local _cache_rc=0
+        _mdfind_cache_check "$bundle_id" || _cache_rc=$?
+        if [[ $_cache_rc -eq 0 ]]; then
+            return 0
+        elif [[ $_cache_rc -eq 2 ]]; then
+            # On mdfind timeout/error assume the app exists (return 0 =
+            # installed here) so a transient Spotlight stall never flags a
+            # live app's service/container as an orphan; do not cache.
+            local app_found _mdfind_rc=0
+            app_found=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2> /dev/null) || _mdfind_rc=$?
+            if [[ $_mdfind_rc -eq 124 || $_mdfind_rc -ge 128 ]]; then
+                return "$_mdfind_rc"
+            elif [[ $_mdfind_rc -ne 0 ]]; then
+                return 0
+            elif [[ -n "$app_found" ]]; then
+                _mdfind_cache_store "$bundle_id" "true"
+                return 0
+            fi
+            _mdfind_cache_store "$bundle_id" "false"
+        fi
+    fi
+
+    return 1
+}
+
 # Remove stub-only ~/Library/Containers directories left by uninstalled apps.
 # A stub container contains only .com.apple.containermanagerd.metadata.plist
 # with no Data/ subdirectory, it holds no user data and is safe to remove.
@@ -1733,48 +1777,6 @@ clean_orphaned_container_stubs() {
     local _ng_state
     _ng_state=$(shopt -p nullglob || true)
     shopt -s nullglob
-
-    _container_stub_app_exists() {
-        local bundle_id="$1"
-        local app_path="$2"
-
-        [[ -d "$app_path" || -e "$app_path" ]] && return 0
-
-        local app_name
-        app_name=$(basename "$app_path")
-        case "$app_path" in
-            /Applications/*)
-                [[ -d "$HOME/Applications/$app_name" ]] && return 0
-                [[ -d "/Applications/Setapp/$app_name" ]] && return 0
-                [[ -d "$HOME/Library/Application Support/Setapp/Applications/$app_name" ]] && return 0
-                ;;
-        esac
-
-        if mole_is_reverse_dns_bundle_id "$bundle_id"; then
-            local _cache_rc=0
-            _mdfind_cache_check "$bundle_id" || _cache_rc=$?
-            if [[ $_cache_rc -eq 0 ]]; then
-                return 0
-            elif [[ $_cache_rc -eq 2 ]]; then
-                # On mdfind timeout/error assume the app exists (return 0 =
-                # installed here) so a transient Spotlight stall never flags a
-                # live app's service/container as an orphan; do not cache.
-                local app_found _mdfind_rc=0
-                app_found=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2> /dev/null) || _mdfind_rc=$?
-                if [[ $_mdfind_rc -eq 124 || $_mdfind_rc -ge 128 ]]; then
-                    return "$_mdfind_rc"
-                elif [[ $_mdfind_rc -ne 0 ]]; then
-                    return 0
-                elif [[ -n "$app_found" ]]; then
-                    _mdfind_cache_store "$bundle_id" "true"
-                    return 0
-                fi
-                _mdfind_cache_store "$bundle_id" "false"
-            fi
-        fi
-
-        return 1
-    }
 
     local pattern_entry
     for pattern_entry in "${stub_patterns[@]}"; do
