@@ -1798,6 +1798,21 @@ _batch_execute_removals() {
         local reason=""
         local suggestion=""
 
+        # Show progress before the pre-teardown verification, not after: the
+        # same-bundle re-scan below can take tens of seconds on a large
+        # receipt set, and silence right after the Enter confirm reads as a
+        # dead prompt (#1340 family). Every downstream path already runs with
+        # this spinner active and stops it before printing.
+        local brew_tag=""
+        [[ "$is_brew_cask" == "true" ]] && brew_tag=" ${CYAN}[Brew]${NC}"
+        if [[ -t 1 ]]; then
+            if [[ ${#app_details[@]} -gt 1 ]]; then
+                start_inline_spinner "[$current_index/${#app_details[@]}] Uninstalling ${app_name}${brew_tag}..."
+            else
+                start_inline_spinner "Uninstalling ${app_name}${brew_tag}..."
+            fi
+        fi
+
         local app_plan_rc=0
         _batch_selected_app_plan_matches "$app_path" \
             "$expected_app_identity" "$expected_info_identity" || app_plan_rc=$?
@@ -1857,17 +1872,6 @@ _batch_execute_removals() {
             else
                 reason="unable to verify other apps with the same bundle id"
                 suggestion="Check mounted volumes and application folders, then try again"
-            fi
-        fi
-
-        # Show progress for current app
-        local brew_tag=""
-        [[ "$is_brew_cask" == "true" ]] && brew_tag=" ${CYAN}[Brew]${NC}"
-        if [[ -t 1 ]]; then
-            if [[ ${#app_details[@]} -gt 1 ]]; then
-                start_inline_spinner "[$current_index/${#app_details[@]}] Uninstalling ${app_name}${brew_tag}..."
-            else
-                start_inline_spinner "Uninstalling ${app_name}${brew_tag}..."
             fi
         fi
 

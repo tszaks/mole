@@ -3753,3 +3753,23 @@ EOF
 
     [ -z "$result" ]
 }
+
+@test "execution spinner starts before the same-bundle re-scan (#1340 family)" {
+    # The pre-teardown re-scan can burn tens of seconds on a large receipt
+    # set. When the spinner started after it, the Enter confirm was followed
+    # by dead silence and users read the prompt as hung. Pin the order
+    # inside _batch_execute_removals.
+    local body spin_line scan_line
+    body=$(awk '/^_batch_execute_removals\(\)/{f=1} f{n++; print n": "$0} f && /^\}/{exit}' \
+        "$PROJECT_ROOT/lib/uninstall/batch.sh")
+    spin_line=$(printf '%s\n' "$body" | command grep -m1 'start_inline_spinner' | cut -d: -f1)
+    scan_line=$(printf '%s\n' "$body" | command grep -m1 'uninstall_live_bundle_has_other_install' | cut -d: -f1)
+    [[ -n "$spin_line" && -n "$scan_line" ]] || {
+        echo "expected both calls inside _batch_execute_removals"
+        return 1
+    }
+    [[ "$spin_line" -lt "$scan_line" ]] || {
+        echo "spinner starts at line $spin_line, after the re-scan at $scan_line"
+        return 1
+    }
+}
