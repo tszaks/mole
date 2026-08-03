@@ -1015,6 +1015,50 @@ find_app_files() {
         )
     fi
 
+    # A bundle id's last segment often names the data directory more precisely
+    # than the display name: tdesktop forks ship as "AyuGram" with bundle
+    # one.ayugram.AyuGramDesktop and write to "Application Support/AyuGram
+    # Desktop", which no display-name variant reaches. Derive exact-name
+    # variants from that segment only under narrow evidence: a valid
+    # reverse-DNS id, a segment of at least 8 characters with a camel-case
+    # transition (so the split yields two or more words), never equal to the
+    # display name, and literal paths only, no globs.
+    if [[ "$bundle_id_valid" == "true" ]]; then
+        local bundle_leaf="${bundle_id##*.}"
+        if [[ ${#bundle_leaf} -ge 8 && "$bundle_leaf" != "$app_name" &&
+            "$bundle_leaf" =~ [a-z][A-Z] ]]; then
+            local bundle_leaf_spaced
+            bundle_leaf_spaced=$(printf '%s' "$bundle_leaf" |
+                sed -E 's/([A-Z]+)([A-Z][a-z])/\1 \2/g; s/([a-z0-9])([A-Z])/\1 \2/g')
+            # The full split breaks the display name itself apart
+            # ("AyuGramDesktop" becomes "Ayu Gram Desktop"), but the real
+            # directory keeps it intact: "AyuGram Desktop". When the leaf
+            # starts with the display name, also derive the variant that
+            # splits only the remainder.
+            local bundle_leaf_name_split=""
+            local app_name_nospace="${app_name// /}"
+            if [[ -n "$app_name_nospace" && "$bundle_leaf" == "$app_name_nospace"?* ]]; then
+                local bundle_leaf_rest="${bundle_leaf#"$app_name_nospace"}"
+                if [[ "$bundle_leaf_rest" =~ ^[A-Z] ]]; then
+                    bundle_leaf_rest=$(printf '%s' "$bundle_leaf_rest" |
+                        sed -E 's/([A-Z]+)([A-Z][a-z])/\1 \2/g; s/([a-z0-9])([A-Z])/\1 \2/g')
+                    bundle_leaf_name_split="$app_name $bundle_leaf_rest"
+                fi
+            fi
+            local bundle_leaf_variant
+            for bundle_leaf_variant in "$bundle_leaf" "$bundle_leaf_spaced" "$bundle_leaf_name_split"; do
+                [[ -n "$bundle_leaf_variant" && "$bundle_leaf_variant" != "$app_name" ]] || continue
+                user_patterns+=(
+                    "$HOME/Library/Application Support/$bundle_leaf_variant"
+                    "$HOME/Library/Caches/$bundle_leaf_variant"
+                    "$HOME/Library/Logs/$bundle_leaf_variant"
+                    "$HOME/Library/Preferences/$bundle_leaf_variant.plist"
+                    "$HOME/Library/Saved Application State/$bundle_leaf_variant.savedState"
+                )
+            done
+        fi
+    fi
+
     # Add all naming variants to cover inconsistent app directory naming
     # Issue #377: Apps create directories with various naming conventions
     if [[ ${#app_name} -gt 3 && "$app_name" =~ [[:space:]] ]]; then

@@ -332,3 +332,55 @@ find_app_files 'invalid_bundle' ''"
     [[ "$result" != *"Caches/Raycast-X"* ]] || return 1
     [[ "$result" != *"raycast-x.raycast"* ]] || return 1
 }
+
+@test "find_app_files derives a camel-split data dir from the bundle leaf (AyuGram Desktop)" {
+    # tdesktop forks: display name "AyuGram", bundle one.ayugram.AyuGramDesktop,
+    # data at "Application Support/AyuGram Desktop". No display-name variant
+    # reaches it; the bundle leaf does.
+    mkdir -p "$HOME/Library/Application Support/AyuGram Desktop"
+    echo "tdata" > "$HOME/Library/Application Support/AyuGram Desktop/settings"
+
+    result=$(find_app_files "one.ayugram.AyuGramDesktop" "AyuGram")
+
+    [[ "$result" =~ "Library/Application Support/AyuGram Desktop" ]] || return 1
+}
+
+@test "find_app_files also takes the raw bundle leaf as an exact dir name" {
+    mkdir -p "$HOME/Library/Application Support/AyuGramDesktop"
+    echo "tdata" > "$HOME/Library/Application Support/AyuGramDesktop/settings"
+
+    result=$(find_app_files "one.ayugram.AyuGramDesktop" "AyuGram")
+
+    [[ "$result" =~ "Library/Application Support/AyuGramDesktop" ]] || return 1
+}
+
+@test "bundle-leaf variants need eight characters and a camel transition" {
+    # A short or single-word leaf ("app", "desktop", "helper") must derive
+    # nothing: exact-path or not, those names collide with unrelated dirs.
+    mkdir -p "$HOME/Library/Application Support/app"
+    mkdir -p "$HOME/Library/Application Support/desktop"
+    mkdir -p "$HOME/Library/Application Support/Whatsapp"
+
+    result=$(find_app_files "com.example.app" "Example")
+    [[ "$result" != *"Application Support/app"* ]] || return 1
+
+    result=$(find_app_files "com.example.desktop" "Example")
+    [[ "$result" != *"Application Support/desktop"* ]] || return 1
+
+    # 8+ chars but no lower-to-upper transition: no derivation either.
+    result=$(find_app_files "com.example.Whatsapp" "Example")
+    [[ "$result" != *"Application Support/Whatsapp"* ]] || return 1
+}
+
+@test "bundle-leaf variants stay quiet when the leaf equals the display name" {
+    # When leaf and display name agree, the ordinary app-name patterns
+    # already cover the dir; the derivation must not add anything, and an
+    # invalid bundle id must never reach the derivation at all.
+    mkdir -p "$HOME/Library/Application Support/CamelCaseApp"
+
+    result=$(find_app_files "com.example.CamelCaseApp" "CamelCaseApp")
+    [[ "$result" =~ "Application Support/CamelCaseApp" ]] || return 1
+
+    result=$(find_app_files "unknown" "Other")
+    [[ "$result" != *"CamelCaseApp"* ]] || return 1
+}
