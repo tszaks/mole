@@ -125,26 +125,6 @@ clean_conda_metadata_caches() {
     done
 }
 
-_dev_cleanup_targets_exist() {
-    local target
-    for target in "$@"; do
-        # Match safe_clean's eligible set: broken symlinks are not cleanup
-        # candidates and must not trigger an active-process defer.
-        [[ -e "$target" ]] || continue
-        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$target" 2> /dev/null; then
-            continue
-        fi
-        if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
-            continue
-        fi
-        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
-            continue
-        fi
-        return 0
-    done
-    return 1
-}
-
 gradle_daemon_running() {
     mole_pgrep_any \
         -f "org.gradle.launcher.daemon" \
@@ -803,27 +783,11 @@ EOF
 }
 
 _xcode_delete_guard_allows() {
-    local process_state=0
-    _xcode_xctest_devices_process_running || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_XCODE_DELETE_GUARD_REASON="Xcode or build tools started"
-    [[ $process_state -eq 2 ]] && _MOLE_XCODE_DELETE_GUARD_REASON="process state unknown"
-    return 1
+    mole_clean_process_guard _xcode_xctest_devices_process_running "Xcode or build tools started"
 }
 
 _coresimulator_delete_guard_allows() {
-    local process_state=0
-    _coresimulator_activity_state || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_XCODE_DELETE_GUARD_REASON="CoreSimulator started"
-    [[ $process_state -eq 2 ]] && _MOLE_XCODE_DELETE_GUARD_REASON="process state unknown"
-    return 1
+    mole_clean_process_guard _coresimulator_activity_state "CoreSimulator started"
 }
 
 _xctest_devices_activity_state() {
@@ -841,27 +805,11 @@ _xctest_devices_activity_state() {
 }
 
 _xctest_devices_delete_guard_allows() {
-    local process_state=0
-    _xctest_devices_activity_state || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_XCODE_DELETE_GUARD_REASON="Xcode, XCTest, or Simulator started"
-    [[ $process_state -eq 2 ]] && _MOLE_XCODE_DELETE_GUARD_REASON="process state unknown"
-    return 1
+    mole_clean_process_guard _xctest_devices_activity_state "Xcode, XCTest, or Simulator started"
 }
 
 _dev_process_delete_guard_allows() {
-    local process_state=0
-    "$_MOLE_DEV_PROCESS_GUARD_PROBE" || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_DEV_PROCESS_GUARD_REASON="$_MOLE_DEV_PROCESS_GUARD_FAMILY started"
-    [[ $process_state -eq 2 ]] && _MOLE_DEV_PROCESS_GUARD_REASON="process state unknown"
-    return 1
+    mole_clean_process_guard "$_MOLE_DEV_PROCESS_GUARD_PROBE" "$_MOLE_DEV_PROCESS_GUARD_FAMILY started"
 }
 
 _dev_report_process_guard_stop() {
@@ -886,11 +834,11 @@ _dev_safe_clean_process_guarded() {
     shift 3
     local _MOLE_DEV_PROCESS_GUARD_PROBE="$probe"
     local _MOLE_DEV_PROCESS_GUARD_FAMILY="$family"
-    local _MOLE_DEV_PROCESS_GUARD_REASON="${family} started"
+    local _MOLE_CLEAN_GUARD_REASON="${family} started"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! _dev_process_delete_guard_allows; then
-            _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_DEV_PROCESS_GUARD_REASON"
+            _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_CLEAN_GUARD_REASON"
             return 1
         fi
         safe_clean "$@"
@@ -900,7 +848,7 @@ _dev_safe_clean_process_guarded() {
     local guarded_rc=0
     safe_clean_guarded _dev_process_delete_guard_allows "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_DEV_PROCESS_GUARD_REASON"
+        _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_CLEAN_GUARD_REASON"
         return 1
     fi
     return "$guarded_rc"
@@ -914,7 +862,7 @@ _dev_clean_service_worker_process_guarded() {
     local cache_path="$5"
     local _MOLE_DEV_PROCESS_GUARD_PROBE="$probe"
     local _MOLE_DEV_PROCESS_GUARD_FAMILY="$family"
-    local _MOLE_DEV_PROCESS_GUARD_REASON="${family} started"
+    local _MOLE_CLEAN_GUARD_REASON="${family} started"
     local guarded_rc=0
 
     clean_service_worker_cache \
@@ -922,7 +870,7 @@ _dev_clean_service_worker_process_guarded() {
         "$cache_path" \
         _dev_process_delete_guard_allows || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_DEV_PROCESS_GUARD_REASON"
+        _dev_report_process_guard_stop "$display_name" "$family" "$_MOLE_CLEAN_GUARD_REASON"
         return 1
     fi
     return "$guarded_rc"
@@ -935,12 +883,12 @@ _xcode_safe_clean_guarded() {
     local delete_guard="$1"
     local display_name="$2"
     shift 2
-    local _MOLE_XCODE_DELETE_GUARD_REASON="process state changed"
+    local _MOLE_CLEAN_GUARD_REASON="process state changed"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! "$delete_guard"; then
-            if [[ "$_MOLE_XCODE_DELETE_GUARD_REASON" == "process state unknown" ]]; then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
+            if [[ "$_MOLE_CLEAN_GUARD_REASON" == "process state unknown" ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLEAN_GUARD_REASON})"
                 note_activity
             elif [[ "$delete_guard" == "_coresimulator_delete_guard_allows" ]]; then
                 mole_defer_cleanup_family "Simulator"
@@ -956,8 +904,8 @@ _xcode_safe_clean_guarded() {
     local guarded_rc=0
     safe_clean_guarded "$delete_guard" "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        if [[ "$_MOLE_XCODE_DELETE_GUARD_REASON" == "process state unknown" ]]; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_XCODE_DELETE_GUARD_REASON})"
+        if [[ "$_MOLE_CLEAN_GUARD_REASON" == "process state unknown" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLEAN_GUARD_REASON})"
             note_activity
         elif [[ "$delete_guard" == "_coresimulator_delete_guard_allows" ]]; then
             mole_defer_cleanup_family "Simulator"
@@ -1208,7 +1156,7 @@ clean_xcode_device_support() {
         preflight_dirs+=("$candidate")
     done < <(command find "$ds_dir" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null || true)
     local has_inner_cleanup_target=false
-    _dev_cleanup_targets_exist \
+    mole_cleanup_targets_exist \
         "$ds_dir"/*/Symbols/System/Library/Caches/* \
         "$ds_dir"/*.log && has_inner_cleanup_target=true
 
@@ -1460,10 +1408,10 @@ clean_xcode_device_support() {
             done
         fi
         [[ "$skip_inner" == "true" ]] && continue
-        _dev_cleanup_targets_exist "$candidate" && inner_cache_targets+=("$candidate")
+        mole_cleanup_targets_exist "$candidate" && inner_cache_targets+=("$candidate")
     done
     for candidate in "$ds_dir"/*.log; do
-        _dev_cleanup_targets_exist "$candidate" && log_targets+=("$candidate")
+        mole_cleanup_targets_exist "$candidate" && log_targets+=("$candidate")
     done
     if [[ ${#inner_cache_targets[@]} -eq 0 && ${#log_targets[@]} -eq 0 ]]; then
         return 0
@@ -2179,7 +2127,7 @@ clean_dev_jvm() {
     safe_clean ~/.ivy2/cache/* "Ivy cache"
     safe_clean ~/.gradle/caches/build-cache-*/* "Gradle build cache"
     safe_clean ~/.gradle/notifications/* "Gradle notifications cache"
-    if _dev_cleanup_targets_exist "$HOME/.gradle/daemon"/* "$HOME/.gradle/workers"/*; then
+    if mole_cleanup_targets_exist "$HOME/.gradle/daemon"/* "$HOME/.gradle/workers"/*; then
         local gradle_state=0
         gradle_daemon_running || gradle_state=$?
         if [[ $gradle_state -eq 0 ]]; then
@@ -2445,7 +2393,7 @@ _plan_versioned_agent_cleanup_targets() {
             continue
         fi
         _MOLE_VERSIONED_AGENT_RETENTION_TARGETS+=("$target")
-        if _dev_cleanup_targets_exist "$target"; then
+        if mole_cleanup_targets_exist "$target"; then
             _MOLE_VERSIONED_AGENT_CLEANUP_TARGETS+=("$target")
         fi
         idx=$((idx + 1))
@@ -2523,7 +2471,7 @@ _MOLE_VERSIONED_AGENT_GUARD_ROOT=""
 _MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK=""
 _MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED=false
 _MOLE_VERSIONED_AGENT_GUARD_KEEP=1
-_MOLE_VERSIONED_AGENT_GUARD_REASON=""
+_MOLE_CLEAN_GUARD_REASON=""
 
 _versioned_agent_delete_guard_allows() {
     local target="${1:-}"
@@ -2535,7 +2483,7 @@ _versioned_agent_delete_guard_allows() {
             "$_MOLE_VERSIONED_AGENT_GUARD_ROOT" \
             "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" || active_status=$?
         if [[ $active_status -eq 124 || $active_status -ge 128 ]]; then
-            _MOLE_VERSIONED_AGENT_GUARD_REASON="inventory interrupted"
+            _MOLE_CLEAN_GUARD_REASON="inventory interrupted"
             return "$active_status"
         fi
         if [[ $active_status -eq 0 ]]; then
@@ -2543,10 +2491,10 @@ _versioned_agent_delete_guard_allows() {
         elif [[ $active_status -eq 1 && "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED" != "true" ]]; then
             : # This agent currently has no active launcher symlink to preserve.
         elif [[ $active_status -eq 1 ]]; then
-            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version changed"
+            _MOLE_CLEAN_GUARD_REASON="active version changed"
             return 1
         else
-            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version unknown"
+            _MOLE_CLEAN_GUARD_REASON="active version unknown"
             return "$active_status"
         fi
     fi
@@ -2560,7 +2508,7 @@ _versioned_agent_delete_guard_allows() {
         "$_MOLE_VERSIONED_AGENT_GUARD_KEEP" \
         "$active_path" || plan_rc=$?
     if [[ $plan_rc -ne 0 ]]; then
-        _MOLE_VERSIONED_AGENT_GUARD_REASON="inventory unknown"
+        _MOLE_CLEAN_GUARD_REASON="inventory unknown"
         [[ $plan_rc -eq 124 || $plan_rc -ge 128 ]] && return "$plan_rc"
         return 1
     fi
@@ -2572,20 +2520,20 @@ _versioned_agent_delete_guard_allows() {
             "$_MOLE_VERSIONED_AGENT_GUARD_ROOT" \
             "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_SYMLINK" || verified_active_status=$?
         if [[ $verified_active_status -eq 124 || $verified_active_status -ge 128 ]]; then
-            _MOLE_VERSIONED_AGENT_GUARD_REASON="inventory interrupted"
+            _MOLE_CLEAN_GUARD_REASON="inventory interrupted"
             return "$verified_active_status"
         fi
         [[ $verified_active_status -ne 0 ]] || verified_active_path="$_MOLE_VERSIONED_AGENT_ACTIVE_PATH"
         if [[ $verified_active_status -ne 0 && $verified_active_status -ne 1 ]]; then
-            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version unknown"
+            _MOLE_CLEAN_GUARD_REASON="active version unknown"
             return "$verified_active_status"
         fi
         if [[ $verified_active_status -eq 1 && "$_MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED" == "true" ]]; then
-            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version changed"
+            _MOLE_CLEAN_GUARD_REASON="active version changed"
             return 1
         fi
         if [[ $verified_active_status -ne $active_status || "$verified_active_path" != "$active_path" ]]; then
-            _MOLE_VERSIONED_AGENT_GUARD_REASON="active version changed"
+            _MOLE_CLEAN_GUARD_REASON="active version changed"
             return 1
         fi
     fi
@@ -2597,13 +2545,13 @@ _versioned_agent_delete_guard_allows() {
         done
     fi
 
-    _MOLE_VERSIONED_AGENT_GUARD_REASON="retention changed"
+    _MOLE_CLEAN_GUARD_REASON="retention changed"
     return 1
 }
 
 _report_versioned_agent_guard_stop() {
     local label="$1"
-    echo -e "  ${GRAY}${ICON_WARNING}${NC} ${label} · stopped (${_MOLE_VERSIONED_AGENT_GUARD_REASON})"
+    echo -e "  ${GRAY}${ICON_WARNING}${NC} ${label} · stopped (${_MOLE_CLEAN_GUARD_REASON})"
     note_activity
 }
 
@@ -2618,7 +2566,7 @@ clean_versioned_agent_root() {
     _plan_versioned_agent_cleanup_targets \
         "$versions_root" "$keep_previous" "$active_path" || plan_rc=$?
     if [[ $plan_rc -ne 0 ]]; then
-        _MOLE_VERSIONED_AGENT_GUARD_REASON="inventory unknown"
+        _MOLE_CLEAN_GUARD_REASON="inventory unknown"
         [[ $plan_rc -eq 124 || $plan_rc -ge 128 ]] && return "$plan_rc"
         _report_versioned_agent_guard_stop "$label"
         return "$plan_rc"
@@ -2630,7 +2578,7 @@ clean_versioned_agent_root() {
     _MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED=false
     [[ -n "$active_path" ]] && _MOLE_VERSIONED_AGENT_GUARD_ACTIVE_REQUIRED=true
     _MOLE_VERSIONED_AGENT_GUARD_KEEP="$keep_previous"
-    _MOLE_VERSIONED_AGENT_GUARD_REASON="retention changed"
+    _MOLE_CLEAN_GUARD_REASON="retention changed"
 
     if declare -f safe_clean_guarded > /dev/null 2>&1; then
         local guarded_rc=0
@@ -2727,22 +2675,16 @@ _MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT=""
 _MOLE_CLAUDE_DESKTOP_GUARD_CLI_ROOT=""
 _MOLE_CLAUDE_DESKTOP_GUARD_VM_ROOT=""
 _MOLE_CLAUDE_DESKTOP_GUARD_KEEP=1
-_MOLE_CLAUDE_DESKTOP_GUARD_REASON=""
+_MOLE_CLEAN_GUARD_REASON=""
 
 _claude_desktop_delete_guard_allows() {
     local target="${1:-}"
-    local process_state=0
-    claude_desktop_running || process_state=$?
-    if [[ $process_state -ne 1 ]]; then
-        _MOLE_CLAUDE_DESKTOP_GUARD_REASON="Claude Desktop started"
-        [[ $process_state -eq 2 ]] && _MOLE_CLAUDE_DESKTOP_GUARD_REASON="process state unknown"
-        return 1
-    fi
+    mole_clean_process_guard claude_desktop_running "Claude Desktop started" || return 1
 
     local current_sdk=""
     current_sdk=$(claude_desktop_sdk_version "$_MOLE_CLAUDE_DESKTOP_GUARD_SUPPORT" || true)
     if [[ -z "$current_sdk" || "$current_sdk" != "$_MOLE_CLAUDE_DESKTOP_GUARD_SDK_VERSION" ]]; then
-        _MOLE_CLAUDE_DESKTOP_GUARD_REASON="active version changed"
+        _MOLE_CLEAN_GUARD_REASON="active version changed"
         return 1
     fi
 
@@ -2753,7 +2695,7 @@ _claude_desktop_delete_guard_allows() {
         [[ -n "$active_root" ]] || continue
         active_entry="$active_root/$current_sdk"
         if [[ -L "$active_entry" || (! -f "$active_entry" && ! -d "$active_entry") ]]; then
-            _MOLE_CLAUDE_DESKTOP_GUARD_REASON="active version changed"
+            _MOLE_CLEAN_GUARD_REASON="active version changed"
             return 1
         fi
     done
@@ -2766,7 +2708,7 @@ _claude_desktop_delete_guard_allows() {
         "$_MOLE_CLAUDE_DESKTOP_GUARD_KEEP" \
         "$_MOLE_CLAUDE_DESKTOP_GUARD_VERSIONS_ROOT/$current_sdk" || plan_rc=$?
     if [[ $plan_rc -ne 0 ]]; then
-        _MOLE_CLAUDE_DESKTOP_GUARD_REASON="inventory unknown"
+        _MOLE_CLEAN_GUARD_REASON="inventory unknown"
         [[ $plan_rc -eq 124 || $plan_rc -ge 128 ]] && return "$plan_rc"
         return 1
     fi
@@ -2777,7 +2719,7 @@ _claude_desktop_delete_guard_allows() {
     local verified_sdk=""
     verified_sdk=$(claude_desktop_sdk_version "$_MOLE_CLAUDE_DESKTOP_GUARD_SUPPORT" || true)
     if [[ -z "$verified_sdk" || "$verified_sdk" != "$current_sdk" ]]; then
-        _MOLE_CLAUDE_DESKTOP_GUARD_REASON="active version changed"
+        _MOLE_CLEAN_GUARD_REASON="active version changed"
         return 1
     fi
     for active_root in \
@@ -2786,7 +2728,7 @@ _claude_desktop_delete_guard_allows() {
         [[ -n "$active_root" ]] || continue
         active_entry="$active_root/$verified_sdk"
         if [[ -L "$active_entry" || (! -f "$active_entry" && ! -d "$active_entry") ]]; then
-            _MOLE_CLAUDE_DESKTOP_GUARD_REASON="active version changed"
+            _MOLE_CLEAN_GUARD_REASON="active version changed"
             return 1
         fi
     done
@@ -2798,14 +2740,14 @@ _claude_desktop_delete_guard_allows() {
         done
     fi
 
-    _MOLE_CLAUDE_DESKTOP_GUARD_REASON="retention changed"
+    _MOLE_CLEAN_GUARD_REASON="retention changed"
     return 1
 }
 
 _claude_desktop_safe_clean_guarded() {
     local display_name="$1"
     shift
-    _MOLE_CLAUDE_DESKTOP_GUARD_REASON="process state changed"
+    _MOLE_CLEAN_GUARD_REASON="process state changed"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         local -a cleanup_args=("$@")
@@ -2819,10 +2761,10 @@ _claude_desktop_safe_clean_guarded() {
             _claude_desktop_delete_guard_allows "$target" || guard_rc=$?
             if [[ $guard_rc -ne 0 ]]; then
                 [[ $guard_rc -eq 124 || $guard_rc -ge 128 ]] && return "$guard_rc"
-                if [[ "$_MOLE_CLAUDE_DESKTOP_GUARD_REASON" == "Claude Desktop started" ]]; then
+                if [[ "$_MOLE_CLEAN_GUARD_REASON" == "Claude Desktop started" ]]; then
                     mole_defer_cleanup_family "Claude Desktop"
                 else
-                    echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLAUDE_DESKTOP_GUARD_REASON})"
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLEAN_GUARD_REASON})"
                     note_activity
                 fi
                 return 1
@@ -2835,10 +2777,10 @@ _claude_desktop_safe_clean_guarded() {
     local guarded_rc=0
     safe_clean_guarded _claude_desktop_delete_guard_allows "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        if [[ "$_MOLE_CLAUDE_DESKTOP_GUARD_REASON" == "Claude Desktop started" ]]; then
+        if [[ "$_MOLE_CLEAN_GUARD_REASON" == "Claude Desktop started" ]]; then
             mole_defer_cleanup_family "Claude Desktop"
         else
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLAUDE_DESKTOP_GUARD_REASON})"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLEAN_GUARD_REASON})"
             note_activity
         fi
         return 1
@@ -3167,30 +3109,17 @@ codex_desktop_cache_physical_path() {
 }
 
 _codex_desktop_cache_delete_guard_allows() {
-    local process_state=0
-    codex_desktop_process_state || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_CODEX_CACHE_GUARD_REASON="Codex started"
-    [[ $process_state -eq 2 ]] && _MOLE_CODEX_CACHE_GUARD_REASON="process state unknown"
-    return 1
+    mole_clean_process_guard codex_desktop_process_state "Codex started"
 }
 
 _codex_desktop_safe_clean_guarded() {
     local display_name="$1"
     shift
-    local _MOLE_CODEX_CACHE_GUARD_REASON="process state changed"
+    local _MOLE_CLEAN_GUARD_REASON="process state changed"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! _codex_desktop_cache_delete_guard_allows; then
-            if [[ "$_MOLE_CODEX_CACHE_GUARD_REASON" == "process state unknown" ]]; then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
-                note_activity
-            else
-                mole_defer_cleanup_family "Codex"
-            fi
+            mole_report_guard_stop "$display_name" mole_defer_cleanup_family "Codex"
             return 1
         fi
         safe_clean "$@"
@@ -3200,12 +3129,7 @@ _codex_desktop_safe_clean_guarded() {
     local guarded_rc=0
     safe_clean_guarded _codex_desktop_cache_delete_guard_allows "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        if [[ "$_MOLE_CODEX_CACHE_GUARD_REASON" == "process state unknown" ]]; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CODEX_CACHE_GUARD_REASON})"
-            note_activity
-        else
-            mole_defer_cleanup_family "Codex"
-        fi
+        mole_report_guard_stop "$display_name" mole_defer_cleanup_family "Codex"
         return 1
     fi
     return "$guarded_rc"
@@ -3237,7 +3161,7 @@ clean_codex_desktop_caches() {
         for leaf in "${leaves[@]}"; do
             physical_leaf=""
             if physical_leaf=$(codex_desktop_cache_physical_path "$profile/$leaf"); then
-                if _dev_cleanup_targets_exist "$physical_leaf"/*; then
+                if mole_cleanup_targets_exist "$physical_leaf"/*; then
                     cleanable_physical_leaves+=("$physical_leaf")
                     cleanable_leaf_labels+=("$leaf")
                 fi
@@ -3348,7 +3272,7 @@ codex_sparkle_staging_physical_path() {
 
 _MOLE_CODEX_STAGING_ROOT=""
 _MOLE_CODEX_STAGING_ENTRY=""
-_MOLE_CODEX_STAGING_GUARD_REASON=""
+_MOLE_CLEAN_GUARD_REASON=""
 
 _codex_staging_entry_is_still_stale() {
     local staging_root="$_MOLE_CODEX_STAGING_ROOT"
@@ -3371,34 +3295,22 @@ _codex_staging_entry_is_still_stale() {
 }
 
 _codex_staging_delete_guard_allows() {
-    _MOLE_CODEX_STAGING_GUARD_REASON="staging entry changed"
+    _MOLE_CLEAN_GUARD_REASON="staging entry changed"
     _codex_staging_entry_is_still_stale || return 1
 
-    local process_state=0
-    codex_desktop_process_state || process_state=$?
-    if [[ $process_state -ne 1 ]]; then
-        _MOLE_CODEX_STAGING_GUARD_REASON="Codex started"
-        [[ $process_state -eq 2 ]] && _MOLE_CODEX_STAGING_GUARD_REASON="process state unknown"
-        return 1
-    fi
+    mole_clean_process_guard codex_desktop_process_state "Codex started" || return 1
 
-    local updater_state=0
-    codex_sparkle_updater_running || updater_state=$?
-    if [[ $updater_state -ne 1 ]]; then
-        _MOLE_CODEX_STAGING_GUARD_REASON="Sparkle updater started"
-        [[ $updater_state -eq 2 ]] && _MOLE_CODEX_STAGING_GUARD_REASON="updater state unknown"
-        return 1
-    fi
+    mole_clean_process_guard codex_sparkle_updater_running "Sparkle updater started" "updater state unknown" || return 1
 
     local open_file_state=0
     if codex_sparkle_staging_has_open_files "$_MOLE_CODEX_STAGING_ROOT"; then
-        _MOLE_CODEX_STAGING_GUARD_REASON="staging files opened"
+        _MOLE_CLEAN_GUARD_REASON="staging files opened"
         return 1
     else
         open_file_state=$?
     fi
     if [[ $open_file_state -eq 2 ]]; then
-        _MOLE_CODEX_STAGING_GUARD_REASON="open-file check unavailable"
+        _MOLE_CLEAN_GUARD_REASON="open-file check unavailable"
         return 1
     fi
 
@@ -3444,7 +3356,7 @@ clean_codex_desktop_staging() {
         if ! codex_sparkle_staging_physical_path "$stale_entry" > /dev/null; then
             continue
         fi
-        if ! _dev_cleanup_targets_exist "$stale_entry"; then
+        if ! mole_cleanup_targets_exist "$stale_entry"; then
             continue
         fi
         stale_entries+=("$stale_entry")
@@ -3502,9 +3414,9 @@ clean_codex_desktop_staging() {
         local guarded_rc=0
         _codex_staging_safe_clean_guarded "$staging_root" "$stale_entry" || guarded_rc=$?
         if [[ $guarded_rc -eq 75 ]]; then
-            case "$_MOLE_CODEX_STAGING_GUARD_REASON" in
+            case "$_MOLE_CLEAN_GUARD_REASON" in
                 "process state unknown" | "updater state unknown" | "open-file check unavailable")
-                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · stopped (${_MOLE_CODEX_STAGING_GUARD_REASON})"
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · stopped (${_MOLE_CLEAN_GUARD_REASON})"
                     note_activity
                     ;;
                 "staging entry changed")
@@ -3578,17 +3490,11 @@ _codex_runtime_size_human() {
 }
 
 _codex_runtime_delete_guard_allows() {
-    local process_state=0
-    codex_runtime_process_state || process_state=$?
-    if [[ $process_state -ne 1 ]]; then
-        _MOLE_CODEX_RUNTIME_GUARD_REASON="Codex started"
-        [[ $process_state -eq 2 ]] && _MOLE_CODEX_RUNTIME_GUARD_REASON="process state unknown"
-        return 1
-    fi
+    mole_clean_process_guard codex_runtime_process_state "Codex started" || return 1
 
     if is_codex_runtime_active "$_MOLE_CODEX_RUNTIME_GUARD_PATH" ||
         ! is_codex_runtime_stale "$_MOLE_CODEX_RUNTIME_GUARD_PATH"; then
-        _MOLE_CODEX_RUNTIME_GUARD_REASON="runtime state changed"
+        _MOLE_CLEAN_GUARD_REASON="runtime state changed"
         return 1
     fi
     return 0
@@ -3597,7 +3503,7 @@ _codex_runtime_delete_guard_allows() {
 _codex_runtime_safe_clean_guarded() {
     local runtime_dir="$1"
     local _MOLE_CODEX_RUNTIME_GUARD_PATH="$runtime_dir"
-    local _MOLE_CODEX_RUNTIME_GUARD_REASON="Codex started"
+    local _MOLE_CLEAN_GUARD_REASON="Codex started"
     local guarded_rc=0
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
@@ -3615,10 +3521,10 @@ _codex_runtime_safe_clean_guarded() {
     fi
 
     if [[ $guarded_rc -eq 75 ]]; then
-        if [[ "$_MOLE_CODEX_RUNTIME_GUARD_REASON" == "Codex started" ]]; then
+        if [[ "$_MOLE_CLEAN_GUARD_REASON" == "Codex started" ]]; then
             mole_defer_cleanup_family "Codex"
         else
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex runtimes · stopped (${_MOLE_CODEX_RUNTIME_GUARD_REASON})"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex runtimes · stopped (${_MOLE_CLEAN_GUARD_REASON})"
             note_activity
         fi
         return 1
@@ -3646,7 +3552,7 @@ clean_codex_runtimes() {
     while IFS= read -r -d '' runtime_dir; do
         if ! is_codex_runtime_active "$runtime_dir" &&
             is_codex_runtime_stale "$runtime_dir" &&
-            _dev_cleanup_targets_exist "$runtime_dir"; then
+            mole_cleanup_targets_exist "$runtime_dir"; then
             has_stale_runtime=true
             break
         fi
@@ -3742,7 +3648,7 @@ clean_antigravity_caches() {
     local ag_profile="$HOME/.gemini/antigravity-browser-profile"
     [[ -d "$ag_profile" ]] || return 0
 
-    _dev_cleanup_targets_exist \
+    mole_cleanup_targets_exist \
         "$ag_profile/Default/Cache"/* \
         "$ag_profile/Default/Code Cache"/* \
         "$ag_profile/Default/GPUCache"/* \
@@ -3790,7 +3696,7 @@ clean_chrome_devtools_mcp_caches() {
     local mcp_profile="$HOME/.cache/chrome-devtools-mcp/chrome-profile"
     [[ -d "$mcp_profile" ]] || return 0
 
-    _dev_cleanup_targets_exist \
+    mole_cleanup_targets_exist \
         "$mcp_profile/Default/Cache"/* \
         "$mcp_profile/Default/Code Cache"/* \
         "$mcp_profile/Default/GPUCache"/* \

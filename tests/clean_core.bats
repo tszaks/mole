@@ -1412,3 +1412,60 @@ EOF
         return 1
     }
 }
+
+@test "mole_clean_process_guard denies on an unknown process state" {
+    # Every cleanup delete guard now funnels its process question through this
+    # one translator, so its tri-state contract is the single place a slip
+    # would turn "Mole could not tell" into "safe to delete" across the whole
+    # clean command. Pin all three states, including that 2 denies.
+    run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+running() { return 0; }
+not_running() { return 1; }
+unknown() { return 2; }
+
+_MOLE_CLEAN_GUARD_REASON=""
+mole_clean_process_guard not_running "App started" || exit 1
+[[ -z "$_MOLE_CLEAN_GUARD_REASON" ]] || exit 1
+
+rc=0
+mole_clean_process_guard running "App started" || rc=$?
+[[ $rc -eq 1 ]] || exit 1
+[[ "$_MOLE_CLEAN_GUARD_REASON" == "App started" ]] || exit 1
+
+rc=0
+mole_clean_process_guard unknown "App started" || rc=$?
+[[ $rc -eq 1 ]] || exit 1
+[[ "$_MOLE_CLEAN_GUARD_REASON" == "process state unknown" ]] || exit 1
+
+rc=0
+mole_clean_process_guard unknown "Updater started" "updater state unknown" || rc=$?
+[[ $rc -eq 1 ]] || exit 1
+[[ "$_MOLE_CLEAN_GUARD_REASON" == "updater state unknown" ]] || exit 1
+EOF
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+}
+
+@test "cleanup delete guards do not re-implement the process-state translation" {
+    # Nine guards open-coded the same six lines. The failure mode is not
+    # duplication, it is that one transcription slip folds state 2 into "not
+    # running" and deletes a live app's files, while the other eight copies
+    # still read correctly in review.
+    local open_coded
+    open_coded=$(
+        command awk '
+            /^[A-Za-z_][A-Za-z0-9_]*\(\)/ { fn = $0; sub(/\(\).*/, "", fn) }
+            fn ~ /_delete_guard_allows$/ && /\|\| process_state=\$\?/ { print FILENAME ":" FNR " " fn }
+        ' "$PROJECT_ROOT"/lib/clean/*.sh
+    )
+    [ -z "$open_coded" ] || {
+        echo "these guards translate the process state themselves instead of calling mole_clean_process_guard:"
+        echo "$open_coded"
+        return 1
+    }
+}

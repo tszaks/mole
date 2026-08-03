@@ -28,26 +28,6 @@ _xcode_cleanup_skip_reason() {
     fi
 }
 
-_app_cache_cleanup_targets_exist() {
-    local target
-    for target in "$@"; do
-        # Match safe_clean's eligible set: broken symlinks are not cleanup
-        # candidates and must not trigger an active-process defer.
-        [[ -e "$target" ]] || continue
-        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$target" 2> /dev/null; then
-            continue
-        fi
-        if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
-            continue
-        fi
-        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
-            continue
-        fi
-        return 0
-    done
-    return 1
-}
-
 _app_cache_cleanup_directories_exist() {
     local target
     for target in "$@"; do
@@ -67,38 +47,19 @@ _app_cache_cleanup_directories_exist() {
 }
 
 _xcode_app_cache_delete_guard_allows() {
-    local process_state=0
-    _xcode_cleanup_process_state || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_APP_CACHE_GUARD_REASON=$(_xcode_cleanup_skip_reason "$process_state")
-    return 1
+    # Same mapping _xcode_cleanup_skip_reason applies (state 0 running, state 2
+    # unknown; state 1 already returned), without its command substitution. The
+    # scan-stage callers still use that helper, where one fork per section is
+    # free; this one runs per delete candidate.
+    mole_clean_process_guard _xcode_cleanup_process_state "Xcode or build tooling running"
 }
 
 _simulator_app_cache_delete_guard_allows() {
-    local process_state=0
-    _simulator_cleanup_process_state || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_APP_CACHE_GUARD_REASON="Simulator or CoreSimulator running"
-    [[ $process_state -eq 2 ]] && _MOLE_APP_CACHE_GUARD_REASON="process state unknown"
-    return 1
+    mole_clean_process_guard _simulator_cleanup_process_state "Simulator or CoreSimulator running"
 }
 
 _final_cut_pro_delete_guard_allows() {
-    local process_state=0
-    final_cut_pro_is_running || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_APP_CACHE_GUARD_REASON="Final Cut Pro started"
-    [[ $process_state -eq 2 ]] && _MOLE_APP_CACHE_GUARD_REASON="process state unknown"
-    return 1
+    mole_clean_process_guard final_cut_pro_is_running "Final Cut Pro started"
 }
 
 _defer_app_cache_guard_family() {
@@ -113,16 +74,11 @@ _app_cache_safe_clean_guarded() {
     local delete_guard="$1"
     local display_name="$2"
     shift 2
-    local _MOLE_APP_CACHE_GUARD_REASON="process state changed"
+    local _MOLE_CLEAN_GUARD_REASON="process state changed"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! "$delete_guard"; then
-            if [[ "$_MOLE_APP_CACHE_GUARD_REASON" == "process state unknown" ]]; then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_APP_CACHE_GUARD_REASON})"
-                note_activity
-            else
-                _defer_app_cache_guard_family "$delete_guard"
-            fi
+            mole_report_guard_stop "$display_name" _defer_app_cache_guard_family "$delete_guard"
             return 1
         fi
         safe_clean "$@"
@@ -132,12 +88,7 @@ _app_cache_safe_clean_guarded() {
     local guarded_rc=0
     safe_clean_guarded "$delete_guard" "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        if [[ "$_MOLE_APP_CACHE_GUARD_REASON" == "process state unknown" ]]; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_APP_CACHE_GUARD_REASON})"
-            note_activity
-        else
-            _defer_app_cache_guard_family "$delete_guard"
-        fi
+        mole_report_guard_stop "$display_name" _defer_app_cache_guard_family "$delete_guard"
         return 1
     fi
     return "$guarded_rc"
@@ -290,7 +241,7 @@ clean_xcode_derived_data() {
 # Xcode and iOS tooling.
 clean_xcode_tools() {
     local simulator_has_targets=false
-    if _app_cache_cleanup_targets_exist \
+    if mole_cleanup_targets_exist \
         "$HOME/Library/Developer/CoreSimulator/Caches"/* \
         "$HOME/Library/Developer/CoreSimulator/Devices"/*/data/tmp/* \
         "$HOME/Library/Logs/CoreSimulator"/*; then
@@ -329,9 +280,9 @@ clean_xcode_tools() {
 
     local xcode_cache_has_targets=false
     local xcode_build_has_targets=false
-    _app_cache_cleanup_targets_exist \
+    mole_cleanup_targets_exist \
         "$HOME/Library/Caches/com.apple.dt.Xcode"/* && xcode_cache_has_targets=true
-    if _app_cache_cleanup_targets_exist "$HOME/Library/Developer/Xcode/Products"/* ||
+    if mole_cleanup_targets_exist "$HOME/Library/Developer/Xcode/Products"/* ||
         _app_cache_cleanup_directories_exist "$HOME/Library/Developer/Xcode/DerivedData"/*; then
         xcode_build_has_targets=true
     fi
@@ -352,7 +303,7 @@ clean_xcode_tools() {
             # candidates to disappear. Revalidate before another process gate
             # so a completed cache-only pass never reports a deferred build.
             xcode_build_has_targets=false
-            if _app_cache_cleanup_targets_exist "$HOME/Library/Developer/Xcode/Products"/* ||
+            if mole_cleanup_targets_exist "$HOME/Library/Developer/Xcode/Products"/* ||
                 _app_cache_cleanup_directories_exist "$HOME/Library/Developer/Xcode/DerivedData"/*; then
                 xcode_build_has_targets=true
             fi
@@ -584,7 +535,7 @@ clean_final_cut_pro_generated_caches() {
     local -a fcp_cache_targets=()
     local target
     while IFS= read -r -d '' target; do
-        if _app_cache_cleanup_targets_exist "$target"; then
+        if mole_cleanup_targets_exist "$target"; then
             fcp_cache_targets+=("$target")
         fi
     done < <(find_final_cut_pro_generated_cache_targets)

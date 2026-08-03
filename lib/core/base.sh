@@ -1131,3 +1131,84 @@ mole_defer_cleanup_family() {
         debug_log "Deferred cleanup while active: $1"
     fi
 }
+
+# Why a cleanup delete guard refused, read by the caller right after a denial.
+# Dynamically scoped rather than returned on stdout on purpose: guards run at
+# the delete boundary, where a command substitution would fork per candidate.
+# Callers that need it isolated declare `local _MOLE_CLEAN_GUARD_REASON` in the
+# wrapper that owns the cleanup.
+_MOLE_CLEAN_GUARD_REASON=""
+
+# Turn a tri-state process probe into an allow/deny plus that reason.
+#
+# Probe contract: 0 = the app is running, 1 = it is not, 2 = could not tell.
+# State 2 must deny. An unreadable process table is not evidence the app is
+# closed, and a copy of this block that folds 2 into "not running" silently
+# turns "unknown" into "safe to delete" on a path that then removes the files.
+# Nine guards across dev.sh, user.sh, and app_caches.sh open-coded these six
+# lines before they landed here; one transcription slip in any of them was a
+# deletion while the owning app was live.
+#
+# Compound guards (Codex runtime/staging, Claude Desktop, versioned agents) call
+# this for the process question and then add their own evidence.
+# The optional third argument overrides the unknown-state wording. Only the
+# default "process state unknown" is echoed against the item by
+# mole_report_guard_stop; a guard that supplies its own wording (the Codex
+# Sparkle updater probe) is deliberately routed to the deferred-family list
+# instead, so keep the two in step when changing either.
+mole_clean_process_guard() {
+    local probe="$1"
+    local busy_reason="$2"
+    local unknown_reason="${3:-process state unknown}"
+    local process_state=0
+    "$probe" || process_state=$?
+    if [[ $process_state -eq 1 ]]; then
+        return 0
+    fi
+
+    _MOLE_CLEAN_GUARD_REASON="$busy_reason"
+    [[ $process_state -eq 2 ]] && _MOLE_CLEAN_GUARD_REASON="$unknown_reason"
+    return 1
+}
+
+# Report a guard refusal. An unknown process state is the user's problem to see
+# now (it means Mole could not tell, not that it found something running), so it
+# prints against the item. A known-running app is ordinary and goes to the
+# end-of-run "Skipped while active" list instead of a line per cache.
+# Usage: mole_report_guard_stop "Xcode cache" mole_defer_cleanup_family "Xcode"
+mole_report_guard_stop() {
+    local display_name="$1"
+    shift
+    if [[ "$_MOLE_CLEAN_GUARD_REASON" == "process state unknown" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_CLEAN_GUARD_REASON})"
+        note_activity
+    else
+        "$@"
+    fi
+}
+
+# Does any of these targets survive the eligibility filter, i.e. would a real
+# cleanup have anything to do?
+#
+# Callers use it to decide whether an active app is worth reporting as skipped:
+# deferring "Xcode" when every candidate was already whitelisted tells the user
+# to quit an app for no reason. The predicate list mirrors the one
+# `_safe_clean_impl` applies before it consults the delete guard, so the two
+# agree on what "eligible" means; broken symlinks are excluded there too.
+mole_cleanup_targets_exist() {
+    local target
+    for target in "$@"; do
+        [[ -e "$target" ]] || continue
+        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
+            continue
+        fi
+        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
+            continue
+        fi
+        return 0
+    done
+    return 1
+}

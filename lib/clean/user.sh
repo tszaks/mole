@@ -2,36 +2,8 @@
 # User Data Cleanup Module
 set -euo pipefail
 
-_user_cleanup_targets_exist() {
-    local target
-    for target in "$@"; do
-        # Match safe_clean's eligible set: broken symlinks are not cleanup
-        # candidates and must not trigger an active-process defer.
-        [[ -e "$target" ]] || continue
-        if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$target" 2> /dev/null; then
-            continue
-        fi
-        if declare -f is_path_whitelisted > /dev/null 2>&1 && is_path_whitelisted "$target" 2> /dev/null; then
-            continue
-        fi
-        if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$target" 2> /dev/null; then
-            continue
-        fi
-        return 0
-    done
-    return 1
-}
-
 _user_process_delete_guard_allows() {
-    local process_state=0
-    "$_MOLE_USER_PROCESS_GUARD_PROBE" || process_state=$?
-    if [[ $process_state -eq 1 ]]; then
-        return 0
-    fi
-
-    _MOLE_USER_PROCESS_GUARD_REASON="$_MOLE_USER_PROCESS_GUARD_FAMILY started"
-    [[ $process_state -eq 2 ]] && _MOLE_USER_PROCESS_GUARD_REASON="process state unknown"
-    return 1
+    mole_clean_process_guard "$_MOLE_USER_PROCESS_GUARD_PROBE" "$_MOLE_USER_PROCESS_GUARD_FAMILY started"
 }
 
 _user_safe_clean_process_guarded() {
@@ -41,16 +13,11 @@ _user_safe_clean_process_guarded() {
     shift 3
     local _MOLE_USER_PROCESS_GUARD_PROBE="$probe"
     local _MOLE_USER_PROCESS_GUARD_FAMILY="$family"
-    local _MOLE_USER_PROCESS_GUARD_REASON="${family} started"
+    local _MOLE_CLEAN_GUARD_REASON="${family} started"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! _user_process_delete_guard_allows; then
-            if [[ "$_MOLE_USER_PROCESS_GUARD_REASON" == "process state unknown" ]]; then
-                echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_USER_PROCESS_GUARD_REASON})"
-                note_activity
-            else
-                mole_defer_cleanup_family "$family"
-            fi
+            mole_report_guard_stop "$display_name" mole_defer_cleanup_family "$family"
             return 1
         fi
         safe_clean "$@"
@@ -60,12 +27,7 @@ _user_safe_clean_process_guarded() {
     local guarded_rc=0
     safe_clean_guarded _user_process_delete_guard_allows "$@" || guarded_rc=$?
     if [[ $guarded_rc -eq 75 ]]; then
-        if [[ "$_MOLE_USER_PROCESS_GUARD_REASON" == "process state unknown" ]]; then
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_USER_PROCESS_GUARD_REASON})"
-            note_activity
-        else
-            mole_defer_cleanup_family "$family"
-        fi
+        mole_report_guard_stop "$display_name" mole_defer_cleanup_family "$family"
         return 1
     fi
     return "$guarded_rc"
@@ -1470,7 +1432,7 @@ clean_browsers() {
     # workers and trigger security warnings during dry-run scans. See #785,
     # #964, and #968.
     local chrome_support_has_targets=false
-    if _user_cleanup_targets_exist \
+    if mole_cleanup_targets_exist \
         "$HOME/Library/Application Support/Google/Chrome"/*/Application\ Cache/* \
         "$HOME/Library/Application Support/Google/Chrome"/*/Code\ Cache/* \
         "$HOME/Library/Application Support/Google/Chrome"/*/GPUCache/* \
@@ -1627,8 +1589,8 @@ clean_browsers() {
     _firefox_process_state || firefox_state=$?
     local firefox_cache_targets=false
     local firefox_profile_cache_targets=false
-    _user_cleanup_targets_exist "$HOME/Library/Caches/Firefox"/* && firefox_cache_targets=true
-    _user_cleanup_targets_exist "$HOME/Library/Application Support/Firefox/Profiles"/*/cache2/* && firefox_profile_cache_targets=true
+    mole_cleanup_targets_exist "$HOME/Library/Caches/Firefox"/* && firefox_cache_targets=true
+    mole_cleanup_targets_exist "$HOME/Library/Application Support/Firefox/Profiles"/*/cache2/* && firefox_profile_cache_targets=true
     if [[ $firefox_state -eq 0 ]]; then
         if [[ "$firefox_cache_targets" == "true" || "$firefox_profile_cache_targets" == "true" ]]; then
             mole_defer_cleanup_family "Firefox"
@@ -1693,14 +1655,14 @@ clean_cloud_storage() {
     local dropbox_state=0
     _dropbox_process_state || dropbox_state=$?
     if [[ $dropbox_state -eq 0 ]]; then
-        if _user_cleanup_targets_exist \
+        if mole_cleanup_targets_exist \
             "$HOME/Library/Caches/com.getdropbox.dropbox" \
             "$HOME/Library/Caches"/com.dropbox.*; then
             mole_defer_cleanup_family "Dropbox"
         fi
     elif [[ $dropbox_state -eq 1 ]]; then
         _clean_dropbox_caches_guarded || true
-    elif _user_cleanup_targets_exist \
+    elif mole_cleanup_targets_exist \
         "$HOME/Library/Caches/com.getdropbox.dropbox" \
         "$HOME/Library/Caches"/com.dropbox.*; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Dropbox cache · skipped (process state unknown)"
@@ -1709,7 +1671,7 @@ clean_cloud_storage() {
     local google_drive_state=0
     _google_drive_process_state || google_drive_state=$?
     if [[ $google_drive_state -eq 0 ]]; then
-        if _user_cleanup_targets_exist "$HOME/Library/Caches/com.google.GoogleDrive"; then
+        if mole_cleanup_targets_exist "$HOME/Library/Caches/com.google.GoogleDrive"; then
             mole_defer_cleanup_family "Google Drive"
         fi
     elif [[ $google_drive_state -eq 1 ]]; then
@@ -1719,7 +1681,7 @@ clean_cloud_storage() {
             "Google Drive cache" \
             ~/Library/Caches/com.google.GoogleDrive \
             "Google Drive cache" || true
-    elif _user_cleanup_targets_exist "$HOME/Library/Caches/com.google.GoogleDrive"; then
+    elif mole_cleanup_targets_exist "$HOME/Library/Caches/com.google.GoogleDrive"; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Google Drive cache · skipped (process state unknown)"
         note_activity
     fi
@@ -1729,7 +1691,7 @@ clean_cloud_storage() {
     local onedrive_state=0
     _onedrive_process_state || onedrive_state=$?
     if [[ $onedrive_state -eq 0 ]]; then
-        if _user_cleanup_targets_exist "$HOME/Library/Caches/com.microsoft.OneDrive"; then
+        if mole_cleanup_targets_exist "$HOME/Library/Caches/com.microsoft.OneDrive"; then
             mole_defer_cleanup_family "OneDrive"
         fi
     elif [[ $onedrive_state -eq 1 ]]; then
@@ -1739,7 +1701,7 @@ clean_cloud_storage() {
             "OneDrive cache" \
             ~/Library/Caches/com.microsoft.OneDrive \
             "OneDrive cache" || true
-    elif _user_cleanup_targets_exist "$HOME/Library/Caches/com.microsoft.OneDrive"; then
+    elif mole_cleanup_targets_exist "$HOME/Library/Caches/com.microsoft.OneDrive"; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} OneDrive cache · skipped (process state unknown)"
         note_activity
     fi
