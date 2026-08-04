@@ -1603,3 +1603,104 @@ EOF
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
+
+_codex_version_plist() {
+	mkdir -p "$(dirname "$1")"
+	cat > "$1" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleVersion</key><string>$2</string></dict></plist>
+PLIST
+}
+
+@test "codex staging removes a superseded staged build regardless of age (#1359)" {
+	local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+	rm -rf "$staging_root"
+	mkdir -p "$staging_root/superseded/Codex.app/Contents" "$staging_root/pending/Codex.app/Contents"
+	_codex_version_plist "$staging_root/superseded/Codex.app/Contents/Info.plist" "5628"
+	_codex_version_plist "$staging_root/pending/Codex.app/Contents/Info.plist" "5900"
+	# The pending entry is ancient; version must protect it anyway.
+	touch -t 202001010000 "$staging_root/pending"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 1; }
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+note_activity() { :; }
+_codex_installed_build_version() { echo "5848"; }
+clean_codex_desktop_staging
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"SAFE_CLEAN:Codex Desktop stale update staging|"*"/superseded"* ]] || return 1
+	[[ "$output" != *"/pending"* ]] || return 1
+}
+
+@test "codex staging removes an equal staged build and keeps invalid metadata on the age rule" {
+	local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+	rm -rf "$staging_root"
+	mkdir -p "$staging_root/equal/Codex.app/Contents" \
+		"$staging_root/badmeta-old/Codex.app/Contents" \
+		"$staging_root/badmeta-fresh/Codex.app/Contents"
+	_codex_version_plist "$staging_root/equal/Codex.app/Contents/Info.plist" "5848"
+	_codex_version_plist "$staging_root/badmeta-old/Codex.app/Contents/Info.plist" "not-a-number"
+	_codex_version_plist "$staging_root/badmeta-fresh/Codex.app/Contents/Info.plist" "also.bad"
+	touch -t 202001010000 "$staging_root/badmeta-old"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 1; }
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+note_activity() { :; }
+_codex_installed_build_version() { echo "5848"; }
+clean_codex_desktop_staging
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"/equal"* ]] || return 1
+	[[ "$output" == *"/badmeta-old"* ]] || return 1
+	[[ "$output" != *"/badmeta-fresh"* ]] || return 1
+}
+
+@test "codex staging keeps the age rule when the installed build is unknown" {
+	local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+	rm -rf "$staging_root"
+	mkdir -p "$staging_root/versioned-fresh/Codex.app/Contents"
+	_codex_version_plist "$staging_root/versioned-fresh/Codex.app/Contents/Info.plist" "1"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 1; }
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+note_activity() { :; }
+_codex_installed_build_version() { return 1; }
+clean_codex_desktop_staging
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
+}

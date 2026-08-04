@@ -3299,6 +3299,23 @@ _codex_staging_entry_is_still_stale() {
     local physical_after=""
     physical_before=$(codex_sparkle_staging_physical_path "$stale_entry") || return 1
 
+    # The boundary must re-verify the same evidence that made the entry
+    # eligible. A version-superseded entry re-reads its staged build and
+    # compares against the installed build captured at scan time; an
+    # age-eligible entry re-checks its age. Mixing them would let a young
+    # superseded entry be refused here, or an aged-out check authorize an
+    # entry whose staged build was swapped after the scan.
+    if [[ "${_MOLE_CODEX_STAGING_MODE:-age}" == "superseded" ]]; then
+        local installed_build="${_MOLE_CODEX_INSTALLED_BUILD:-}"
+        [[ "$installed_build" =~ ^[0-9]+$ ]] || return 1
+        local staged_build=""
+        staged_build=$(_codex_staged_build_version "$stale_entry") || return 1
+        [[ "$staged_build" -le "$installed_build" ]] || return 1
+        physical_after=$(codex_sparkle_staging_physical_path "$stale_entry") || return 1
+        [[ "$physical_after" == "$physical_before" ]] || return 1
+        return 0
+    fi
+
     local stale_match=""
     while IFS= read -r -d '' stale_match; do
         physical_after=$(codex_sparkle_staging_physical_path "$stale_entry") || return 1
@@ -3341,6 +3358,7 @@ _codex_staging_safe_clean_guarded() {
     local stale_entry="$2"
     _MOLE_CODEX_STAGING_ROOT="$staging_root"
     _MOLE_CODEX_STAGING_ENTRY="$stale_entry"
+    _MOLE_CODEX_STAGING_MODE="${3:-age}"
 
     if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
         if ! _codex_staging_delete_guard_allows; then
@@ -3356,6 +3374,65 @@ _codex_staging_safe_clean_guarded() {
         "Codex Desktop stale update staging"
 }
 
+# Installed Codex Desktop build number, or failure. Two sources, per the
+# single-probe rule: the fixed install paths first, a bounded mdfind second,
+# both verified against the exact bundle id, and a strict bounded-decimal
+# gate so prose or error text can never win a version comparison.
+_codex_installed_build_version() {
+    local app_path="" candidate cand_id
+    for candidate in "/Applications/Codex.app" "$HOME/Applications/Codex.app"; do
+        [[ -d "$candidate" ]] || continue
+        cand_id=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+            "$candidate/Contents/Info.plist" 2> /dev/null) || continue
+        [[ "$cand_id" == "com.openai.codex" ]] || continue
+        app_path="$candidate"
+        break
+    done
+    if [[ -z "$app_path" ]]; then
+        local mdfind_out="" line
+        mdfind_out=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" mdfind \
+            "kMDItemCFBundleIdentifier == 'com.openai.codex'" 2> /dev/null) || return 1
+        while IFS= read -r line; do
+            [[ -d "$line" && "$line" == *.app ]] || continue
+            cand_id=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+                /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+                "$line/Contents/Info.plist" 2> /dev/null) || continue
+            [[ "$cand_id" == "com.openai.codex" ]] || continue
+            app_path="$line"
+            break
+        done <<< "$mdfind_out"
+    fi
+    [[ -n "$app_path" ]] || return 1
+    local build=""
+    build=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" \
+        "$app_path/Contents/Info.plist" 2> /dev/null) || return 1
+    [[ "$build" =~ ^[0-9]+$ && ${#build} -le 10 ]] || return 1
+    printf '%s\n' "$build"
+}
+
+# Build number of the app staged inside one first-level Installation entry.
+# Only immediate .app children count, and two children disagreeing on the
+# version is ambiguous and fails, so the caller falls back to the age rule.
+_codex_staged_build_version() {
+    local entry="$1"
+    local staged_build="" staged_app build
+    for staged_app in "$entry"/*.app; do
+        [[ -d "$staged_app" ]] || continue
+        build=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+            /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" \
+            "$staged_app/Contents/Info.plist" 2> /dev/null) || return 1
+        [[ "$build" =~ ^[0-9]+$ && ${#build} -le 10 ]] || return 1
+        if [[ -n "$staged_build" && "$staged_build" != "$build" ]]; then
+            return 1
+        fi
+        staged_build="$build"
+    done
+    [[ -n "$staged_build" ]] || return 1
+    printf '%s\n' "$staged_build"
+}
+
 clean_codex_desktop_staging() {
     local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
     [[ -d "$staging_root" ]] || return 0
@@ -3364,7 +3441,17 @@ clean_codex_desktop_staging() {
         return 0
     fi
 
+    # Version-aware eligibility (#1359): a staged build at or below the
+    # installed one is superseded and removable at any age, a staged build
+    # above it is a pending update and kept at any age, and an entry whose
+    # versions cannot be read exactly keeps the original age-only rule.
+    # Every guard between here and deletion is unchanged.
+    local installed_build=""
+    installed_build=$(_codex_installed_build_version) || installed_build=""
+    _MOLE_CODEX_INSTALLED_BUILD="$installed_build"
+
     local -a stale_entries=()
+    local -a stale_entry_modes=()
     local stale_entry
     while IFS= read -r -d '' stale_entry; do
         if ! codex_sparkle_staging_physical_path "$stale_entry" > /dev/null; then
@@ -3373,8 +3460,23 @@ clean_codex_desktop_staging() {
         if ! mole_cleanup_targets_exist "$stale_entry"; then
             continue
         fi
-        stale_entries+=("$stale_entry")
-    done < <(command find -P "$staging_root" -mindepth 1 -maxdepth 1 -type d -mtime +"$MOLE_ORPHAN_AGE_DAYS" -print0 2> /dev/null)
+        local staged_build=""
+        if [[ -n "$installed_build" ]]; then
+            staged_build=$(_codex_staged_build_version "$stale_entry") || staged_build=""
+        fi
+        if [[ -n "$installed_build" && -n "$staged_build" ]]; then
+            if [[ "$staged_build" -le "$installed_build" ]]; then
+                stale_entries+=("$stale_entry")
+                stale_entry_modes+=("superseded")
+            fi
+            continue
+        fi
+        if [[ -n "$(command find -P "$stale_entry" -maxdepth 0 -type d \
+            -mtime +"$MOLE_ORPHAN_AGE_DAYS" 2> /dev/null)" ]]; then
+            stale_entries+=("$stale_entry")
+            stale_entry_modes+=("age")
+        fi
+    done < <(command find -P "$staging_root" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null)
     [[ ${#stale_entries[@]} -gt 0 ]] || return 0
 
     if is_path_whitelisted "$staging_root"; then
@@ -3424,9 +3526,12 @@ clean_codex_desktop_staging() {
         return 0
     fi
 
+    local stale_entry_idx=0
     for stale_entry in "${stale_entries[@]}"; do
         local guarded_rc=0
-        _codex_staging_safe_clean_guarded "$staging_root" "$stale_entry" || guarded_rc=$?
+        _codex_staging_safe_clean_guarded "$staging_root" "$stale_entry" \
+            "${stale_entry_modes[$stale_entry_idx]}" || guarded_rc=$?
+        stale_entry_idx=$((stale_entry_idx + 1))
         if [[ $guarded_rc -eq 75 ]]; then
             case "$_MOLE_CLEAN_GUARD_REASON" in
                 "process state unknown" | "updater state unknown" | "open-file check unavailable")
