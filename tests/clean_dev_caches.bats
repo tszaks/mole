@@ -100,9 +100,10 @@ EOF
     [[ "$output" != *"SAFE_CLEAN:Gradle workers"* ]]
 }
 
-@test "clean_dev_jvm fails closed when the Gradle process probe errors" {
-    mkdir -p "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
-    touch "$HOME/.gradle/daemon/candidate"
+@test "clean_dev_jvm fails closed for every Gradle target when the process probe errors" {
+    rm -rf "$HOME/.gradle/caches" "$HOME/.gradle/notifications" "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+    mkdir -p "$HOME/.gradle/caches/build-cache-1" "$HOME/.gradle/notifications" "$HOME/.gradle/daemon/8.14" "$HOME/.gradle/workers/worker-1"
+    touch "$HOME/.gradle/caches/build-cache-1/entry" "$HOME/.gradle/notifications/entry" "$HOME/.gradle/daemon/8.14/entry" "$HOME/.gradle/workers/worker-1/entry"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -117,9 +118,81 @@ EOF
         echo "$output"
         return 1
     }
-    [[ "$output" == *"Gradle daemon/workers · skipped (process state unknown)"* ]] || return 1
-    [[ "$output" != *"SAFE_CLEAN:Gradle daemon"* ]] || return 1
-    [[ "$output" != *"SAFE_CLEAN:Gradle workers"* ]]
+    [[ "$output" == *"Gradle targets · skipped (process state unknown)"* ]] || return 1
+    [[ "$output" != *"SAFE_CLEAN:Gradle"* ]] || return 1
+}
+
+@test "clean_dev_jvm defers every Gradle target while Gradle is running" {
+    rm -rf "$HOME/.gradle/caches" "$HOME/.gradle/notifications" "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+    mkdir -p "$HOME/.gradle/caches/build-cache-1" "$HOME/.gradle/notifications" "$HOME/.gradle/daemon/8.14" "$HOME/.gradle/workers/worker-1"
+    touch "$HOME/.gradle/caches/build-cache-1/entry" "$HOME/.gradle/notifications/entry" "$HOME/.gradle/daemon/8.14/entry" "$HOME/.gradle/workers/worker-1/entry"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+gradle_daemon_running() { return 0; }
+defer_cleanup_family() { echo "DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:${!#}"; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"DEFER:Gradle"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Gradle"* ]] || return 1
+}
+
+@test "clean_dev_jvm cleans every Gradle target when idle" {
+    rm -rf "$HOME/.gradle/caches" "$HOME/.gradle/notifications" "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+    mkdir -p "$HOME/.gradle/caches/build-cache-1" "$HOME/.gradle/notifications" "$HOME/.gradle/daemon/8.14" "$HOME/.gradle/workers/worker-1"
+    touch "$HOME/.gradle/caches/build-cache-1/entry" "$HOME/.gradle/notifications/entry" "$HOME/.gradle/daemon/8.14/entry" "$HOME/.gradle/workers/worker-1/entry"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+gradle_daemon_running() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"SAFE_CLEAN:Gradle build cache|"* ]] || return 1
+    [[ "$output" == *"SAFE_CLEAN:Gradle notifications cache|"* ]] || return 1
+    [[ "$output" == *"SAFE_CLEAN:"*".gradle/daemon/8.14"* ]] || return 1
+    [[ "$output" == *"SAFE_CLEAN:"*".gradle/workers/worker-1"* ]] || return 1
+    rm -rf "$HOME/.gradle"
+}
+
+@test "clean_dev_jvm stops remaining Gradle cleanup when the delete guard refuses" {
+    rm -rf "$HOME/.gradle/caches" "$HOME/.gradle/notifications" "$HOME/.gradle/daemon" "$HOME/.gradle/workers"
+    mkdir -p "$HOME/.gradle/caches/build-cache-1" "$HOME/.gradle/notifications" "$HOME/.gradle/daemon/8.14" "$HOME/.gradle/workers/worker-1"
+    touch "$HOME/.gradle/caches/build-cache-1/entry" "$HOME/.gradle/notifications/entry" "$HOME/.gradle/daemon/8.14/entry" "$HOME/.gradle/workers/worker-1/entry"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+gradle_daemon_running() { return 1; }
+_dev_process_delete_guard_allows() { return 1; }
+defer_cleanup_family() { echo "DEFER:$1"; }
+safe_clean() { echo "UNEXPECTED_CLEAN:${!#}"; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"DEFER:Gradle"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN:Gradle"* ]] || return 1
+    rm -rf "$HOME/.gradle"
 }
 
 @test "clean_dev_jvm ignores empty Gradle daemon roots while active" {
