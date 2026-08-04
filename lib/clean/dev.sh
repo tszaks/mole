@@ -2123,23 +2123,39 @@ clean_dev_jvm() {
     safe_clean ~/.sbt/boot/* "SBT boot cache"
     safe_clean ~/.sbt/launchers/* "SBT launcher cache"
     safe_clean ~/.ivy2/cache/* "Ivy cache"
-    safe_clean ~/.gradle/caches/build-cache-*/* "Gradle build cache"
-    safe_clean ~/.gradle/notifications/* "Gradle notifications cache"
-    if mole_cleanup_targets_exist "$HOME/.gradle/daemon"/* "$HOME/.gradle/workers"/*; then
+    if mole_cleanup_targets_exist \
+        "$HOME/.gradle/caches/build-cache-"*/* \
+        "$HOME/.gradle/notifications"/* \
+        "$HOME/.gradle/daemon"/* \
+        "$HOME/.gradle/workers"/*; then
         local gradle_state=0
         gradle_daemon_running || gradle_state=$?
         if [[ $gradle_state -eq 0 ]]; then
             mole_defer_cleanup_family "Gradle"
         elif [[ $gradle_state -eq 1 ]]; then
+            # Each group rechecks the probe at its deletion boundary; any
+            # refusal stops the remaining Gradle cleanup.
+            _dev_safe_clean_process_guarded \
+                gradle_daemon_running \
+                "Gradle" \
+                "Gradle build cache" \
+                "$HOME/.gradle/caches/build-cache-"*/* \
+                "Gradle build cache" || return 0
+            _dev_safe_clean_process_guarded \
+                gradle_daemon_running \
+                "Gradle" \
+                "Gradle notifications cache" \
+                "$HOME/.gradle/notifications"/* \
+                "Gradle notifications cache" || return 0
             _dev_safe_clean_process_guarded \
                 gradle_daemon_running \
                 "Gradle" \
                 "Gradle daemon/workers" \
-                ~/.gradle/daemon/* \
-                ~/.gradle/workers/* \
-                "Gradle daemon/workers" || true
+                "$HOME/.gradle/daemon"/* \
+                "$HOME/.gradle/workers"/* \
+                "Gradle daemon/workers" || return 0
         else
-            echo -e "  ${GRAY}${ICON_WARNING}${NC} Gradle daemon/workers · skipped (process state unknown)"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Gradle targets · skipped (process state unknown)"
             note_activity
         fi
     fi
