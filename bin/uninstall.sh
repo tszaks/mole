@@ -1266,6 +1266,27 @@ match_apps_by_name() {
     selected_apps=()
     local -a matched_indices=()
 
+    # `mo uninstall Tor Browser` arrives as two words. Matching each word
+    # alone sent "Tor" into a substring hit on WebSTORm while the app the
+    # user actually named sat in the list (#1365). When the words joined
+    # with spaces exactly match an installed app's display or directory
+    # name, that is the query; only otherwise does each word stand alone.
+    if [[ ${#search_terms[@]} -gt 1 ]]; then
+        local joined_lower
+        joined_lower=$(echo "$*" | tr '[:upper:]' '[:lower:]')
+        local joined_app
+        for joined_app in "${apps_data[@]}"; do
+            IFS='|' read -r epoch app_path app_name bundle_id size last_used size_kb <<< "$joined_app"
+            local joined_name_lower joined_dir_lower
+            joined_name_lower=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+            joined_dir_lower=$(basename "$app_path" .app | tr '[:upper:]' '[:lower:]')
+            if [[ "$joined_name_lower" == "$joined_lower" || "$joined_dir_lower" == "$joined_lower" ]]; then
+                selected_apps=("$joined_app")
+                return 0
+            fi
+        done
+    fi
+
     for search_term in "${search_terms[@]}"; do
         local search_lower
         search_lower=$(echo "$search_term" | tr '[:upper:]' '[:lower:]')

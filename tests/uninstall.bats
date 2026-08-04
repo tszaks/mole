@@ -3773,3 +3773,51 @@ EOF
         return 1
     }
 }
+
+@test "match_apps_by_name joins multi-word args into one exact app name (#1365)" {
+    # `mo uninstall Tor Browser` arrives as two words; "Tor" alone
+    # substring-matched WebSTORm. The joined words exactly name an
+    # installed app, so that must be the single match.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1000|$HOME/Applications/WebStorm.app|WebStorm|com.jetbrains.WebStorm|3.06 GB|1000000|3208960"
+	"1001|$HOME/Applications/Tor Browser.app|Tor Browser|org.torproject.torbrowser|501.8 MB|1000001|513843"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "Tor" "Browser"
+echo "count=${#selected_apps[@]}"
+echo "match=${selected_apps[0]}"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"count=1"* ]] || return 1
+    [[ "$output" == *"Tor Browser"* ]] || return 1
+    [[ "$output" != *"WebStorm"* ]] || return 1
+}
+
+@test "match_apps_by_name keeps per-word matching when the joined form names nothing" {
+    # Two genuinely separate app queries must keep working after the
+    # joined-form check: "TestApp2 TestApp3" names no single app.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1000|$HOME/Applications/TestApp2.app|TestApp2|com.example.TestApp2|500 MB|1000001|512000"
+	"1001|$HOME/Applications/TestApp3.app|TestApp3|com.example.TestApp3|300 MB|1000002|307200"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "TestApp2" "TestApp3"
+echo "count=${#selected_apps[@]}"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"count=2"* ]] || return 1
+}
