@@ -1933,8 +1933,12 @@ perform_cleanup() {
         done < <(emit_free_space_summary "$initial_free_space_kb")
     fi
 
+    # Caches of running apps are deferred silently: skipping them is Mole's
+    # ordinary behavior, not news, and for always-on tools (Codex, browsers)
+    # a summary line here appeared on every single run. Preview still lists
+    # what would be cleaned, and the ledger stays visible under --debug.
     if [[ ${#DEFERRED_CLEANUP_FAMILIES[@]} -gt 0 ]]; then
-        summary_details+=("Skipped while active: ${GRAY}$(format_deferred_cleanup_families)${NC}")
+        debug_log "Deferred while active: $(format_deferred_cleanup_families)"
     fi
 
     if [[ "$DRY_RUN" == "true" &&

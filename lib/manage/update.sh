@@ -906,23 +906,27 @@ show_version() {
     local channel
     channel=$(get_install_channel)
 
-    printf '\nMole version %s\n' "$VERSION"
+    # A reader like `mo --version | head -1` closes the pipe after the first
+    # line; the remaining writes then fail with SIGPIPE and bash prints a
+    # "write error: Broken pipe" the user never asked for. A closed reader
+    # means "stop", so stop quietly.
+    printf '\nMole version %s\n' "$VERSION" 2> /dev/null || return 0
     if [[ "$channel" == "nightly" ]]; then
         local commit
         commit=$(get_install_commit)
         if [[ -n "$commit" ]]; then
-            printf 'Channel: Nightly (%s)\n' "$commit"
+            printf 'Channel: Nightly (%s)\n' "$commit" 2> /dev/null || return 0
         else
-            printf 'Channel: Nightly\n'
+            printf 'Channel: Nightly\n' 2> /dev/null || return 0
         fi
     fi
-    printf 'macOS: %s\n' "$os_ver"
-    printf 'Architecture: %s\n' "$arch"
-    printf 'Kernel: %s\n' "$kernel"
-    printf 'SIP: %s\n' "$sip_status"
-    printf 'Disk Free: %s\n' "$disk_free"
-    printf 'Install: %s\n' "$install_method"
-    printf 'Shell: %s\n\n' "${SHELL:-Unknown}"
+    printf 'macOS: %s\n' "$os_ver" 2> /dev/null || return 0
+    printf 'Architecture: %s\n' "$arch" 2> /dev/null || return 0
+    printf 'Kernel: %s\n' "$kernel" 2> /dev/null || return 0
+    printf 'SIP: %s\n' "$sip_status" 2> /dev/null || return 0
+    printf 'Disk Free: %s\n' "$disk_free" 2> /dev/null || return 0
+    printf 'Install: %s\n' "$install_method" 2> /dev/null || return 0
+    printf 'Shell: %s\n\n' "${SHELL:-Unknown}" 2> /dev/null || return 0
 }
 
 show_help() {
