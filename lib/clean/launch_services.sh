@@ -107,7 +107,13 @@ prefetch_stale_launch_services_scan() {
     [[ -x "$lsregister" ]] || return 0
     mkdir -p "$(dirname "$MOLE_LS_STALE_CACHE_FILE")" 2> /dev/null || return 0
     (
-        local partial="$MOLE_LS_STALE_CACHE_FILE.partial.$$"
+        # mktemp in the destination directory, then verify the path is the
+        # regular file we just made: a predictable partial name could be
+        # pre-planted as a symlink and turn this background redirect into a
+        # write through it. Same-directory keeps the final mv atomic.
+        local partial=""
+        partial=$(mktemp "$MOLE_LS_STALE_CACHE_FILE.partial.XXXXXX") || exit 0
+        [[ -f "$partial" && ! -L "$partial" ]] || exit 0
         if collect_stale_launch_services_app_paths "$lsregister" \
             "$((MOLE_TIMEOUT_DISK_VERIFY_SEC * 2))" > "$partial"; then
             mv -f "$partial" "$MOLE_LS_STALE_CACHE_FILE"
