@@ -1270,21 +1270,46 @@ match_apps_by_name() {
     # alone sent "Tor" into a substring hit on WebSTORm while the app the
     # user actually named sat in the list (#1365). When the words joined
     # with spaces exactly match an installed app's display or directory
-    # name, that is the query; only otherwise does each word stand alone.
+    # name, that is the query, UNLESS every word already exactly names its
+    # own installed app: with Foo.app, Bar.app, and "Foo Bar.app" all
+    # present, `mo uninstall Foo Bar` keeps its original two-app meaning
+    # rather than silently collapsing into the third.
     if [[ ${#search_terms[@]} -gt 1 ]]; then
-        local joined_lower
-        joined_lower=$(echo "$*" | tr '[:upper:]' '[:lower:]')
-        local joined_app
-        for joined_app in "${apps_data[@]}"; do
-            IFS='|' read -r epoch app_path app_name bundle_id size last_used size_kb <<< "$joined_app"
-            local joined_name_lower joined_dir_lower
-            joined_name_lower=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
-            joined_dir_lower=$(basename "$app_path" .app | tr '[:upper:]' '[:lower:]')
-            if [[ "$joined_name_lower" == "$joined_lower" || "$joined_dir_lower" == "$joined_lower" ]]; then
-                selected_apps=("$joined_app")
-                return 0
+        local every_word_exact=true
+        local word word_lower word_app word_hit
+        for word in "${search_terms[@]}"; do
+            word_lower=$(echo "$word" | tr '[:upper:]' '[:lower:]')
+            word_hit=false
+            for word_app in "${apps_data[@]}"; do
+                IFS='|' read -r epoch app_path app_name bundle_id size last_used size_kb <<< "$word_app"
+                local word_name_lower word_dir_lower
+                word_name_lower=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+                word_dir_lower=$(basename "$app_path" .app | tr '[:upper:]' '[:lower:]')
+                if [[ "$word_name_lower" == "$word_lower" || "$word_dir_lower" == "$word_lower" ]]; then
+                    word_hit=true
+                    break
+                fi
+            done
+            if [[ "$word_hit" == "false" ]]; then
+                every_word_exact=false
+                break
             fi
         done
+        if [[ "$every_word_exact" == "false" ]]; then
+            local joined_lower
+            joined_lower=$(echo "$*" | tr '[:upper:]' '[:lower:]')
+            local joined_app
+            for joined_app in "${apps_data[@]}"; do
+                IFS='|' read -r epoch app_path app_name bundle_id size last_used size_kb <<< "$joined_app"
+                local joined_name_lower joined_dir_lower
+                joined_name_lower=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
+                joined_dir_lower=$(basename "$app_path" .app | tr '[:upper:]' '[:lower:]')
+                if [[ "$joined_name_lower" == "$joined_lower" || "$joined_dir_lower" == "$joined_lower" ]]; then
+                    selected_apps=("$joined_app")
+                    return 0
+                fi
+            done
+        fi
     fi
 
     for search_term in "${search_terms[@]}"; do

@@ -3821,3 +3821,30 @@ EOF
     }
     [[ "$output" == *"count=2"* ]] || return 1
 }
+
+@test "match_apps_by_name keeps two-app meaning when every word exactly names its own app" {
+    # With Foo.app, Bar.app, and "Foo Bar.app" all installed, the joined
+    # interpretation must not silently swallow the original two-app query.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+selected_apps=()
+apps_data=(
+	"1000|$HOME/Applications/Foo.app|Foo|com.example.foo|100 MB|1000000|102400"
+	"1001|$HOME/Applications/Bar.app|Bar|com.example.bar|100 MB|1000001|102400"
+	"1002|$HOME/Applications/Foo Bar.app|Foo Bar|com.example.foobar|100 MB|1000002|102400"
+)
+source "$PROJECT_ROOT/tests/test_match_apps_helper.sh"
+match_apps_by_name "Foo" "Bar"
+echo "count=${#selected_apps[@]}"
+printf 'sel=%s\n' "${selected_apps[@]}"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"count=2"* ]] || return 1
+    [[ "$output" == *"|Foo|"* ]] || return 1
+    [[ "$output" == *"|Bar|"* ]] || return 1
+    [[ "$output" != *"Foo Bar"* ]] || return 1
+}
