@@ -50,7 +50,7 @@ echo "RC=$?"
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]] || return 1
+    [[ "$output" == *"Mail Downloads · skipped (sizing unavailable)"* ]] || return 1
     [[ "$output" == *"RC=0"* ]] || return 1
 }
 
@@ -85,7 +85,7 @@ EOF
 
     [ "$status" -eq 0 ] || return 1
     [[ "$output" == *"REMOVE:$HOME/Library/Mail Downloads/old.bin"* ]] || return 1
-    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]] || return 1
+    [[ "$output" == *"Mail Downloads · skipped (sizing unavailable)"* ]] || return 1
     [[ "$output" == *"RC=0"* ]] || return 1
 }
 
@@ -116,7 +116,7 @@ echo "RC=$?"
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Mail attachment sizing timed out, skipping"* ]] || return 1
+    [[ "$output" == *"Mail attachment sizing failed"* ]] || return 1
     [[ "$output" != *"REMOVE:"* ]] || return 1
     [[ "$output" == *"RC=0"* ]] || return 1
 }
@@ -138,7 +138,7 @@ echo "RC=$?"
 EOF
 
     [ "$status" -eq 130 ] || return 1
-    [[ "$output" != *"skipped (sizing timed out)"* ]] || return 1
+    [[ "$output" != *"skipped (sizing unavailable)"* ]] || return 1
 }
 
 @test "mo clean completes when the Mail Downloads du stalls (#1344)" {
@@ -185,5 +185,29 @@ EOF
 
     [ "$status" -eq 0 ] || return 1
     [[ "$output" == *"Cleanup complete"* ]] || return 1
-    [[ "$output" == *"Mail Downloads · skipped (sizing timed out)"* ]] || return 1
+    [[ "$output" == *"Mail Downloads · skipped (sizing unavailable)"* ]] || return 1
+}
+
+@test "mail dir sizing hard failure (1) skips the target and keeps the run going (#1366)" {
+    # On Intel with macOS 26 the protected Mail container refuses du
+    # outright: rc=1 immediately, no timeout. That must skip exactly like
+    # the 124 case instead of cancelling the whole run.
+    mkdir -p "$HOME/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+pgrep() { return 1; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+get_path_size_kb() { return 1; }
+_clean_mail_downloads
+echo "RC=$?"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Mail Downloads · skipped (sizing unavailable)"* ]] || return 1
+    [[ "$output" == *"RC=0"* ]] || return 1
 }
