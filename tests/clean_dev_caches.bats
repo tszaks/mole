@@ -1606,10 +1606,11 @@ EOF
 
 _codex_version_plist() {
 	mkdir -p "$(dirname "$1")"
+	local bundle_id="${3:-com.openai.codex}"
 	cat > "$1" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>CFBundleVersion</key><string>$2</string></dict></plist>
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>$bundle_id</string><key>CFBundleVersion</key><string>$2</string></dict></plist>
 PLIST
 }
 
@@ -1703,4 +1704,68 @@ EOF
 		return 1
 	}
 	[[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
+}
+
+@test "codex staging refuses version supersession for a foreign staged bundle id" {
+	# A lower version number on a DIFFERENT app proves nothing about
+	# Codex's staging; identity gates the comparison, so the entry falls
+	# back to the age rule and a fresh one stays.
+	local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+	rm -rf "$staging_root"
+	mkdir -p "$staging_root/foreign/Other.app/Contents"
+	_codex_version_plist "$staging_root/foreign/Other.app/Contents/Info.plist" "1" "com.example.other"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 1; }
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+note_activity() { :; }
+_codex_installed_build_version() { echo "5848"; }
+clean_codex_desktop_staging
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
+}
+
+@test "codex installed-version resolution fails on two copies that disagree" {
+	# Both copies share the one staging cache, so a staged build may be the
+	# pending update for either. Disagreeing installed versions make
+	# ownership ambiguous and must resolve to the age rule, never to the
+	# first copy found.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+run_with_timeout() { shift; "$@"; }
+mdfind() { return 1; }
+_codex_app_build_version() {
+    case "$1" in
+        "/Applications/Codex.app") echo "5900" ;;
+        "$HOME/Applications/Codex.app") echo "5800" ;;
+        *) return 1 ;;
+    esac
+}
+mkdir -p "/tmp/nonexistent-guard" 2>/dev/null || true
+if _codex_installed_build_version; then
+    echo "RESOLVED_DESPITE_CONFLICT"
+else
+    echo "AMBIGUOUS_FALLS_BACK"
+fi
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"AMBIGUOUS_FALLS_BACK"* ]] || return 1
+	[[ "$output" != *"RESOLVED_DESPITE_CONFLICT"* ]] || return 1
 }

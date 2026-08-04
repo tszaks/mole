@@ -3378,38 +3378,55 @@ _codex_staging_safe_clean_guarded() {
 # single-probe rule: the fixed install paths first, a bounded mdfind second,
 # both verified against the exact bundle id, and a strict bounded-decimal
 # gate so prose or error text can never win a version comparison.
-_codex_installed_build_version() {
-    local app_path="" candidate cand_id
-    for candidate in "/Applications/Codex.app" "$HOME/Applications/Codex.app"; do
-        [[ -d "$candidate" ]] || continue
-        cand_id=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-            /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
-            "$candidate/Contents/Info.plist" 2> /dev/null) || continue
-        [[ "$cand_id" == "com.openai.codex" ]] || continue
-        app_path="$candidate"
-        break
-    done
-    if [[ -z "$app_path" ]]; then
-        local mdfind_out="" line
-        mdfind_out=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" mdfind \
-            "kMDItemCFBundleIdentifier == 'com.openai.codex'" 2> /dev/null) || return 1
-        while IFS= read -r line; do
-            [[ -d "$line" && "$line" == *.app ]] || continue
-            cand_id=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-                /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
-                "$line/Contents/Info.plist" 2> /dev/null) || continue
-            [[ "$cand_id" == "com.openai.codex" ]] || continue
-            app_path="$line"
-            break
-        done <<< "$mdfind_out"
-    fi
-    [[ -n "$app_path" ]] || return 1
+# Build number of one verified Codex install, or failure. Identity and
+# version both come from the same plist, both gated.
+_codex_app_build_version() {
+    local candidate="$1"
+    [[ -d "$candidate" ]] || return 1
+    local cand_id=""
+    cand_id=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+        "$candidate/Contents/Info.plist" 2> /dev/null) || return 1
+    [[ "$cand_id" == "com.openai.codex" ]] || return 1
     local build=""
     build=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
         /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" \
-        "$app_path/Contents/Info.plist" 2> /dev/null) || return 1
+        "$candidate/Contents/Info.plist" 2> /dev/null) || return 1
     [[ "$build" =~ ^[0-9]+$ && ${#build} -le 10 ]] || return 1
     printf '%s\n' "$build"
+}
+
+_codex_installed_build_version() {
+    # All copies share one bundle id and therefore one staging cache, so a
+    # staged build can belong to any of them. Supersession is only provable
+    # against a UNIQUE installed version: two copies disagreeing on their
+    # build make ownership ambiguous, and the caller falls back to the age
+    # rule rather than deleting what may be the other copy's pending update.
+    local resolved_build="" candidate build
+    for candidate in "/Applications/Codex.app" "$HOME/Applications/Codex.app"; do
+        build=$(_codex_app_build_version "$candidate") || continue
+        if [[ -n "$resolved_build" && "$resolved_build" != "$build" ]]; then
+            return 1
+        fi
+        resolved_build="$build"
+    done
+    local mdfind_out="" line
+    mdfind_out=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" mdfind \
+        "kMDItemCFBundleIdentifier == 'com.openai.codex'" 2> /dev/null) || mdfind_out=""
+    while IFS= read -r line; do
+        [[ -d "$line" && "$line" == *.app ]] || continue
+        case "$line" in
+            "/Applications/Codex.app" | "$HOME/Applications/Codex.app") continue ;;
+            "$HOME/Library/Caches/"*) continue ;;
+        esac
+        build=$(_codex_app_build_version "$line") || continue
+        if [[ -n "$resolved_build" && "$resolved_build" != "$build" ]]; then
+            return 1
+        fi
+        resolved_build="$build"
+    done <<< "$mdfind_out"
+    [[ -n "$resolved_build" ]] || return 1
+    printf '%s\n' "$resolved_build"
 }
 
 # Build number of the app staged inside one first-level Installation entry.
@@ -3420,10 +3437,10 @@ _codex_staged_build_version() {
     local staged_build="" staged_app build
     for staged_app in "$entry"/*.app; do
         [[ -d "$staged_app" ]] || continue
-        build=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
-            /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" \
-            "$staged_app/Contents/Info.plist" 2> /dev/null) || return 1
-        [[ "$build" =~ ^[0-9]+$ && ${#build} -le 10 ]] || return 1
+        # The staged app must prove the same identity as the installed one:
+        # a version comparison across two different apps authorizes nothing,
+        # and _codex_app_build_version gates id and version from one plist.
+        build=$(_codex_app_build_version "$staged_app") || return 1
         if [[ -n "$staged_build" && "$staged_build" != "$build" ]]; then
             return 1
         fi
