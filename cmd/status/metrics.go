@@ -155,6 +155,9 @@ type DiskStatus struct {
 	Fstype      string  `json:"fstype"`
 	External    bool    `json:"external"`
 	SmartStatus string  `json:"smart_status"`
+	// Purgeable is the reclaimable purgeable bytes Finder counts as free on
+	// macOS APFS. Zero when unknown.
+	Purgeable uint64 `json:"purgeable,omitempty"`
 }
 
 type NetworkStatus struct {
