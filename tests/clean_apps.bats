@@ -2660,3 +2660,52 @@ EOF
 		return 1
 	}
 }
+
+@test "installed-app scan skips an iOS app with a dangling WrappedBundle symlink" {
+	# AudioCopy.app has no Contents/, a WrappedBundle symlink into a Wrapper/
+	# that does not exist, so no readable plist anywhere. It owns no
+	# bundle-id-named data, so skipping it invents no orphan; before this it
+	# failed the whole App-leftovers scan closed on that machine.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << 'EOF'
+set -uo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+apps="$HOME/Applications"
+rm -rf "$apps"
+mkdir -p "$apps/Good.app/Contents" "$apps/AudioCopy.app"
+ln -s "Wrapper/AudioCopy.app" "$apps/AudioCopy.app/WrappedBundle"
+printf '%s' '<?xml version="1.0"?><!DOCTYPE plist><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.good</string></dict></plist>' > "$apps/Good.app/Contents/Info.plist"
+debug_log() { :; }
+scan_installed_apps "$HOME/installed.txt" || { echo "SCAN_FAILED"; exit 1; }
+grep -Fxq "com.example.good" "$HOME/installed.txt" || { echo "MISSING_GOOD"; exit 1; }
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+}
+
+@test "installed-app scan still fails closed on a plist-less app with no dangling wrapper" {
+	# The dangling-symlink skip is narrow: an app with no plist and no
+	# WrappedBundle symlink at all keeps failing the scan closed, since its
+	# identity is genuinely unknown rather than provably absent.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << 'EOF'
+set -uo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+rm -f "$HOME/.cache/mole/installed_apps_cache"
+apps="$HOME/Applications"
+rm -rf "$apps"
+mkdir -p "$apps/Good.app/Contents" "$apps/Mystery.app/Contents"
+printf '%s' '<?xml version="1.0"?><!DOCTYPE plist><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.good</string></dict></plist>' > "$apps/Good.app/Contents/Info.plist"
+debug_log() { :; }
+if scan_installed_apps "$HOME/installed.txt"; then
+  echo "SCAN_SUCCEEDED_UNEXPECTEDLY"; exit 1
+fi
+EOF
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+}

@@ -253,6 +253,18 @@ scan_installed_apps() {
                     if [[ -f "$plist_path" ]] && /usr/bin/plutil -lint "$plist_path" > /dev/null 2>&1; then
                         continue
                     fi
+                    # An iOS wrapper whose WrappedBundle symlink is dangling has
+                    # its entire payload, plist included, missing: no identity can
+                    # be read anywhere, so like a plist that parses with no id it
+                    # cannot own bundle-id-named leftovers and skipping it invents
+                    # no orphan. Deliberately narrow: only a dangling WrappedBundle
+                    # symlink paired with no plist qualifies, so an app with a
+                    # merely unreadable Info.plist still fails the scan closed,
+                    # where the id may exist and simply be unreadable.
+                    if [[ ! -f "$plist_path" && -L "$app_path/WrappedBundle" &&
+                        ! -e "$app_path/WrappedBundle" ]]; then
+                        continue
+                    fi
                     printf '%s\n' "$app_path" >> "$scan_tmp_dir/scan_failures.list"
                     exit 1
                 fi
