@@ -352,6 +352,18 @@ install_lock_reauthenticate() {
         return 1
     fi
     [[ -r /dev/tty && -w /dev/tty ]] || return 1
+    # Forensics for a field report of a second password prompt that keeps
+    # recurring with a live keepalive: record what the non-interactive probe
+    # actually said before we ask again. "a password is required" means the
+    # timestamp really lapsed; anything else is a different failure wearing
+    # the same prompt. One line per event, quiet on every healthy update.
+    if mkdir -p "$HOME/.cache/mole" 2> /dev/null; then
+        {
+            printf '%s installer reauth, sudo -n said: ' "$(date '+%F %T' 2> /dev/null || echo '?')"
+            sudo -n true 2>&1 || true
+            printf '\n'
+        } >> "$HOME/.cache/mole/auth_diag.log" 2> /dev/null || true
+    fi
     # shellcheck disable=SC2024 # sudo's own prompt belongs on the same terminal.
     sudo -v < /dev/tty > /dev/tty 2> /dev/tty
 }
