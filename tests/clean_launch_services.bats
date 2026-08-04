@@ -216,18 +216,17 @@ EOF
     grep -q 'arg=-dump' "$log_file"
 }
 
-@test "a completed prefetch is consumed without a second lsregister dump" {
+@test "a fresh stale-scan cache is consumed without a second lsregister dump" {
     local lsregister="$TEST_ROOT/bin/lsregister"
     local log_file="$TEST_ROOT/lsregister.log"
     local missing_app="$TEST_ROOT/Missing App.app"
-    local prefetch_dir="$TEST_ROOT/prefetch"
     write_lsregister_stub "$lsregister"
-    mkdir -p "$prefetch_dir"
-    printf '%s\n' "$missing_app" > "$prefetch_dir/candidates"
+    mkdir -p "$HOME/.cache/mole"
+    printf '%s\n' "$missing_app" > "$HOME/.cache/mole/ls_stale_candidates"
     : > "$log_file"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" \
-        LSREGISTER_LOG="$log_file" PREFETCH_DIR="$prefetch_dir" /bin/bash --noprofile --norc <<'EOF'
+        LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/launch_services.sh"
@@ -235,8 +234,6 @@ get_lsregister_path() { printf '%s\n' "$LSREGISTER_BIN"; }
 run_with_timeout() { shift; "$@"; }
 note_activity() { :; }
 DRY_RUN=true
-MOLE_LS_PREFETCH_DIR="$PREFETCH_DIR"
-MOLE_LS_PREFETCH_PID=99999
 clean_stale_launch_services_registrations
 EOF
 
@@ -245,23 +242,21 @@ EOF
         return 1
     }
     [[ "$output" == *"Missing App.app"* ]] || return 1
-    # The whole point of the prefetch: no second dump at section time.
+    # The whole point of the cache: no second dump at section time.
     if grep -q 'arg=-dump' "$log_file"; then
-        echo "second dump ran despite prefetch"
+        echo "second dump ran despite fresh cache"
         return 1
     fi
 }
 
-@test "an incomplete prefetch skips the section quietly instead of waiting" {
+@test "no fresh cache and a finished prefetch skip the section quietly" {
     local lsregister="$TEST_ROOT/bin/lsregister"
     local log_file="$TEST_ROOT/lsregister.log"
-    local prefetch_dir="$TEST_ROOT/prefetch"
     write_lsregister_stub "$lsregister"
-    mkdir -p "$prefetch_dir"
     : > "$log_file"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" \
-        LSREGISTER_LOG="$log_file" PREFETCH_DIR="$prefetch_dir" /bin/bash --noprofile --norc <<'EOF'
+        LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/launch_services.sh"
@@ -270,7 +265,6 @@ run_with_timeout() { shift; "$@"; }
 note_activity() { :; }
 debug_log() { printf 'DEBUG:%s\n' "$*"; }
 DRY_RUN=true
-MOLE_LS_PREFETCH_DIR="$PREFETCH_DIR"
 MOLE_LS_PREFETCH_PID=99999
 clean_stale_launch_services_registrations
 echo "RC=$?"
@@ -280,10 +274,43 @@ EOF
         echo "$output"
         return 1
     }
-    [[ "$output" == *"prefetch incomplete, skipping"* ]] || return 1
+    [[ "$output" == *"no fresh result yet, skipping this run"* ]] || return 1
     [[ "$output" == *"RC=0"* ]] || return 1
     if grep -q 'arg=-dump' "$log_file"; then
         echo "fell back to an inline dump"
         return 1
     fi
+}
+
+@test "an expired stale-scan cache is not consumed" {
+    local lsregister="$TEST_ROOT/bin/lsregister"
+    local log_file="$TEST_ROOT/lsregister.log"
+    local missing_app="$TEST_ROOT/Missing App.app"
+    write_lsregister_stub "$lsregister"
+    mkdir -p "$HOME/.cache/mole"
+    printf '%s\n' "$missing_app" > "$HOME/.cache/mole/ls_stale_candidates"
+    touch -t 202001010000 "$HOME/.cache/mole/ls_stale_candidates"
+    : > "$log_file"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" \
+        LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/launch_services.sh"
+get_lsregister_path() { printf '%s\n' "$LSREGISTER_BIN"; }
+run_with_timeout() { shift; "$@"; }
+note_activity() { :; }
+debug_log() { printf 'DEBUG:%s\n' "$*"; }
+DRY_RUN=true
+MOLE_LS_PREFETCH_PID=99999
+clean_stale_launch_services_registrations
+echo "RC=$?"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"no fresh result yet, skipping this run"* ]] || return 1
+    [[ "$output" != *"Missing App.app"* ]] || return 1
 }
