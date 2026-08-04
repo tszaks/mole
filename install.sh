@@ -1603,9 +1603,32 @@ print_usage_summary() {
     echo ""
 }
 
+# Temporary field diagnostic for a recurring second password prompt: the
+# handed-over sudo ticket dies within ~30s of pre-auth on one machine, and
+# the moment of death is the missing fact. Sample the ticket every 5s for a
+# minute and timestamp each state so the death can be aligned against the
+# keepalive's own trace lines. Runs only for handed-over sessions (updates),
+# self-terminates, and will be removed once the case closes.
+start_sudo_ticket_watchdog() {
+    [[ "${MOLE_ASSUME_SUDO_AUTH:-0}" == "1" ]] || return 0
+    [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]] && return 0
+    mkdir -p "$HOME/.cache/mole" 2> /dev/null || return 0
+    (
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            ticket_state="alive"
+            sudo -n true 2> /dev/null || ticket_state="dead"
+            printf '%s installer ticket watchdog: %s\n' \
+                "$(date '+%F %T' 2> /dev/null || echo '?')" "$ticket_state" \
+                >> "$HOME/.cache/mole/auth_diag.log" 2> /dev/null || true
+            sleep 5
+        done
+    ) < /dev/null > /dev/null 2>&1 &
+}
+
 # Main install/update flows
 perform_install() {
     resolve_source_dir
+    start_sudo_ticket_watchdog
     local source_version
     source_version="$(get_source_version || true)"
 
@@ -1649,6 +1672,7 @@ perform_install() {
 
 perform_update() {
     check_requirements
+    start_sudo_ticket_watchdog
 
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
         resolve_source_dir 2> /dev/null || true
