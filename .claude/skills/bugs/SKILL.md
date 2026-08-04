@@ -56,6 +56,7 @@ Every "is this app installed" and "is this service active" question in this repo
 - `mdfind` alone misses Homebrew casks with no metadata importer and never indexes SMJobBless helpers embedded under `Contents/Library/LaunchServices` (`6a055de4`).
 - `command -v` plus a LaunchAgents grep only covers CLI-style owners, so `~/.bridge` was flagged orphan while Proton Mail Bridge.app was installed (`28ee58c9`).
 - Any UP `utun*` interface read as "VPN active" flagged every Mac with iCloud Private Relay (`37a446c9`).
+- A probe can carry side effects that outweigh its answer: `brew list mole` asked whether Homebrew owns the install, but brew's entry point resets the user's sudo timestamp, so the probe executed the pre-authed ticket and every update paid a second password prompt (`cb4a3d66`). When a filesystem fact answers the question (the Cellar directory), never run the tool.
 
 ```bash
 command grep -rn 'mdfind' lib/ bin/ | command grep -v run_with_timeout

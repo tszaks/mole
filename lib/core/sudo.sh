@@ -249,47 +249,16 @@ _start_sudo_keepalive() {
         # This prevents immediately triggering Touch ID again
         sleep 2
 
-        # Forensics shared with the installer's reauth path: every failed
-        # refresh leaves one line, so a later second password prompt can be
-        # matched against what the keepalive was doing at that moment.
-        local diag_log="$HOME/.cache/mole/auth_diag.log"
-        mkdir -p "$HOME/.cache/mole" 2> /dev/null || diag_log=""
-
-        # A start line and a sparse success heartbeat disambiguate the empty
-        # log: no start line means the keepalive never ran, a start line with
-        # no heartbeats means it died early, and heartbeats right up to a
-        # reauth event mean the refreshes succeed yet the ticket lapses
-        # anyway, which points at timestamp scope rather than at this loop.
-        if [[ -n "$diag_log" ]]; then
-            printf '%s keepalive started\n' "$(date '+%F %T' 2> /dev/null || echo '?')" \
-                >> "$diag_log" 2> /dev/null || true
-        fi
-        local refresh_ok_count=0
         while true; do
-            local refresh_rc=0
-            local refresh_err=""
-            refresh_err=$(sudo -n -v 2>&1) || refresh_rc=$?
-            if [[ $refresh_rc -ne 0 ]]; then
+            if ! sudo -n -v 2> /dev/null; then
                 # A failed refresh is harmless and often transient (authd
                 # busy, machine waking). Giving up after a few misses is what
                 # let the timestamp lapse minutes into a long install and
                 # forced a second authentication prompt; `-n` never prompts,
                 # so retrying costs nothing. Exit only with the parent.
-                if [[ -n "$diag_log" ]]; then
-                    printf '%s keepalive refresh rc=%s: %s\n' \
-                        "$(date '+%F %T' 2> /dev/null || echo '?')" \
-                        "$refresh_rc" "${refresh_err:-no output}" \
-                        >> "$diag_log" 2> /dev/null || true
-                fi
                 kill -0 "$$" 2> /dev/null || exit
                 sleep 5
                 continue
-            fi
-            refresh_ok_count=$((refresh_ok_count + 1))
-            if [[ -n "$diag_log" && $((refresh_ok_count % 10)) -eq 0 ]]; then
-                printf '%s keepalive heartbeat, %s refreshes ok\n' \
-                    "$(date '+%F %T' 2> /dev/null || echo '?')" "$refresh_ok_count" \
-                    >> "$diag_log" 2> /dev/null || true
             fi
             sleep 30
             kill -0 "$$" 2> /dev/null || exit

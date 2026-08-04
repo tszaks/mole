@@ -352,18 +352,6 @@ install_lock_reauthenticate() {
         return 1
     fi
     [[ -r /dev/tty && -w /dev/tty ]] || return 1
-    # Forensics for a field report of a second password prompt that keeps
-    # recurring with a live keepalive: record what the non-interactive probe
-    # actually said before we ask again. "a password is required" means the
-    # timestamp really lapsed; anything else is a different failure wearing
-    # the same prompt. One line per event, quiet on every healthy update.
-    if mkdir -p "$HOME/.cache/mole" 2> /dev/null; then
-        {
-            printf '%s installer reauth, sudo -n said: ' "$(date '+%F %T' 2> /dev/null || echo '?')"
-            sudo -n true 2>&1 || true
-            printf '\n'
-        } >> "$HOME/.cache/mole/auth_diag.log" 2> /dev/null || true
-    fi
     # shellcheck disable=SC2024 # sudo's own prompt belongs on the same terminal.
     sudo -v < /dev/tty > /dev/tty 2> /dev/tty
 }
@@ -1607,8 +1595,8 @@ print_usage_summary() {
 # never by running `brew`: the brew entry point resets the user's sudo
 # timestamp as a security measure, and invoking it after the update flow's
 # pre-authentication is exactly what killed the handed-over ticket within
-# five seconds and forced a second password prompt on every update (the
-# ticket watchdog caught it dying between installer start and the lock).
+# five seconds and forced a second password prompt on every update, with
+# the ticket dying between installer start and the first privileged step.
 homebrew_owns_mole() {
     local brew_prefix
     for brew_prefix in "${HOMEBREW_PREFIX:-}" /opt/homebrew /usr/local; do
@@ -1617,32 +1605,9 @@ homebrew_owns_mole() {
     return 1
 }
 
-# Temporary field diagnostic for a recurring second password prompt: the
-# handed-over sudo ticket dies within ~30s of pre-auth on one machine, and
-# the moment of death is the missing fact. Sample the ticket every 5s for a
-# minute and timestamp each state so the death can be aligned against the
-# keepalive's own trace lines. Runs only for handed-over sessions (updates),
-# self-terminates, and will be removed once the case closes.
-start_sudo_ticket_watchdog() {
-    [[ "${MOLE_ASSUME_SUDO_AUTH:-0}" == "1" ]] || return 0
-    [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]] && return 0
-    mkdir -p "$HOME/.cache/mole" 2> /dev/null || return 0
-    (
-        for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            ticket_state="alive"
-            sudo -n true 2> /dev/null || ticket_state="dead"
-            printf '%s installer ticket watchdog: %s\n' \
-                "$(date '+%F %T' 2> /dev/null || echo '?')" "$ticket_state" \
-                >> "$HOME/.cache/mole/auth_diag.log" 2> /dev/null || true
-            sleep 5
-        done
-    ) < /dev/null > /dev/null 2>&1 &
-}
-
 # Main install/update flows
 perform_install() {
     resolve_source_dir
-    start_sudo_ticket_watchdog
     local source_version
     source_version="$(get_source_version || true)"
 
@@ -1686,7 +1651,6 @@ perform_install() {
 
 perform_update() {
     check_requirements
-    start_sudo_ticket_watchdog
 
     if homebrew_owns_mole; then
         resolve_source_dir 2> /dev/null || true
