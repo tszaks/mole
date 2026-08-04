@@ -1162,7 +1162,7 @@ check_requirements() {
         exit 1
     fi
 
-    if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
+    if homebrew_owns_mole; then
         local mole_path
         mole_path=$(command -v mole 2> /dev/null || true)
         local is_homebrew_binary=false
@@ -1603,6 +1603,20 @@ print_usage_summary() {
     echo ""
 }
 
+# Whether Homebrew owns a mole install, decided from the Cellar on disk and
+# never by running `brew`: the brew entry point resets the user's sudo
+# timestamp as a security measure, and invoking it after the update flow's
+# pre-authentication is exactly what killed the handed-over ticket within
+# five seconds and forced a second password prompt on every update (the
+# ticket watchdog caught it dying between installer start and the lock).
+homebrew_owns_mole() {
+    local brew_prefix
+    for brew_prefix in "${HOMEBREW_PREFIX:-}" /opt/homebrew /usr/local; do
+        [[ -n "$brew_prefix" && -d "$brew_prefix/Cellar/mole" ]] && return 0
+    done
+    return 1
+}
+
 # Temporary field diagnostic for a recurring second password prompt: the
 # handed-over sudo ticket dies within ~30s of pre-auth on one machine, and
 # the moment of death is the missing fact. Sample the ticket every 5s for a
@@ -1674,7 +1688,7 @@ perform_update() {
     check_requirements
     start_sudo_ticket_watchdog
 
-    if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
+    if homebrew_owns_mole; then
         resolve_source_dir 2> /dev/null || true
         local current_version
         current_version=$(get_installed_version || echo "unknown")

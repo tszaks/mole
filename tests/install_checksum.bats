@@ -1231,3 +1231,34 @@ EOF
 	[[ "$output" != *"DOUBLE_ACQUIRE"* ]] || return 1
 	[[ "$output" != *"MUTEX_LEAKED"* ]] || return 1
 }
+
+@test "the update path never runs brew inside the pre-authed window" {
+	# brew's entry point resets the sudo timestamp as a security measure;
+	# running it after pre-auth killed the handed-over ticket within five
+	# seconds (field ticket watchdog) and forced a second password prompt
+	# on every update. Homebrew ownership is decided from the Cellar on
+	# disk instead, so brew itself never runs in that window.
+	if command grep -q 'brew list mole' "$PROJECT_ROOT/install.sh"; then
+		echo "brew list mole is back in install.sh"
+		return 1
+	fi
+	command grep -q 'homebrew_owns_mole()' "$PROJECT_ROOT/install.sh" || {
+		echo "cellar-based ownership check missing"
+		return 1
+	}
+
+	# The helper itself: a Cellar dir under HOMEBREW_PREFIX means owned,
+	# no Cellar anywhere means not owned, and brew is never executed.
+	eval "$(sed -n '/^homebrew_owns_mole()/,/^}/p' "$PROJECT_ROOT/install.sh")"
+	local fake_prefix="$BATS_TEST_TMPDIR/fakebrew"
+	mkdir -p "$fake_prefix/Cellar/mole"
+	HOMEBREW_PREFIX="$fake_prefix" homebrew_owns_mole || {
+		echo "cellar dir not detected"
+		return 1
+	}
+	if HOMEBREW_PREFIX="$BATS_TEST_TMPDIR/empty" homebrew_owns_mole 2> /dev/null &&
+		[[ ! -d /opt/homebrew/Cellar/mole && ! -d /usr/local/Cellar/mole ]]; then
+		echo "claimed ownership with no cellar anywhere"
+		return 1
+	fi
+}
