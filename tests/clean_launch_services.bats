@@ -215,3 +215,75 @@ EOF
     [[ "$output" == "" ]] || return 1
     grep -q 'arg=-dump' "$log_file"
 }
+
+@test "a completed prefetch is consumed without a second lsregister dump" {
+    local lsregister="$TEST_ROOT/bin/lsregister"
+    local log_file="$TEST_ROOT/lsregister.log"
+    local missing_app="$TEST_ROOT/Missing App.app"
+    local prefetch_dir="$TEST_ROOT/prefetch"
+    write_lsregister_stub "$lsregister"
+    mkdir -p "$prefetch_dir"
+    printf '%s\n' "$missing_app" > "$prefetch_dir/candidates"
+    : > "$log_file"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" \
+        LSREGISTER_LOG="$log_file" PREFETCH_DIR="$prefetch_dir" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/launch_services.sh"
+get_lsregister_path() { printf '%s\n' "$LSREGISTER_BIN"; }
+run_with_timeout() { shift; "$@"; }
+note_activity() { :; }
+DRY_RUN=true
+MOLE_LS_PREFETCH_DIR="$PREFETCH_DIR"
+MOLE_LS_PREFETCH_PID=99999
+clean_stale_launch_services_registrations
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Missing App.app"* ]] || return 1
+    # The whole point of the prefetch: no second dump at section time.
+    if grep -q 'arg=-dump' "$log_file"; then
+        echo "second dump ran despite prefetch"
+        return 1
+    fi
+}
+
+@test "an incomplete prefetch skips the section quietly instead of waiting" {
+    local lsregister="$TEST_ROOT/bin/lsregister"
+    local log_file="$TEST_ROOT/lsregister.log"
+    local prefetch_dir="$TEST_ROOT/prefetch"
+    write_lsregister_stub "$lsregister"
+    mkdir -p "$prefetch_dir"
+    : > "$log_file"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" \
+        LSREGISTER_LOG="$log_file" PREFETCH_DIR="$prefetch_dir" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/launch_services.sh"
+get_lsregister_path() { printf '%s\n' "$LSREGISTER_BIN"; }
+run_with_timeout() { shift; "$@"; }
+note_activity() { :; }
+debug_log() { printf 'DEBUG:%s\n' "$*"; }
+DRY_RUN=true
+MOLE_LS_PREFETCH_DIR="$PREFETCH_DIR"
+MOLE_LS_PREFETCH_PID=99999
+clean_stale_launch_services_registrations
+echo "RC=$?"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"prefetch incomplete, skipping"* ]] || return 1
+    [[ "$output" == *"RC=0"* ]] || return 1
+    if grep -q 'arg=-dump' "$log_file"; then
+        echo "fell back to an inline dump"
+        return 1
+    fi
+}

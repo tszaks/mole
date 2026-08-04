@@ -77,12 +77,41 @@ launch_services_emit_missing_record_paths() {
 # shellcheck disable=SC2329
 collect_stale_launch_services_app_paths() {
     local lsregister="$1"
+    local dump_timeout="${2:-$MOLE_TIMEOUT_PKG_LIST_SEC}"
 
     [[ -x "$lsregister" ]] || return 0
 
-    run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" "$lsregister" -dump 2> /dev/null |
+    run_with_timeout "$dump_timeout" "$lsregister" -dump 2> /dev/null |
         launch_services_emit_missing_record_paths |
         LC_ALL=C sort -u
+}
+
+# The lsregister dump takes ten seconds and more on machines with a large
+# LaunchServices database, and the old inline bound made every clean run wait
+# for it and then give up (rc=124 on each run, so the stale-registration
+# cleanup never actually ran there). Start the dump in the background at the
+# beginning of a clean run instead: by the time App leftovers needs the
+# result it is normally ready, and a still-incomplete dump means this run
+# skips quietly rather than waiting. The completed file only appears through
+# an atomic rename, so a partial dump can never be consumed.
+MOLE_LS_PREFETCH_DIR=""
+MOLE_LS_PREFETCH_PID=""
+prefetch_stale_launch_services_scan() {
+    local lsregister
+    lsregister=$(get_lsregister_path)
+    [[ -x "$lsregister" ]] || return 0
+    MOLE_LS_PREFETCH_DIR=$(create_temp_dir) || {
+        MOLE_LS_PREFETCH_DIR=""
+        return 0
+    }
+    (
+        local out="$MOLE_LS_PREFETCH_DIR/candidates"
+        if collect_stale_launch_services_app_paths "$lsregister" \
+            "$MOLE_TIMEOUT_DISK_VERIFY_SEC" > "$out.partial"; then
+            mv -f "$out.partial" "$out"
+        fi
+    ) < /dev/null > /dev/null 2>&1 &
+    MOLE_LS_PREFETCH_PID=$!
 }
 
 # shellcheck disable=SC2329
@@ -99,14 +128,40 @@ clean_stale_launch_services_registrations() {
     # feedback).
     start_section_spinner "Scanning launch services..."
     local ls_scan_started_at=$SECONDS
-    local ls_scan_rc=0
-    collect_stale_launch_services_app_paths "$lsregister" > "$candidates_file" || ls_scan_rc=$?
-    if [[ $ls_scan_rc -ne 0 ]]; then
-        stop_section_spinner
-        debug_log "LaunchServices stale app scan failed (rc=$ls_scan_rc after $((SECONDS - ls_scan_started_at))s)"
-        return 0
+    if [[ -n "$MOLE_LS_PREFETCH_DIR" ]]; then
+        # A prefetch was started at the beginning of the run. Give a nearly
+        # finished dump a short grace, then either consume the completed
+        # file or skip quietly; never fall back to a second inline dump.
+        local grace_left=5
+        while [[ ! -f "$MOLE_LS_PREFETCH_DIR/candidates" && $grace_left -gt 0 ]] &&
+            kill -0 "$MOLE_LS_PREFETCH_PID" 2> /dev/null; do
+            sleep 1
+            grace_left=$((grace_left - 1))
+        done
+        if [[ -f "$MOLE_LS_PREFETCH_DIR/candidates" ]]; then
+            if ! cp "$MOLE_LS_PREFETCH_DIR/candidates" "$candidates_file"; then
+                stop_section_spinner
+                debug_log "LaunchServices prefetch result unreadable, skipping"
+                return 0
+            fi
+            debug_log "PERF [LaunchServices stale scan] prefetched, waited $((SECONDS - ls_scan_started_at))s"
+        else
+            stop_section_spinner
+            debug_log "LaunchServices stale scan prefetch incomplete, skipping this run"
+            return 0
+        fi
+    else
+        # No prefetch ran (standalone invocation): keep the bounded inline
+        # scan so this function stays usable on its own.
+        local ls_scan_rc=0
+        collect_stale_launch_services_app_paths "$lsregister" > "$candidates_file" || ls_scan_rc=$?
+        if [[ $ls_scan_rc -ne 0 ]]; then
+            stop_section_spinner
+            debug_log "LaunchServices stale app scan failed (rc=$ls_scan_rc after $((SECONDS - ls_scan_started_at))s)"
+            return 0
+        fi
+        debug_log "PERF [LaunchServices stale scan] $((SECONDS - ls_scan_started_at))s"
     fi
-    debug_log "PERF [LaunchServices stale scan] $((SECONDS - ls_scan_started_at))s"
 
     local max_items="${MOLE_LAUNCH_SERVICES_STALE_LIMIT:-50}"
     [[ "$max_items" =~ ^[0-9]+$ ]] || max_items=50

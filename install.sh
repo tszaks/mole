@@ -23,8 +23,10 @@ fi
 _SPINNER_PID=""
 start_line_spinner() {
     local msg="$1"
+    # Non-tty readers (mo update pipes this output) get a plain progress
+    # line: the spinner glyph without animation reads as a broken prompt.
     [[ ! -t 1 ]] && {
-        echo -e "${BLUE}|${NC} $msg"
+        echo -e "$msg"
         return
     }
     local chars="|/-\\"
@@ -68,9 +70,16 @@ curl_download_with_retry() {
     local attempt=1
     local max_attempts=3
     local curl_exit=0
+    # Capture curl's stderr per attempt and surface it only when the download
+    # ultimately fails: a transient TLS reset that the retry recovers from is
+    # not news, and printing it made successful installs look broken.
+    local curl_err=""
+    curl_err="$(mktemp "${TMPDIR:-/tmp}/mole-curl-err.XXXXXX")" || curl_err=""
 
     while true; do
-        if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$output_file"; then
+        if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$output_file" \
+            2> "${curl_err:-/dev/null}"; then
+            [[ -n "$curl_err" ]] && rm -f "$curl_err"
             return 0
         else
             curl_exit=$?
@@ -79,13 +88,22 @@ curl_download_with_retry() {
         rm -f "$output_file" 2> /dev/null || true
         case "$curl_exit" in
             6 | 7 | 18 | 28 | 35 | 52 | 55 | 56) ;;
-            *) return "$curl_exit" ;;
+            *)
+                [[ -s "$curl_err" ]] && cat "$curl_err" >&2
+                [[ -n "$curl_err" ]] && rm -f "$curl_err"
+                return "$curl_exit"
+                ;;
         esac
 
         if [[ "$attempt" -ge "$max_attempts" ]]; then
+            [[ -s "$curl_err" ]] && cat "$curl_err" >&2
+            [[ -n "$curl_err" ]] && rm -f "$curl_err"
             return "$curl_exit"
         fi
-        sleep 1 || return "$curl_exit"
+        sleep 1 || {
+            [[ -n "$curl_err" ]] && rm -f "$curl_err"
+            return "$curl_exit"
+        }
         attempt=$((attempt + 1))
     done
 }

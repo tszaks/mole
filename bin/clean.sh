@@ -1533,6 +1533,13 @@ perform_cleanup() {
         total_size_cleaned=0
     fi
 
+    # Start the slow lsregister dump now so it overlaps the earlier sections
+    # instead of stalling App leftovers; see prefetch_stale_launch_services_scan.
+    # Test harnesses skip it so no background dump outlives a test.
+    if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
+        prefetch_stale_launch_services_scan || true
+    fi
+
     local initial_free_space_kb=""
     local initial_free_space_display="Unknown"
 
