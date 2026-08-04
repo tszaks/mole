@@ -4,18 +4,6 @@
 set -euo pipefail
 
 # shellcheck disable=SC2329
-launch_services_extract_app_path_from_line() {
-    local line="$1"
-    [[ "$line" == */*".app"* ]] || return 1
-
-    local path="/${line#*/}"
-    path="${path%%.app*}.app"
-    path="${path%/}"
-
-    [[ "$path" == /* && "$path" == *.app ]] || return 1
-    printf '%s\n' "$path"
-}
-
 # shellcheck disable=SC2329
 launch_services_stale_app_path_is_safe() {
     local path="$1"
@@ -36,42 +24,44 @@ launch_services_stale_app_path_is_safe() {
 
 # shellcheck disable=SC2329
 launch_services_emit_missing_record_paths() {
-    local -a record_paths=()
-    local missing_record=false
-    local line app_path
-
-    _flush_launch_services_record() {
-        if [[ "$missing_record" == "true" && ${#record_paths[@]} -gt 0 ]]; then
-            local record_path
-            for record_path in "${record_paths[@]}"; do
-                if launch_services_stale_app_path_is_safe "$record_path"; then
-                    printf '%s\n' "$record_path"
-                fi
-            done
-        fi
-        record_paths=()
-        missing_record=false
-    }
-
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ -z "$line" ]]; then
-            _flush_launch_services_record
-            continue
-        fi
-        if [[ "$line" =~ ^[[:space:]]*bundle[[:space:]] ]]; then
-            _flush_launch_services_record
-        fi
-
-        if [[ "$line" == *"Bundle node not found on disk"* ]]; then
-            missing_record=true
-        fi
-
-        if app_path=$(launch_services_extract_app_path_from_line "$line"); then
-            record_paths+=("$app_path")
+    # A full lsregister dump is a quarter million lines on a real machine.
+    # The original bash loop forked one command substitution per line, which
+    # turned a 2-second dump into minutes of parsing and made the scan time
+    # out on every run. One awk pass does the record grouping and path
+    # extraction; the bash safety filter below then vets only the handful of
+    # surviving candidates, so the audited policy check stays in one place.
+    local candidate
+    awk '
+        function flush_record(    i) {
+            if (missing && n > 0) {
+                for (i = 1; i <= n; i++) print paths[i]
+            }
+            n = 0
+            missing = 0
+        }
+        /^[[:space:]]*bundle[[:space:]]/ { flush_record() }
+        $0 == "" {
+            flush_record()
+            next
+        }
+        index($0, "Bundle node not found on disk") > 0 { missing = 1 }
+        {
+            slash = index($0, "/")
+            if (slash > 0) {
+                p = substr($0, slash)
+                ai = index(p, ".app")
+                if (ai > 0) {
+                    paths[++n] = substr(p, 1, ai + 3)
+                }
+            }
+        }
+        END { flush_record() }
+    ' | while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] || continue
+        if launch_services_stale_app_path_is_safe "$candidate"; then
+            printf '%s\n' "$candidate"
         fi
     done
-
-    _flush_launch_services_record
 }
 
 # shellcheck disable=SC2329

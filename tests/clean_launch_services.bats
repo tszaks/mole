@@ -314,3 +314,38 @@ EOF
     [[ "$output" == *"no fresh result yet, skipping this run"* ]] || return 1
     [[ "$output" != *"Missing App.app"* ]] || return 1
 }
+
+@test "the dump parser handles a quarter-million-line dump in seconds" {
+    # The original per-line command substitution forked once per dump line
+    # and turned a 2s lsregister dump into minutes of parsing, which is why
+    # the scan timed out on every run of a real machine (250k lines there).
+    # One awk pass must chew a comparable dump well inside the old 10s scan
+    # bound; the generous ceiling below only guards against a regression
+    # back to per-line forking, not against scheduler noise.
+    local big_dump="$TEST_ROOT/big.dump"
+    awk 'BEGIN {
+        for (i = 0; i < 50000; i++) {
+            printf "bundle id: %d\n", i
+            printf "\tpath: /Applications/Missing%d.app (0x%x)\n", i, i
+            if (i % 50 == 0) printf "\tBundle node not found on disk\n"
+            printf "\n"
+        }
+    }' > "$big_dump"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" BIG_DUMP="$big_dump" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/launch_services.sh"
+started=$SECONDS
+count=$(launch_services_emit_missing_record_paths < "$BIG_DUMP" | wc -l | tr -d ' ')
+printf 'COUNT=%s ELAPSED=%s\n' "$count" "$((SECONDS - started))"
+[ "$((SECONDS - started))" -lt 30 ]
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"COUNT=1000 "* ]] || return 1
+}
