@@ -98,11 +98,15 @@ clean_stale_launch_services_registrations() {
     # database; without a spinner the section looks hung (per-step loading
     # feedback).
     start_section_spinner "Scanning launch services..."
-    if ! collect_stale_launch_services_app_paths "$lsregister" > "$candidates_file"; then
+    local ls_scan_started_at=$SECONDS
+    local ls_scan_rc=0
+    collect_stale_launch_services_app_paths "$lsregister" > "$candidates_file" || ls_scan_rc=$?
+    if [[ $ls_scan_rc -ne 0 ]]; then
         stop_section_spinner
-        debug_log "LaunchServices stale app scan failed"
+        debug_log "LaunchServices stale app scan failed (rc=$ls_scan_rc after $((SECONDS - ls_scan_started_at))s)"
         return 0
     fi
+    debug_log "PERF [LaunchServices stale scan] $((SECONDS - ls_scan_started_at))s"
 
     local max_items="${MOLE_LAUNCH_SERVICES_STALE_LIMIT:-50}"
     [[ "$max_items" =~ ^[0-9]+$ ]] || max_items=50

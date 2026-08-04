@@ -202,9 +202,11 @@ scan_installed_apps() {
     local app_scan_pids=()
     local auxiliary_pids=()
     local dir_idx=0
+    local scan_started_at=$SECONDS
     for app_dir in "${app_dirs[@]}"; do
         [[ -d "$app_dir" ]] || continue
         (
+            local worker_started_at=$SECONDS
             local app_paths
             if ! app_paths=$(command find "$app_dir" -maxdepth 3 -type d -name '*.app' 2> /dev/null); then
                 printf '%s\n' "$app_dir" >> "$scan_tmp_dir/scan_failures.list"
@@ -256,6 +258,8 @@ scan_installed_apps() {
                 fi
                 echo "$bundle_id"
             done <<< "$app_paths"
+            printf '%s: %ss\n' "$app_dir" "$((SECONDS - worker_started_at))" \
+                >> "$scan_tmp_dir/perf.list"
         ) > "$scan_tmp_dir/apps_${dir_idx}.txt" &
         app_scan_pids+=($!)
         dir_idx=$((dir_idx + 1))
@@ -267,11 +271,20 @@ scan_installed_apps() {
         # Skip AppleScript during tests to avoid permission dialogs
         if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
             local running_apps=""
+            # On a managed Mac the System Events automation permission is
+            # often undetermined or denied, and this probe then burns its
+            # whole timeout on every scan; the perf line is what proves it.
+            local osascript_started_at=$SECONDS
             if command -v osascript > /dev/null 2>&1 &&
                 running_apps=$(run_with_timeout "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" osascript -e 'tell application "System Events" to get bundle identifier of every application process' 2> /dev/null); then
                 printf '%s\n' "$running_apps" | tr ',' '\n' |
                     sed -e 's/^ *//;s/ *$//' -e '/^$/d' -e '/^missing value$/d' > "$scan_tmp_dir/running.txt"
                 running_probe_succeeded=1
+                printf 'running-apps osascript: %ss\n' "$((SECONDS - osascript_started_at))" \
+                    >> "$scan_tmp_dir/perf.list"
+            else
+                printf 'running-apps osascript failed after %ss\n' "$((SECONDS - osascript_started_at))" \
+                    >> "$scan_tmp_dir/perf.list"
             fi
         else
             running_probe_succeeded=1
@@ -279,10 +292,13 @@ scan_installed_apps() {
         # Fallback: lsappinfo is more reliable than osascript
         if command -v lsappinfo > /dev/null 2>&1; then
             local lsappinfo_output=""
+            local lsappinfo_started_at=$SECONDS
             if lsappinfo_output=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" lsappinfo list 2> /dev/null); then
                 printf '%s\n' "$lsappinfo_output" |
                     sed -n 's/.*"CFBundleIdentifier"="\([^"]*\)".*/\1/p' >> "$scan_tmp_dir/running.txt"
                 running_probe_succeeded=1
+                printf 'running-apps lsappinfo: %ss\n' "$((SECONDS - lsappinfo_started_at))" \
+                    >> "$scan_tmp_dir/perf.list"
             fi
         fi
         [[ $running_probe_succeeded -eq 1 ]] || exit 1
@@ -322,7 +338,13 @@ scan_installed_apps() {
             fi
         done
     fi
-    debug_log "All background processes completed"
+    debug_log "All background processes completed in $((SECONDS - scan_started_at))s"
+    if [[ -s "$scan_tmp_dir/perf.list" ]]; then
+        local perf_line=""
+        while IFS= read -r perf_line; do
+            debug_log "PERF [installed-app scan] $perf_line"
+        done < "$scan_tmp_dir/perf.list"
+    fi
     if [[ $app_scan_failed -ne 0 ]]; then
         # Surface the first unreadable bundle so the skip message is actionable
         # without --debug. Workers append before exiting nonzero.
@@ -1512,6 +1534,7 @@ clean_orphaned_system_services() {
             _orphan_service_candidate_still_eligible "$orphan_file" "$expected_identity" || eligibility_rc=$?
             if [[ $eligibility_rc -eq 124 ]]; then
                 echo -e "  ${YELLOW}${ICON_WARNING}${NC} Orphaned system services · ${GRAY}time limit reached, stopped cleanup${NC}"
+                debug_log "Orphaned services stopped by deadline at stage: eligibility recheck"
                 note_activity
                 return 0
             elif [[ $eligibility_rc -ge 128 ]]; then
@@ -1543,6 +1566,7 @@ clean_orphaned_system_services() {
                 fi
                 if [[ $orphan_size_rc -eq 124 ]]; then
                     echo -e "  ${YELLOW}${ICON_WARNING}${NC} Orphaned system services · ${GRAY}time limit reached, stopped cleanup${NC}"
+                    debug_log "Orphaned services stopped by deadline at stage: launchctl bootout"
                     note_activity
                     return 0
                 fi
@@ -1568,6 +1592,7 @@ clean_orphaned_system_services() {
                 fi
                 if [[ $file_size_rc -eq 124 ]]; then
                     echo -e "  ${YELLOW}${ICON_WARNING}${NC} Orphaned system services · ${GRAY}time limit reached, stopped cleanup${NC}"
+                    debug_log "Orphaned services stopped by deadline at stage: plist removal"
                     note_activity
                     return 0
                 fi
@@ -1583,6 +1608,7 @@ clean_orphaned_system_services() {
                         "$expected_identity" || pre_unload_rc=$?
                     if [[ $pre_unload_rc -eq 124 ]]; then
                         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Orphaned system services · ${GRAY}time limit reached, stopped cleanup${NC}"
+                        debug_log "Orphaned services stopped by deadline at stage: privileged plist removal"
                         note_activity
                         return 0
                     elif [[ $pre_unload_rc -ge 128 ]]; then
@@ -1612,6 +1638,7 @@ clean_orphaned_system_services() {
                     "$expected_identity" || final_eligibility_rc=$?
                 if [[ $final_eligibility_rc -eq 124 ]]; then
                     echo -e "  ${YELLOW}${ICON_WARNING}${NC} Orphaned system services · ${GRAY}time limit reached, stopped cleanup${NC}"
+                    debug_log "Orphaned services stopped by deadline at stage: helper binary removal"
                     note_activity
                     return 0
                 elif [[ $final_eligibility_rc -ge 128 ]]; then
