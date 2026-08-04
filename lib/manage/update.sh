@@ -171,6 +171,23 @@ _update_lock_sudo() {
     sudo -n "$@"
 }
 
+# Whether the installer child will need sudo for this install dir. This MUST
+# be at least as broad as install.sh's needs_sudo(), which checks the PARENT
+# directory: on a machine where /usr/local/bin is user-writable but /usr/local
+# is root's, the old narrower check here said "no sudo", so no pre-auth and no
+# keepalive ran, MOLE_ASSUME_SUDO_AUTH stayed 0, and the installer then asked
+# interactively at each privileged stretch: two password prompts per slow
+# update, with the keepalive never in play. One predicate, one answer.
+update_install_requires_sudo() {
+    local install_dir="$1"
+    [[ ! -w "$install_dir" ]] && return 0
+    [[ -e "$install_dir/mole" && ! -w "$install_dir/mole" ]] && return 0
+    local parent_dir
+    parent_dir="$(dirname "$install_dir")"
+    [[ ! -w "$parent_dir" ]] && return 0
+    return 1
+}
+
 # The installer, and the lock helpers above, reuse this shell's sudo session
 # through `sudo -n`. Ask a real child process whether that session reaches it
 # rather than inferring it from a TTY check: the timestamp scope is sudo's
@@ -1158,9 +1175,7 @@ update_mole() (
     chmod +x "$tmp_installer"
 
     local requires_sudo="false"
-    if [[ ! -w "$install_dir" ]]; then
-        requires_sudo="true"
-    elif [[ -e "$install_dir/mole" && ! -w "$install_dir/mole" ]]; then
+    if update_install_requires_sudo "$install_dir"; then
         requires_sudo="true"
     fi
 

@@ -1718,3 +1718,36 @@ INNER
 	}
 	[[ "$output" != *"Updated to nightly build (main)"* ]]
 }
+
+@test "update sudo predicate is at least as broad as the installer's" {
+	# On a machine where /usr/local/bin is user-writable but /usr/local is
+	# root's, update.sh said "no sudo" while install.sh said "sudo": no
+	# pre-auth, no keepalive, and the installer prompted interactively at
+	# each privileged stretch, twice per slow update. The shared predicate
+	# must flag the parent-directory case exactly like install.sh needs_sudo.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+VERSION="0.0.0"
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/manage/update.sh"
+
+root="$HOME/sudo-predicate"
+mkdir -p "$root/locked-parent/bin" "$root/open/bin"
+chmod 555 "$root/locked-parent"
+trap 'chmod 755 "$root/locked-parent" 2>/dev/null || true' EXIT
+
+if update_install_requires_sudo "$root/locked-parent/bin"; then
+    echo "PARENT_LOCKED=needs-sudo"
+fi
+if ! update_install_requires_sudo "$root/open/bin"; then
+    echo "OPEN=no-sudo"
+fi
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"PARENT_LOCKED=needs-sudo"* ]] || return 1
+	[[ "$output" == *"OPEN=no-sudo"* ]] || return 1
+}
