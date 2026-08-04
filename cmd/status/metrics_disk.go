@@ -107,7 +107,7 @@ func collectDisksWithCorrections(useCorrections bool) ([]DiskStatus, error) {
 		usedPercent := usage.UsedPercent
 		purgeable := uint64(0)
 		if useCorrections && runtime.GOOS == "darwin" && strings.ToLower(part.Fstype) == "apfs" {
-			used, usedPercent, purgeable = correctAPFSDiskUsage(part.Mountpoint, total, usage.Used)
+			used, usedPercent, purgeable = correctAPFSDiskUsage(part.Mountpoint, total, usage.Used, usage.Free)
 		}
 
 		disks = append(disks, DiskStatus{
@@ -339,14 +339,14 @@ func getDiskutilTotalBytes(mountpoint string) (uint64, error) {
 //  1. Finder via osascript (startup disk only), exact match with macOS Finder
 //  2. diskutil APFSContainerFree, corrects APFS snapshot space
 //  3. Raw gopsutil values, original statfs-based calculation
-func correctAPFSDiskUsage(mountpoint string, total, rawUsed uint64) (used uint64, usedPercent float64, purgeable uint64) {
+func correctAPFSDiskUsage(mountpoint string, total, rawUsed, rawFree uint64) (used uint64, usedPercent float64, purgeable uint64) {
 	// Tier 1: Finder via osascript (startup disk at "/" only).
 	if mountpoint == "/" && commandExists("osascript") {
 		if finderFree, finderTotal, err := getFinderStartupDiskFreeBytes(); err == nil &&
 			finderTotal > 0 && finderFree <= finderTotal {
 			used = finderTotal - finderFree
 			usedPercent = float64(used) / float64(finderTotal) * 100.0
-			return used, usedPercent, finderPurgeableBytes(total, rawUsed, finderFree)
+			return used, usedPercent, finderPurgeableBytes(rawFree, finderFree)
 		}
 	}
 
@@ -369,12 +369,11 @@ func correctAPFSDiskUsage(mountpoint string, total, rawUsed uint64) (used uint64
 
 // finderPurgeableBytes returns the purgeable portion of Finder's free space:
 // Finder counts reclaimable purgeable files as free, while statfs (df) does
-// not, so the difference is the purgeable total.
-func finderPurgeableBytes(total, rawUsed, finderFree uint64) uint64 {
-	rawFree := uint64(0)
-	if total > rawUsed {
-		rawFree = total - rawUsed
-	}
+// not, so the difference is the purgeable total. Both inputs must come from
+// the same accounting: rawFree is the statfs free figure, never a value
+// derived from the diskutil-corrected total, or the correction itself would
+// be misreported as purgeable space.
+func finderPurgeableBytes(rawFree, finderFree uint64) uint64 {
 	if finderFree <= rawFree {
 		return 0
 	}

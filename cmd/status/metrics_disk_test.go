@@ -391,8 +391,9 @@ func TestCorrectAPFSDiskUsageReportsFinderPurgeable(t *testing.T) {
 	}
 
 	total := uint64(1889700000000)
-	rawUsed := total - uint64(522700000000)
-	used, usedPercent, purgeable := correctAPFSDiskUsage("/", total, rawUsed)
+	rawFree := uint64(522700000000)
+	rawUsed := total - rawFree
+	used, usedPercent, purgeable := correctAPFSDiskUsage("/", total, rawUsed, rawFree)
 
 	if want := total - uint64(663700000000); used != want {
 		t.Fatalf("used = %d, want %d", used, want)
@@ -431,9 +432,25 @@ func TestCorrectAPFSDiskUsageClampsPurgeableToZero(t *testing.T) {
 	}
 
 	total := uint64(1889700000000)
-	rawUsed := total - uint64(522700000000)
-	_, _, purgeable := correctAPFSDiskUsage("/", total, rawUsed)
+	rawFree := uint64(522700000000)
+	rawUsed := total - rawFree
+	_, _, purgeable := correctAPFSDiskUsage("/", total, rawUsed, rawFree)
 	if purgeable != 0 {
 		t.Fatalf("purgeable = %d, want 0", purgeable)
+	}
+}
+
+func TestFinderPurgeableBytesIgnoresCorrectedTotal(t *testing.T) {
+	// The regression this pins: purgeable was once derived from the
+	// diskutil-corrected total minus statfs used, so the correction itself
+	// showed up as purgeable space. The statfs free figure is the only
+	// valid baseline.
+	rawFree := uint64(500 << 30)
+	finderFree := uint64(520 << 30)
+	if got, want := finderPurgeableBytes(rawFree, finderFree), uint64(20<<30); got != want {
+		t.Fatalf("purgeable = %d, want %d", got, want)
+	}
+	if got := finderPurgeableBytes(finderFree, rawFree); got != 0 {
+		t.Fatalf("purgeable when finder below statfs = %d, want 0", got)
 	}
 }
