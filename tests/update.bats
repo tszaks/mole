@@ -1750,6 +1750,12 @@ fi
 if update_install_requires_sudo "$root/locked-bin/bin"; then
     echo "UNWRITABLE_DIR=needs-sudo"
 fi
+mkdir -p "$root/readonly-mole/bin"
+touch "$root/readonly-mole/bin/mole"
+chmod 444 "$root/readonly-mole/bin/mole"
+if ! update_install_requires_sudo "$root/readonly-mole/bin"; then
+    echo "READONLY_MOLE=no-sudo"
+fi
 EOF
 
 	[ "$status" -eq 0 ] || {
@@ -1759,4 +1765,7 @@ EOF
 	[[ "$output" == *"EXISTING_WRITABLE=no-sudo"* ]] || return 1
 	[[ "$output" == *"MISSING_UNDER_LOCKED=needs-sudo"* ]] || return 1
 	[[ "$output" == *"UNWRITABLE_DIR=needs-sudo"* ]] || return 1
+	# A read-only entry script in a writable dir is replaced by atomic mv,
+	# which needs directory write only; the installer never sudos for it.
+	[[ "$output" == *"READONLY_MOLE=no-sudo"* ]] || return 1
 }

@@ -180,16 +180,16 @@ _update_lock_sudo() {
 # update, with the keepalive never in play. One predicate, one answer.
 update_install_requires_sudo() {
     local install_dir="$1"
-    # Mirror install.sh needs_sudo exactly: when the install dir exists, its
-    # own writability decides (plus the entry script's), and the parent
-    # matters only when the dir is missing and must be created. An
-    # unconditional parent check forced authentication for an existing
-    # writable dir under a root-owned parent, aborting non-interactive
-    # updates the installer could have completed without sudo at all.
+    # Mirror install.sh needs_sudo VERBATIM: when the install dir exists,
+    # its own writability alone decides, and the parent matters only when
+    # the dir is missing and must be created. The entry script's own file
+    # permission is deliberately not consulted: the installer replaces it
+    # through a same-directory temp file and an atomic mv, and a rename
+    # needs directory write, never target-file write, so a read-only mole
+    # in a writable dir updates fine without sudo.
     if [[ -e "$install_dir" ]]; then
-        [[ ! -w "$install_dir" ]] && return 0
-        [[ -e "$install_dir/mole" && ! -w "$install_dir/mole" ]] && return 0
-        return 1
+        [[ ! -w "$install_dir" ]]
+        return
     fi
     local parent_dir
     parent_dir="$(dirname "$install_dir")"
