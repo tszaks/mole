@@ -121,6 +121,12 @@ while [[ \$# -gt 0 ]]; do
 		*) shift ;;
 	esac
 done
+# A handed-over sudo session means root would write regardless of the
+# directory's mode bits; emulate that by unlocking the prefix the test
+# made read-only to trigger the sudo path in the first place.
+if [[ "\${MOLE_ASSUME_SUDO_AUTH:-0}" == "1" ]]; then
+	chmod u+w "\$prefix" 2>/dev/null || true
+fi
 mkdir -p "\$prefix" "\$config/bin"
 printf '#!/bin/bash\necho "Mole version %s"\n' "\${MOLE_VERSION#V}" > "\$prefix/mole.next"
 printf '#!/bin/bash\nexit 0\n' > "\$config/bin/analyze-go"
@@ -776,7 +782,7 @@ INNER
 	mkdir -p "$fake_bin"
 	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
 	make_update_curl_stub "$fake_bin" "$current_version"
-	chmod a-w "$manual_bin/mole"
+	chmod a-w "$manual_bin"
 	cat > "$fake_bin/sudo" << 'SCRIPT'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SUDO_LOG"
@@ -798,7 +804,7 @@ SCRIPT
 		SUDO_LOG="$sudo_log" \
 		"$manual_bin/mo" update --force
 
-	chmod u+w "$manual_bin/mole"
+	chmod u+w "$manual_bin"
 
 	[ "$status" -eq 0 ]
 	[ -f "$installer_sudo_auth_log" ]
@@ -821,7 +827,7 @@ SCRIPT
 	mkdir -p "$fake_bin"
 	make_manual_mole_install "$manual_bin" "$manual_config" "1.41.0"
 	make_update_curl_stub "$fake_bin" "$current_version"
-	chmod a-w "$manual_bin/mole"
+	chmod a-w "$manual_bin"
 
 	# macOS scopes the sudo timestamp to the controlling terminal and falls back
 	# to the parent PID when there is none, so a credential this shell holds does
@@ -856,7 +862,7 @@ SCRIPT
 		SUDO_COUNT="$sudo_count" \
 		"$manual_bin/mo" update --force
 
-	chmod u+w "$manual_bin/mole"
+	chmod u+w "$manual_bin"
 
 	[ "$status" -eq 1 ] || return 1
 	[[ "$output" == *"Admin access cannot be handed to the installer"* ]] || return 1
