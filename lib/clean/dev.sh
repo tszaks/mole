@@ -3308,6 +3308,14 @@ _codex_staging_entry_is_still_stale() {
     if [[ "${_MOLE_CODEX_STAGING_MODE:-age}" == "superseded" ]]; then
         local installed_build="${_MOLE_CODEX_INSTALLED_BUILD:-}"
         [[ "$installed_build" =~ ^[0-9]+$ ]] || return 1
+        # The scan-time verdict rested on the installed set being unique and
+        # at this build. Re-resolve at the boundary: a copy installed or
+        # swapped since the scan (say an older one whose pending update is
+        # exactly this staged build) must void the supersession, not ride
+        # a stale snapshot into a deletion.
+        local installed_now=""
+        installed_now=$(_codex_installed_build_version) || return 1
+        [[ "$installed_now" == "$installed_build" ]] || return 1
         local staged_build=""
         staged_build=$(_codex_staged_build_version "$stale_entry") || return 1
         [[ "$staged_build" -le "$installed_build" ]] || return 1
@@ -3410,9 +3418,14 @@ _codex_installed_build_version() {
         fi
         resolved_build="$build"
     done
+    # A failed or timed-out mdfind is an unanswered question, not an empty
+    # answer: an unindexed extra copy elsewhere could be the owner of a
+    # staged build we are about to call superseded. Fail the resolution and
+    # let the caller fall back to the age rule; only a clean rc 0 with no
+    # rows may mean "no other copies".
     local mdfind_out="" line
     mdfind_out=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" mdfind \
-        "kMDItemCFBundleIdentifier == 'com.openai.codex'" 2> /dev/null) || mdfind_out=""
+        "kMDItemCFBundleIdentifier == 'com.openai.codex'" 2> /dev/null) || return 1
     while IFS= read -r line; do
         [[ -d "$line" && "$line" == *.app ]] || continue
         case "$line" in

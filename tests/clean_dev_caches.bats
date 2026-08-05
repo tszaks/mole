@@ -1769,3 +1769,79 @@ EOF
 	[[ "$output" == *"AMBIGUOUS_FALLS_BACK"* ]] || return 1
 	[[ "$output" != *"RESOLVED_DESPITE_CONFLICT"* ]] || return 1
 }
+
+@test "codex resolution treats a failed mdfind as unanswered, not as no-other-copies" {
+	# A timed-out or failed mdfind may be hiding an unindexed extra copy
+	# whose pending update is the staged build under judgment. Resolution
+	# must fail (age rule), even when a fixed-path copy reads cleanly; a
+	# clean rc 0 with no rows is the only valid "no other copies".
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+run_with_timeout() { shift; "$@"; }
+mkdir -p "$HOME/Applications/Codex.app/Contents"
+cat > "$HOME/Applications/Codex.app/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.openai.codex</string><key>CFBundleVersion</key><string>5800</string></dict></plist>
+PLIST
+mdfind() { return 2; }
+if _codex_installed_build_version; then
+    echo "RESOLVED_DESPITE_MDFIND_FAILURE"
+fi
+mdfind() { return 0; }
+resolved=$(_codex_installed_build_version) || { echo "CLEAN_EMPTY_FAILED"; exit 1; }
+echo "CLEAN_EMPTY_RESOLVED=$resolved"
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"RESOLVED_DESPITE_MDFIND_FAILURE"* ]] || return 1
+	[[ "$output" == *"CLEAN_EMPTY_RESOLVED=5800"* ]] || return 1
+}
+
+@test "codex supersession boundary re-verifies the installed set before deleting" {
+	# The scan snapshot is not enough: a copy installed or swapped after
+	# the scan (an older one whose pending update is exactly this staged
+	# build) must void the supersession at the deletion boundary.
+	local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+	rm -rf "$staging_root"
+	mkdir -p "$staging_root/entry/Codex.app/Contents"
+	_codex_version_plist "$staging_root/entry/Codex.app/Contents/Info.plist" "5628"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+run_with_timeout() { shift; "$@"; }
+staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+_MOLE_CODEX_STAGING_ROOT="$staging_root"
+_MOLE_CODEX_STAGING_ENTRY="$staging_root/entry"
+_MOLE_CODEX_STAGING_MODE="superseded"
+_MOLE_CODEX_INSTALLED_BUILD="5848"
+
+_codex_installed_build_version() { echo "5900"; }
+if _codex_staging_entry_is_still_stale; then
+    echo "STALE_DESPITE_CHANGED_INSTALL"
+fi
+_codex_installed_build_version() { return 1; }
+if _codex_staging_entry_is_still_stale; then
+    echo "STALE_DESPITE_AMBIGUOUS_INSTALL"
+fi
+_codex_installed_build_version() { echo "5848"; }
+if _codex_staging_entry_is_still_stale; then
+    echo "STALE_WITH_STABLE_INSTALL"
+fi
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" != *"STALE_DESPITE_CHANGED_INSTALL"* ]] || return 1
+	[[ "$output" != *"STALE_DESPITE_AMBIGUOUS_INSTALL"* ]] || return 1
+	[[ "$output" == *"STALE_WITH_STABLE_INSTALL"* ]] || return 1
+}
