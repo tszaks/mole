@@ -88,6 +88,34 @@ EOF
     [[ "$output" != *"Cleanup cancelled"* ]]
 }
 
+@test "run with removal timeouts completes and reports them (#1384)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+# Stub every section so perform_cleanup never scans the real machine.
+for fn in clean_user_essentials clean_finder_metadata clean_app_caches \
+    clean_browsers run_cloud_and_office_cleanup clean_developer_tools \
+    clean_user_gui_applications clean_virtualization_tools \
+    clean_application_support_logs clean_orphaned_app_data \
+    clean_orphaned_system_services clean_orphaned_container_stubs \
+    clean_stale_launch_services_registrations show_user_launch_agent_hint_notice \
+    clean_apple_silicon_caches clean_cached_device_firmware \
+    clean_time_machine_failed_backups check_large_file_candidates \
+    show_project_artifact_hint_notice; do
+    eval "$fn() { return 0; }"
+done
+run_with_shell_timeout() { return 0; }
+clean_user_essentials() { MOLE_CLEAN_REMOVAL_TIMEOUTS=3; return 0; }
+perform_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Cleanup complete"* ]]
+    [[ "$output" != *"Cleanup cancelled"* ]]
+    [[ "$output" == *"3 item(s) exceeded the 30s removal budget"* ]]
+}
+
 @test "sizing timeouts still clean and the summary reports the under-count (#1374)" {
     mkdir -p "$HOME/Library/Caches/cache1374"
     printf x > "$HOME/Library/Caches/cache1374/file.bin"

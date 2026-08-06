@@ -1247,7 +1247,10 @@ _safe_clean_impl() {
                         safe_remove "$path" true "$size" "" \
                             "$bound_parent" "$bound_parent_id" \
                             "$bound_target_id" || action_rc=$?
-                        if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                        # A removal timeout (124) is a failed removal, not a
+                        # user interrupt: count it below and keep cleaning so
+                        # one slow disk item never cancels the rest of the run.
+                        if [[ $action_rc -ge 128 ]]; then
                             cleanup_interrupt_rc=$action_rc
                             break
                         elif [[ $action_rc -eq 0 ]]; then
@@ -1352,7 +1355,9 @@ _safe_clean_impl() {
                     safe_remove "$path" true "$size_kb" "" \
                         "$bound_parent" "$bound_parent_id" \
                         "$bound_target_id" || action_rc=$?
-                    if [[ $action_rc -eq 124 || $action_rc -ge 128 ]]; then
+                    # Same non-fatal removal-timeout policy as the
+                    # parallel-result loop above.
+                    if [[ $action_rc -ge 128 ]]; then
                         cleanup_interrupt_rc=$action_rc
                         break
                     elif [[ $action_rc -eq 0 ]]; then
@@ -1418,7 +1423,7 @@ _safe_clean_impl() {
         debug_log "Permission denied while cleaning: $description"
     fi
     if [[ $removal_failed_count -gt 0 && "$DRY_RUN" != "true" ]]; then
-        debug_log "Skipped $removal_failed_count items, permission denied or in use, for: $description"
+        debug_log "Skipped $removal_failed_count items, permission denied, in use, or timed out, for: $description"
     fi
 
     if [[ $removed_any -eq 1 ]]; then
@@ -1482,6 +1487,8 @@ start_cleanup() {
     export MOLE_CLEAN_CANCEL_STATUS
     MOLE_CLEAN_SIZING_TIMEOUTS=0
     export MOLE_CLEAN_SIZING_TIMEOUTS
+    MOLE_CLEAN_REMOVAL_TIMEOUTS=0
+    export MOLE_CLEAN_REMOVAL_TIMEOUTS
     log_operation_session_start "clean"
     DRY_RUN_SEEN_IDENTITIES=()
     DRY_RUN_TOTAL_PARTIAL=false
@@ -1992,6 +1999,10 @@ perform_cleanup() {
 
     if [[ ${MOLE_CLEAN_SIZING_TIMEOUTS:-0} -gt 0 ]]; then
         summary_details+=("${GRAY}${ICON_WARNING}${NC} Some items exceeded the ${MOLE_TIMEOUT_DISK_VERIFY_SEC}s size-check budget and were counted as 0, so the total is under-reported. Raise ${GRAY}MOLE_TIMEOUT_DISK_VERIFY_SEC${NC} to measure them.")
+    fi
+
+    if [[ ${MOLE_CLEAN_REMOVAL_TIMEOUTS:-0} -gt 0 ]]; then
+        summary_details+=("${GRAY}${ICON_WARNING}${NC} ${MOLE_CLEAN_REMOVAL_TIMEOUTS} item(s) exceeded the ${MOLE_TIMEOUT_DISK_VERIFY_SEC}s removal budget and were left in place. Raise ${GRAY}MOLE_TIMEOUT_DISK_VERIFY_SEC${NC} for slower disks.")
     fi
 
     if [[ $had_errexit -eq 1 ]]; then
