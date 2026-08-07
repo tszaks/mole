@@ -853,9 +853,14 @@ _uninstall_materialize_complete_pkg_apps() {
         "$MOLE_TIMEOUT_DISK_VERIFY_SEC" "$deadline_seconds") || remaining_rc=$?
     [[ $remaining_rc -eq 0 ]] || return "$remaining_rc"
 
+    # Allow the on-disk receipt cache (#1383). A cold walk of every non-Apple
+    # package on an Xcode machine can burn the whole discovery budget; the
+    # cache is keyed by a 1h TTL and only stores nonstandard .app paths, which
+    # is enough for the sibling check. A stale miss is still fail-closed:
+    # timeout/incomplete paths degrade to MOLE_UNINSTALL_SCAN_PARTIAL and
+    # narrow the plan rather than deleting shared leftovers.
     local producer_rc=0
-    MOLE_PKG_RECEIPT_CACHE_DISABLE=1 \
-        MOLE_PKG_RECEIPT_LIST_TIMEOUT="$remaining" \
+    MOLE_PKG_RECEIPT_LIST_TIMEOUT="$remaining" \
         MOLE_PKG_RECEIPT_SCAN_TIMEOUT="$remaining" \
         pkg_receipt_nonstandard_app_paths \
         --require-complete > "$output_file" || producer_rc=$?
@@ -1403,6 +1408,16 @@ _batch_scan_app_details() {
         fi
         local preview_live_sibling_fingerprint="$_MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT"
 
+        # Receipt enumeration is machine-wide and can consume the whole shared
+        # discovery budget on an Xcode Mac (#1383). Guarantee a minimum floor
+        # for the selected-app remnant walk so a long sibling scan cannot
+        # starve leftover matching and hard-abort the batch with 124.
+        local remnant_floor=$((SECONDS + MOLE_TIMEOUT_HINT_SCAN_SEC))
+        if (( _MOLE_UNINSTALL_DISCOVERY_DEADLINE < remnant_floor )); then
+            debug_log "Extending uninstall discovery deadline by ${MOLE_TIMEOUT_HINT_SCAN_SEC}s for remnant scan of $app_name"
+            _MOLE_UNINSTALL_DISCOVERY_DEADLINE=$remnant_floor
+        fi
+
         local sibling_guard="none"
         if [[ "$live_sibling_present" == true ]]; then
             sibling_guard="guard_login"
@@ -1536,37 +1551,69 @@ _batch_scan_app_details() {
             related_files=$(MOLE_UNINSTALL_SIBLING_SURVIVES="$sibling_survives" \
                 find_app_files "$bundle_id" "$discovery_app_name" \
                 "$app_path") || discovery_rc=$?
-            [[ $discovery_rc -eq 0 ]] || return "$discovery_rc"
+            if [[ $discovery_rc -eq 124 ]]; then
+                # Out of budget after a heavy machine-wide probe (#1383): keep
+                # the selected app removable and leave leftovers alone rather
+                # than aborting the whole batch with "nothing was removed".
+                related_files=""
+                log_warning "$(printf "%s: leftover scan timed out; only the app bundle will be removed" "$app_name")"
+            elif [[ $discovery_rc -ne 0 ]]; then
+                return "$discovery_rc"
+            fi
             # Diagnostic-report discovery prefers CFBundleExecutable from the
             # selected bundle, and same-bundle-id siblings ship the same
             # executable name ("Xcode" for Xcode-beta.app), so under the
             # guard it would collect the survivor's crash reports no matter
             # which name is passed in. Leaving crash logs behind is the
-            # fail-safe direction.
-            if [[ "$sibling_guard" == "none" ]]; then
-                discovery_rc=0
+            # fail-safe direction. Skip follow-on probes when leftover
+            # discovery already timed out so we do not burn the floor budget.
+            if [[ "$sibling_guard" == "none" && $discovery_rc -ne 124 ]]; then
+                local diag_rc=0
                 diag_user=$(get_diagnostic_report_paths_for_app "$app_path" \
                     "$discovery_app_name" \
-                    "$HOME/Library/Logs/DiagnosticReports") || discovery_rc=$?
-                [[ $discovery_rc -eq 0 ]] || return "$discovery_rc"
+                    "$HOME/Library/Logs/DiagnosticReports") || diag_rc=$?
+                if [[ $diag_rc -eq 124 ]]; then
+                    diag_user=""
+                    debug_log "Diagnostic report scan timed out for $app_name"
+                elif [[ $diag_rc -ne 0 ]]; then
+                    return "$diag_rc"
+                fi
                 [[ -n "$diag_user" ]] && related_files=$(
                     [[ -n "$related_files" ]] && echo "$related_files"
                     echo "$diag_user"
                 )
-                discovery_rc=0
+                diag_rc=0
                 diag_system=$(get_diagnostic_report_paths_for_app "$app_path" \
-                    "$discovery_app_name" "/Library/Logs/DiagnosticReports") || discovery_rc=$?
-                [[ $discovery_rc -eq 0 ]] || return "$discovery_rc"
+                    "$discovery_app_name" "/Library/Logs/DiagnosticReports") || diag_rc=$?
+                if [[ $diag_rc -eq 124 ]]; then
+                    diag_system=""
+                    debug_log "System diagnostic report scan timed out for $app_name"
+                elif [[ $diag_rc -ne 0 ]]; then
+                    return "$diag_rc"
+                fi
             fi
-            discovery_rc=0
-            system_files=$(find_app_system_files \
-                "$bundle_id" "$discovery_app_name") || discovery_rc=$?
-            [[ $discovery_rc -eq 0 ]] || return "$discovery_rc"
+            if [[ $discovery_rc -ne 124 ]]; then
+                local system_rc=0
+                system_files=$(find_app_system_files \
+                    "$bundle_id" "$discovery_app_name") || system_rc=$?
+                if [[ $system_rc -eq 124 ]]; then
+                    system_files=""
+                    debug_log "System leftover scan timed out for $app_name"
+                elif [[ $system_rc -ne 0 ]]; then
+                    return "$system_rc"
+                fi
+            fi
         fi
         local related_size_kb="0"
         local related_size_rc=0
         related_size_kb=$(calculate_total_size "$related_files") || related_size_rc=$?
-        [[ $related_size_rc -eq 124 || $related_size_rc -ge 128 ]] && return "$related_size_rc"
+        if [[ $related_size_rc -eq 124 ]]; then
+            # Size is display-only here; keep the leftover plan and under-report.
+            related_size_kb=0
+            debug_log "Related-file size probe timed out for $app_name"
+        elif [[ $related_size_rc -ge 128 ]]; then
+            return "$related_size_rc"
+        fi
         [[ $related_size_rc -eq 0 && "$related_size_kb" =~ ^[0-9]+$ ]] || related_size_kb=0
         local review_only_system_files="$system_files"
         review_only_system_files=$(append_line "$review_only_system_files" "$diag_system")
@@ -1608,7 +1655,12 @@ _batch_scan_app_details() {
         local login_helpers_rc=0
         login_item_helpers=$(discover_login_item_helper_bundle_ids \
             "$app_path") || login_helpers_rc=$?
-        [[ $login_helpers_rc -eq 0 ]] || return "$login_helpers_rc"
+        if [[ $login_helpers_rc -eq 124 ]]; then
+            login_item_helpers=""
+            debug_log "Login-item helper discovery timed out for $app_name"
+        elif [[ $login_helpers_rc -ne 0 ]]; then
+            return "$login_helpers_rc"
+        fi
         local encoded_login_item_helpers
         encoded_login_item_helpers=$(printf '%s' "$login_item_helpers" | base64 | tr -d '\n' || echo "")
         local encoded_live_sibling_fingerprint

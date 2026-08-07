@@ -3365,7 +3365,9 @@ INNER
     [[ "$output" != *"UNEXPECTED_DELETE"* ]]
 }
 
-@test "batch scan stops before creating a plan when related-file sizing times out" {
+@test "batch scan keeps the app plan when related-file sizing times out" {
+    # Related size is display-only (#1383). A stalled du on leftovers must not
+    # abort the batch; the leftover paths stay in the plan with size 0.
     run env HOME="$HOME/batch-related-size-timeout" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc <<'INNER'
 set -euo pipefail
@@ -3398,6 +3400,8 @@ get_path_size_kb() {
 find_app_files() { printf '%s\n' "$related_path"; }
 get_diagnostic_report_paths_for_app() { return 0; }
 find_app_system_files() { return 0; }
+discover_login_item_helper_bundle_ids() { return 0; }
+has_sensitive_data() { return 1; }
 
 selected_apps=("0|$app_path|TimedOut|com.example.TimedOut|0|Never")
 running_apps=()
@@ -3410,11 +3414,69 @@ total_estimated_size=0
 rc=0
 _batch_scan_app_details || rc=$?
 printf 'RC=%s DETAILS=%s\n' "$rc" "${#app_details[@]}"
-[[ $rc -eq 124 && ${#app_details[@]} -eq 0 ]]
+[[ $rc -eq 0 && ${#app_details[@]} -eq 1 ]]
 INNER
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"RC=124 DETAILS=0"* ]]
+    [[ "$output" == *"RC=0 DETAILS=1"* ]]
+}
+
+@test "batch scan keeps the app when leftover discovery times out after receipt work (#1383)" {
+    # Machine-wide receipt walks can exhaust the shared deadline; leftover
+    # discovery then returns 124. That must narrow to the selected app, not
+    # abort with "nothing was removed".
+    run env HOME="$HOME/batch-leftover-timeout" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/batch.sh"
+
+app_path="$HOME/Applications/UniFi-Discover.app"
+mkdir -p "$app_path"
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+_batch_refresh_selected_app_bundle_id() { printf 'com.example.unifi\n'; }
+official_uninstaller_vendor() { return 1; }
+uninstall_bundle_id_has_surviving_sibling() { return 1; }
+uninstall_live_bundle_has_other_install() {
+    # Sibling scan finished with a complete "no sibling" proof, but burned
+    # the shared wall clock so leftover discovery has no budget left.
+    _MOLE_UNINSTALL_DISCOVERY_DEADLINE=$SECONDS
+    _MOLE_UNINSTALL_LIVE_SIBLING_FINGERPRINT=""
+    _MOLE_UNINSTALL_LIVE_SIBLING_PATHS=()
+    return 1
+}
+pgrep() { return 1; }
+get_brew_cask_name() { return 1; }
+get_file_owner() { whoami; }
+get_path_size_kb() { printf '4\n'; }
+find_app_files() { return 124; }
+get_diagnostic_report_paths_for_app() { echo "UNEXPECTED_DIAG"; return 99; }
+find_app_system_files() { echo "UNEXPECTED_SYSTEM"; return 99; }
+discover_login_item_helper_bundle_ids() { return 0; }
+has_sensitive_data() { return 1; }
+
+selected_apps=("0|$app_path|UniFi Discover|com.example.unifi|0|Never")
+running_apps=()
+sudo_apps=()
+brew_cask_apps=()
+blocked_apps=()
+manual_removal_apps=()
+app_details=()
+total_estimated_size=0
+rc=0
+_batch_scan_app_details || rc=$?
+printf 'RC=%s DETAILS=%s\n' "$rc" "${#app_details[@]}"
+# Plan must exist: one detail row, app-only (no leftover encoding of UNEXPECTED_*)
+[[ $rc -eq 0 && ${#app_details[@]} -eq 1 ]]
+printf 'DETAIL=%s\n' "${app_details[0]}"
+INNER
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=0 DETAILS=1"* ]] || return 1
+    [[ "$output" == *"leftover scan timed out; only the app bundle will be removed"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_DIAG"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SYSTEM"* ]] || return 1
 }
 
 # ---------------------------------------------------------------------------
