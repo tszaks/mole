@@ -1413,7 +1413,7 @@ _batch_scan_app_details() {
         # for the selected-app remnant walk so a long sibling scan cannot
         # starve leftover matching and hard-abort the batch with 124.
         local remnant_floor=$((SECONDS + MOLE_TIMEOUT_HINT_SCAN_SEC))
-        if (( _MOLE_UNINSTALL_DISCOVERY_DEADLINE < remnant_floor )); then
+        if ((_MOLE_UNINSTALL_DISCOVERY_DEADLINE < remnant_floor)); then
             debug_log "Extending uninstall discovery deadline by ${MOLE_TIMEOUT_HINT_SCAN_SEC}s for remnant scan of $app_name"
             _MOLE_UNINSTALL_DISCOVERY_DEADLINE=$remnant_floor
         fi
