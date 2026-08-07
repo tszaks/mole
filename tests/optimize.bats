@@ -555,7 +555,7 @@ execute_optimization sqlite_vacuum
 EOF
 
 	[[ "$status" -eq 0 ]] || { echo "$output"; return 1; }
-	[[ "$output" == *"Skipped 1 oversized databases"* ]] || return 1
+	[[ "$output" == *"Skipped 1 databases over the 100 MB safety limit"* ]] || return 1
 }
 
 @test "optimize does not auto-fix Gatekeeper anymore" {
