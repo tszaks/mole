@@ -1129,6 +1129,11 @@ WHITELIST_PATTERNS=(
     "$HOME/Library/Application Support/Google/Chrome/optimization_guide_model_store/*"
 )
 pgrep() { return 1; }
+# The fixture HOME carries Library/Caches/com.apple.Safari from a sibling
+# test, and validate_path_for_deletion refuses a cache whose owner is live.
+# Pin an empty process table so this whitelist test does not depend on
+# whether Safari happens to be running on the machine (#1390).
+ps() { printf '  PID  PPID COMM ARGS\n'; }
 clean_service_worker_cache() { :; }
 note_activity() { :; }
 safe_clean() {

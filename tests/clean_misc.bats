@@ -348,12 +348,30 @@ EOF
 }
 
 @test "clean_3d_tools calls expected caches" {
+    # Autodesk is only swept when a cache tree exists (#1390 made the row
+    # conditional on real targets), so the fixture has to provide one or the
+    # assertion below passes on an empty glob and proves nothing.
+    mkdir -p "$HOME/Library/Caches/com.autodesk.AcCoreConsole"
+    touch "$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db"
+
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+# Autodesk moved behind the live-owner guard in #1390, so a case that only
+# stubs safe_clean would silently stop seeing its row. Supply the guarded
+# path too, and an empty process table so the verdict does not depend on
+# whether Fusion happens to be running here.
 pgrep() { return 1; }
+ps() { printf '  PID  PPID COMM ARGS\n'; }
 safe_clean() { echo "$2"; }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    "$guard" || return 75
+    local count=$#
+    echo "${!count}"
+}
 clean_3d_tools
 EOF
 

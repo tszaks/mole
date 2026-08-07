@@ -1988,3 +1988,112 @@ EOF
     [ "$status" -eq 0 ]
     [ "$output" = "48" ]
 }
+
+# One vendor's Squirrel `ShipIt` used to claim another vendor's cache: the old
+# probe accepted the bare last DNS label (`pgrep -x ShipIt`), and Claude's
+# running ShipIt made Mole treat VS Code's idle cache as live. Measured on a
+# real process table, leaf-only matching called 34 of 59 idle caches busy.
+# Parity with the Mac app's ProcessGuard.processListMentionsCacheOwner.
+@test "cache owner probe requires corroboration for a shared leaf name (#1390)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/file_ops.sh"
+# Squirrel passes the owning bundle id as argv[1], which is the real reason
+# the running copy is identifiable at all. Copied from an actual `ps` line.
+ps() {
+    cat <<'TABLE'
+  PID  PPID COMM             ARGS
+  501     1 /Applications/Claude.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt /Applications/Claude.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt com.anthropic.claudefordesktop.ShipIt
+  502     1 /System/Library/PrivateFrameworks/DataAccess.framework/Support/dataaccessd /System/Library/PrivateFrameworks/DataAccess.framework/Support/dataaccessd
+  503     1 /usr/libexec/syncdefaultsd /usr/libexec/syncdefaultsd
+TABLE
+}
+state=0
+_mole_user_cache_owner_process_state "com.microsoft.VSCode.ShipIt" || state=$?
+printf 'SHIPIT=%s\n' "$state"
+state=0
+_mole_user_cache_owner_process_state "com.plausiblelabs.crashreporter.data" || state=$?
+printf 'DATA=%s\n' "$state"
+state=0
+_mole_user_cache_owner_process_state "com.anthropic.claudefordesktop.ShipIt" || state=$?
+printf 'CLAUDE=%s\n' "$state"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"SHIPIT=1"* ]] || return 1
+    [[ "$output" == *"DATA=1"* ]] || return 1
+    # The same line names both `ShipIt` and `Claude`, so this one is real.
+    [[ "$output" == *"CLAUDE=0"* ]]
+}
+
+# The reason the probe exists: AcCoreConsole registers no NSRunningApplication
+# and its cache dir is com.autodesk.AcCoreConsole, so the leaf plus the vendor
+# on the same argv line is the only available evidence.
+@test "cache owner probe still catches a corroborated helper (#1390)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/file_ops.sh"
+ps() {
+    cat <<'TABLE'
+  PID  PPID COMM             ARGS
+  601     1 /Applications/Autodesk Fusion.app/Contents/MacOS/AcCoreConsole /Applications/Autodesk Fusion.app/Contents/MacOS/AcCoreConsole
+TABLE
+}
+state=0
+_mole_user_cache_owner_process_state "com.autodesk.AcCoreConsole" || state=$?
+printf 'HELPER=%s\n' "$state"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"HELPER=0"* ]]
+}
+
+# Mole's own size probe runs `du` over the very directory it is judging, so the
+# cache id appears in the table because Mole is looking at it. Counting that as
+# ownership would hide every cache that takes long enough to measure.
+@test "cache owner probe ignores Mole's own measurement processes" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/file_ops.sh"
+ps() {
+    cat <<TABLE
+  PID  PPID COMM             ARGS
+  701     1 /usr/bin/du du -skPx $HOME/Library/Caches/com.example.SampleApp
+  702     1 /bin/sh sh -c mole clean
+TABLE
+}
+state=0
+_mole_user_cache_owner_process_state "com.example.SampleApp" || state=$?
+printf 'SELF=%s\n' "$state"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"SELF=1"* ]]
+}
+
+# An unreadable process table is not proof the owner is idle.
+@test "cache owner probe fails closed when the process table is unreadable" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/file_ops.sh"
+ps() { return 1; }
+state=0
+_mole_user_cache_owner_process_state "com.example.SampleApp" || state=$?
+printf 'UNREADABLE=%s\n' "$state"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"UNREADABLE=2"* ]]
+}

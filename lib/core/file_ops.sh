@@ -227,12 +227,117 @@ _mole_sqlite_family_base_path() {
     _mole_user_cache_sqlite_main_path "$1"
 }
 
+# One process-table snapshot per run, mirroring the Mac app's
+# ProcessGuard.cachedProcessTable. The answer cannot change between candidates
+# inside a single sweep, and the old code forked pgrep up to three times per
+# cache directory.
+#
+# Lines that must not vote are dropped here: Mole's own process, and the
+# measurement tools it forks over the very path being judged. `du -skPx
+# ~/Library/Caches/<id>` puts <id> in the table purely because Mole is looking
+# at it, which would make every slowly-measured cache report its owner as live.
+_MOLE_PROCESS_TABLE=""
+_MOLE_PROCESS_TABLE_STATE=""
+
+_mole_process_table() {
+    if [[ -n "${_MOLE_PROCESS_TABLE_STATE:-}" ]]; then
+        [[ "$_MOLE_PROCESS_TABLE_STATE" == "ok" ]] || return 1
+        printf '%s\n' "$_MOLE_PROCESS_TABLE"
+        return 0
+    fi
+
+    local raw=""
+    if ! raw=$(ps -axo pid,ppid,comm,args 2> /dev/null) || [[ -z "$raw" ]]; then
+        _MOLE_PROCESS_TABLE_STATE="unavailable"
+        return 1
+    fi
+
+    # Every text tool below runs under LC_ALL=C so it compares BYTES. A process
+    # table is not guaranteed to be UTF-8: an app named 富途牛牛 makes awk and
+    # grep abort with "illegal byte sequence" in a UTF-8 locale, and an aborted
+    # filter would silently shorten the table into a false "owner is idle".
+    local filtered=""
+
+    # Mole must not vote on itself. `pgrep -f` skipped the caller for free;
+    # a raw table does not, and every candidate id reaches this code as an
+    # argument, so the shell running `mo clean` (and any wrapper above it)
+    # carries that id in its own argv. Walking the ppid chain drops the whole
+    # invoking tree, which is also what excludes the `du` and `find` children
+    # forked to MEASURE the very directory being judged.
+    if ! filtered=$(printf '%s\n' "$raw" | LC_ALL=C awk -v self="$$" '
+        NR > 1 {
+            pid = $1
+            parent[pid] = $2
+            order[++count] = pid
+            # Drop the pid/ppid columns back off the line.
+            sub(/^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+/, "")
+            text[pid] = $0
+            comm[pid] = $1
+        }
+        END {
+            for (p = self; p != "" && p != "0" && p != "1" && !(p in seen); p = parent[p]) {
+                seen[p] = 1
+                mine[p] = 1
+            }
+            # Descendants too: a command substitution forks a child that
+            # inherits our argv verbatim, so the id would come back through
+            # the copy even after the ancestor chain is gone.
+            for (i = 1; i <= count; i++) {
+                pid = order[i]
+                depth = 0
+                for (p = pid; p != "" && p != "0" && p != "1" && depth < 64; p = parent[p]) {
+                    if (p == self) { mine[pid] = 1; break }
+                    depth++
+                }
+            }
+            for (i = 1; i <= count; i++) {
+                pid = order[i]
+                if (pid in mine) continue
+                n = split(comm[pid], parts, "/")
+                base = parts[n]
+                if (base == "du" || base == "find" || base == "mdfind" ||
+                    base == "ps" || base == "grep" || base == "stat" ||
+                    base == "ls" || base == "rm") continue
+                if (index(tolower(text[pid]), "com.tw93.mole") > 0) continue
+                print text[pid]
+            }
+        }'); then
+        # A filter that died mid-table would leave a SHORT table, which reads
+        # as "nothing owns this cache". Refuse to answer instead.
+        _MOLE_PROCESS_TABLE_STATE="unavailable"
+        return 1
+    fi
+
+    _MOLE_PROCESS_TABLE="$filtered"
+    _MOLE_PROCESS_TABLE_STATE="ok"
+    printf '%s\n' "$_MOLE_PROCESS_TABLE"
+    return 0
+}
+
+# Escape every non-alphanumeric byte so a cache-dir component is matched as a
+# literal inside an ERE.
+_mole_regex_escape() {
+    printf '%s' "$1" | sed 's/[^A-Za-z0-9_]/\\&/g'
+}
+
 # Tri-state process probe for a reverse-DNS cache owner:
 # 0 = a matching process is running, 1 = none matched, 2 = could not tell.
+#
+# Two acceptance shapes, deliberately asymmetric (parity with the Mac app's
+# ProcessGuard.processListMentionsCacheOwner):
+#   1. The full reverse-DNS id appears in the line. Self-identifying, so a
+#      plain substring is enough.
+#   2. The last DNS label appears as a DELIMITED token AND the same line
+#      independently names another component of the id. Corroboration is what
+#      makes a shared binary name usable: Claude and VS Code both ship a
+#      Squirrel binary called ShipIt, so `pgrep -x ShipIt` attributed VS Code's
+#      cache to a running Claude. Measured on this machine before the change,
+#      34 of 59 idle caches were called busy; the plain-substring shapes it
+#      relied on also read "default" out of syncdefaultsd and "data" out of
+#      dataaccessd.
 _mole_user_cache_owner_process_state() {
     local owner="$1"
     [[ -n "$owner" ]] || return 2
-    command -v pgrep > /dev/null 2>&1 || return 2
 
     local cache_token="|${owner}:"
     case "${_MOLE_USER_CACHE_OWNER_STATE_CACHE:-}" in
@@ -241,32 +346,52 @@ _mole_user_cache_owner_process_state() {
         *"${cache_token}2|"*) return 2 ;;
     esac
 
+    local table=""
+    if ! table=$(_mole_process_table); then
+        # An unreadable process table is not proof the owner is idle.
+        return 2
+    fi
+
     local state=1
-    local rc=0
-    # Bundle id often appears in helper argv or Mach-O path (AcCoreConsole's
-    # cache dir is com.autodesk.AcCoreConsole even when no NSRunningApplication
-    # registers that id).
-    if pgrep -f "$owner" > /dev/null 2>&1; then
+    if printf '%s\n' "$table" | LC_ALL=C grep -qiF -- "$owner"; then
         state=0
-    else
-        rc=$?
-        [[ $rc -eq 1 ]] || state=2
     fi
 
     local leaf="${owner##*.}"
     if [[ $state -eq 1 && -n "$leaf" && "$leaf" != "$owner" && ${#leaf} -ge 4 ]]; then
-        if pgrep -x "$leaf" > /dev/null 2>&1; then
-            state=0
-        else
-            rc=$?
-            [[ $rc -eq 1 ]] || state=2
-        fi
-        if [[ $state -eq 1 ]]; then
-            if pgrep -f "/$leaf" > /dev/null 2>&1; then
+        # "com" is in every reverse-DNS id and corroborates nothing.
+        local -a corroborators=()
+        local old_ifs="$IFS"
+        local -a components=()
+        IFS='.' read -r -a components <<< "$owner"
+        IFS="$old_ifs"
+        local index=0
+        local last_index=$((${#components[@]} - 1))
+        local component
+        for component in "${components[@]}"; do
+            if [[ $index -lt $last_index && ${#component} -ge 4 ]]; then
+                case "$component" in
+                    [cC][oO][mM]) ;;
+                    *) corroborators+=("$(_mole_regex_escape "$component")") ;;
+                esac
+            fi
+            index=$((index + 1))
+        done
+
+        if [[ ${#corroborators[@]} -gt 0 ]]; then
+            local escaped_leaf
+            escaped_leaf=$(_mole_regex_escape "$leaf")
+            local alternation=""
+            for component in "${corroborators[@]}"; do
+                alternation="${alternation:+$alternation|}$component"
+            done
+            local boundary_open='(^|[^A-Za-z0-9])'
+            local boundary_close='([^A-Za-z0-9]|$)'
+            # Two greps, so both tokens must land on the SAME line.
+            if printf '%s\n' "$table" |
+                LC_ALL=C grep -iE -- "${boundary_open}${escaped_leaf}${boundary_close}" |
+                LC_ALL=C grep -qiE -- "${boundary_open}(${alternation})${boundary_close}"; then
                 state=0
-            else
-                rc=$?
-                [[ $rc -eq 1 ]] || state=2
             fi
         fi
     fi

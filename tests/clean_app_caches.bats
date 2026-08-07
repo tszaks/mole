@@ -1358,11 +1358,13 @@ INNER
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=0 /bin/bash --noprofile --norc << 'INNER'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-pgrep() {
-    if [[ "$*" == *AcCoreConsole* ]] || [[ "$*" == *com.autodesk.AcCoreConsole* ]]; then
-        return 0
-    fi
-    return 1
+# The owner probe reads one `ps` snapshot rather than forking pgrep per
+# candidate, so a live helper is simulated by the table it would appear in.
+ps() {
+    cat <<'TABLE'
+  PID  PPID COMM             ARGS
+  901     1 /Applications/Autodesk Fusion.app/Contents/MacOS/AcCoreConsole /Applications/Autodesk Fusion.app/Contents/MacOS/AcCoreConsole
+TABLE
 }
 oplog_enabled() { return 1; }
 log_operation() { :; }
