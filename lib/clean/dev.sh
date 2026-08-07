@@ -362,11 +362,40 @@ clean_dev_mise() {
 
     safe_clean "$mise_cache_path"/* "mise cache"
 }
-# Rust/cargo caches.
+# Resolve a tool home from an optional env value plus default.
+# Only absolute paths without ".." / control characters are accepted from
+# env; anything else falls back to the default so a poisoned CARGO_HOME
+# cannot redirect cleanup (issue #1378, mise-relocated cargo/rustup).
+# shellcheck disable=SC2329
+resolve_tool_home() {
+    local env_value="${1:-}"
+    local default_home="$2"
+
+    if [[ -n "$env_value" && "$env_value" == /* ]]; then
+        case "$env_value" in
+            *'/../'* | */.. | .. | *$'\n'* | *$'\r'*)
+                ;;
+            *)
+                printf '%s\n' "${env_value%/}"
+                return 0
+                ;;
+        esac
+    fi
+    printf '%s\n' "${default_home%/}"
+}
+
+# Rust/cargo caches. Honor CARGO_HOME / RUSTUP_HOME when they point at a
+# validated absolute path (mise and other version managers relocate these).
+# Scope stays regenerable cache only: registry/cache, git, downloads — never
+# bin, toolchains, registry/index, or registry/src.
 clean_dev_rust() {
-    safe_clean ~/.cargo/registry/cache/* "Rust cargo cache"
-    safe_clean ~/.cargo/git/* "Cargo git cache"
-    safe_clean ~/.rustup/downloads/* "Rust downloads cache"
+    local cargo_home rustup_home
+    cargo_home=$(resolve_tool_home "${CARGO_HOME:-}" "${HOME}/.cargo")
+    rustup_home=$(resolve_tool_home "${RUSTUP_HOME:-}" "${HOME}/.rustup")
+
+    safe_clean "${cargo_home}/registry/cache"/* "Rust cargo cache"
+    safe_clean "${cargo_home}/git"/* "Cargo git cache"
+    safe_clean "${rustup_home}/downloads"/* "Rustup downloads cache"
 }
 # Ruby/gem ecosystem caches (not installed versions).
 clean_dev_ruby() {
@@ -410,8 +439,11 @@ check_multiple_versions() {
 check_rust_toolchains() {
     command -v rustup > /dev/null 2>&1 || return 0
 
+    local rustup_home
+    rustup_home=$(resolve_tool_home "${RUSTUP_HOME:-}" "${HOME}/.rustup")
+
     check_multiple_versions \
-        "$HOME/.rustup/toolchains" \
+        "${rustup_home}/toolchains" \
         "Rust toolchains" \
         "rustup toolchain list"
 }

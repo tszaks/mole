@@ -1291,6 +1291,74 @@ EOF
     [[ "$output" == *"PHP Composer cache|"* ]]
 }
 
+@test "clean_dev_rust honors CARGO_HOME and RUSTUP_HOME when absolute" {
+    # mise and friends relocate cargo/rustup via env; hardcoded ~/.cargo misses
+    # the live cache (issue #1378). Scope stays regenerable leaves only.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        CARGO_HOME="$HOME/.local/share/mise/cargo" \
+        RUSTUP_HOME="$HOME/.local/share/mise/rustup" \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_dev_rust
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Rust cargo cache|$HOME/.local/share/mise/cargo/registry/cache/*"* ]] || return 1
+    [[ "$output" == *"Cargo git cache|$HOME/.local/share/mise/cargo/git/*"* ]] || return 1
+    [[ "$output" == *"Rustup downloads cache|$HOME/.local/share/mise/rustup/downloads/*"* ]] || return 1
+    [[ "$output" != *"/.cargo/"* ]] || return 1
+    [[ "$output" != *"/.rustup/"* ]] || return 1
+}
+
+@test "clean_dev_rust falls back to default homes without env" {
+    run env -u CARGO_HOME -u RUSTUP_HOME \
+        HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+unset CARGO_HOME RUSTUP_HOME
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_dev_rust
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Rust cargo cache|$HOME/.cargo/registry/cache/*"* ]] || return 1
+    [[ "$output" == *"Cargo git cache|$HOME/.cargo/git/*"* ]] || return 1
+    [[ "$output" == *"Rustup downloads cache|$HOME/.rustup/downloads/*"* ]] || return 1
+}
+
+@test "resolve_tool_home rejects relative and traversal env values" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+fail=0
+expect() {
+    local got
+    got=$(resolve_tool_home "$1" "$HOME/.cargo")
+    if [[ "$got" != "$2" ]]; then
+        printf 'UNEXPECTED: env=%q got=%q want=%q\n' "$1" "$got" "$2"
+        fail=1
+    fi
+}
+expect "" "$HOME/.cargo"
+expect "$HOME/.local/share/mise/cargo" "$HOME/.local/share/mise/cargo"
+expect "relative/cargo" "$HOME/.cargo"
+expect "$HOME/../evil" "$HOME/.cargo"
+expect "/tmp/foo/../bar" "$HOME/.cargo"
+exit $fail
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
 @test "clean_developer_tools runs key stages" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
