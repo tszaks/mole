@@ -610,7 +610,14 @@ _record_file_ops_dry_run_target() {
         local measured_size=""
         local measure_rc=0
         measured_size=$(get_path_size_kb "$path" 2> /dev/null) || measure_rc=$?
-        [[ $measure_rc -eq 124 || $measure_rc -ge 128 ]] && return "$measure_rc"
+        if [[ $measure_rc -ge 128 ]]; then
+            return "$measure_rc"
+        fi
+        if [[ $measure_rc -eq 124 ]]; then
+            # Sizing budget exhausted: preview the item as size-unknown rather
+            # than cancelling the whole dry run.
+            MOLE_CLEAN_SIZING_TIMEOUTS=$((${MOLE_CLEAN_SIZING_TIMEOUTS:-0} + 1))
+        fi
         if [[ $measure_rc -eq 0 && "$measured_size" =~ ^[0-9]+$ ]]; then
             size_kb="$measured_size"
         else
@@ -772,8 +779,9 @@ safe_remove() {
                 size_kb=$(get_path_size_kb "$path" "$size_probe_timeout" 2> /dev/null) || size_probe_rc=$?
             fi
             if [[ $size_probe_rc -eq 124 ]]; then
-                _mole_record_clean_cancellation 124
-                return 124
+                # Sizing budget exhausted: still remove the item, with the
+                # freed total under-reported, matching the batch-sizing policy.
+                MOLE_CLEAN_SIZING_TIMEOUTS=$((${MOLE_CLEAN_SIZING_TIMEOUTS:-0} + 1))
             fi
             if [[ $size_probe_rc -ge 128 ]]; then
                 _mole_record_clean_cancellation "$size_probe_rc"
@@ -829,7 +837,10 @@ safe_remove() {
     if [[ $rm_exit -eq 124 ]]; then
         debug_log "Removal timed out: $path"
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "removal timed out"
-        _mole_record_clean_cancellation 124
+        # A slow disk can exceed the per-item removal budget. That is a failed
+        # removal, not a user interrupt: count it and keep going so one slow
+        # cache never cancels the remaining cleanup.
+        MOLE_CLEAN_REMOVAL_TIMEOUTS=$((${MOLE_CLEAN_REMOVAL_TIMEOUTS:-0} + 1))
         return 124
     fi
 
@@ -1187,8 +1198,7 @@ safe_sudo_remove() {
                         -n du -skP "$path" < /dev/null 2> /dev/null | awk '{print $1}') || size_probe_rc=$?
                 fi
                 if [[ $size_probe_rc -eq 124 ]]; then
-                    _mole_record_clean_cancellation 124
-                    return 124
+                    MOLE_CLEAN_SIZING_TIMEOUTS=$((${MOLE_CLEAN_SIZING_TIMEOUTS:-0} + 1))
                 fi
                 if [[ $size_probe_rc -ge 128 ]]; then
                     _mole_record_clean_cancellation "$size_probe_rc"
@@ -1233,7 +1243,7 @@ safe_sudo_remove() {
 
     if [[ $ret -eq 124 ]]; then
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "removal timed out"
-        _mole_record_clean_cancellation 124
+        MOLE_CLEAN_REMOVAL_TIMEOUTS=$((${MOLE_CLEAN_REMOVAL_TIMEOUTS:-0} + 1))
         return 124
     fi
     if [[ $ret -ge 128 ]]; then
