@@ -598,6 +598,9 @@ opt_sqlite_vacuum() {
     local failed=0
     local policy_skipped=0
     local already_optimal=0
+    # Paths held back only by the size ceiling (issue #1367): never claim
+    # "all already optimized" when this list is non-empty.
+    local -a policy_skipped_paths=()
 
     for pattern in "${db_paths[@]}"; do
         while IFS= read -r db_file; do
@@ -616,6 +619,7 @@ opt_sqlite_vacuum() {
             file_size=$(get_file_size "$db_file")
             if [[ "$file_size" -gt "$MOLE_SQLITE_MAX_SIZE" ]]; then
                 policy_skipped=$((policy_skipped + 1))
+                policy_skipped_paths+=("$db_file")
                 continue
             fi
 
@@ -675,12 +679,19 @@ opt_sqlite_vacuum() {
     fi
 
     export OPTIMIZE_DATABASES_COUNT="${vacuumed}"
+    # Headline must not say "already optimized" when size policy skipped
+    # anything, or when nothing was even compact enough to claim success
+    # (issue #1367).
     if [[ $vacuumed -gt 0 ]]; then
         opt_msg "Optimized $vacuumed databases for Mail, Safari, Messages"
-    elif [[ $timed_out -eq 0 && $failed -eq 0 ]]; then
+    elif [[ $timed_out -ne 0 || $failed -ne 0 ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Database optimization incomplete"
+    elif [[ $policy_skipped -gt 0 ]]; then
+        opt_msg "No databases compacted"
+    elif [[ $already_optimal -gt 0 ]]; then
         opt_msg "All databases already optimized"
     else
-        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Database optimization incomplete"
+        opt_msg "No databases found to optimize"
     fi
 
     if [[ $already_optimal -gt 0 ]]; then
@@ -688,7 +699,17 @@ opt_sqlite_vacuum() {
     fi
 
     if [[ $policy_skipped -gt 0 ]]; then
-        opt_msg "Skipped $policy_skipped oversized databases"
+        opt_msg "Skipped $policy_skipped databases over the 100 MB safety limit"
+        local skipped_path skipped_size skipped_display
+        for skipped_path in "${policy_skipped_paths[@]}"; do
+            skipped_size=$(get_file_size "$skipped_path" 2> /dev/null || echo 0)
+            if [[ "$skipped_size" =~ ^[0-9]+$ && "$skipped_size" -gt 0 ]]; then
+                skipped_display=$(bytes_to_human "$skipped_size")
+            else
+                skipped_display="unknown size"
+            fi
+            echo -e "  ${GRAY}${ICON_SUBLIST}${NC} ${skipped_path/#$HOME/~} · ${skipped_display}"
+        done
     fi
 
     if [[ $timed_out -gt 0 ]]; then
@@ -1417,17 +1438,40 @@ opt_shared_file_list_repair() {
     optimize_task_result_from_counts "$repaired" "$((scan_failed + remove_failed))"
 }
 
-# Clean old delivered notifications from NotificationCenter database.
-opt_notification_cleanup() {
-    local nc_db_dir
-    nc_db_dir="$(getconf DARWIN_USER_DIR 2> /dev/null || true)/com.apple.notificationcenter/db2"
-    local nc_db="$nc_db_dir/db"
-
-    if [[ ! -f "$nc_db" ]]; then
-        opt_msg "Notification Center database not found"
-        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNCHANGED"
+# Resolve the live Notification Center SQLite database.
+# macOS 15+ (Sequoia and later) stores it under the usernoted group container;
+# older systems keep it under DARWIN_USER_DIR. Prefer the path that actually
+# exists so we never report "not found" while usernoted holds the real db open
+# (issue #1368).
+# shellcheck disable=SC2329
+resolve_notification_center_db() {
+    local group_db="$HOME/Library/Group Containers/group.com.apple.usernoted/db2/db"
+    if [[ -f "$group_db" ]]; then
+        printf '%s\n' "$group_db"
         return 0
     fi
+
+    local darwin_dir=""
+    darwin_dir="$(getconf DARWIN_USER_DIR 2> /dev/null || true)"
+    darwin_dir="${darwin_dir%/}"
+    if [[ -n "$darwin_dir" && -f "$darwin_dir/com.apple.notificationcenter/db2/db" ]]; then
+        printf '%s\n' "$darwin_dir/com.apple.notificationcenter/db2/db"
+        return 0
+    fi
+    return 1
+}
+
+# Clean old delivered notifications from NotificationCenter database.
+opt_notification_cleanup() {
+    local nc_db=""
+    if ! nc_db=$(resolve_notification_center_db); then
+        # Unavailable, not a healthy empty state: the success "not found" line
+        # made a missed Sequoia path look like a no-op (issue #1368).
+        echo -e "  ${GRAY}-${NC} Notification Center database unavailable (no supported path)"
+        optimize_task_result "$MOLE_OPTIMIZE_OUTCOME_UNAVAILABLE"
+        return 0
+    fi
+    debug_log "Notification Center database: $nc_db"
 
     local db_size=""
     if ! db_size=$(opt_existing_file_size_kb_strict "$nc_db"); then

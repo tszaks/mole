@@ -23,35 +23,139 @@ teardown_file() {
 }
 
 @test "clean_dev_npm prunes pnpm store without deleting orphaned global store" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+    # Real file on PATH so type -P prefers the stub over any host pnpm.
+    mkdir -p "$HOME/bin"
+    cat > "$HOME/bin/pnpm" <<'SCRIPT'
+#!/bin/bash
+case "${1:-}" in
+    --version) echo "11.0.0"; exit 0 ;;
+    store)
+        [[ "${2:-}" == "path" ]] && { echo "/tmp/pnpm-store"; exit 0; }
+        [[ "${2:-}" == "prune" ]] && exit 0
+        ;;
+esac
+exit 2
+SCRIPT
+    chmod +x "$HOME/bin/pnpm"
+
+    run env HOME="$HOME" PATH="$HOME/bin:/usr/bin:/bin" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-clean_tool_cache() { echo "$1"; }
+clean_tool_cache() { echo "$1|$2"; }
 safe_clean() { echo "$2"; }
 note_activity() { :; }
 run_with_timeout() { shift; "$@"; }
-pnpm() {
-    if [[ "$1" == "store" && "$2" == "prune" ]]; then
-        return 0
-    fi
-    if [[ "$1" == "store" && "$2" == "path" ]]; then
-        echo "/tmp/pnpm-store"
-        return 0
-    fi
-    return 0
-}
+pgrep() { return 1; }
 npm() { return 0; }
-export -f pnpm npm
+export -f pgrep npm
 clean_dev_npm
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"pnpm cache"* ]] || return 1
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"pnpm cache|/tmp/pnpm-store"* ]] || return 1
     [[ "$output" != *"Orphaned pnpm store"* ]] || return 1
-    [[ "$output" != *"pnpm store"* ]]
+}
+
+@test "clean_pnpm_stores prunes each distinct store from installed majors" {
+    # issue #1370: active PATH pnpm (v11) plus a mise-installed pnpm 10.
+    mkdir -p "$HOME/bin" "$HOME/.local/share/mise/installs/pnpm/10.34.5"
+    cat > "$HOME/bin/pnpm" <<'SCRIPT'
+#!/bin/bash
+case "${1:-}" in
+    --version) echo "11.17.0"; exit 0 ;;
+    store)
+        if [[ "${2:-}" == "path" ]]; then
+            echo "$HOME/Library/pnpm/store/v11"
+            exit 0
+        fi
+        if [[ "${2:-}" == "prune" ]]; then
+            echo "PRUNE_V11"
+            exit 0
+        fi
+        ;;
+esac
+exit 2
+SCRIPT
+    chmod +x "$HOME/bin/pnpm"
+    cat > "$HOME/.local/share/mise/installs/pnpm/10.34.5/pnpm" <<'SCRIPT'
+#!/bin/bash
+case "${1:-}" in
+    --version) echo "10.34.5"; exit 0 ;;
+    store)
+        if [[ "${2:-}" == "path" ]]; then
+            echo "$HOME/.local/share/pnpm/store/v10"
+            exit 0
+        fi
+        if [[ "${2:-}" == "prune" ]]; then
+            echo "PRUNE_V10"
+            exit 0
+        fi
+        ;;
+esac
+exit 2
+SCRIPT
+    chmod +x "$HOME/.local/share/mise/installs/pnpm/10.34.5/pnpm"
+
+    run env HOME="$HOME" PATH="$HOME/bin:/usr/bin:/bin" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+run_with_timeout() { shift; "$@"; }
+pgrep() { return 1; }
+is_path_whitelisted() { return 1; }
+export -f pgrep
+clean_tool_cache() {
+    local description="$1"
+    local cache_path="$2"
+    shift 2
+    echo "CACHE:$description|$cache_path"
+    "$@"
+}
+clean_pnpm_stores
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"CACHE:pnpm cache|$HOME/Library/pnpm/store/v11"* ]] || return 1
+    [[ "$output" == *"CACHE:pnpm cache|$HOME/.local/share/pnpm/store/v10"* ]] || return 1
+    [[ "$output" == *"PRUNE_V11"* ]] || return 1
+    [[ "$output" == *"PRUNE_V10"* ]] || return 1
+}
+
+@test "clean_pnpm_stores skips when pnpm is running" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { printf 'DEBUG:%s\n' "$*"; }
+pgrep() { return 0; }
+pnpm() { echo "UNEXPECTED"; return 0; }
+export -f pgrep pnpm
+clean_pnpm_stores
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"skipping store prune"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED"* ]] || return 1
 }
 
 @test "clean_dev_npm cleans default npm residual directories" {

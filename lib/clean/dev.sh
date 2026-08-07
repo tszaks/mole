@@ -131,6 +131,138 @@ gradle_daemon_running() {
         -f "GradleDaemon"
 }
 
+# True when a pnpm process is running, or when process state cannot be
+# determined (fail closed: skip prune rather than race a live install).
+# shellcheck disable=SC2329
+pnpm_process_blocks_prune() {
+    if ! command -v pgrep > /dev/null 2>&1; then
+        return 0
+    fi
+    # Capture pgrep's own status: after a failed `if pgrep; then`, $? is the
+    # if-statement status (0), not pgrep's 1, which would false-positive block.
+    local pgrep_rc=0
+    pgrep -x pnpm > /dev/null 2>&1 || pgrep_rc=$?
+    # 0 = running (block), 1 = no match (allow), other = unknown (block).
+    [[ $pgrep_rc -ne 1 ]]
+}
+
+# Absolute store path without ".." / control characters only.
+# shellcheck disable=SC2329
+is_safe_pnpm_store_path() {
+    local path="${1:-}"
+    [[ -n "$path" && "$path" == /* ]] || return 1
+    case "$path" in
+        *'/../'* | */.. | .. | *$'\n'* | *$'\r'*)
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+# Emit candidate pnpm binaries already installed locally. Never downloads.
+# Order: PATH pnpm first, then mise versioned installs. Callers dedupe by
+# resolved store path (issue #1370).
+# shellcheck disable=SC2329
+list_installed_pnpm_binaries() {
+    local bin=""
+    if command -v pnpm > /dev/null 2>&1; then
+        # type -P resolves only real files; shell-function stubs (tests) fall
+        # back to the bare "pnpm" name still reachable on PATH.
+        bin=$(type -P pnpm 2> /dev/null || true)
+        if [[ -n "$bin" && -x "$bin" ]]; then
+            printf '%s\n' "$bin"
+        else
+            printf '%s\n' "pnpm"
+        fi
+    fi
+
+    local mise_root="$HOME/.local/share/mise/installs/pnpm"
+    if [[ -d "$mise_root" ]]; then
+        local version_dir
+        for version_dir in "$mise_root"/*; do
+            [[ -d "$version_dir" ]] || continue
+            if [[ -x "$version_dir/pnpm" ]]; then
+                printf '%s\n' "$version_dir/pnpm"
+            fi
+        done
+    fi
+}
+
+# Prune every distinct pnpm store generation reachable through an already
+# installed matching pnpm binary. Owner command only (plain `store prune`,
+# no --force, no raw directory delete). Dedupes by store path so two
+# binaries that resolve to the same generation run once (issue #1370).
+# shellcheck disable=SC2329
+clean_pnpm_stores() {
+    local pnpm_default_store="$HOME/Library/pnpm/store"
+
+    if pnpm_process_blocks_prune; then
+        debug_log "pnpm process running or process state unknown, skipping store prune"
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} pnpm cache · would skip (pnpm busy)"
+            note_activity
+        fi
+        return 0
+    fi
+
+    local -a pnpm_bins=()
+    local bin_line
+    while IFS= read -r bin_line; do
+        [[ -n "$bin_line" ]] || continue
+        pnpm_bins+=("$bin_line")
+    done < <(list_installed_pnpm_binaries)
+
+    if [[ ${#pnpm_bins[@]} -eq 0 ]]; then
+        debug_log "pnpm is unavailable, leaving global pnpm store for manual review: $pnpm_default_store"
+        return 0
+    fi
+
+    local -a seen_stores=()
+    local pruned_any=false
+    local pnpm_bin store_path store_seen store_entry
+    for pnpm_bin in "${pnpm_bins[@]}"; do
+        # Usable binary only; never prompt Corepack to download another major.
+        if ! COREPACK_ENABLE_DOWNLOAD_PROMPT=0 run_with_timeout \
+            "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$pnpm_bin" --version > /dev/null 2>&1; then
+            debug_log "Skipping unusable pnpm binary: $pnpm_bin"
+            continue
+        fi
+
+        start_section_spinner "Checking pnpm store path..."
+        store_path=$(COREPACK_ENABLE_DOWNLOAD_PROMPT=0 run_with_timeout \
+            "$MOLE_TIMEOUT_QUICK_DETECT_SEC" "$pnpm_bin" store path 2> /dev/null) || store_path=""
+        stop_section_spinner
+
+        if ! is_safe_pnpm_store_path "$store_path"; then
+            debug_log "Rejecting unsafe or empty pnpm store path from $pnpm_bin: ${store_path:-<empty>}"
+            continue
+        fi
+        store_path="${store_path%/}"
+
+        store_seen=false
+        for store_entry in "${seen_stores[@]+"${seen_stores[@]}"}"; do
+            if [[ "$store_entry" == "$store_path" ]]; then
+                store_seen=true
+                break
+            fi
+        done
+        if [[ "$store_seen" == "true" ]]; then
+            debug_log "pnpm store already scheduled: $store_path"
+            continue
+        fi
+        seen_stores+=("$store_path")
+
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "pnpm cache" "$store_path" \
+            run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" \
+            env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "$pnpm_bin" store prune
+        pruned_any=true
+    done
+
+    if [[ "$pruned_any" != "true" ]]; then
+        debug_log "No pruneable pnpm store resolved from installed binaries"
+    fi
+}
+
 # npm/pnpm/yarn/bun caches.
 clean_dev_npm() {
     local npm_default_cache="$HOME/.npm"
@@ -176,23 +308,7 @@ clean_dev_npm() {
         done
     fi
 
-    # Clean pnpm store cache
-    local pnpm_default_store=~/Library/pnpm/store
-    # Check if pnpm is actually usable (not just Corepack shim)
-    if command -v pnpm > /dev/null 2>&1 && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm --version > /dev/null 2>&1; then
-        local pnpm_store_path
-        start_section_spinner "Checking store path..."
-        pnpm_store_path=$(COREPACK_ENABLE_DOWNLOAD_PROMPT=0 run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" pnpm store path 2> /dev/null) || pnpm_store_path=""
-        stop_section_spinner
-
-        local pnpm_cache_check="$pnpm_default_store"
-        if [[ -n "$pnpm_store_path" && "$pnpm_store_path" == /* ]]; then
-            pnpm_cache_check="$pnpm_store_path"
-        fi
-        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "pnpm cache" "$pnpm_cache_check" run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" pnpm store prune
-    else
-        debug_log "pnpm is unavailable, leaving global pnpm store for manual review: $pnpm_default_store"
-    fi
+    clean_pnpm_stores
     clean_corepack_cache
     local bun_default_cache="$HOME/.bun/install/cache"
     local bun_cache_path="$bun_default_cache"
