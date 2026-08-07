@@ -158,6 +158,37 @@ EOF
     [[ "$output" != *"UNEXPECTED"* ]] || return 1
 }
 
+# Corepack and npm-installed pnpm run as `node .../pnpm.cjs`, so the busy
+# guard has to match the invoked program, not the process name. `-x pnpm`
+# saw only the standalone binary and let a prune race a live install.
+@test "pnpm busy guard sees a corepack pnpm and ignores a lockfile mention" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+
+# Stand in for the real process table: pgrep -f matches its pattern against
+# each full argv line.
+PROCESS_TABLE=""
+pgrep() {
+    [[ "$1" == "-f" ]] || return 1
+    printf '%s\n' "$PROCESS_TABLE" | grep -qE "$2"
+}
+
+PROCESS_TABLE="node /Users/x/.cache/node/corepack/v1/pnpm/9.1.0/bin/pnpm.cjs install"
+printf 'COREPACK=%s\n' "$(pnpm_process_blocks_prune && echo block || echo allow)"
+PROCESS_TABLE="vim /Users/x/project/pnpm-lock.yaml"
+printf 'LOCKFILE=%s\n' "$(pnpm_process_blocks_prune && echo block || echo allow)"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"COREPACK=block"* ]] || return 1
+    [[ "$output" == *"LOCKFILE=allow"* ]]
+}
+
 @test "clean_dev_npm cleans default npm residual directories" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

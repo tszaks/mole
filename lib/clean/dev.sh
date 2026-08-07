@@ -138,10 +138,16 @@ pnpm_process_blocks_prune() {
     if ! command -v pgrep > /dev/null 2>&1; then
         return 0
     fi
+    # `-x pnpm` only sees the standalone binary. Corepack and npm-installed
+    # pnpm run as `node .../pnpm.cjs`, so the guard it was written to be
+    # (fail closed while an install is live) never fired for them. Match the
+    # invoked program instead, delimited so `pnpm-lock.yaml` in some other
+    # process's argv cannot block the prune forever.
+    #
     # Capture pgrep's own status: after a failed `if pgrep; then`, $? is the
     # if-statement status (0), not pgrep's 1, which would false-positive block.
     local pgrep_rc=0
-    pgrep -x pnpm > /dev/null 2>&1 || pgrep_rc=$?
+    pgrep -f '(^|/)pnpm(\.cjs)?([[:space:]]|$)' > /dev/null 2>&1 || pgrep_rc=$?
     # 0 = running (block), 1 = no match (allow), other = unknown (block).
     [[ $pgrep_rc -ne 1 ]]
 }
