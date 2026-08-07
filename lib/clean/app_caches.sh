@@ -66,6 +66,7 @@ _defer_app_cache_guard_family() {
     case "$1" in
         _simulator_app_cache_delete_guard_allows) mole_defer_cleanup_family "Simulator" ;;
         _final_cut_pro_delete_guard_allows) mole_defer_cleanup_family "Final Cut Pro" ;;
+        _autodesk_cache_delete_guard_allows) mole_defer_cleanup_family "Autodesk" ;;
         *) mole_defer_cleanup_family "Xcode" ;;
     esac
 }
@@ -671,11 +672,62 @@ clean_video_tools() {
     safe_clean ~/Library/Caches/com.adobe.PremierePro.*/* "Premiere Pro cache"
     clean_jianying_pro_generated_caches
 }
+# Autodesk Fusion helpers (AcCoreConsole, ADPClientService) outlive the main
+# window and keep SQLite caches open under ~/Library/Caches/com.autodesk.*.
+# Deleting those while the helper runs can fill the volume with unlinked temp
+# writes (#1390). Probe is intentionally broad on the Autodesk family; the
+# safe_remove live-cache gate is the per-path backstop for every reverse-DNS
+# cache tree, including the generic ~/Library/Caches/* sweep.
+autodesk_cache_process_state() {
+    mole_pgrep_any \
+        -f "com.autodesk." \
+        -x "AcCoreConsole" \
+        -f "/AcCoreConsole" \
+        -x "ADPClientService" \
+        -f "/ADPClientService" \
+        -f "Autodesk Fusion" \
+        -f "Fusion 360" \
+        -f "Fusion360"
+}
+
+_autodesk_cache_delete_guard_allows() {
+    mole_clean_process_guard autodesk_cache_process_state "Autodesk running"
+}
+
 # 3D and CAD tools.
 clean_3d_tools() {
     safe_clean ~/Library/Caches/org.blenderfoundation.blender/* "Blender cache"
     safe_clean ~/Library/Caches/com.maxon.cinema4d/* "Cinema 4D cache"
-    safe_clean ~/Library/Caches/com.autodesk.*/* "Autodesk cache"
+
+    local -a autodesk_targets=()
+    local autodesk_entry
+    for autodesk_entry in "$HOME"/Library/Caches/com.autodesk.*; do
+        [[ -e "$autodesk_entry" ]] || continue
+        if mole_cleanup_targets_exist "$autodesk_entry"/*; then
+            autodesk_targets+=("$autodesk_entry"/*)
+        elif mole_cleanup_targets_exist "$autodesk_entry"; then
+            autodesk_targets+=("$autodesk_entry")
+        fi
+    done
+    if [[ ${#autodesk_targets[@]} -gt 0 ]]; then
+        local process_state=0
+        autodesk_cache_process_state || process_state=$?
+        if [[ $process_state -ne 1 ]]; then
+            if [[ $process_state -eq 2 ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Autodesk cache · skipped (process state unknown)"
+                note_activity
+            else
+                mole_defer_cleanup_family "Autodesk"
+            fi
+        else
+            _app_cache_safe_clean_guarded \
+                _autodesk_cache_delete_guard_allows \
+                "Autodesk cache" \
+                "${autodesk_targets[@]}" \
+                "Autodesk cache" || true
+        fi
+    fi
+
     safe_clean ~/Library/Caches/com.sketchup.*/* "SketchUp cache"
 }
 # Productivity apps.

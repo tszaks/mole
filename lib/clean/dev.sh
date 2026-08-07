@@ -3760,6 +3760,237 @@ clean_codex_cli() {
     debug_log "Codex CLI state left intact by default: $codex_root"
 }
 
+# Physical-path gate for marketplace staging under ~/.codex/.tmp. Same
+# no-symlink-below-HOME rule as the Sparkle staging helper, scoped to a
+# caller-supplied root so completed marketplaces stay out of reach.
+codex_marketplace_staging_physical_path() {
+    local candidate="$1"
+    local staging_root="$2"
+    local home_prefix="${HOME%/}/"
+
+    case "$candidate" in
+        "$staging_root" | "$staging_root"/*) ;;
+        *) return 1 ;;
+    esac
+    [[ -d "$candidate" ]] || return 1
+    if [[ "$candidate" != "$staging_root" && "${candidate%/*}" != "$staging_root" ]]; then
+        return 1
+    fi
+
+    local relative="${candidate#"$home_prefix"}"
+    local old_ifs="$IFS"
+    local -a components=()
+    IFS='/' read -r -a components <<< "$relative"
+    IFS="$old_ifs"
+    [[ ${#components[@]} -gt 0 ]] || return 1
+
+    local probe="$HOME"
+    local component
+    for component in "${components[@]}"; do
+        [[ -n "$component" ]] || return 1
+        probe="$probe/$component"
+        [[ -L "$probe" ]] && return 1
+    done
+
+    local physical_root=""
+    local physical_candidate=""
+    physical_root=$(cd -P "$staging_root" 2> /dev/null && pwd -P) || return 1
+    physical_candidate=$(cd -P "$candidate" 2> /dev/null && pwd -P) || return 1
+    if [[ "$candidate" == "$staging_root" ]]; then
+        [[ "$physical_candidate" == "$physical_root" ]] || return 1
+    else
+        [[ "${physical_candidate%/*}" == "$physical_root" ]] || return 1
+    fi
+
+    printf '%s\n' "$physical_candidate"
+}
+
+_MOLE_CODEX_MARKETPLACE_STAGING_ROOT=""
+_MOLE_CODEX_MARKETPLACE_STAGING_ENTRY=""
+
+_codex_marketplace_staging_entry_is_still_stale() {
+    local staging_root="$_MOLE_CODEX_MARKETPLACE_STAGING_ROOT"
+    local stale_entry="$_MOLE_CODEX_MARKETPLACE_STAGING_ENTRY"
+    [[ -n "$staging_root" && -n "$stale_entry" ]] || return 1
+    [[ "${stale_entry%/*}" == "$staging_root" ]] || return 1
+    [[ -d "$stale_entry" && ! -L "$stale_entry" ]] || return 1
+
+    local physical_before=""
+    local physical_after=""
+    physical_before=$(codex_marketplace_staging_physical_path "$stale_entry" "$staging_root") || return 1
+
+    if [[ -z "$(command find -P "$stale_entry" -maxdepth 0 -type d \
+        -mtime +"$MOLE_ORPHAN_AGE_DAYS" 2> /dev/null)" ]]; then
+        return 1
+    fi
+
+    physical_after=$(codex_marketplace_staging_physical_path "$stale_entry" "$staging_root") || return 1
+    [[ "$physical_before" == "$physical_after" ]] || return 1
+    return 0
+}
+
+_codex_marketplace_staging_delete_guard_allows() {
+    _codex_marketplace_staging_entry_is_still_stale || return 1
+    mole_clean_process_guard codex_runtime_process_state "Codex started" || return 1
+    if codex_sparkle_staging_has_open_files "$_MOLE_CODEX_MARKETPLACE_STAGING_ROOT"; then
+        _MOLE_CLEAN_GUARD_REASON="open files"
+        return 1
+    else
+        local open_file_state=$?
+        if [[ "$open_file_state" -eq 2 ]]; then
+            _MOLE_CLEAN_GUARD_REASON="open-file check unavailable"
+            return 1
+        fi
+    fi
+    _codex_marketplace_staging_entry_is_still_stale || return 1
+    return 0
+}
+
+_codex_marketplace_staging_safe_clean_guarded() {
+    local staging_root="$1"
+    local stale_entry="$2"
+    local display_name="$3"
+    _MOLE_CODEX_MARKETPLACE_STAGING_ROOT="$staging_root"
+    _MOLE_CODEX_MARKETPLACE_STAGING_ENTRY="$stale_entry"
+    local _MOLE_CLEAN_GUARD_REASON="staging entry changed"
+
+    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
+        if ! _codex_marketplace_staging_delete_guard_allows; then
+            return 75
+        fi
+        safe_clean "$stale_entry" "$display_name"
+        return $?
+    fi
+
+    local guarded_rc=0
+    safe_clean_guarded _codex_marketplace_staging_delete_guard_allows \
+        "$stale_entry" "$display_name" || guarded_rc=$?
+    return "$guarded_rc"
+}
+
+# Abandoned Codex marketplace staging leftovers (#1389). Completes marketplaces
+# such as openai-bundled and configured marketplace dirs are never candidates;
+# only exact staging prefixes under fixed roots, aged by MOLE_ORPHAN_AGE_DAYS.
+# marketplace-backup-* stays out of scope until recovery semantics are clear.
+clean_codex_marketplace_staging() {
+    local tmp_root="$HOME/.codex/.tmp"
+    [[ -d "$tmp_root" ]] || return 0
+
+    local -a staging_roots=(
+        "$tmp_root/bundled-marketplaces"
+        "$tmp_root/marketplaces/.staging"
+    )
+    local -a staging_prefixes=(
+        "openai-bundled.staging-"
+        "marketplace-upgrade-"
+        "marketplace-add-"
+    )
+
+    local -a stale_entries=()
+    local -a stale_roots=()
+    local staging_root prefix stale_entry
+    for staging_root in "${staging_roots[@]}"; do
+        [[ -d "$staging_root" ]] || continue
+        if ! codex_marketplace_staging_physical_path "$staging_root" "$staging_root" > /dev/null; then
+            debug_log "Codex marketplace staging skipped: unsafe root $staging_root"
+            continue
+        fi
+        while IFS= read -r -d '' stale_entry; do
+            local base
+            base=$(basename "$stale_entry")
+            local matched=false
+            for prefix in "${staging_prefixes[@]}"; do
+                case "$base" in
+                    "$prefix"*)
+                        matched=true
+                        break
+                        ;;
+                esac
+            done
+            [[ "$matched" == "true" ]] || continue
+            if ! codex_marketplace_staging_physical_path "$stale_entry" "$staging_root" > /dev/null; then
+                continue
+            fi
+            if ! mole_cleanup_targets_exist "$stale_entry"; then
+                continue
+            fi
+            if [[ -n "$(command find -P "$stale_entry" -maxdepth 0 -type d \
+                -mtime +"$MOLE_ORPHAN_AGE_DAYS" 2> /dev/null)" ]]; then
+                stale_entries+=("$stale_entry")
+                stale_roots+=("$staging_root")
+            fi
+        done < <(command find -P "$staging_root" -mindepth 1 -maxdepth 1 -type d -print0 2> /dev/null)
+    done
+    [[ ${#stale_entries[@]} -gt 0 ]] || return 0
+
+    if is_path_whitelisted "$tmp_root" || is_path_whitelisted "$HOME/.codex"; then
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Codex marketplace staging · would skip (whitelist)"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Codex marketplace staging · skipped (whitelist)"
+        fi
+        note_activity
+        return 0
+    fi
+
+    local process_state=0
+    codex_runtime_process_state || process_state=$?
+    if [[ $process_state -ne 1 ]]; then
+        if [[ $process_state -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex marketplace staging · skipped (process state unknown)"
+            note_activity
+        else
+            mole_defer_cleanup_family "Codex"
+        fi
+        return 0
+    fi
+
+    local open_file_state=0
+    # Reuse the Sparkle open-file helper shape against each staging root only
+    # when that root still has candidates (open files on an idle sibling root
+    # must not block cleanup elsewhere).
+    local idx=0
+    for stale_entry in "${stale_entries[@]}"; do
+        staging_root="${stale_roots[$idx]}"
+        idx=$((idx + 1))
+
+        if is_path_whitelisted "$stale_entry"; then
+            continue
+        fi
+
+        open_file_state=0
+        if codex_sparkle_staging_has_open_files "$staging_root"; then
+            mole_defer_cleanup_family "Codex"
+            return 0
+        else
+            open_file_state=$?
+        fi
+        if [[ "$open_file_state" -eq 2 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex marketplace staging · skipped (open-file check unavailable)"
+            note_activity
+            return 0
+        fi
+
+        local guarded_rc=0
+        _codex_marketplace_staging_safe_clean_guarded \
+            "$staging_root" "$stale_entry" \
+            "Codex marketplace staging" || guarded_rc=$?
+        if [[ $guarded_rc -eq 75 ]]; then
+            case "${_MOLE_CLEAN_GUARD_REASON:-}" in
+                "process state unknown" | "open-file check unavailable")
+                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex marketplace staging · stopped (${_MOLE_CLEAN_GUARD_REASON})"
+                    note_activity
+                    ;;
+                "staging entry changed")
+                    debug_log "Codex marketplace staging entry changed before cleanup: $stale_entry"
+                    ;;
+                *) mole_defer_cleanup_family "Codex" ;;
+            esac
+            return 0
+        fi
+    done
+}
+
 # Shared Chromium Default profile caches that are safe to regenerate.
 clean_chromium_default_caches() {
     local profile_root="$1"
@@ -3957,6 +4188,8 @@ clean_dev_misc() {
     clean_codex_runtimes
     # Sparkle uses random first-level directories for each update installation.
     clean_codex_desktop_staging
+    # Abandoned marketplace staging under ~/.codex/.tmp (completed marketplaces stay).
+    clean_codex_marketplace_staging
     # Codex CLI working-directory caches (~/.codex)
     clean_codex_cli
     # Cursor Agent session logs (versions cleaned separately in clean_dev_ai_agents)

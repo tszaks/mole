@@ -149,6 +149,170 @@ _mole_is_active_powerlog_database_path() {
     return "$result"
 }
 
+# Live reverse-DNS user-cache guard (#1390).
+# Unlinking an open Cache.db (or its -wal/-shm companions) while the owning
+# helper still holds the database can send that process into an unbounded write
+# loop on unlinked temp files and fill the volume (Autodesk Fusion's
+# AcCoreConsole). Size and mtime are never authority for these trees: only a
+# conclusive "no matching process" result, plus an open-file check for SQLite
+# families, may authorize deletion.
+#
+# Process-state results are memoized for the current clean process so a batch
+# under one cache directory does not fork pgrep once per leaf file. Bash 3.2
+# has no associative arrays, so the cache is a pipe-delimited string.
+
+_mole_user_library_caches_prefix() {
+    printf '%s\n' "${HOME%/}/Library/Caches"
+}
+
+_mole_user_cache_owner_component() {
+    local path="$1"
+    local prefix
+    prefix=$(_mole_user_library_caches_prefix)
+    local normalized="${path%/}"
+    case "$normalized" in
+        "$prefix"/*) ;;
+        *) return 1 ;;
+    esac
+    local remainder="${normalized#"$prefix"/}"
+    local component="${remainder%%/*}"
+    # Reverse-DNS style only (com.vendor.app). Named trees such as Homebrew
+    # stay outside this gate; they have their own process probes.
+    [[ "$component" == *.* && "$component" != .* ]] || return 1
+    printf '%s\n' "$component"
+    return 0
+}
+
+_mole_is_user_cache_sqlite_family_path() {
+    local base
+    base=$(basename "$1")
+    case "$base" in
+        *.db | *.db-wal | *.db-shm | \
+            *.sqlite | *.sqlite-wal | *.sqlite-shm | \
+            *.sqlite3 | *.sqlite3-wal | *.sqlite3-shm)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+_mole_user_cache_sqlite_main_path() {
+    local path="$1"
+    case "$path" in
+        *-wal) printf '%s\n' "${path%-wal}" ;;
+        *-shm) printf '%s\n' "${path%-shm}" ;;
+        *) printf '%s\n' "$path" ;;
+    esac
+}
+
+# Tri-state process probe for a reverse-DNS cache owner:
+# 0 = a matching process is running, 1 = none matched, 2 = could not tell.
+_mole_user_cache_owner_process_state() {
+    local owner="$1"
+    [[ -n "$owner" ]] || return 2
+    command -v pgrep > /dev/null 2>&1 || return 2
+
+    local cache_token="|${owner}:"
+    case "${_MOLE_USER_CACHE_OWNER_STATE_CACHE:-}" in
+        *"${cache_token}0|"*) return 0 ;;
+        *"${cache_token}1|"*) return 1 ;;
+        *"${cache_token}2|"*) return 2 ;;
+    esac
+
+    local state=1
+    local rc=0
+    # Bundle id often appears in helper argv or Mach-O path (AcCoreConsole's
+    # cache dir is com.autodesk.AcCoreConsole even when no NSRunningApplication
+    # registers that id).
+    if pgrep -f "$owner" > /dev/null 2>&1; then
+        state=0
+    else
+        rc=$?
+        [[ $rc -eq 1 ]] || state=2
+    fi
+
+    local leaf="${owner##*.}"
+    if [[ $state -eq 1 && -n "$leaf" && "$leaf" != "$owner" && ${#leaf} -ge 4 ]]; then
+        if pgrep -x "$leaf" > /dev/null 2>&1; then
+            state=0
+        else
+            rc=$?
+            [[ $rc -eq 1 ]] || state=2
+        fi
+        if [[ $state -eq 1 ]]; then
+            if pgrep -f "/$leaf" > /dev/null 2>&1; then
+                state=0
+            else
+                rc=$?
+                [[ $rc -eq 1 ]] || state=2
+            fi
+        fi
+    fi
+
+    _MOLE_USER_CACHE_OWNER_STATE_CACHE="${_MOLE_USER_CACHE_OWNER_STATE_CACHE-}${cache_token}${state}|"
+    return "$state"
+}
+
+_mole_user_cache_sqlite_has_open_handle() {
+    local path="$1"
+    command -v lsof > /dev/null 2>&1 || return 2
+
+    local main_db
+    main_db=$(_mole_user_cache_sqlite_main_path "$path")
+    local candidate
+    for candidate in "$main_db" "${main_db}-wal" "${main_db}-shm"; do
+        [[ -e "$candidate" ]] || continue
+        if lsof -F n -- "$candidate" > /dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Return 0 when deletion must be refused (live owner or open SQLite handle).
+_mole_should_refuse_live_user_cache_path() {
+    local path="$1"
+    local owner=""
+    owner=$(_mole_user_cache_owner_component "$path") || return 1
+
+    local process_state=0
+    _mole_user_cache_owner_process_state "$owner" || process_state=$?
+    if [[ $process_state -eq 0 ]]; then
+        debug_log "Live user cache owner running, keep: $path ($owner)"
+        return 0
+    fi
+    if [[ $process_state -eq 2 ]]; then
+        debug_log "Live user cache owner state unknown, keep: $path ($owner)"
+        return 0
+    fi
+
+    # Process is conclusively idle. Still refuse SQLite family members that
+    # another process has open under a different name (rare, fail-closed).
+    if _mole_is_user_cache_sqlite_family_path "$path"; then
+        local open_state=0
+        _mole_user_cache_sqlite_has_open_handle "$path" || open_state=$?
+        if [[ $open_state -eq 0 ]]; then
+            debug_log "Open SQLite user cache handle, keep: $path"
+            return 0
+        fi
+        # open_state 2 (lsof missing) is not evidence of use once the process
+        # probe already returned idle; allow deletion.
+    elif [[ -d "$path" ]]; then
+        local candidate open_state
+        for candidate in "$path/Cache.db" "$path"/*.db; do
+            [[ -f "$candidate" ]] || continue
+            open_state=0
+            _mole_user_cache_sqlite_has_open_handle "$candidate" || open_state=$?
+            if [[ $open_state -eq 0 ]]; then
+                debug_log "Open SQLite under user cache dir, keep: $path ($candidate)"
+                return 0
+            fi
+        done
+    fi
+
+    return 1
+}
+
 _mole_path_is_same_existing_file() {
     local path="$1"
     local protected_path="$2"
@@ -526,6 +690,14 @@ safe_remove() {
         return 1
     fi
 
+    # Live reverse-DNS caches under ~/Library/Caches (#1390): refuse while the
+    # owning process is running or an open SQLite handle is proven. Final sink
+    # so both safe_clean and direct safe_remove callers are covered.
+    if _mole_should_refuse_live_user_cache_path "$path"; then
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "live user cache"
+        return 1
+    fi
+
     # Dry-run mode: log but don't delete
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         local dry_record_rc=0
@@ -620,6 +792,15 @@ safe_remove() {
     if declare -f holds_compiled_model_cache > /dev/null 2>&1 && holds_compiled_model_cache "$path" 2> /dev/null; then
         debug_log "Skipped removal after compiled model cache appeared: $path"
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "compiled model cache"
+        return 1
+    fi
+
+    # Recheck live-owner / open-SQLite state after size probing: a helper can
+    # launch while du is walking the tree (same race class as the compiled
+    # model cache check above).
+    if _mole_should_refuse_live_user_cache_path "$path"; then
+        debug_log "Skipped removal after live user cache appeared: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "live user cache"
         return 1
     fi
 

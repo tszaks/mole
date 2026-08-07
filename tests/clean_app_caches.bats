@@ -1239,3 +1239,119 @@ EOF
     [[ "$output" == *"SIZE_RC:124 CANCEL:124"* ]] || return 1
     [[ "$output" != *"UNEXPECTED_DELETE"* ]]
 }
+
+@test "clean_3d_tools skips Autodesk cache while AcCoreConsole is running (#1390)" {
+    mkdir -p "$HOME/Library/Caches/com.autodesk.AcCoreConsole"
+    touch "$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db"
+    touch "$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db-shm"
+    touch "$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db-wal"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+pgrep() {
+    if [[ "$*" == *AcCoreConsole* ]] || [[ "$*" == *com.autodesk.* ]]; then
+        return 0
+    fi
+    return 1
+}
+safe_clean() {
+    local desc="${*: -1}"
+    case "$desc" in
+        "Autodesk cache") echo "UNEXPECTED_AUTODESK:$desc" ;;
+    esac
+}
+safe_clean_guarded() { echo "UNEXPECTED_GUARDED:$*"; }
+mole_defer_cleanup_family() { echo "DEFER:$1"; }
+note_activity() { :; }
+clean_3d_tools
+INNER
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DEFER:Autodesk"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_AUTODESK"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_GUARDED"* ]] || return 1
+    [[ -f "$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db" ]]
+}
+
+@test "clean_3d_tools removes Autodesk cache when no Autodesk process is running" {
+    rm -rf "$HOME/Library/Caches/com.autodesk.AcCoreConsole"
+    mkdir -p "$HOME/Library/Caches/com.autodesk.AcCoreConsole"
+    touch "$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+pgrep() { return 1; }
+safe_clean() {
+    local desc="${*: -1}"
+    echo "SAFE_CLEAN:$desc"
+    local arg
+    for arg in "${@:1:$#-1}"; do
+        echo "PATH:$arg"
+    done
+}
+safe_clean_guarded() { shift; safe_clean "$@"; }
+note_activity() { :; }
+clean_3d_tools
+INNER
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SAFE_CLEAN:Autodesk cache"* ]] || return 1
+    [[ "$output" == *"PATH:"*"com.autodesk.AcCoreConsole"* ]] || return 1
+}
+
+@test "safe_remove refuses a live reverse-DNS user cache (#1390)" {
+    mkdir -p "$HOME/Library/Caches/com.autodesk.AcCoreConsole"
+    local db="$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db"
+    touch "$db"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=0 /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+pgrep() {
+    if [[ "$*" == *AcCoreConsole* ]] || [[ "$*" == *com.autodesk.AcCoreConsole* ]]; then
+        return 0
+    fi
+    return 1
+}
+oplog_enabled() { return 1; }
+log_operation() { :; }
+debug_log() { :; }
+db="$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db"
+set +e
+safe_remove "$db" true
+rc=$?
+set -e
+[[ $rc -ne 0 ]]
+[[ -f "$db" ]]
+INNER
+
+    [ "$status" -eq 0 ]
+    [[ -f "$db" ]]
+}
+
+@test "safe_remove deletes an idle reverse-DNS user cache" {
+    mkdir -p "$HOME/Library/Caches/com.example.idleapp"
+    local db="$HOME/Library/Caches/com.example.idleapp/Cache.db"
+    touch "$db"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=0 /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+pgrep() { return 1; }
+lsof() { return 1; }
+oplog_enabled() { return 1; }
+log_operation() { :; }
+debug_log() { :; }
+validate_path_for_deletion() { return 0; }
+db="$HOME/Library/Caches/com.example.idleapp/Cache.db"
+safe_remove "$db" true
+[[ ! -e "$db" ]]
+INNER
+
+    [ "$status" -eq 0 ]
+    [[ ! -e "$db" ]]
+}

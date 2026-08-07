@@ -1127,3 +1127,83 @@ EOF
     assert_output_not_contains "Claude Desktop bundled Claude Code · skipped"
     assert_output_not_contains "SAFE_CLEAN:"
 }
+
+@test "clean_codex_marketplace_staging removes only aged staging prefixes (#1389)" {
+    local tmp="$HOME/.codex/.tmp"
+    local bundled="$tmp/bundled-marketplaces"
+    local staging="$tmp/marketplaces/.staging"
+    mkdir -p "$bundled/openai-bundled" \
+        "$bundled/openai-bundled.staging-old" \
+        "$bundled/openai-bundled.staging-fresh" \
+        "$tmp/marketplaces/my-marketplace" \
+        "$staging/marketplace-upgrade-old" \
+        "$staging/marketplace-add-old" \
+        "$staging/marketplace-backup-old"
+    touch "$bundled/openai-bundled/KEEP" \
+        "$bundled/openai-bundled.staging-old/GONE" \
+        "$bundled/openai-bundled.staging-fresh/KEEP" \
+        "$tmp/marketplaces/my-marketplace/KEEP" \
+        "$staging/marketplace-upgrade-old/GONE" \
+        "$staging/marketplace-add-old/GONE" \
+        "$staging/marketplace-backup-old/KEEP"
+    touch -t 202001010000 \
+        "$bundled/openai-bundled" \
+        "$bundled/openai-bundled.staging-old" \
+        "$tmp/marketplaces/my-marketplace" \
+        "$staging/marketplace-upgrade-old" \
+        "$staging/marketplace-add-old" \
+        "$staging/marketplace-backup-old"
+    # Fresh staging must stay (age gate).
+    touch "$bundled/openai-bundled.staging-fresh"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() { return 1; }
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+note_activity() { :; }
+clean_codex_marketplace_staging
+INNER
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SAFE_CLEAN:Codex marketplace staging|$bundled/openai-bundled.staging-old"* ]] || return 1
+    [[ "$output" == *"SAFE_CLEAN:Codex marketplace staging|$staging/marketplace-upgrade-old"* ]] || return 1
+    [[ "$output" == *"SAFE_CLEAN:Codex marketplace staging|$staging/marketplace-add-old"* ]] || return 1
+    [[ "$output" != *"openai-bundled|"* ]] || return 1
+    [[ "$output" != *"openai-bundled.staging-fresh"* ]] || return 1
+    [[ "$output" != *"my-marketplace"* ]] || return 1
+    [[ "$output" != *"marketplace-backup-old"* ]] || return 1
+}
+
+@test "clean_codex_marketplace_staging defers while Codex runtime is active" {
+    local staging="$HOME/.codex/.tmp/marketplaces/.staging"
+    mkdir -p "$staging/marketplace-upgrade-old"
+    touch "$staging/marketplace-upgrade-old/payload"
+    touch -t 202001010000 "$staging/marketplace-upgrade-old"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pgrep() {
+    if [[ "$*" == *codex* ]] || [[ "$*" == *Codex* ]] || [[ "$*" == *ChatGPT* ]]; then
+        return 0
+    fi
+    return 1
+}
+lsof() { return 1; }
+safe_clean() { echo "UNEXPECTED:$1"; }
+mole_defer_cleanup_family() { echo "DEFER:$1"; }
+note_activity() { :; }
+clean_codex_marketplace_staging
+INNER
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DEFER:Codex"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED:"* ]] || return 1
+    [[ -f "$staging/marketplace-upgrade-old/payload" ]]
+}
