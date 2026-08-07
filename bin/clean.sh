@@ -139,6 +139,9 @@ expand_whitelist_patterns() {
     fi
 }
 expand_whitelist_patterns
+# Existing user files replace defaults entirely; re-apply hard safety entries
+# (FINDER_METADATA and future SAFETY_WHITELIST_PATTERNS) so they still protect.
+ensure_safety_whitelist_patterns
 
 prepare_clean_preview_file() {
     EXPORT_LIST_FILE="$CLEAN_PREVIEW_FINAL_FILE"

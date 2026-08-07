@@ -127,6 +127,51 @@ EOF
     [ "$status" -eq 1 ]
 }
 
+@test "load_whitelist merges FINDER_METADATA into an existing custom file (#1396)" {
+    mkdir -p "$(dirname "$WHITELIST_PATH")"
+    printf '%s\n' "$HOME/.cache/custom-keep/*" > "$WHITELIST_PATH"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+load_whitelist
+has_sentinel=false
+has_custom=false
+for p in "${CURRENT_WHITELIST_PATTERNS[@]}"; do
+    [[ "$p" == "$FINDER_METADATA_SENTINEL" ]] && has_sentinel=true
+    [[ "$p" == "$HOME/.cache/custom-keep/*" ]] && has_custom=true
+done
+printf 'sentinel=%s custom=%s count=%s\n' "$has_sentinel" "$has_custom" "${#CURRENT_WHITELIST_PATTERNS[@]}"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"sentinel=true"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"custom=true"* ]] || { echo "$output"; return 1; }
+}
+
+@test "ensure_safety_whitelist_patterns is idempotent and preserves custom entries" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+declare -a WHITELIST_PATTERNS=("$HOME/.cache/custom-keep/*" "$FINDER_METADATA_SENTINEL")
+declare -a CURRENT_WHITELIST_PATTERNS=("${WHITELIST_PATTERNS[@]}")
+ensure_safety_whitelist_patterns
+ensure_safety_whitelist_patterns
+sentinel_count=0
+custom_count=0
+for p in "${WHITELIST_PATTERNS[@]}"; do
+    [[ "$p" == "$FINDER_METADATA_SENTINEL" ]] && sentinel_count=$((sentinel_count + 1))
+    [[ "$p" == "$HOME/.cache/custom-keep/*" ]] && custom_count=$((custom_count + 1))
+done
+printf 'sentinel=%s custom=%s total=%s\n' "$sentinel_count" "$custom_count" "${#WHITELIST_PATTERNS[@]}"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"sentinel=1"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"custom=1"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"total=2"* ]] || { echo "$output"; return 1; }
+}
+
 @test "legacy optimize whitelist with only removed task ids migrates safely on Bash 3.2" {
     local legacy_path="$HOME/.config/mole/whitelist_checks"
     local optimize_path="$HOME/.config/mole/whitelist_optimize"

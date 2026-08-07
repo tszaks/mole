@@ -1163,6 +1163,46 @@ SCRIPT
     [ -f "$HOME/Documents/.DS_Store" ]
 }
 
+@test "custom whitelist without FINDER_METADATA still protects .DS_Store via safety merge (#1396)" {
+    mkdir -p "$HOME/Documents" "$HOME/.config/mole"
+    touch "$HOME/Documents/.DS_Store"
+    # Pre-FINDER_METADATA user file: custom path only, no sentinel.
+    printf '%s\n' "$HOME/.cache/custom-keep/*" > "$HOME/.config/mole/whitelist"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'SCRIPT'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+
+# Mirror bin/clean.sh load + safety merge + protect flag.
+declare -a WHITELIST_PATTERNS=()
+while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    WHITELIST_PATTERNS+=("$line")
+done < "$HOME/.config/mole/whitelist"
+ensure_safety_whitelist_patterns
+
+PROTECT_FINDER_METADATA=false
+for entry in "${WHITELIST_PATTERNS[@]}"; do
+    if [[ "$entry" == "$FINDER_METADATA_SENTINEL" ]]; then
+        PROTECT_FINDER_METADATA=true
+        break
+    fi
+done
+echo "protect=$PROTECT_FINDER_METADATA"
+
+clean_ds_store_tree() { echo "CLEANED:$1"; }
+clean_finder_metadata
+echo "done"
+SCRIPT
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"protect=true"* ]] || { echo "$output"; return 1; }
+    [[ "$output" != *"CLEANED:"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"done"* ]] || return 1
+    [ -f "$HOME/Documents/.DS_Store" ]
+}
+
 @test "_clean_recent_items removes shared file lists" {
     local shared_dir="$HOME/Library/Application Support/com.apple.sharedfilelist"
     mkdir -p "$shared_dir"

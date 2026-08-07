@@ -22,8 +22,9 @@ readonly WHITELIST_CONFIG_CLEAN="$HOME/.config/mole/whitelist"
 readonly WHITELIST_CONFIG_OPTIMIZE="$HOME/.config/mole/whitelist_optimize"
 readonly WHITELIST_CONFIG_OPTIMIZE_LEGACY="$HOME/.config/mole/whitelist_checks"
 
-# Default whitelist patterns defined in lib/core/common.sh:
+# Default / safety whitelist patterns defined in lib/core/base.sh:
 # - DEFAULT_WHITELIST_PATTERNS
+# - SAFETY_WHITELIST_PATTERNS (always merged for clean mode)
 # - FINDER_METADATA_SENTINEL
 
 # Save whitelist patterns to config (defaults to "clean" for legacy callers)
@@ -276,6 +277,11 @@ load_whitelist() {
     else
         CURRENT_WHITELIST_PATTERNS=()
         WHITELIST_PATTERNS=()
+    fi
+
+    # Hard safety defaults always reach existing clean whitelist files (#1396).
+    if [[ "$mode" == "clean" ]]; then
+        ensure_safety_whitelist_patterns
     fi
 }
 

@@ -175,6 +175,52 @@ declare -a DEFAULT_WHITELIST_PATTERNS=(
 declare -a DEFAULT_OPTIMIZE_WHITELIST_PATTERNS=(
 )
 
+# Safety patterns always merge into an existing user whitelist file.
+# Replacement semantics (V1.7.5+) treat the file as the complete set, so
+# protections added later (FINDER_METADATA in V1.9.9) never reached users who
+# already had a whitelist. Only hard safety belongs here; optional convenience
+# defaults stay in DEFAULT_WHITELIST_PATTERNS and remain fully replaceable.
+declare -a SAFETY_WHITELIST_PATTERNS=(
+    "$FINDER_METADATA_SENTINEL"
+)
+
+# Append any missing SAFETY_WHITELIST_PATTERNS to WHITELIST_PATTERNS.
+# When CURRENT_WHITELIST_PATTERNS is declared (manage UI), keep it in sync.
+ensure_safety_whitelist_patterns() {
+    local safety existing found
+    [[ ${#SAFETY_WHITELIST_PATTERNS[@]} -eq 0 ]] && return 0
+
+    for safety in "${SAFETY_WHITELIST_PATTERNS[@]}"; do
+        found=false
+        if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+            for existing in "${WHITELIST_PATTERNS[@]}"; do
+                if [[ "$existing" == "$safety" ]]; then
+                    found=true
+                    break
+                fi
+            done
+        fi
+        if [[ "$found" == "false" ]]; then
+            WHITELIST_PATTERNS+=("$safety")
+        fi
+
+        if declare -p CURRENT_WHITELIST_PATTERNS &> /dev/null 2>&1; then
+            found=false
+            if [[ ${#CURRENT_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+                for existing in "${CURRENT_WHITELIST_PATTERNS[@]}"; do
+                    if [[ "$existing" == "$safety" ]]; then
+                        found=true
+                        break
+                    fi
+                done
+            fi
+            if [[ "$found" == "false" ]]; then
+                CURRENT_WHITELIST_PATTERNS+=("$safety")
+            fi
+        fi
+    done
+}
+
 # ============================================================================
 # BSD Stat Compatibility
 # ============================================================================
