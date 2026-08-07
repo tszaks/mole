@@ -1165,6 +1165,14 @@ lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
 is_path_whitelisted() { return 1; }
 safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
+# The staging cleanup has no engine-absent fallback (see the audited-count
+# gate in clean_core.bats), so a standalone case supplies the guard itself.
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    "$guard" || return 75
+    safe_clean "$@"
+}
 note_activity() { :; }
 clean_codex_marketplace_staging
 INNER

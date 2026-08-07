@@ -3387,9 +3387,15 @@ codex_sparkle_staging_has_open_files() {
     return 2
 }
 
-codex_sparkle_staging_physical_path() {
+# Physical-path gate for a staging directory that must sit exactly one level
+# under a fixed, app-owned root below HOME. Prints the resolved physical path,
+# or fails when the candidate is outside the root, is not a directory, sits too
+# deep, or reaches the root through a symlink. No component below HOME may be a
+# link: these are fixed app-owned paths, and accepting one would let a lexical
+# staging root be redirected into ordinary user data.
+codex_staging_physical_path() {
     local candidate="$1"
-    local staging_root="$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
+    local staging_root="$2"
     local home_prefix="${HOME%/}/"
 
     case "$candidate" in
@@ -3401,9 +3407,6 @@ codex_sparkle_staging_physical_path() {
         return 1
     fi
 
-    # This is a fixed app-owned cache path, so no component below HOME needs to
-    # be a symlink. Rejecting each one prevents Sparkle's lexical staging root
-    # from being redirected into ordinary user data.
     local relative="${candidate#"$home_prefix"}"
     local old_ifs="$IFS"
     local -a components=()
@@ -3430,6 +3433,12 @@ codex_sparkle_staging_physical_path() {
     fi
 
     printf '%s\n' "$physical_candidate"
+}
+
+# Sparkle's staging root is fixed, so it only supplies the root.
+codex_sparkle_staging_physical_path() {
+    codex_staging_physical_path \
+        "$1" "$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation"
 }
 
 _MOLE_CODEX_STAGING_ROOT=""
@@ -3908,51 +3917,6 @@ clean_codex_cli() {
     debug_log "Codex CLI state left intact by default: $codex_root"
 }
 
-# Physical-path gate for marketplace staging under ~/.codex/.tmp. Same
-# no-symlink-below-HOME rule as the Sparkle staging helper, scoped to a
-# caller-supplied root so completed marketplaces stay out of reach.
-codex_marketplace_staging_physical_path() {
-    local candidate="$1"
-    local staging_root="$2"
-    local home_prefix="${HOME%/}/"
-
-    case "$candidate" in
-        "$staging_root" | "$staging_root"/*) ;;
-        *) return 1 ;;
-    esac
-    [[ -d "$candidate" ]] || return 1
-    if [[ "$candidate" != "$staging_root" && "${candidate%/*}" != "$staging_root" ]]; then
-        return 1
-    fi
-
-    local relative="${candidate#"$home_prefix"}"
-    local old_ifs="$IFS"
-    local -a components=()
-    IFS='/' read -r -a components <<< "$relative"
-    IFS="$old_ifs"
-    [[ ${#components[@]} -gt 0 ]] || return 1
-
-    local probe="$HOME"
-    local component
-    for component in "${components[@]}"; do
-        [[ -n "$component" ]] || return 1
-        probe="$probe/$component"
-        [[ -L "$probe" ]] && return 1
-    done
-
-    local physical_root=""
-    local physical_candidate=""
-    physical_root=$(cd -P "$staging_root" 2> /dev/null && pwd -P) || return 1
-    physical_candidate=$(cd -P "$candidate" 2> /dev/null && pwd -P) || return 1
-    if [[ "$candidate" == "$staging_root" ]]; then
-        [[ "$physical_candidate" == "$physical_root" ]] || return 1
-    else
-        [[ "${physical_candidate%/*}" == "$physical_root" ]] || return 1
-    fi
-
-    printf '%s\n' "$physical_candidate"
-}
-
 _MOLE_CODEX_MARKETPLACE_STAGING_ROOT=""
 _MOLE_CODEX_MARKETPLACE_STAGING_ENTRY=""
 
@@ -3965,14 +3929,14 @@ _codex_marketplace_staging_entry_is_still_stale() {
 
     local physical_before=""
     local physical_after=""
-    physical_before=$(codex_marketplace_staging_physical_path "$stale_entry" "$staging_root") || return 1
+    physical_before=$(codex_staging_physical_path "$stale_entry" "$staging_root") || return 1
 
     if [[ -z "$(command find -P "$stale_entry" -maxdepth 0 -type d \
         -mtime +"$MOLE_ORPHAN_AGE_DAYS" 2> /dev/null)" ]]; then
         return 1
     fi
 
-    physical_after=$(codex_marketplace_staging_physical_path "$stale_entry" "$staging_root") || return 1
+    physical_after=$(codex_staging_physical_path "$stale_entry" "$staging_root") || return 1
     [[ "$physical_before" == "$physical_after" ]] || return 1
     return 0
 }
@@ -4002,14 +3966,10 @@ _codex_marketplace_staging_safe_clean_guarded() {
     _MOLE_CODEX_MARKETPLACE_STAGING_ENTRY="$stale_entry"
     local _MOLE_CLEAN_GUARD_REASON="staging entry changed"
 
-    if ! declare -f safe_clean_guarded > /dev/null 2>&1; then
-        if ! _codex_marketplace_staging_delete_guard_allows; then
-            return 75
-        fi
-        safe_clean "$stale_entry" "$display_name"
-        return $?
-    fi
-
+    # No engine-absent fallback here on purpose: a second, degraded copy of the
+    # delete guard is a place the guarded and unguarded verdicts can disagree,
+    # and the audit in `tests/clean_core.bats` caps how many of those exist.
+    # Standalone callers provide `safe_clean_guarded` instead.
     local guarded_rc=0
     safe_clean_guarded _codex_marketplace_staging_delete_guard_allows \
         "$stale_entry" "$display_name" || guarded_rc=$?
@@ -4039,7 +3999,7 @@ clean_codex_marketplace_staging() {
     local staging_root prefix stale_entry
     for staging_root in "${staging_roots[@]}"; do
         [[ -d "$staging_root" ]] || continue
-        if ! codex_marketplace_staging_physical_path "$staging_root" "$staging_root" > /dev/null; then
+        if ! codex_staging_physical_path "$staging_root" "$staging_root" > /dev/null; then
             debug_log "Codex marketplace staging skipped: unsafe root $staging_root"
             continue
         fi
@@ -4056,7 +4016,7 @@ clean_codex_marketplace_staging() {
                 esac
             done
             [[ "$matched" == "true" ]] || continue
-            if ! codex_marketplace_staging_physical_path "$stale_entry" "$staging_root" > /dev/null; then
+            if ! codex_staging_physical_path "$stale_entry" "$staging_root" > /dev/null; then
                 continue
             fi
             if ! mole_cleanup_targets_exist "$stale_entry"; then
