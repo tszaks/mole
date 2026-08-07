@@ -1009,10 +1009,18 @@ SCRIPT
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
+# `remaining` is `deadline - SECONDS`, and SECONDS keeps ticking in real
+# time, so one shared `SECONDS=100` before four forks means the last call
+# sees a smaller window than the first. On a slow runner the window reached
+# zero, the helper returned 124 with no output, and the case failed for
+# reasons that had nothing to do with clamping. Re-pin the clock per call.
 SECONDS=100
 printf 'CLAMPED=%s\n' "$(_mole_timeout_with_deadline 30.5 101)"
+SECONDS=100
 printf 'SHORT=%s\n' "$(_mole_timeout_with_deadline 0.5 101)"
+SECONDS=100
 printf 'ZERO=%s\n' "$(_mole_timeout_with_deadline 0 101)"
+SECONDS=100
 printf 'LEADING=%s\n' "$(_mole_timeout_with_deadline 08.5 101)"
 SCRIPT
 
