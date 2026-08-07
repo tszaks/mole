@@ -261,7 +261,7 @@ Relevant timeout behavior includes:
 
 - orphan and Spotlight checks: 2s
 - LaunchServices rebuild during uninstall: bounded 10s and 15s steps
-- LaunchServices stale registration cleanup in clean: dump bounded to 10s, each unregister bounded to 3s
+- LaunchServices stale registration cleanup in clean: dump bounded to 60s (2x DISK_VERIFY) with background prefetch + 24h candidate cache, fail-soft partial results on mid-dump timeout, each unregister bounded to 3s
 - Homebrew uninstall cask flow: 300s by default, extended for large apps when needed
 - project scans and sizing operations: bounded to avoid whole-home stalls
 
@@ -326,7 +326,7 @@ Key coverage areas include:
 - sudo credential prompting and session management (`tests/manage_sudo.bats`)
 - purge config path discovery and write behavior (`tests/purge_config_paths.bats`)
 - hint and cleanup-hint flows (`tests/clean_hints.bats`)
-- stale LaunchServices unregister limited to missing apps, dry-run preview, fail-closed on dump failure, and a path-safety filter that rejects live, system, traversal, and injection paths (`tests/clean_launch_services.bats`)
+- stale LaunchServices unregister limited to missing apps, dry-run preview, fail-soft on dump failure (empty result skips with a visible note; partial mid-timeout candidates still re-verified on disk), and a path-safety filter that rejects live, system, traversal, and injection paths (`tests/clean_launch_services.bats`)
 - Touch ID PAM file permission enforcement (`tests/cli.bats`)
 - bundle ID boundary matching and malformed-ID rejection (`tests/uninstall_safety.bats`)
 - official-uninstaller exclusion and receipt payload allowlisting (`tests/uninstall_safety.bats`)

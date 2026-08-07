@@ -195,12 +195,30 @@ EOF
 
 @test "clean_stale_launch_services_registrations ignores dump failures" {
     local lsregister="$TEST_ROOT/bin/lsregister"
-    local dump_file="$TEST_ROOT/missing.dump"
     local log_file="$TEST_ROOT/lsregister.log"
-    write_lsregister_stub "$lsregister"
+    mkdir -p "$(dirname "$lsregister")"
+    # Hard-failing dump: the shared stub always exits 0 after cat, which would
+    # look like an empty-but-successful scan. Issue #1395 needs the empty
+    # failure path to stay fail-soft and say disk cleanup is unaffected.
+    cat > "$lsregister" <<'SCRIPT'
+#!/usr/bin/env bash
+{
+    printf 'argc=%s\n' "$#"
+    for arg in "$@"; do
+        printf 'arg=%s\n' "$arg"
+    done
+} >> "$LSREGISTER_LOG"
+case "${1:-}" in
+    -dump) exit 1 ;;
+    -u) exit 0 ;;
+esac
+exit 2
+SCRIPT
+    chmod +x "$lsregister"
     : > "$log_file"
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" LSREGISTER_DUMP="$dump_file" LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" \
+        LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/launch_services.sh"
@@ -211,8 +229,12 @@ DRY_RUN=false
 clean_stale_launch_services_registrations
 EOF
 
-    [ "$status" -eq 0 ]
-    [[ "$output" == "" ]] || return 1
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"scan skipped (disk cleanup unaffected)"* ]] || return 1
+    [[ "$output" != *"removed"* ]] || return 1
     grep -q 'arg=-dump' "$log_file"
 }
 
@@ -275,6 +297,7 @@ EOF
         return 1
     }
     [[ "$output" == *"no fresh result yet, skipping this run"* ]] || return 1
+    [[ "$output" == *"deferred to next clean"* ]] || return 1
     [[ "$output" == *"RC=0"* ]] || return 1
     if grep -q 'arg=-dump' "$log_file"; then
         echo "fell back to an inline dump"
@@ -312,7 +335,97 @@ EOF
         return 1
     }
     [[ "$output" == *"no fresh result yet, skipping this run"* ]] || return 1
+    [[ "$output" == *"deferred to next clean"* ]] || return 1
     [[ "$output" != *"Missing App.app"* ]] || return 1
+}
+
+@test "collect_stale fails soft and keeps partial candidates when the dump is killed" {
+    # A large macOS 26 LaunchServices DB often exceeds the bound; killing
+    # lsregister mid-dump must not throw away the paths already parsed.
+    local lsregister="$TEST_ROOT/bin/lsregister"
+    local dump_file="$TEST_ROOT/lsregister.dump"
+    local log_file="$TEST_ROOT/lsregister.log"
+    local missing_app="$TEST_ROOT/Partial Missing.app"
+    mkdir -p "$(dirname "$lsregister")"
+    cat > "$lsregister" <<'SCRIPT'
+#!/usr/bin/env bash
+{
+    printf 'argc=%s\n' "$#"
+    for arg in "$@"; do
+        printf 'arg=%s\n' "$arg"
+    done
+} >> "$LSREGISTER_LOG"
+case "${1:-}" in
+    -dump)
+        cat "$LSREGISTER_DUMP"
+        # Non-zero exit simulates run_with_timeout killing a slow dump.
+        exit 124
+        ;;
+esac
+exit 2
+SCRIPT
+    chmod +x "$lsregister"
+    cat > "$dump_file" <<DUMP
+bundle id: 1
+    path: $missing_app
+    Bundle node not found on disk
+
+DUMP
+    : > "$log_file"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" LSREGISTER_BIN="$lsregister" \
+        LSREGISTER_DUMP="$dump_file" LSREGISTER_LOG="$log_file" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/launch_services.sh"
+get_lsregister_path() { printf '%s\n' "$LSREGISTER_BIN"; }
+# Pass the stub through so its own non-zero dump status reaches the pipeline.
+run_with_timeout() { shift; "$@"; }
+note_activity() { :; }
+DRY_RUN=true
+clean_stale_launch_services_registrations
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Partial Missing.app"* ]] || return 1
+    [[ "$output" == *"would unregister"* ]] || return 1
+    [[ "$output" != *"scan skipped"* ]] || return 1
+}
+
+@test "the dump parser survives invalid UTF-8 in a record line" {
+    # Invalid UTF-8 under a UTF-8 locale previously aborted awk mid-stream
+    # ("towc: multibyte conversion failure") and zeroed the whole scan.
+    local dump_file="$TEST_ROOT/bad-utf8.dump"
+    local missing_app="$TEST_ROOT/After Bad Bytes.app"
+    {
+        printf 'bundle id: 0\n'
+        # 0xFF is never valid UTF-8; the marker and path stay ASCII.
+        printf '\tpath: /tmp/bad'
+        printf '\xff'
+        printf 'name.app\n'
+        printf '\tBundle node not found on disk\n\n'
+        printf 'bundle id: 1\n'
+        printf '\tpath: %s\n' "$missing_app"
+        printf '\tBundle node not found on disk\n\n'
+    } > "$dump_file"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" BIG_DUMP="$dump_file" \
+        MISSING_APP="$missing_app" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/launch_services.sh"
+paths=$(launch_services_emit_missing_record_paths < "$BIG_DUMP")
+printf 'PATHS:\n%s\n' "$paths"
+printf '%s\n' "$paths" | grep -Fqx "$MISSING_APP"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
 }
 
 @test "the dump parser handles a quarter-million-line dump in seconds" {
