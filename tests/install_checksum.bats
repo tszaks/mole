@@ -1238,7 +1238,11 @@ EOF
 	# seconds (field ticket watchdog) and forced a second password prompt
 	# on every update. Homebrew ownership is decided from the Cellar on
 	# disk instead, so brew itself never runs in that window.
-	if command grep -q 'brew list mole' "$PROJECT_ROOT/install.sh"; then
+	# Comment lines are stripped first: the invariant is that install.sh does
+	# not RUN this, and a comment explaining why it was dropped is not a call.
+	# A bare grep flagged exactly that comment and read as a real regression.
+	if command grep -vE '^[[:space:]]*#' "$PROJECT_ROOT/install.sh" |
+		command grep -q 'brew list mole'; then
 		echo "brew list mole is back in install.sh"
 		return 1
 	fi

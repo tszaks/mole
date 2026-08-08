@@ -79,7 +79,7 @@ curl_download_with_retry() {
     while true; do
         if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$output_file" \
             2> "${curl_err:-/dev/null}"; then
-            [[ -n "$curl_err" ]] && rm -f "$curl_err"
+            [[ -n "$curl_err" ]] && rm -f "$curl_err" # SAFE: exact mktemp stderr file created above
             return 0
         else
             curl_exit=$?
@@ -90,18 +90,18 @@ curl_download_with_retry() {
             6 | 7 | 18 | 28 | 35 | 52 | 55 | 56) ;;
             *)
                 [[ -s "$curl_err" ]] && cat "$curl_err" >&2
-                [[ -n "$curl_err" ]] && rm -f "$curl_err"
+                [[ -n "$curl_err" ]] && rm -f "$curl_err" # SAFE: exact mktemp stderr file created above
                 return "$curl_exit"
                 ;;
         esac
 
         if [[ "$attempt" -ge "$max_attempts" ]]; then
             [[ -s "$curl_err" ]] && cat "$curl_err" >&2
-            [[ -n "$curl_err" ]] && rm -f "$curl_err"
+            [[ -n "$curl_err" ]] && rm -f "$curl_err" # SAFE: exact mktemp stderr file created above
             return "$curl_exit"
         fi
         sleep 1 || {
-            [[ -n "$curl_err" ]] && rm -f "$curl_err"
+            [[ -n "$curl_err" ]] && rm -f "$curl_err" # SAFE: exact mktemp stderr file created above
             return "$curl_exit"
         }
         attempt=$((attempt + 1))
@@ -1598,8 +1598,17 @@ print_usage_summary() {
 # five seconds and forced a second password prompt on every update, with
 # the ticket dying between installer start and the first privileged step.
 homebrew_owns_mole() {
+    local -a brew_prefixes=("${HOMEBREW_PREFIX:-}" /opt/homebrew /usr/local)
+    # A custom prefix need not export HOMEBREW_PREFIX, and `brew list mole`
+    # used to find those installs. Derive the prefix from brew's own location
+    # instead: reading the path is not running the binary.
+    local brew_bin=""
+    brew_bin=$(command -v brew 2> /dev/null || true)
+    if [[ -n "$brew_bin" ]]; then
+        brew_prefixes+=("$(dirname "$(dirname "$brew_bin")")")
+    fi
     local brew_prefix
-    for brew_prefix in "${HOMEBREW_PREFIX:-}" /opt/homebrew /usr/local; do
+    for brew_prefix in "${brew_prefixes[@]}"; do
         [[ -n "$brew_prefix" && -d "$brew_prefix/Cellar/mole" ]] && return 0
     done
     return 1
