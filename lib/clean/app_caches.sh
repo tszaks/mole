@@ -141,7 +141,14 @@ clean_xcode_derived_data() {
         local dir_size_kb=0
         local dry_run_count=0
         local dry_run_stopped_reason=""
+        local dry_run_seen=0
+        # Sizing every project means one du per entry plus a process probe on
+        # each side of it. On a real DerivedData that is tens of seconds with
+        # nothing on screen, which reads as a freeze.
+        start_section_spinner "Measuring Xcode DerivedData, 0/${project_count}..."
         for dir in "${projects[@]}"; do
+            dry_run_seen=$((dry_run_seen + 1))
+            start_section_spinner "Measuring Xcode DerivedData, ${dry_run_seen}/${project_count}..."
             xcode_state=0
             _xcode_cleanup_process_state || xcode_state=$?
             if [[ $xcode_state -ne 1 ]]; then
@@ -150,8 +157,11 @@ clean_xcode_derived_data() {
             fi
             local size_rc=0
             dir_size_kb=$(get_path_size_kb "$dir" 2> /dev/null) || size_rc=$?
-            [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
-            [[ $size_rc -eq 0 ]] || return "$size_rc"
+            if [[ $size_rc -ne 0 ]]; then
+                stop_section_spinner
+                _mole_record_clean_cancellation "$size_rc"
+                return "$size_rc"
+            fi
             [[ "$dir_size_kb" =~ ^[0-9]+$ ]] || dir_size_kb=0
             xcode_state=0
             _xcode_cleanup_process_state || xcode_state=$?
@@ -165,6 +175,7 @@ clean_xcode_derived_data() {
             size_kb=$((size_kb + dir_size_kb))
             dry_run_count=$((dry_run_count + 1))
         done
+        stop_section_spinner
         if [[ $dry_run_count -gt 0 ]]; then
             project_label="projects"
             [[ $dry_run_count -eq 1 ]] && project_label="project"
@@ -188,7 +199,14 @@ clean_xcode_derived_data() {
     local removed=0
     local removed_size_kb=0
     local stopped_reason=""
+    local seen=0
+    # Each project costs a du, two process probes, and the removal itself, so a
+    # large DerivedData runs for tens of seconds. Without this the section
+    # prints nothing until every project is gone.
+    start_section_spinner "Removing Xcode DerivedData, 0/${project_count}..."
     for dir in "${projects[@]}"; do
+        seen=$((seen + 1))
+        start_section_spinner "Removing Xcode DerivedData, ${seen}/${project_count}..."
         xcode_state=0
         _xcode_cleanup_process_state || xcode_state=$?
         if [[ $xcode_state -ne 1 ]]; then
@@ -199,8 +217,11 @@ clean_xcode_derived_data() {
         local dir_size_kb=0
         local size_rc=0
         dir_size_kb=$(get_path_size_kb "$dir" 2> /dev/null) || size_rc=$?
-        [[ $size_rc -eq 0 ]] || _mole_record_clean_cancellation "$size_rc"
-        [[ $size_rc -eq 0 ]] || return "$size_rc"
+        if [[ $size_rc -ne 0 ]]; then
+            stop_section_spinner
+            _mole_record_clean_cancellation "$size_rc"
+            return "$size_rc"
+        fi
         [[ "$dir_size_kb" =~ ^[0-9]+$ ]] || dir_size_kb=0
 
         # Sizing is timeout-bounded but can still take long enough for a build
@@ -216,6 +237,7 @@ clean_xcode_derived_data() {
             removed_size_kb=$((removed_size_kb + dir_size_kb))
         fi
     done
+    stop_section_spinner
 
     if [[ $removed -gt 0 ]]; then
         project_label="projects"
