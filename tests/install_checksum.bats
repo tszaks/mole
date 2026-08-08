@@ -448,7 +448,7 @@ grep -q "fallback-binary" "$CONFIG_DIR/bin/status-go"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"SUCCESS:Installed status (V1.2.2"* ]]
+	[[ "$output" == *"SUCCESS:Installed status from V1.2.2"* ]]
 }
 
 @test "download_binary aborts on fallback-tag checksum mismatch without a source build" {
@@ -1117,7 +1117,7 @@ out="$(verify_release_asset_checksum V1.0.0 "$asset" "$file")" && rc=0 || rc=$?
 verify_release_attestation() { return 0; }
 out="$(verify_release_asset_checksum V1.0.0 "$asset" "$file")" && rc=0 || rc=$?
 [ "$rc" -eq 0 ] || { echo "WRONG: verified rc=$rc want 0"; exit 1; }
-[[ "$out" == *"SUCCESS:Verified ${asset} (sha256 + attestation)"* ]] || { echo "WRONG: verified success missing: $out"; exit 1; }
+[[ "$out" == *"SUCCESS:Verified ${asset} · sha256 + attestation"* ]] || { echo "WRONG: verified success missing: $out"; exit 1; }
 
 rm -f "$file"
 EOF

@@ -1047,7 +1047,7 @@ update_mole() (
         latest="main"
         download_label="Downloading nightly installer..."
         install_label="Installing nightly update..."
-        final_success_label="nightly build (main)"
+        final_success_label="nightly build"
 
         latest_commit=$(get_latest_commit_from_github)
         if [[ "$force_update" != "true" ]]; then
@@ -1229,10 +1229,14 @@ update_mole() (
         local success_label="$3"
         if [[ -t 1 ]]; then stop_inline_spinner; fi
 
+        # One blank line opens the block and nothing adds another inside it.
+        # The installer lines and the result below are one list; a gap between
+        # them read as if the update had finished twice.
         local filtered_output
         filtered_output=$(printf '%s\n' "$output" | sed '/^$/d')
+        printf '\n'
         if [[ -n "$filtered_output" ]]; then
-            printf '\n%s\n' "$filtered_output"
+            printf '%s\n' "$filtered_output"
         fi
 
         if ! printf '%s\n' "$output" | grep -Eq "Updated to latest version|Already on latest version"; then
@@ -1248,7 +1252,7 @@ update_mole() (
             if [[ -z "$new_version" ]]; then
                 new_version="$fallback_version"
             fi
-            printf '\n%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${new_version:-unknown}"
+            printf '%s\n\n' "${GREEN}${ICON_SUCCESS}${NC} Updated to ${success_label}, ${new_version:-unknown}"
         else
             printf '\n'
         fi

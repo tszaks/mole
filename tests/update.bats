@@ -1352,7 +1352,7 @@ SCRIPT
 		return 1
 	}
 	[[ "$output" == *"Retrying with a direct reinstall"* ]] || return 1
-	[[ "$output" == *"Updated to nightly build (main), abc1234"* ]] || return 1
+	[[ "$output" == *"Updated to nightly build, abc1234"* ]] || return 1
 	[ "$(cat "$heal_log")" = "main|$manual_bin|$manual_config" ] || return 1
 	grep -qFx 'CHANNEL=nightly' "$manual_config/install_channel" || return 1
 	grep -qFx 'COMMIT_HASH=abc1234' "$manual_config/install_channel"
@@ -1550,14 +1550,14 @@ INSTALLER
 }
 
 [[ "$(get_latest_commit_from_github)" == "$expected_commit" ]] || exit 1
-_update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" "$expected_commit"
+_update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build" "$expected_commit"
 INNER
 
 	[ "$status" -eq 0 ] || {
 		echo "$output"
 		return 1
 	}
-	[[ "$output" == *"Updated to nightly build (main), def5678"* ]]
+	[[ "$output" == *"Updated to nightly build, def5678"* ]]
 }
 
 @test "nightly self-heal accepts a fresh receipt without reusing a stale commit when HEAD is unknown" {
@@ -1596,14 +1596,14 @@ INSTALLER
 
 # A GitHub API rate limit leaves the expected commit empty. The verified
 # reinstall must still report success instead of "Nightly update failed".
-_update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""
+_update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build" ""
 INNER
 
 	[ "$status" -eq 0 ] || {
 		echo "$output"
 		return 1
 	}
-	[[ "$output" == *"Updated to nightly build (main)"* ]] || return 1
+	[[ "$output" == *"Updated to nightly build"* ]] || return 1
 	[[ "$output" != *"deadbee"* ]] || return 1
 	run grep -q '^COMMIT_HASH=' "$HOME/unknown-head-self-heal/config/install_channel"
 	[ "$status" -eq 1 ]
@@ -1625,7 +1625,7 @@ curl() {
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0'
 }
 
-if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""; then
+if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build" ""; then
 	exit 1
 fi
 exit 0
@@ -1635,7 +1635,7 @@ INNER
 		echo "$output"
 		return 1
 	}
-	[[ "$output" != *"Updated to nightly build (main)"* ]]
+	[[ "$output" != *"Updated to nightly build"* ]]
 }
 
 @test "nightly self-heal bounds the installed binary version probe" {
@@ -1671,7 +1671,7 @@ printf 'CHANNEL=nightly\nCOMMIT_HASH=fee1bad\nINSTALL_RECEIPT=%s\n' "$MOLE_INSTA
 INSTALLER
 }
 
-if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""; then
+if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build" ""; then
 	exit 1
 fi
 exit 0
@@ -1712,7 +1712,7 @@ INSTALLER
 
 # The registry claims success but no binary exists at the install path.
 # Success asserted from installer output alone is the V1.47.1 shape.
-if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build (main)" ""; then
+if _update_self_heal_reinstall 0 main "$HOME/bin" "$HOME/config" "$HOME/bin/mole" "nightly build" ""; then
 	exit 1
 fi
 exit 0
@@ -1722,7 +1722,7 @@ INNER
 		echo "$output"
 		return 1
 	}
-	[[ "$output" != *"Updated to nightly build (main)"* ]]
+	[[ "$output" != *"Updated to nightly build"* ]]
 }
 
 @test "update sudo predicate agrees with the installer's needs_sudo" {

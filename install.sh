@@ -961,7 +961,7 @@ verify_release_asset_checksum() {
             result=0
             if [[ "$attestation_status" -eq 0 ]]; then
                 stop_line_spinner
-                log_success "Verified ${asset_name} (sha256 + attestation)"
+                log_success "Verified ${asset_name} · sha256 + attestation"
             fi
         fi
     fi
@@ -1338,7 +1338,7 @@ download_binary() {
             if [[ -t 1 ]]; then stop_line_spinner; fi
             if verify_release_asset_checksum "$fallback_tag" "$asset_name" "$staged_path" &&
                 install_staged_binary "$staged_path" "$target_path"; then
-                log_success "Installed ${binary_name} (${fallback_tag}, v${version} not yet published)"
+                log_success "Installed ${binary_name} from ${fallback_tag} · v${version} not yet published"
                 return 0
             fi
             rm -f "$staged_path"
