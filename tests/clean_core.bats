@@ -884,7 +884,6 @@ clean_application_support_logs() { :; }
 clean_orphaned_app_data() { :; }
 clean_orphaned_system_services() { :; }
 clean_orphaned_container_stubs() { :; }
-clean_stale_launch_services_registrations() { :; }
 show_user_launch_agent_hint_notice() { :; }
 clean_apple_silicon_caches() { :; }
 clean_cached_device_firmware() { :; }

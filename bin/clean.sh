@@ -18,7 +18,6 @@ source "$SCRIPT_DIR/../lib/clean/apps.sh"
 source "$SCRIPT_DIR/../lib/clean/dev.sh"
 source "$SCRIPT_DIR/../lib/clean/app_caches.sh"
 source "$SCRIPT_DIR/../lib/clean/hints.sh"
-source "$SCRIPT_DIR/../lib/clean/launch_services.sh"
 source "$SCRIPT_DIR/../lib/clean/system.sh"
 source "$SCRIPT_DIR/../lib/clean/user.sh"
 
@@ -1587,13 +1586,6 @@ perform_cleanup() {
         total_size_cleaned=0
     fi
 
-    # Start the slow lsregister dump now so it overlaps the earlier sections
-    # instead of stalling App leftovers; see prefetch_stale_launch_services_scan.
-    # Test harnesses skip it so no background dump outlives a test.
-    if [[ "${MOLE_TEST_MODE:-0}" != "1" && "${MOLE_TEST_NO_AUTH:-0}" != "1" ]]; then
-        prefetch_stale_launch_services_scan || true
-    fi
-
     local initial_free_space_kb=""
     local initial_free_space_display="Unknown"
 
@@ -1821,8 +1813,14 @@ perform_cleanup() {
             start_section "App leftovers"
             _run_cleanup_step clean_orphaned_app_data || return $?
             _run_cleanup_step clean_orphaned_system_services || return $?
+            # No stale-LaunchServices step here on purpose. `lsregister -u`
+            # cannot remove a record whose app is already gone: on macOS 15 and
+            # later it fails with -10814 for every such path, which is exactly
+            # the set this would have targeted, so the step could only ever
+            # report failures. `mo optimize` already offers the supported
+            # repair (`lsregister -gc` plus a domain rescan) as an explicit,
+            # user-triggered task.
             _run_cleanup_step clean_orphaned_container_stubs || return $?
-            _run_cleanup_step clean_stale_launch_services_registrations || return $?
             _run_cleanup_step show_user_launch_agent_hint_notice || return $?
             end_section
 

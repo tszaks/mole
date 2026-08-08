@@ -55,7 +55,7 @@ Core controls include:
 - uninstall removal flows that move items to Trash use `mole_delete`, which validates the path again and records the operation result. `mole_delete` now also validates symlinks instead of skipping them, and normalizes the target by collapsing repeated slashes and stripping a trailing slash before the protected-path check, so equivalent path spellings cannot slip past protection.
 - incomplete download cleanup skips files currently open (lsof check) and uses quoted glob patterns to prevent word-splitting on filenames that contain spaces
 - live user-cache protection refuses any reverse-DNS directory under `~/Library/Caches` whose owner is still running. Deleting an open SQLite cache can send the owning helper into a loop writing to unlinked files until the volume fills, observed with Autodesk Fusion's background helpers (issue #1390). The probe is tri-state and denies on both "running" and "could not tell": an unreadable process table is never read as idle. A SQLite family member is additionally refused while a WAL `-shm` companion exists or `lsof` proves an open handle, and a missing `lsof` fails closed. The check runs inside `validate_path_for_deletion()` and again in `safe_remove()` after size probing, so a helper that launches mid-scan still blocks the delete. The same gate covers the generic `~/Library/Caches/*` sweep, not only the app-specific cleaners
-- stale LaunchServices cleanup in `mo clean` (`lib/clean/launch_services.sh`) only unregisters records with `lsregister -u` and never deletes files; it acts on an entry only when the dump marks it `Bundle node not found on disk` and the referenced `.app` is confirmed absent (`[[ ! -e ]]`), rejects `/System`, `/Library/Apple`, `..` traversal, and newline/carriage-return paths, honors dry-run, is bounded by `MOLE_LAUNCH_SERVICES_STALE_LIMIT` (default 50), and never performs a global `lsregister -r -f` rebuild. Candidates may come from a background dump cached at `~/.cache/mole/ls_stale_candidates` for up to 24 hours, so staleness is expected by design: every cached path is re-checked against the full safety predicate at use time, including `[[ ! -e ]]`, which is what rejects an app reinstalled since the dump. The cache only ever appears through an atomic rename, so a partial dump is never consumed
+- `mo clean` does not touch the LaunchServices database. A per-record removal is not implementable: `lsregister -u` resolves the path before unregistering, so on macOS 15 and later it returns `-10814` for exactly the records whose app is already gone. The only supported repair is a domain rescan, which is an explicit user-triggered task in `mo optimize` (`opt_launch_services_rebuild`), never an automatic step inside cleanup
 - uninstall leftover removal is gated by a shared-bundle-id sibling guard: when another install of the same bundle id is still present, shared leftovers are kept and only the selected bundle is removed. Absence of a sibling must be proven, not assumed, so the scan reports three states and only a complete "no other install" result unlocks full leftover removal; a timeout, an unreadable volume, or an unreadable bundle degrades to the narrowed plan. The package-receipt half of that evidence is cached on disk keyed by a checksum of the installed receipt list rather than by time alone, because a TTL cannot prove completeness and a package installed after the last write would otherwise stay invisible to the guard
 - orphaned system-service cleanup in `mo clean` (`lib/clean/apps.sh` `clean_orphaned_system_services`) runs only when sudo is already available, scans `/Library/{LaunchDaemons,LaunchAgents,PrivilegedHelperTools}` while skipping `com.apple.*`, and flags an entry only when its launchd `Program`/`ProgramArguments[0]` path is absolute and missing, or a `PrivilegedHelperTools` helper whose parent app is uninstalled (`bundle_has_installed_app`). Package-manager and system binary locations, a known-helper protect list, mdfind-resolved installed apps, the whitelist, and `should_protect_path` (with `SYSTEM_CRITICAL_BUNDLES` still enforced) all exclude entries before removal. Root-owned plists are read with non-interactive sudo and fail closed, so an unreadable plist is never misread as a missing binary; removal runs `launchctl unload` then the guarded `safe_sudo_remove`, and honors dry-run (issue #1082)
 
@@ -263,7 +263,6 @@ Relevant timeout behavior includes:
 
 - orphan and Spotlight checks: 2s
 - LaunchServices rebuild during uninstall: bounded 10s and 15s steps
-- LaunchServices stale registration cleanup in clean: dump bounded to 60s (2x DISK_VERIFY) with background prefetch + 24h candidate cache, fail-soft partial results on mid-dump timeout, each unregister bounded to 3s
 - Homebrew uninstall cask flow: 300s by default, extended for large apps when needed
 - project scans and sizing operations: bounded to avoid whole-home stalls
 
@@ -304,7 +303,6 @@ There is no single `tests/security.bats` file. Instead, security-relevant behavi
 - `tests/clean_dev_caches.bats`
 - `tests/clean_system_maintenance.bats`
 - `tests/clean_apps.bats`
-- `tests/clean_launch_services.bats`
 - `tests/file_ops_mole_delete.bats`
 - `tests/purge.bats`
 - `tests/installer.bats`
@@ -328,7 +326,6 @@ Key coverage areas include:
 - sudo credential prompting and session management (`tests/manage_sudo.bats`)
 - purge config path discovery and write behavior (`tests/purge_config_paths.bats`)
 - hint and cleanup-hint flows (`tests/clean_hints.bats`)
-- stale LaunchServices unregister limited to missing apps, dry-run preview, fail-soft on dump failure (empty result skips with a visible note; partial mid-timeout candidates still re-verified on disk), and a path-safety filter that rejects live, system, traversal, and injection paths (`tests/clean_launch_services.bats`)
 - Touch ID PAM file permission enforcement (`tests/cli.bats`)
 - bundle ID boundary matching and malformed-ID rejection (`tests/uninstall_safety.bats`)
 - official-uninstaller exclusion and receipt payload allowlisting (`tests/uninstall_safety.bats`)
