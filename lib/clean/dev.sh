@@ -3564,7 +3564,11 @@ _codex_app_build_version() {
         /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" \
         "$candidate/Contents/Info.plist" 2> /dev/null) || return 1
     [[ "$build" =~ ^[0-9]+$ && ${#build} -le 10 ]] || return 1
-    printf '%s\n' "$build"
+    # Normalize to base 10 before anyone compares these. `[[ a -le b ]]` reads a
+    # leading zero as octal, so a CFBundleVersion of 0123 would rank below 100
+    # and a newer staged build could be called superseded; 08 and 09 are not
+    # even valid octal and abort the test with a bash error on stderr.
+    printf '%s\n' "$((10#$build))"
 }
 
 _codex_installed_build_version() {
