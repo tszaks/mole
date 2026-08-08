@@ -1538,9 +1538,14 @@ total_size_cleaned=0
 printf '\n' | batch_uninstall_applications > "$HOME/output.log" 2>&1
 
 grep -q "Review only: ~/system/com.example.review.helper" "$HOME/output.log"
-grep -q "System files left untouched after removal:" "$HOME/output.log"
-[[ "$(grep -cF "~/system/com.example.review.helper" "$HOME/output.log")" -eq 2 ]]
-grep -q "Review these paths before removing them manually; prefer the app's official uninstaller when available" "$HOME/output.log"
+# The summary states the count, not the paths: they were already listed above
+# the confirmation prompt, so the path must appear exactly once in the run.
+[[ "$(grep -cF "~/system/com.example.review.helper" "$HOME/output.log")" -eq 1 ]]
+grep -q "Kept 1 system-level path, which Mole never removes" "$HOME/output.log"
+# Keeping system paths is the designed outcome, so the run is not "incomplete".
+! grep -q "Uninstall incomplete" "$HOME/output.log"
+grep -q "Uninstall complete" "$HOME/output.log"
+# The point of the whole case: the file is reported, never deleted.
 ! grep -q "$HOME/system/com.example.review.helper" "$HOME/remove.log"
 [[ -e "$HOME/system/com.example.review.helper" ]]
 EOF
@@ -1597,7 +1602,7 @@ output=$(cat "$output_file")
 [[ "$output" == *"Uninstall dry run complete"* ]] || { echo "WRONG: missing dry-run summary"; cat "$output_file"; exit 1; }
 [[ "$output" == *"Would remove 1 app"* ]] || { echo "WRONG: missing would-remove summary"; cat "$output_file"; exit 1; }
 [[ "$output" != *"Could not remove"* ]] || { echo "WRONG: dry-run reported expected leftovers"; cat "$output_file"; exit 1; }
-[[ "$output" != *"System files left untouched after removal"* ]] || { echo "WRONG: dry-run reported post-removal system leftovers"; cat "$output_file"; exit 1; }
+[[ "$output" != *"system-level path"* ]] || { echo "WRONG: dry-run reported post-removal system leftovers"; cat "$output_file"; exit 1; }
 [[ "$output" != *"Uninstall incomplete"* ]] || { echo "WRONG: dry-run marked incomplete"; cat "$output_file"; exit 1; }
 EOF
 

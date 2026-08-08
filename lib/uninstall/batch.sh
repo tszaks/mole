@@ -2453,16 +2453,17 @@ _batch_render_summary() {
     fi
 
     if [[ ${#review_only_system_leftovers[@]} -gt 0 ]]; then
-        summary_status="warn"
-        summary_details+=("${ICON_REVIEW} System files left untouched after removal:")
-
-        local system_leftover
-        local tilde_display='~'
-        for system_leftover in "${review_only_system_leftovers[@]}"; do
-            summary_details+=("${GRAY}${ICON_SUBLIST}${NC} ${system_leftover/#$HOME/$tilde_display}")
-        done
-
-        summary_details+=("${GRAY}${ICON_SUBLIST}${NC} Review these paths before removing them manually; prefer the app's official uninstaller when available")
+        # Deliberately not a warning, and deliberately one line. The CLI never
+        # removes system-level paths, so keeping them is the designed outcome
+        # of a successful uninstall, not an incomplete one; marking the run
+        # "incomplete" told users something went wrong when nothing had. The
+        # exact paths were already listed above the confirmation prompt, so
+        # repeating them plus a generic "review these" line only added noise to
+        # the block the user reads last, with no action attached to it.
+        local kept_count=${#review_only_system_leftovers[@]}
+        local kept_label="paths"
+        [[ $kept_count -eq 1 ]] && kept_label="path"
+        summary_details+=("${ICON_REVIEW} Kept ${kept_count} system-level ${kept_label}, which Mole never removes")
     fi
 
     if [[ ${#system_extension_warning_apps[@]} -gt 0 ]]; then
