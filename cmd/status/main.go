@@ -199,7 +199,7 @@ func (m model) View() string {
 			if cardWidth > 2 {
 				cardWidth -= 2
 			}
-			cards := buildCards(m.metrics, cardWidth, cpuCores)
+			cards := buildCards(m.metrics, cardWidth, cpuCores, !m.lastFullAt.IsZero())
 
 			var rendered []string
 			for i, c := range cards {
@@ -211,7 +211,7 @@ func (m model) View() string {
 			cardContent = lipgloss.JoinVertical(lipgloss.Left, rendered...)
 		} else {
 			cardWidth := max(24, termWidth/2-4)
-			cards := buildCards(m.metrics, cardWidth, cpuCores)
+			cards := buildCards(m.metrics, cardWidth, cpuCores, !m.lastFullAt.IsZero())
 			cardContent = renderTwoColumns(cards, termWidth)
 		}
 
