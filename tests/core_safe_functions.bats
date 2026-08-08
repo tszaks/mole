@@ -1057,7 +1057,11 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 started=$(date +%s)
 set +e
-size=$(get_path_size_kb "$APP_DIR" 1)
+# Budget must be >= 2s. SECONDS has whole-second granularity, so a 1s budget
+# is really "until the next second boundary" and can collapse to nearly zero,
+# returning 124 before mdls is ever spawned. Two seconds always leaves at
+# least a full second for the probe, which is what this case asserts on.
+size=$(get_path_size_kb "$APP_DIR" 2)
 size_rc=$?
 set -e
 elapsed=$(( $(date +%s) - started ))
@@ -1072,7 +1076,7 @@ SCRIPT
     [[ "$(< "$trace")" != *"UNEXPECTED_DU"* ]] || return 1
     local elapsed="${output##*ELAPSED=}"
     [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
-    [ "$elapsed" -lt 3 ]
+    [ "$elapsed" -lt 4 ]
 }
 
 @test "safe_remove stops when a size probe is interrupted" {
