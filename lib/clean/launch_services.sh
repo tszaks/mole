@@ -118,8 +118,10 @@ MOLE_LS_STALE_CACHE_FILE="$HOME/.cache/mole/ls_stale_candidates"
 MOLE_LS_STALE_CACHE_TTL_SECONDS=86400
 # Grace after the App leftovers section starts: give a nearly finished
 # background dump time to land the cache before we skip. 15s covers the
-# measured macOS 26 dump; longer waits only stall the section.
-MOLE_LS_STALE_GRACE_SECONDS="${MOLE_LS_STALE_GRACE_SECONDS:-15}"
+# measured macOS 26 dump; longer waits only stall the section. Deliberately a
+# constant, not an override: running out of grace degrades to "deferred to next
+# clean" rather than failing, so no user has a reason to tune it.
+MOLE_LS_STALE_GRACE_SECONDS=15
 MOLE_LS_PREFETCH_PID=""
 
 ls_stale_cache_is_fresh() {
@@ -177,8 +179,7 @@ clean_stale_launch_services_registrations() {
         # A prefetch ran (or a previous run already left a fresh cache).
         # Give a nearly finished dump a short grace, then either consume the
         # cache or skip quietly; never fall back to a second inline dump.
-        local grace_left="${MOLE_LS_STALE_GRACE_SECONDS}"
-        [[ "$grace_left" =~ ^[0-9]+$ ]] || grace_left=15
+        local grace_left=$MOLE_LS_STALE_GRACE_SECONDS
         while ! ls_stale_cache_is_fresh && [[ $grace_left -gt 0 ]] &&
             kill -0 "$MOLE_LS_PREFETCH_PID" 2> /dev/null; do
             sleep 1
