@@ -535,3 +535,63 @@ EOF
 	[[ "$output" != *"unbound variable"* ]] || return 1
 	[[ "$output" == *"RC=0 OUT=$HOME/usr-local/Example.app"* ]] || return 1
 }
+
+@test "a newly installed receipt invalidates the cached complete answer" {
+	# uninstall reads a complete receipt answer as proof that no other install
+	# owns an app's leftovers. A TTL alone cannot carry that proof: a sibling
+	# packaged after the cache was written stays invisible for up to an hour,
+	# and the shared-bundle-id guard then clears leftovers the survivor needs.
+	# The cache is keyed by the receipt list, so installing anything busts it.
+	local mock_bin="$HOME/mock-pkgutil-cache"
+	local pkgs_file="$HOME/receipt-pkgs.txt"
+	mkdir -p "$mock_bin" \
+		"$HOME/usr-local/First.app/Contents" \
+		"$HOME/usr-local/Second.app/Contents"
+	cat > "$mock_bin/pkgutil" << MOCK
+#!/bin/bash
+case "\$1" in
+    --pkgs) cat "$pkgs_file" ;;
+    --files)
+        case "\$2" in
+            com.example.first) printf '${HOME#/}/usr-local/First.app/Contents/Info.plist\n' ;;
+            com.example.second) printf '${HOME#/}/usr-local/Second.app/Contents/Info.plist\n' ;;
+        esac
+        ;;
+esac
+MOCK
+	chmod +x "$mock_bin/pkgutil"
+	printf 'com.example.first\n' > "$pkgs_file"
+
+	sed -e "s|/usr/local/\*.app|$HOME/usr-local/*.app|g" \
+		-e 's|MOLE_PKG_RECEIPTS_LOADED|MOLE_PKG_RECEIPTS_TEST_LOADED|g' \
+		"$PROJECT_ROOT/lib/core/pkg_receipts.sh" > "$HOME/pkg_receipts_cache_test.sh"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" PKGS_FILE="$pkgs_file" \
+		PATH="$mock_bin:/usr/bin:/bin" \
+		MOLE_PKG_RECEIPT_CACHE_FILE="$HOME/receipt-cache" \
+		/bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$HOME/pkg_receipts_cache_test.sh"
+
+first=$(pkg_receipt_nonstandard_app_paths --require-complete)
+# Same receipts: the cache may answer, and must still answer correctly.
+warm=$(pkg_receipt_nonstandard_app_paths --require-complete)
+# A second package lands. The cached answer is now incomplete.
+printf 'com.example.first\ncom.example.second\n' > "$PKGS_FILE"
+after=$(pkg_receipt_nonstandard_app_paths --require-complete)
+printf 'FIRST=[%s]\nWARM=[%s]\nAFTER=[%s]\n' \
+    "$(printf '%s' "$first" | tr '\n' ' ')" \
+    "$(printf '%s' "$warm" | tr '\n' ' ')" \
+    "$(printf '%s' "$after" | tr '\n' ' ')"
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"FIRST=[$HOME/usr-local/First.app]"* ]] || return 1
+	[[ "$output" == *"WARM=[$HOME/usr-local/First.app]"* ]] || return 1
+	# The whole point: the newly packaged sibling must appear immediately.
+	[[ "$output" == *"AFTER=[$HOME/usr-local/First.app $HOME/usr-local/Second.app]"* ]] || return 1
+}

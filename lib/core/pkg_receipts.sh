@@ -25,23 +25,10 @@ pkg_receipt_nonstandard_app_paths() {
         now_epoch=$(date +%s 2> /dev/null || echo 0)
     fi
 
-    if [[ "${MOLE_PKG_RECEIPT_CACHE_DISABLE:-0}" != "1" && -r "$cache_file" ]]; then
-        local cache_mtime=0
-        if declare -f get_file_mtime > /dev/null 2>&1; then
-            cache_mtime=$(get_file_mtime "$cache_file")
-        else
-            cache_mtime=$(stat -f "%m" "$cache_file" 2> /dev/null || echo 0)
-        fi
-        if [[ "$cache_ttl" =~ ^[0-9]+$ && "$cache_mtime" =~ ^[0-9]+$ &&
-            "$now_epoch" =~ ^[0-9]+$ && $cache_ttl -gt 0 &&
-            $((now_epoch - cache_mtime)) -lt $cache_ttl ]]; then
-            while IFS= read -r cached_app_path; do
-                [[ -n "$cached_app_path" && -d "$cached_app_path" ]] && printf '%s\n' "$cached_app_path"
-            done < "$cache_file"
-            return 0
-        fi
-    fi
-
+    # `pkgutil --pkgs` is one cheap call; what costs seconds on an Xcode Mac is
+    # the per-receipt `--files` walk below (#1383). So the receipt list is read
+    # first and doubles as the cache key: installing a package always adds a
+    # receipt, which changes the fingerprint and forces a rescan.
     local pkgs_output=""
     local pkgs_rc=0
     if declare -f run_with_timeout > /dev/null 2>&1; then
@@ -58,6 +45,41 @@ pkg_receipt_nonstandard_app_paths() {
         return 0
     fi
     [[ -n "$pkgs_output" ]] || return 0
+
+    local receipts_fingerprint=""
+    receipts_fingerprint=$(printf '%s\n' "$pkgs_output" | LC_ALL=C cksum 2> /dev/null |
+        LC_ALL=C tr -cd '0-9 ' | LC_ALL=C tr ' ' '-') || receipts_fingerprint=""
+    receipts_fingerprint="${receipts_fingerprint%-}"
+
+    # A caller asking for a complete answer is asking for proof, and the TTL
+    # alone cannot supply it: a sibling installed since the last write would be
+    # missing from a cache that still looks fresh, and uninstall reads that
+    # absence as "no other install owns these leftovers". The fingerprint closes
+    # that window, so an unfingerprintable cache is unusable to those callers.
+    if [[ "${MOLE_PKG_RECEIPT_CACHE_DISABLE:-0}" != "1" && -r "$cache_file" ]] &&
+        [[ -n "$receipts_fingerprint" || "$require_complete" != "1" ]]; then
+        local cache_mtime=0
+        if declare -f get_file_mtime > /dev/null 2>&1; then
+            cache_mtime=$(get_file_mtime "$cache_file")
+        else
+            cache_mtime=$(stat -f "%m" "$cache_file" 2> /dev/null || echo 0)
+        fi
+        if [[ "$cache_ttl" =~ ^[0-9]+$ && "$cache_mtime" =~ ^[0-9]+$ &&
+            "$now_epoch" =~ ^[0-9]+$ && $cache_ttl -gt 0 &&
+            $((now_epoch - cache_mtime)) -lt $cache_ttl ]]; then
+            local cache_header=""
+            IFS= read -r cache_header < "$cache_file" || cache_header=""
+            if [[ "$cache_header" == "#receipts:$receipts_fingerprint" ]]; then
+                local cache_line_no=0
+                while IFS= read -r cached_app_path; do
+                    cache_line_no=$((cache_line_no + 1))
+                    [[ $cache_line_no -eq 1 ]] && continue
+                    [[ -n "$cached_app_path" && -d "$cached_app_path" ]] && printf '%s\n' "$cached_app_path"
+                done < "$cache_file"
+                return 0
+            fi
+        fi
+    fi
 
     local -a seen_apps=()
     local scan_start=$SECONDS
@@ -152,7 +174,10 @@ pkg_receipt_nonstandard_app_paths() {
         fi
     fi
 
-    if [[ "${MOLE_PKG_RECEIPT_CACHE_DISABLE:-0}" != "1" && -n "$cache_file" ]]; then
+    # No fingerprint means no verifiable cache entry, so skip the write rather
+    # than leave a file that can never match on read.
+    if [[ "${MOLE_PKG_RECEIPT_CACHE_DISABLE:-0}" != "1" && -n "$cache_file" &&
+        -n "$receipts_fingerprint" ]]; then
         local cache_dir="${cache_file%/*}"
         if [[ -n "$cache_dir" && "$cache_dir" != "$cache_file" ]]; then
             if declare -f ensure_user_dir > /dev/null 2>&1; then
@@ -164,10 +189,9 @@ pkg_receipt_nonstandard_app_paths() {
         local cache_tmp
         cache_tmp=$(mktemp "${TMPDIR:-/tmp}/mole.pkg_receipts.XXXXXX" 2> /dev/null || true)
         if [[ -n "$cache_tmp" ]]; then
+            printf '#receipts:%s\n' "$receipts_fingerprint" > "$cache_tmp"
             if [[ ${#seen_apps[@]} -gt 0 ]]; then
-                printf '%s\n' "${seen_apps[@]}" | sort -u > "$cache_tmp"
-            else
-                : > "$cache_tmp"
+                printf '%s\n' "${seen_apps[@]}" | sort -u >> "$cache_tmp"
             fi
             mv -f "$cache_tmp" "$cache_file" 2> /dev/null || rm -f "$cache_tmp" 2> /dev/null || true
         fi
