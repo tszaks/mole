@@ -352,8 +352,12 @@ _mole_user_cache_owner_process_state() {
         return 2
     fi
 
+    # Feed the table by here-string, never through a pipe. `grep -q` exits on
+    # its first match, and the printf still writing into that closed pipe takes
+    # SIGPIPE, which bash reports as "printf: write error: Broken pipe" on
+    # stderr; during `mo clean` that lands in the middle of the user's output.
     local state=1
-    if printf '%s\n' "$table" | LC_ALL=C grep -qiF -- "$owner"; then
+    if LC_ALL=C grep -qiF -- "$owner" <<< "$table"; then
         state=0
     fi
 
@@ -387,10 +391,14 @@ _mole_user_cache_owner_process_state() {
             done
             local boundary_open='(^|[^A-Za-z0-9])'
             local boundary_close='([^A-Za-z0-9]|$)'
-            # Two greps, so both tokens must land on the SAME line.
-            if printf '%s\n' "$table" |
-                LC_ALL=C grep -iE -- "${boundary_open}${escaped_leaf}${boundary_close}" |
-                LC_ALL=C grep -qiE -- "${boundary_open}(${alternation})${boundary_close}"; then
+            # Two passes, so both tokens must land on the SAME line. Materialize
+            # the first result instead of piping into a `grep -q`, for the same
+            # broken-pipe reason as the substring check above.
+            local leaf_lines=""
+            leaf_lines=$(LC_ALL=C grep -iE -- \
+                "${boundary_open}${escaped_leaf}${boundary_close}" <<< "$table") || leaf_lines=""
+            if [[ -n "$leaf_lines" ]] && LC_ALL=C grep -qiE -- \
+                "${boundary_open}(${alternation})${boundary_close}" <<< "$leaf_lines"; then
                 state=0
             fi
         fi
@@ -1011,6 +1019,7 @@ safe_remove() {
     # Use || to capture the exit code so set -e won't abort on rm failures
     local error_msg
     local rm_exit=0
+    local section_deadline_spent=0
     if declare -F rm > /dev/null 2>&1; then
         error_msg=$(rm -rf "$path" 2>&1) || rm_exit=$? # safe_remove
     else
@@ -1019,16 +1028,26 @@ safe_remove() {
             "$deadline_seconds") || rm_exit=$?
         if [[ $rm_exit -eq 0 ]]; then
             error_msg=$(run_with_timeout "$rm_timeout" rm -rf "$path" < /dev/null 2>&1) || rm_exit=$? # safe_remove
+        else
+            # The section's own wall-clock budget ran out, so rm never started.
+            section_deadline_spent=1
         fi
     fi
 
     if [[ $rm_exit -eq 124 ]]; then
         debug_log "Removal timed out: $path"
-        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "removal timed out"
-        # A slow disk can exceed the per-item removal budget. That is a failed
-        # removal, not a user interrupt: count it and keep going so one slow
-        # cache never cancels the remaining cleanup.
-        MOLE_CLEAN_REMOVAL_TIMEOUTS=$((${MOLE_CLEAN_REMOVAL_TIMEOUTS:-0} + 1))
+        if [[ $section_deadline_spent -eq 1 ]]; then
+            # Not a slow removal: the caller's section deadline expired before
+            # rm ran, and that section reports its own stop. Counting it here
+            # would point the user at the per-item removal budget instead.
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "section time limit reached"
+        else
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "removal timed out"
+            # A slow disk can exceed the per-item removal budget. That is a
+            # failed removal, not a user interrupt: count it and keep going so
+            # one slow cache never cancels the remaining cleanup.
+            MOLE_CLEAN_REMOVAL_TIMEOUTS=$((${MOLE_CLEAN_REMOVAL_TIMEOUTS:-0} + 1))
+        fi
         return 124
     fi
 
@@ -1417,11 +1436,15 @@ safe_sudo_remove() {
         return 1
     fi
     local remove_timeout=""
+    local section_deadline_spent=0
     remove_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
         "$deadline_seconds") || ret=$?
     if [[ $ret -eq 0 ]]; then
         output=$(_mole_bounded_sudo "$remove_timeout" \
             -n rm -rf "$path" < /dev/null 2>&1) || ret=$? # safe_remove
+    else
+        # The section's own wall-clock budget ran out, so rm never started.
+        section_deadline_spent=1
     fi
 
     if [[ $ret -eq 0 ]]; then
@@ -1430,8 +1453,15 @@ safe_sudo_remove() {
     fi
 
     if [[ $ret -eq 124 ]]; then
-        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "removal timed out"
-        MOLE_CLEAN_REMOVAL_TIMEOUTS=$((${MOLE_CLEAN_REMOVAL_TIMEOUTS:-0} + 1))
+        if [[ $section_deadline_spent -eq 1 ]]; then
+            # The section prints its own "time limit reached" line; counting it
+            # here too would tell the user to raise the per-item removal budget,
+            # which is not the budget that ran out.
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "section time limit reached"
+        else
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$path" "removal timed out"
+            MOLE_CLEAN_REMOVAL_TIMEOUTS=$((${MOLE_CLEAN_REMOVAL_TIMEOUTS:-0} + 1))
+        fi
         return 124
     fi
     if [[ $ret -ge 128 ]]; then
