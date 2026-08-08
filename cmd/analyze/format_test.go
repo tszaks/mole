@@ -122,14 +122,18 @@ func TestFormatPercentKeepsFixedWidth(t *testing.T) {
 }
 
 func TestColoredProgressBarKeepsFixedWidthWithoutGrayTrack(t *testing.T) {
+	// A value too small to fill one cell renders blank, not a sliver. Stacked
+	// down a long tail of sub-0.1% rows the slivers formed a solid vertical
+	// rule that drew the eye to the least significant entries; the percent
+	// column already distinguishes "< 0.1%" from zero.
 	tests := []struct {
 		name      string
 		value     int64
 		maxValue  int64
 		percent   float64
-		wantSmall bool
+		wantBlank bool
 	}{
-		{"empty", 0, 100, 0, false},
+		{"empty", 0, 100, 0, true},
 		{"tiny nonzero", 1, 1000, 0.01, true},
 		{"partial", 25, 100, 25, false},
 		{"full", 100, 100, 100, false},
@@ -144,8 +148,11 @@ func TestColoredProgressBarKeepsFixedWidthWithoutGrayTrack(t *testing.T) {
 			if strings.Contains(got, "░") {
 				t.Fatalf("progress bar should not render a gray track: %q", got)
 			}
-			if tt.wantSmall && !strings.Contains(got, "▏") {
-				t.Fatalf("tiny nonzero progress should render a thin marker: %q", got)
+			if tt.wantBlank && got != strings.Repeat(" ", barWidth) {
+				t.Fatalf("sub-cell progress should render blank, got %q", got)
+			}
+			if !tt.wantBlank && !strings.Contains(got, "█") {
+				t.Fatalf("visible progress should render bar glyphs, got %q", got)
 			}
 		})
 	}

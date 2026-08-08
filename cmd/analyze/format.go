@@ -116,7 +116,11 @@ func coloredProgressBar(value, maxValue int64, percent float64) string {
 		barColor = colorGreen
 	}
 	if filled == 0 {
-		return barColor + "▏" + strings.Repeat(" ", barWidth-1) + colorReset
+		// Leave the bar blank rather than drawing a sliver. A long tail of
+		// sub-0.1% entries each drew one, and stacked they read as a solid
+		// vertical rule down the screen, pulling the eye to the least
+		// significant rows. The percent column already says "< 0.1%".
+		return strings.Repeat(" ", barWidth)
 	}
 
 	var bar strings.Builder
