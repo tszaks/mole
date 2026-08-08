@@ -4308,8 +4308,10 @@ clean_dev_misc() {
     clean_codex_cli
     # Cursor Agent session logs (versions cleaned separately in clean_dev_ai_agents)
     [[ -d "$HOME/.local/share/cursor-agent" ]] && safe_find_delete "$HOME/.local/share/cursor-agent" "*.log" "$MOLE_LOG_AGE_DAYS" "f"
-    # Playwright cached browser binaries
-    safe_clean ~/Library/Caches/ms-playwright/* "Playwright browsers"
+    # Playwright browser revisions are hard-protected by should_protect_path,
+    # so no safe_clean call here can ever remove them. They cost a 100-500 MB
+    # CDN re-download and a stale registry link does not prove the user is done
+    # with the revision. Keep this surface read-only.
     # Chrome DevTools MCP keeps a Chromium profile; clean only rebuildable caches.
     clean_chrome_devtools_mcp_caches
     # Claude Code state under ~/.claude can include persistent memory,
