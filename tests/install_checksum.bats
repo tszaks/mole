@@ -89,7 +89,7 @@ test -x "$CONFIG_DIR/bin/analyze-go"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"SUCCESS:Downloaded analyze binary"* ]]
+	[[ "$output" == *"SUCCESS:Installed analyze"* ]]
 }
 
 @test "download_binary retries transient asset and checksum failures" {
@@ -155,7 +155,7 @@ grep -qx "$content" "$CONFIG_DIR/bin/analyze-go"
 EOF
 
 	[ "$status" -eq 0 ] || return 1
-	[[ "$output" == *"SUCCESS:Downloaded analyze binary"* ]]
+	[[ "$output" == *"SUCCESS:Installed analyze"* ]]
 }
 
 @test "download_binary aborts on checksum mismatch without downgrading to a source build" {
@@ -448,7 +448,7 @@ grep -q "fallback-binary" "$CONFIG_DIR/bin/status-go"
 EOF
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"SUCCESS:Downloaded status from V1.2.2"* ]]
+	[[ "$output" == *"SUCCESS:Installed status (V1.2.2"* ]]
 }
 
 @test "download_binary aborts on fallback-tag checksum mismatch without a source build" {

@@ -23,12 +23,12 @@ fi
 _SPINNER_PID=""
 start_line_spinner() {
     local msg="$1"
-    # Non-tty readers (mo update pipes this output) get a plain progress
-    # line: the spinner glyph without animation reads as a broken prompt.
-    [[ ! -t 1 ]] && {
-        echo -e "$msg"
-        return
-    }
+    # A progress line only means something while it is being watched. When the
+    # output is captured, as `mo update` does, every one of these lands in the
+    # final block as a stale "Downloading..." / "Verifying..." line that the
+    # very next line contradicts. Say nothing there and let the result lines
+    # speak; a tty still gets the animation.
+    [[ -t 1 ]] || return 0
     local chars="|/-\\"
     # shellcheck disable=SC1003
     [[ -z "$chars" ]] && chars='|/-\\'
@@ -1223,11 +1223,7 @@ build_binary_from_source() {
         return 1
     fi
 
-    if [[ -t 1 ]]; then
-        start_line_spinner "Building ${binary_name} from source..."
-    else
-        echo "Building ${binary_name} from source..."
-    fi
+    start_line_spinner "Building ${binary_name} from source..."
 
     if (cd "$SOURCE_DIR" && go build -ldflags="-s -w" -o "$target_path" "./$cmd_dir" > /dev/null 2>&1); then
         if [[ -t 1 ]]; then stop_line_spinner; fi
@@ -1306,17 +1302,17 @@ download_binary() {
 
     # Skip preflight network checks to avoid false negatives.
 
-    if [[ -t 1 ]]; then
-        start_line_spinner "Downloading ${binary_name}..."
-    else
-        echo "Downloading ${binary_name}..."
-    fi
+    start_line_spinner "Downloading ${binary_name}..."
 
-    if curl_download_with_retry "$url" "$staged_path"; then
+    # Both download attempts are followed by another route, so a failure here
+    # is a step in the flow rather than the end of it. Surfacing curl's raw
+    # stderr made the ordinary "tag not published yet" case print a 404 the
+    # user cannot act on, immediately above the line explaining the fallback.
+    if curl_download_with_retry "$url" "$staged_path" 2> /dev/null; then
         if [[ -t 1 ]]; then stop_line_spinner; fi
         if verify_release_asset_checksum "$release_tag" "$asset_name" "$staged_path" &&
             install_staged_binary "$staged_path" "$target_path"; then
-            log_success "Downloaded ${binary_name} binary"
+            log_success "Installed ${binary_name}"
             return 0
         fi
         rm -f "$staged_path"
@@ -1337,16 +1333,12 @@ download_binary() {
     fallback_tag=$(get_latest_release_tag 2> /dev/null || true)
     if [[ -n "$fallback_tag" && "$fallback_tag" != "$release_tag" ]]; then
         local fallback_url="https://github.com/tw93/mole/releases/download/${fallback_tag}/${asset_name}"
-        if [[ -t 1 ]]; then
-            start_line_spinner "Retrying ${binary_name} from ${fallback_tag}..."
-        else
-            echo "Retrying ${binary_name} from ${fallback_tag}..."
-        fi
-        if curl_download_with_retry "$fallback_url" "$staged_path"; then
+        start_line_spinner "Retrying ${binary_name} from ${fallback_tag}..."
+        if curl_download_with_retry "$fallback_url" "$staged_path" 2> /dev/null; then
             if [[ -t 1 ]]; then stop_line_spinner; fi
             if verify_release_asset_checksum "$fallback_tag" "$asset_name" "$staged_path" &&
                 install_staged_binary "$staged_path" "$target_path"; then
-                log_success "Downloaded ${binary_name} from ${fallback_tag} (v${version} not yet published)"
+                log_success "Installed ${binary_name} (${fallback_tag}, v${version} not yet published)"
                 return 0
             fi
             rm -f "$staged_path"
@@ -1415,40 +1407,31 @@ install_files() {
                 return 1
             fi
 
-            log_success "Installed mole to $INSTALL_DIR"
         fi
     else
         log_error "mole executable not found in ${SOURCE_DIR:-unknown}"
         exit 1
     fi
 
-    if [[ -f "$SOURCE_DIR/mo" ]]; then
-        if [[ "$source_dir_abs" == "$install_dir_abs" ]]; then
-            log_success "mo alias already present"
-        else
-            if ! maybe_sudo cp "$SOURCE_DIR/mo" "$INSTALL_DIR/mo.new" ||
-                ! maybe_sudo chmod +x "$INSTALL_DIR/mo.new" ||
-                ! maybe_sudo mv -f "$INSTALL_DIR/mo.new" "$INSTALL_DIR/mo"; then
-                log_error "Failed to install mo alias to $INSTALL_DIR (admin access missing or denied)"
-                return 1
-            fi
-            log_success "Installed mo alias"
+    if [[ -f "$SOURCE_DIR/mo" && "$source_dir_abs" != "$install_dir_abs" ]]; then
+        if ! maybe_sudo cp "$SOURCE_DIR/mo" "$INSTALL_DIR/mo.new" ||
+            ! maybe_sudo chmod +x "$INSTALL_DIR/mo.new" ||
+            ! maybe_sudo mv -f "$INSTALL_DIR/mo.new" "$INSTALL_DIR/mo"; then
+            log_error "Failed to install mo alias to $INSTALL_DIR (admin access missing or denied)"
+            return 1
         fi
     fi
 
     if [[ -d "$SOURCE_DIR/bin" ]]; then
         local source_bin_abs="$(cd "$SOURCE_DIR/bin" && pwd)"
         local config_bin_abs="$(cd "$CONFIG_DIR/bin" && pwd)"
-        if [[ "$source_bin_abs" == "$config_bin_abs" ]]; then
-            log_success "Modules already synced"
-        else
+        if [[ "$source_bin_abs" != "$config_bin_abs" ]]; then
             local -a bin_files=("$SOURCE_DIR/bin"/*)
             if [[ ${#bin_files[@]} -gt 0 ]]; then
                 cp -r "${bin_files[@]}" "$CONFIG_DIR/bin/"
                 for file in "$CONFIG_DIR/bin/"*; do
                     [[ -e "$file" ]] && chmod +x "$file"
                 done
-                log_success "Installed modules"
             fi
         fi
     fi
@@ -1456,13 +1439,10 @@ install_files() {
     if [[ -d "$SOURCE_DIR/lib" ]]; then
         local source_lib_abs="$(cd "$SOURCE_DIR/lib" && pwd)"
         local config_lib_abs="$(cd "$CONFIG_DIR/lib" && pwd)"
-        if [[ "$source_lib_abs" == "$config_lib_abs" ]]; then
-            log_success "Libraries already synced"
-        else
+        if [[ "$source_lib_abs" != "$config_lib_abs" ]]; then
             local -a lib_files=("$SOURCE_DIR/lib"/*)
             if [[ ${#lib_files[@]} -gt 0 ]]; then
                 cp -r "${lib_files[@]}" "$CONFIG_DIR/lib/"
-                log_success "Installed libraries"
             fi
         fi
     fi
@@ -1487,6 +1467,12 @@ install_files() {
             return 1
         fi
     fi
+
+    # One line for the whole file install. Reporting the entry script, the mo
+    # alias, the modules and the libraries separately described the layout
+    # rather than the outcome, and every one of them is a hard failure that
+    # returns above if it goes wrong.
+    log_success "Installed to $INSTALL_DIR"
 
     local helper_install_marker="$CONFIG_DIR/.helper_install_incomplete"
     : > "$helper_install_marker"
@@ -1552,6 +1538,13 @@ print_usage_summary() {
     if [[ ${VERBOSE} -ne 1 ]]; then
         return
     fi
+
+    # A usage cheat sheet is for someone watching a fresh install scroll by.
+    # `mo update` runs this same installer with its output captured, so on a
+    # tty-less run the block arrives after the fact and tells an existing user
+    # the nine commands they already use, followed by a second success line
+    # contradicting nothing. The caller prints its own result there.
+    [[ -t 1 ]] || return 0
 
     echo ""
 
