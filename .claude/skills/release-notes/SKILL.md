@@ -75,7 +75,8 @@ No `---` separators between sections, and no trailing repository link; the publi
 - **English block first, 中文 block second**. Same numbered order in both blocks. Same number of items.
 - **Order items by user-perceived impact, not commit chronology**. Headline change first; internal safety hardening, performance, and bug fixes follow.
 - **Do not describe overview icons that no longer exist**. Analyze overview rows are text-only because emoji width and baselines vary across terminals. If icons return later, they must not imply that user data such as iOS Backups, Xcode Archives, or Old Downloads is safe to delete.
-- **Verify every command mentioned in the notes actually exists in HEAD**. AGENTS.md cites `mo check / mo doctor` as a case where a removed command nearly shipped as a "feature".
+- **Verify every command mentioned in the notes actually exists in HEAD**. The deleted `mo check` / `mo doctor` commands nearly shipped in notes as a "feature" after they were removed.
+- **An incident or troubleshooting note is one sentence of symptom plus one command**. No cause taxonomy, no command per branch; the user needs the one line that gets them unstuck. Match the previous release's language treatment for that note: if the last release carried it in one language, do not add a second.
 - **Keep the Mole Mac App cross-link only if it matches the current release style**. Do not turn it into a sales block.
 
 ## Publish

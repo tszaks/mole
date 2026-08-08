@@ -77,11 +77,12 @@ the user asked for; do not leave an unbounded monitor running in the background.
 - `mo clean` also sweeps leftovers from apps the user already deleted. It does
   not touch installed apps; that is `mo uninstall`.
 - `mo clean --external <path>` cleans macOS metadata off an external volume.
-- `mo purge` removes rebuildable project artifacts (`target/`, `build/`,
-  `dist/`, `.next/`). It deliberately does not touch anything that needs a
-  network to restore (`node_modules/`, `Pods/`, `venv/`), so a purge is always
-  recoverable with a local rebuild. `mo purge --paths` configures which
-  directories are scanned; `--include-empty` shows zero-size candidates.
+- `mo purge` removes rebuildable project artifacts: local build output
+  (`target/`, `build/`, `dist/`, `.next/`) and dependency directories that need
+  a network to restore (`node_modules/`, `Pods/`, `venv/`, `vendor/`). A purge
+  is therefore not always recoverable offline, so say which kind the candidates
+  are before running it. `mo purge --paths` configures which directories are
+  scanned; `--include-empty` shows zero-size candidates.
 - `mo optimize` refreshes caches and system services. It is the one destructive
   command whose effects are not "files disappear", so say what it will do
   before running it.

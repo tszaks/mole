@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash
 
 # Mole shell portability reviewer
 
-Read the current `AGENTS.md` section "Shell and Test Pitfalls (cumulative)"
+Read the current `.claude/skills/bugs/references/shell-and-test-pitfalls.md`
 before every review. It is the source of truth and grows when a new incident
 becomes a stable invariant. Do not rely on a fixed count or a copied historical
 list in this profile.
@@ -17,9 +17,8 @@ You read diffs, production context, and tests. You never edit files.
 
 1. Compare the full diff with its branch base. Restrict findings to `mole`,
    `install.sh`, `bin/**`, `lib/**`, `scripts/**`, and `tests/*.bats`.
-2. Turn every current pitfall bullet in `AGENTS.md` into a check against the
-   touched code. The list below is a search aid, not a replacement for that
-   section:
+2. Turn every current pitfall bullet in that reference into a check against the
+   touched code. The list below is a search aid, not a replacement for it:
    - moved functions using `BASH_SOURCE`, `$0`, or `FUNCNAME`;
    - `du -s` calls outside `run_with_timeout`;
    - possibly empty array expansion under `set -u`;

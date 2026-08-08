@@ -56,7 +56,7 @@ Every "is this app installed" and "is this service active" question in this repo
 - `mdfind` alone misses Homebrew casks with no metadata importer and never indexes SMJobBless helpers embedded under `Contents/Library/LaunchServices` (`6a055de4`).
 - `command -v` plus a LaunchAgents grep only covers CLI-style owners, so `~/.bridge` was flagged orphan while Proton Mail Bridge.app was installed (`28ee58c9`).
 - Any UP `utun*` interface read as "VPN active" flagged every Mac with iCloud Private Relay (`37a446c9`).
-- A probe can carry side effects that outweigh its answer: `brew list mole` asked whether Homebrew owns the install, but brew's entry point resets the user's sudo timestamp, so the probe executed the pre-authed ticket and every update paid a second password prompt (`cb4a3d66`). When a filesystem fact answers the question (the Cellar directory), never run the tool.
+- A probe can carry side effects that outweigh its answer: `brew list mole` asked whether Homebrew owns the install, but brew's entry point resets the user's sudo timestamp, so the probe executed the pre-authed ticket and every update paid a second password prompt (`cb4a3d66`). When a filesystem fact answers the question (the Cellar directory), never run the tool. Then apply this archetype to the replacement: the first Cellar version checked only `HOMEBREW_PREFIX`, `/opt/homebrew`, and `/usr/local`, so a custom prefix that does not export the variable went undetected where the old query had found it (`73f89841`). Swapping a probe for a filesystem fact still owes you every legitimate location of that fact, which here means deriving the prefix from `command -v brew` as well; reading the path is not running the binary.
 
 ```bash
 command grep -rn 'mdfind' lib/ bin/ | command grep -v run_with_timeout
@@ -139,6 +139,8 @@ Changing how a cached value is computed without invalidating the cache means the
 
 The method: for every cache, confirm it has a TTL, a schema version, and invalidation on each mutation that changes its inputs. When a fix changes a computed value, bump the schema in the same commit. When verifying any fix, confirm you are not reading last release's cache.
 
+A TTL proves "not too old". It never proves "complete", so check what the caller does with the answer. `pkg_receipt_nonstandard_app_paths --require-complete` feeds the shared-bundle-id sibling guard, which reads a complete answer as proof that no other install owns an app's leftovers; the cache short-circuit returned 0 without consulting `require_complete`, so a package installed after the last write stayed invisible for an hour and the guard cleared leftovers the survivor still needed (`b4f00651`). When a result is consumed as proof of absence, either bypass the cache for those callers or key it to a fingerprint of the evidence itself, so the entry dies the moment the evidence changes. That cache now stores a checksum of `pkgutil --pkgs` as a header: installing anything adds a receipt, which changes the fingerprint. Re-verifying each cached path still exists only filters entries that disappeared, never ones that appeared.
+
 ### 9. Two paths computing the same number differently
 
 Any number rendered twice will eventually disagree: dry-run preview against the summary total, the item count against the raw target count, a subtree size against `du`, base-10 against base-2.
@@ -180,6 +182,8 @@ Four other ways a test here has passed vacuously:
 
 The rule: end every assertion with `|| return 1`, include a positive control proving the negative assertions are not vacuous, and verify red-green by reverting the fix and watching the test fail.
 
+The mirror image is also a test defect, not a product bug. A case that fails in the full suite and passes in isolation is usually asserting a boundary the code never promised: `get_path_size_kb` was given a 1s budget and the test asserted `mdls` had run, but deadlines count in whole `SECONDS`, so that budget can collapse before the probe is spawned (`e95dd750`). A case can also fail on prose: a source-invariant test grepped `install.sh` for `brew list mole`, and the comment explaining why that call was removed read as the call coming back (`73f89841`). Before chasing a red run into production code, ask whether the assertion is timing-sensitive or is matching text outside the code path.
+
 ### 12. A gate that cannot say why it refused
 
 A guard with many independent failure causes and one message. The user cannot act, and the maintainer cannot triage, so the report arrives as "it does not work" and the fix targets whichever wording was quoted.
@@ -210,7 +214,7 @@ For each gate, list every reachable `return 1` and name the message and the reme
 
 ## Verification bar
 
-Never report a defect inferred from a function name or a file name. Grep the implementation. Confirm the code is production code: an unguarded call inside `#[cfg(test)]`, a bats fixture, a comment, or a string literal is not a defect.
+Never report a defect inferred from a function name or a file name. Grep the implementation. Confirm the code is production code: an unguarded call inside a bats fixture, a Go `_test.go` file, a comment, or a string literal is not a defect.
 
 ```bash
 ./scripts/check.sh --format
