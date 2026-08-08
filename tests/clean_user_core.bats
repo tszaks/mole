@@ -1619,3 +1619,57 @@ EOF
         return 1
     }
 }
+
+@test "large files dates the irreplaceable rows and leaves caches undated" {
+    local review_home="$HOME/large-review-dates"
+    mkdir -p \
+        "$review_home/Library/Application Support/MobileSync/Backup/00008150-DEVICE" \
+        "$review_home/Library/Developer/Xcode/Archives/2026-03-04" \
+        "$review_home/Library/Developer/Xcode/DerivedData/Some-project"
+    touch -t 202601021200 "$review_home/Library/Application Support/MobileSync/Backup/00008150-DEVICE"
+    touch -t 202603041200 "$review_home/Library/Developer/Xcode/Archives/2026-03-04"
+
+    run env HOME="$review_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+docker() { return 1; }
+defaults() { return 1; }
+du() { printf '2097152 %s\n' "${2:-/tmp}"; }
+run_with_timeout() {
+    shift
+    "$@"
+}
+check_large_file_candidates
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    # Size alone cannot decide these two: the date separates a live phone
+    # backup from a dead one, and a shipped archive from a stray export.
+    [[ "$output" == *"iOS backups"*"2026-01-02"* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Xcode archives"*"2026-03-04"* ]] || {
+        echo "$output"
+        return 1
+    }
+    # Rebuildable caches stay undated on purpose; their age never changes the
+    # answer, and a date on every row would bury the two that matter.
+    local derived_row
+    derived_row=$(printf '%s\n' "$output" | grep 'Xcode DerivedData' || true)
+    [[ -n "$derived_row" ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$derived_row" != *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]* ]] || {
+        echo "$derived_row"
+        return 1
+    }
+}

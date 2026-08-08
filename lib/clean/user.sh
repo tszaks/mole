@@ -2382,30 +2382,62 @@ check_large_file_candidates() {
         printf '%s\n' "$size_kb"
     }
 
-    # One row per large item: "label · size · path". The review icon carries the
-    # review-only semantics; format_path_link keeps the path clickable even
-    # with spaces (OSC 8 link, not terminal auto-linking).
+    # Date of the newest immediate child. Only for rows holding irreplaceable
+    # data that goes stale, where size alone cannot decide: 100GB of last
+    # month's phone backup is the only copy of that phone, and 100GB from a
+    # device sold two years ago is dead weight. Rebuildable caches get no date
+    # because their age never changes the answer.
+    # One bounded command, materialized whole: a partial listing would report
+    # an older date than the truth, which is worse than reporting none. On
+    # timeout or any nonzero status the row falls back to no date.
+    _large_dir_newest_date() {
+        local path="$1"
+        local mtimes="" newest=""
+        mtimes=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" \
+            command find "$path" -mindepth 1 -maxdepth 1 -exec stat -f '%m' {} + 2> /dev/null) || return 1
+        [[ -n "$mtimes" ]] || return 1
+        newest=$(printf '%s\n' "$mtimes" | sort -n | tail -1)
+        [[ "$newest" =~ ^[0-9]+$ ]] || return 1
+        date -r "$newest" '+%Y-%m-%d' 2> /dev/null || return 1
+    }
+
+    # One row per large item: "label · size · path", with an optional date
+    # between size and path. Bare date, no leading word: it sits right after a
+    # short size field, so it lands in a stable column and reads as a date on
+    # its own. The review icon carries the review-only semantics;
+    # format_path_link keeps the path clickable even with spaces (OSC 8 link,
+    # not terminal auto-linking).
     _report_large_review_row() {
         local label="$1"
         local size_human="$2"
         local path="$3"
+        local newest_date="${4:-}"
+        local date_part=""
+        [[ -n "$newest_date" ]] && date_part=" · ${GRAY}${newest_date}${NC}"
         stop_section_spinner
-        echo -e "  ${YELLOW}${ICON_REVIEW}${NC} ${label} · ${GREEN}${size_human}${NC} · ${GRAY}$(format_path_link "$path")${NC}"
+        echo -e "  ${YELLOW}${ICON_REVIEW}${NC} ${label} · ${GREEN}${size_human}${NC}${date_part} · ${GRAY}$(format_path_link "$path")${NC}"
         found_any=true
         start_section_spinner "Scanning large files..."
     }
 
+    # Pass "date" as $4 on rows where staleness decides the action. Rows left
+    # without it stay two fields wide.
     _report_large_review_dir() {
         local label="$1"
         local path="$2"
         local probe_timeout="${3:-}"
+        local want_date="${4:-}"
         [[ -d "$path" ]] || return 0
         local size_kb=""
         size_kb=$(_large_candidate_size_kb "$path" "$probe_timeout") || return 0
         [[ "$size_kb" -ge "$threshold_kb" ]] || return 0
         local size_human
         size_human=$(bytes_to_human "$((size_kb * 1024))")
-        _report_large_review_row "$label" "$size_human" "$path"
+        local detail=""
+        if [[ "$want_date" == "date" ]]; then
+            detail=$(_large_dir_newest_date "$path") || detail=""
+        fi
+        _report_large_review_row "$label" "$size_human" "$path" "$detail"
     }
 
     # The du probes below (Mail, backups, package stores) take seconds in
@@ -2527,7 +2559,10 @@ check_large_file_candidates() {
     fi
 
     _report_large_review_dir "Xcode DerivedData" "$HOME/Library/Developer/Xcode/DerivedData"
-    _report_large_review_dir "Xcode archives" "$HOME/Library/Developer/Xcode/Archives"
+    # Archives hold the dSYMs that symbolicate crashes from shipped builds, so
+    # the newest date separates the releases still worth keeping from repeated
+    # export attempts left behind on one afternoon.
+    _report_large_review_dir "Xcode archives" "$HOME/Library/Developer/Xcode/Archives" "" "date"
     _report_large_review_dir "Simulator data" "$HOME/Library/Developer/CoreSimulator/Devices"
     if [[ "$docker_reported" != "true" ]]; then
         _report_large_review_dir "Docker Desktop data" "$HOME/Library/Containers/com.docker.docker/Data"
@@ -2535,7 +2570,7 @@ check_large_file_candidates() {
     # Device backups reach 100GB+ with millions of small files; the default
     # 3s du budget times out cold and silently drops the most valuable row,
     # so give this probe the hint-scan budget instead.
-    _report_large_review_dir "iOS backups" "$HOME/Library/Application Support/MobileSync/Backup" "$MOLE_TIMEOUT_HINT_SCAN_SEC"
+    _report_large_review_dir "iOS backups" "$HOME/Library/Application Support/MobileSync/Backup" "$MOLE_TIMEOUT_HINT_SCAN_SEC" "date"
     _report_large_review_dir "LM Studio models" "$HOME/.lmstudio/models"
     local orbstack_data
     for orbstack_data in "$HOME"/Library/Group\ Containers/*dev.orbstack/data "$HOME/OrbStack"; do
@@ -2563,7 +2598,7 @@ check_large_file_candidates() {
 
     stop_section_spinner
 
-    unset -f _large_candidate_size_kb _report_large_review_dir _report_large_review_row
+    unset -f _large_candidate_size_kb _large_dir_newest_date _report_large_review_dir _report_large_review_row
 
     # Only mark activity when something was reported so an empty section can
     # collapse instead of printing a reassurance row.
