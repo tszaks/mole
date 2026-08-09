@@ -19,6 +19,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Navigation starts a replacement scan immediately, so abandoned scan work
+// must release its subprocesses and workers before it can compete for I/O.
+const liveScanCancellationBudget = 250 * time.Millisecond
+
 func resetOverviewSnapshotForTest() {
 	overviewSnapshotMu.Lock()
 	overviewSnapshotCache = nil
@@ -1808,7 +1812,7 @@ func TestLiveScanCancellationStopsFoldedDirectoryProbe(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("expected canceled scan, got %v", err)
 		}
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(liveScanCancellationBudget):
 		t.Fatal("folded-directory probe kept running after live scan cancellation")
 	}
 }
@@ -1855,7 +1859,7 @@ func TestLiveScanCancellationStopsNestedFoldedDirectoryProbe(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("expected canceled scan, got %v", err)
 		}
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(liveScanCancellationBudget):
 		t.Fatal("nested folded-directory probe kept running after live scan cancellation")
 	}
 }
@@ -1954,7 +1958,7 @@ func TestCanceledLiveScanPublishesNoResultsOrCache(t *testing.T) {
 	waitForTestPath(t, started)
 	start.cancel()
 
-	deadline := time.NewTimer(250 * time.Millisecond)
+	deadline := time.NewTimer(liveScanCancellationBudget)
 	defer deadline.Stop()
 	for {
 		select {
