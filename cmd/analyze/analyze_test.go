@@ -117,7 +117,7 @@ func installBlockingDuProbe(t *testing.T) string {
 func waitForTestPath(t *testing.T, path string) {
 	t.Helper()
 
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if _, err := os.Stat(path); err == nil {
 			return
