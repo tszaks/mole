@@ -1728,6 +1728,65 @@ func TestLiveScanCancellationStopsNestedFoldedDirectoryProbe(t *testing.T) {
 	}
 }
 
+func TestCanceledLiveScanPublishesNoResultsOrCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root := filepath.Join(home, "root")
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(filepath.Join(project, "node_modules"), 0o755); err != nil {
+		t.Fatalf("create folded subtree: %v", err)
+	}
+	for i := range subdirCacheMinFiles {
+		path := filepath.Join(project, fmt.Sprintf("file-%03d.bin", i))
+		if err := os.WriteFile(path, []byte("cacheable"), 0o644); err != nil {
+			t.Fatalf("write cacheable file: %v", err)
+		}
+	}
+	started := installBlockingDuProbe(t)
+
+	var filesScanned, dirsScanned, bytesScanned int64
+	currentPath := &atomic.Value{}
+	currentPath.Store("")
+	start, ok := startLiveScanCmd(root, &filesScanned, &dirsScanned, &bytesScanned, currentPath)().(liveScanStartMsg)
+	if !ok {
+		t.Fatal("expected live scan start message")
+	}
+
+	waitForTestPath(t, started)
+	start.cancel()
+
+	seenCanceled := false
+	deadline := time.NewTimer(250 * time.Millisecond)
+	defer deadline.Stop()
+	for {
+		select {
+		case event, open := <-start.events:
+			if !open {
+				if !seenCanceled {
+					t.Fatal("canceled scan closed without a terminal canceled event")
+				}
+				cachePath, err := getCachePath(project)
+				if err != nil {
+					t.Fatalf("resolve project cache path: %v", err)
+				}
+				if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+					t.Fatalf("canceled scan persisted partial cache at %s", cachePath)
+				}
+				return
+			}
+			switch event.kind {
+			case liveScanCanceled:
+				seenCanceled = true
+			case liveScanChildDone, liveScanComplete:
+				t.Fatalf("canceled scan published stale event kind %v", event.kind)
+			}
+		case <-deadline.C:
+			t.Fatal("canceled live scan did not close promptly")
+		}
+	}
+}
+
 func TestLiveScanStartDoesNotAddSecondSpinnerTick(t *testing.T) {
 	root := t.TempDir()
 	child := filepath.Join(root, "child")
