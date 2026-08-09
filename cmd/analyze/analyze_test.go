@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1600,6 +1601,75 @@ func TestLiveScanInitialListingShowsImmediateChildren(t *testing.T) {
 	}
 	if !foundFile || !foundDir {
 		t.Fatalf("expected immediate file and directory entries, got %+v", start.entries)
+	}
+}
+
+func TestLiveScanCancellationStopsFoldedDirectoryProbe(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "folded")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatalf("create folded directory: %v", err)
+	}
+
+	binDir := filepath.Join(root, "bin")
+	if err := os.Mkdir(binDir, 0o755); err != nil {
+		t.Fatalf("create fake bin: %v", err)
+	}
+	started := filepath.Join(root, "du-started")
+	duStub := filepath.Join(binDir, "du")
+	stub := "#!/bin/sh\n" +
+		"printf started > \"$MOLE_TEST_DU_STARTED\"\n" +
+		"exec /usr/bin/tail -f /dev/null\n"
+	if err := os.WriteFile(duStub, []byte(stub), 0o755); err != nil {
+		t.Fatalf("write du stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MOLE_TEST_DU_STARTED", started)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	limiter := newScanLimiter(1)
+	largeFileMinSize := int64(largeFileWarmupMinSize)
+	var filesScanned, dirsScanned, bytesScanned int64
+	currentPath := &atomic.Value{}
+	currentPath.Store("")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := scanLiveTarget(
+			ctx,
+			liveScanTarget{name: "folded", path: target, kind: liveScanTargetFoldedDirectory},
+			make(chan fileEntry, maxLargeFiles*2),
+			&largeFileMinSize,
+			limiter,
+			&filesScanned,
+			&dirsScanned,
+			&bytesScanned,
+			currentPath,
+			scanCacheBypass,
+		)
+		done <- err
+	}()
+
+	startedDeadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(startedDeadline) {
+			t.Fatal("du probe did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected canceled scan, got %v", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("folded-directory probe kept running after live scan cancellation")
 	}
 }
 

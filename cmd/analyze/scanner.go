@@ -315,7 +315,7 @@ func scanPathConcurrentWithLimiter(root string, filesScanned, dirsScanned, bytes
 					size, err := func() (int64, error) {
 						duSem <- struct{}{}
 						defer func() { <-duSem }()
-						return getDirectorySizeFromDu(fullPath)
+						return getDirectorySizeFromDu(context.Background(), fullPath)
 					}()
 					if err != nil || size <= 0 {
 						size = calculateDirSizeFastWithLimiter(fullPath, limiter, filesScanned, dirsScanned, bytesScanned, currentPath)
@@ -719,7 +719,7 @@ func calculateDirSizeConcurrent(root string, largeFileChan chan<- fileEntry, lar
 					size, err := func() (int64, error) {
 						duSem <- struct{}{}
 						defer func() { <-duSem }()
-						return getDirectorySizeFromDu(fullPath)
+						return getDirectorySizeFromDu(context.Background(), fullPath)
 					}()
 					if err != nil || size <= 0 {
 						size = calculateDirSizeFastWithLimiter(fullPath, limiter, filesScanned, dirsScanned, bytesScanned, currentPath)
@@ -811,7 +811,7 @@ func measureOverviewSize(path string) (int64, error) {
 		excludePath = filepath.Join(home, "Library")
 	}
 
-	if duSize, err := getDirectorySizeFromDuWithExcludeAndIgnores(path, excludePath, overviewIgnoreNamesForPath(path)); err == nil {
+	if duSize, err := getDirectorySizeFromDuWithExcludeAndIgnores(context.Background(), path, excludePath, overviewIgnoreNamesForPath(path)); err == nil {
 		_ = storeOverviewSize(path, duSize)
 		return duSize, nil
 	}
@@ -829,15 +829,15 @@ func measureOverviewSize(path string) (int64, error) {
 	return 0, fmt.Errorf("unable to measure directory size with fast methods")
 }
 
-func getDirectorySizeFromDu(path string) (int64, error) {
-	return getDirectorySizeFromDuWithExclude(path, "")
+func getDirectorySizeFromDu(ctx context.Context, path string) (int64, error) {
+	return getDirectorySizeFromDuWithExclude(ctx, path, "")
 }
 
-func getDirectorySizeFromDuWithExclude(path string, excludePath string) (int64, error) {
-	return getDirectorySizeFromDuWithExcludeAndIgnores(path, excludePath, nil)
+func getDirectorySizeFromDuWithExclude(ctx context.Context, path string, excludePath string) (int64, error) {
+	return getDirectorySizeFromDuWithExcludeAndIgnores(ctx, path, excludePath, nil)
 }
 
-func getDirectorySizeFromDuWithExcludeAndIgnores(path string, excludePath string, ignoreNames []string) (int64, error) {
+func getDirectorySizeFromDuWithExcludeAndIgnores(ctx context.Context, path string, excludePath string, ignoreNames []string) (int64, error) {
 	// Validate paths.
 	if err := validatePath(path); err != nil {
 		return 0, err
@@ -858,7 +858,7 @@ func getDirectorySizeFromDuWithExcludeAndIgnores(path string, excludePath string
 			return 0, err
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), duTimeout)
+		ctx, cancel := context.WithTimeout(ctx, duTimeout)
 		defer cancel()
 
 		args := []string{"-skPx"}
