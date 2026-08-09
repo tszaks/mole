@@ -644,11 +644,12 @@ func loadStaleCacheFromDisk(path string) (*cacheEntry, error) {
 }
 
 func saveCacheToDisk(path string, result scanResult) error {
-	return saveCacheToDiskWithOptions(context.Background(), path, result, false)
+	ctx := context.Background()
+	return saveCacheToDiskWithOptions(newScanPublication(ctx, nil), path, result, false)
 }
 
-func saveCacheToDiskWithOptions(ctx context.Context, path string, result scanResult, needsRefresh bool) error {
-	if err := ctx.Err(); err != nil {
+func saveCacheToDiskWithOptions(publication *scanPublication, path string, result scanResult, needsRefresh bool) error {
+	if err := publication.ctx.Err(); err != nil {
 		return err
 	}
 	cachePath, err := getCachePath(path)
@@ -694,11 +695,10 @@ func saveCacheToDiskWithOptions(ctx context.Context, path string, result scanRes
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	if err := ctx.Err(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, cachePath); err != nil {
+	err = publication.commit(func() error {
+		return os.Rename(tmpPath, cachePath)
+	})
+	if err != nil {
 		_ = os.Remove(tmpPath)
 		return err
 	}

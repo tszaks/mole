@@ -1579,7 +1579,8 @@ func TestScanCmdTreatsWarmedCacheAsStale(t *testing.T) {
 		TotalSize:  42,
 		TotalFiles: 1,
 	}
-	if err := saveCacheToDiskWithOptions(context.Background(), target, result, true); err != nil {
+	ctx := context.Background()
+	if err := saveCacheToDiskWithOptions(newScanPublication(ctx, nil), target, result, true); err != nil {
 		t.Fatalf("saveCacheToDiskWithOptions: %v", err)
 	}
 
@@ -1605,9 +1606,10 @@ func TestCanceledCacheSaveDoesNotPublish(t *testing.T) {
 		t.Fatalf("create target: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := saveCacheToDiskWithOptions(ctx, target, scanResult{TotalSize: 42, TotalFiles: 1}, true)
+	ctx, cancelContext := context.WithCancel(context.Background())
+	publication := newScanPublication(ctx, cancelContext)
+	publication.cancel()
+	err := saveCacheToDiskWithOptions(publication, target, scanResult{TotalSize: 42, TotalFiles: 1}, true)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected canceled cache save, got %v", err)
 	}
@@ -1618,6 +1620,66 @@ func TestCanceledCacheSaveDoesNotPublish(t *testing.T) {
 	}
 	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
 		t.Fatalf("canceled cache save published %s", cachePath)
+	}
+}
+
+func TestScanPublicationLinearizesCacheMutations(t *testing.T) {
+	root := t.TempDir()
+	tmpPath := filepath.Join(root, "entry.tmp")
+	cachePath := filepath.Join(root, "entry.gob")
+	if err := os.WriteFile(tmpPath, []byte("cache"), 0o644); err != nil {
+		t.Fatalf("write temporary cache: %v", err)
+	}
+
+	ctx, cancelContext := context.WithCancel(context.Background())
+	publication := newScanPublication(ctx, cancelContext)
+	commitEntered := make(chan struct{})
+	releaseCommit := make(chan struct{})
+	commitDone := make(chan error, 1)
+	go func() {
+		commitDone <- publication.commit(func() error {
+			close(commitEntered)
+			<-releaseCommit
+			return os.Rename(tmpPath, cachePath)
+		})
+	}()
+	<-commitEntered
+
+	cancelStarted := make(chan struct{})
+	cancelDone := make(chan struct{})
+	go func() {
+		close(cancelStarted)
+		publication.cancel()
+		close(cancelDone)
+	}()
+	<-cancelStarted
+	select {
+	case <-cancelDone:
+		t.Fatal("cancellation returned before the active cache commit finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseCommit)
+	if err := <-commitDone; err != nil {
+		t.Fatalf("cache commit that won publication order failed: %v", err)
+	}
+	select {
+	case <-cancelDone:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("cancellation did not resume after cache commit")
+	}
+	if _, err := os.Stat(cachePath); err != nil {
+		t.Fatalf("cache commit did not publish before cancellation returned: %v", err)
+	}
+
+	err := publication.commit(func() error {
+		return os.Remove(cachePath)
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected post-cancel cache removal to be rejected, got %v", err)
+	}
+	if _, err := os.Stat(cachePath); err != nil {
+		t.Fatalf("post-cancel cache removal changed published state: %v", err)
 	}
 }
 
@@ -1693,8 +1755,9 @@ func TestLiveScanCancellationStopsFoldedDirectoryProbe(t *testing.T) {
 
 	started := installBlockingDuProbe(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, cancelContext := context.WithCancel(context.Background())
+	publication := newScanPublication(ctx, cancelContext)
+	defer publication.cancel()
 	limiter := newScanLimiter(1)
 	largeFileMinSize := int64(largeFileWarmupMinSize)
 	var filesScanned, dirsScanned, bytesScanned int64
@@ -1714,13 +1777,14 @@ func TestLiveScanCancellationStopsFoldedDirectoryProbe(t *testing.T) {
 			&bytesScanned,
 			currentPath,
 			scanCacheBypass,
+			publication,
 		)
 		done <- err
 	}()
 
 	waitForTestPath(t, started)
 
-	cancel()
+	publication.cancel()
 	select {
 	case err := <-done:
 		if !errors.Is(err, context.Canceled) {
@@ -1739,8 +1803,9 @@ func TestLiveScanCancellationStopsNestedFoldedDirectoryProbe(t *testing.T) {
 	}
 	started := installBlockingDuProbe(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, cancelContext := context.WithCancel(context.Background())
+	publication := newScanPublication(ctx, cancelContext)
+	defer publication.cancel()
 	limiter := newScanLimiter(1)
 	largeFileMinSize := int64(largeFileWarmupMinSize)
 	var filesScanned, dirsScanned, bytesScanned int64
@@ -1760,12 +1825,13 @@ func TestLiveScanCancellationStopsNestedFoldedDirectoryProbe(t *testing.T) {
 			&bytesScanned,
 			currentPath,
 			scanCacheBypass,
+			publication,
 		)
 		done <- err
 	}()
 
 	waitForTestPath(t, started)
-	cancel()
+	publication.cancel()
 	select {
 	case err := <-done:
 		if !errors.Is(err, context.Canceled) {
@@ -1778,7 +1844,7 @@ func TestLiveScanCancellationStopsNestedFoldedDirectoryProbe(t *testing.T) {
 
 func TestLiveScanEventStreamRejectsCompletionAfterCancellation(t *testing.T) {
 	ctx, cancelContext := context.WithCancel(context.Background())
-	stream := newLiveScanEventStream(ctx, cancelContext, 1)
+	stream := newLiveScanEventStream(newScanPublication(ctx, cancelContext), 1)
 
 	stream.publishProgress(liveScanEventMsg{kind: liveScanChildProgress})
 	stream.publishProgress(liveScanEventMsg{kind: liveScanChildProgress})
@@ -1801,6 +1867,44 @@ func TestLiveScanEventStreamRejectsCompletionAfterCancellation(t *testing.T) {
 		if event.kind == liveScanComplete {
 			t.Fatal("stream published completion after cancellation")
 		}
+	}
+}
+
+func TestLiveScanEventStreamReservesRequiredCapacity(t *testing.T) {
+	ctx, cancelContext := context.WithCancel(context.Background())
+	const targetCount = 3
+	stream := newLiveScanEventStream(newScanPublication(ctx, cancelContext), targetCount)
+
+	done := make(chan struct{})
+	go func() {
+		for range cap(stream.events) - stream.requiredSlots {
+			stream.publishProgress(liveScanEventMsg{kind: liveScanChildProgress})
+		}
+		for range targetCount {
+			stream.publish(liveScanEventMsg{kind: liveScanChildDone})
+		}
+		stream.publish(liveScanEventMsg{kind: liveScanComplete})
+		stream.close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("required live-scan events exhausted their reserved capacity")
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("closed stream did not release its context: %v", ctx.Err())
+	}
+
+	var required int
+	for event := range stream.events {
+		if event.kind != liveScanChildProgress {
+			required++
+		}
+	}
+	if required != targetCount+1 {
+		t.Fatalf("got %d required events, want %d", required, targetCount+1)
 	}
 }
 
@@ -2085,13 +2189,14 @@ func TestCacheBypassSkipsHomeLibraryOverviewSnapshot(t *testing.T) {
 
 	scanTarget := func(policy scanCachePolicy) scanResult {
 		t.Helper()
+		ctx := context.Background()
 		var filesScanned, dirsScanned, bytesScanned int64
 		current := &atomic.Value{}
 		current.Store("")
 		limiter := newScanLimiter(1)
 		largeFileMinSize := int64(largeFileWarmupMinSize)
 		result, err := scanLiveTarget(
-			context.Background(),
+			ctx,
 			liveScanTarget{name: "Library", path: library, kind: liveScanTargetHomeLibrary},
 			make(chan fileEntry, maxLargeFiles*2),
 			&largeFileMinSize,
@@ -2101,6 +2206,7 @@ func TestCacheBypassSkipsHomeLibraryOverviewSnapshot(t *testing.T) {
 			&bytesScanned,
 			current,
 			policy,
+			newScanPublication(ctx, nil),
 		)
 		if err != nil {
 			t.Fatalf("scan Home Library: %v", err)
@@ -2117,10 +2223,11 @@ func TestCacheBypassSkipsHomeLibraryOverviewSnapshot(t *testing.T) {
 
 	scanHome := func(policy scanCachePolicy) int64 {
 		t.Helper()
+		ctx := context.Background()
 		var filesScanned, dirsScanned, bytesScanned int64
 		current := &atomic.Value{}
 		current.Store("")
-		result, err := scanPathConcurrentWithLimiter(context.Background(), home, &filesScanned, &dirsScanned, &bytesScanned, current, false, maxEntries, nil, policy)
+		result, err := scanPathConcurrentWithLimiter(ctx, home, &filesScanned, &dirsScanned, &bytesScanned, current, false, maxEntries, nil, policy, newScanPublication(ctx, nil))
 		if err != nil {
 			t.Fatalf("scan Home: %v", err)
 		}
@@ -2509,7 +2616,8 @@ func TestEnterSelectedDirRefreshesStaleInMemoryCache(t *testing.T) {
 		TotalSize:  1,
 		TotalFiles: 1,
 	}
-	if err := saveCacheToDiskWithOptions(context.Background(), child, warmed, true); err != nil {
+	ctx := context.Background()
+	if err := saveCacheToDiskWithOptions(newScanPublication(ctx, nil), child, warmed, true); err != nil {
 		t.Fatalf("saveCacheToDiskWithOptions: %v", err)
 	}
 
@@ -2575,7 +2683,8 @@ func TestGoBackRefreshesHistoryEntryNeedingRefresh(t *testing.T) {
 		TotalSize:  2,
 		TotalFiles: 1,
 	}
-	if err := saveCacheToDiskWithOptions(context.Background(), child, warmed, true); err != nil {
+	ctx := context.Background()
+	if err := saveCacheToDiskWithOptions(newScanPublication(ctx, nil), child, warmed, true); err != nil {
 		t.Fatalf("saveCacheToDiskWithOptions: %v", err)
 	}
 

@@ -26,6 +26,55 @@ var spotlightQueryRunner = func(ctx context.Context, root, query string) ([]byte
 	return exec.CommandContext(ctx, "mdfind", "-onlyin", root, query).Output()
 }
 
+// scanPublication gives cancellation a linearizable boundary with externally
+// visible scan side effects. A publication either completes before cancel
+// returns, or observes the canceled scan and is rejected.
+type scanPublication struct {
+	ctx           context.Context
+	cancelContext context.CancelFunc
+
+	mu       sync.Mutex
+	canceled bool
+}
+
+func newScanPublication(ctx context.Context, cancel context.CancelFunc) *scanPublication {
+	return &scanPublication{ctx: ctx, cancelContext: cancel}
+}
+
+func (p *scanPublication) cancel() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.canceled {
+		return
+	}
+	p.canceled = true
+	if p.cancelContext != nil {
+		p.cancelContext()
+	}
+}
+
+func (p *scanPublication) commit(action func() error) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.canceled {
+		return context.Canceled
+	}
+	if err := p.ctx.Err(); err != nil {
+		return err
+	}
+	return action()
+}
+
+func (p *scanPublication) finish(action func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.canceled = true
+	if p.cancelContext != nil {
+		p.cancelContext()
+	}
+	action()
+}
+
 // scanLimiter bundles the concurrency budgets used by a single scan pass.
 //
 // There are five separate semaphores on purpose: each protects a different
@@ -160,7 +209,7 @@ func scanPathConcurrentAllEntries(ctx context.Context, root string, filesScanned
 }
 
 func scanPathConcurrentWithOptions(ctx context.Context, root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value, useSpotlight bool, entryLimit int) (scanResult, error) {
-	return scanPathConcurrentWithLimiter(ctx, root, filesScanned, dirsScanned, bytesScanned, currentPath, useSpotlight, entryLimit, nil, scanCacheReuse)
+	return scanPathConcurrentWithLimiter(ctx, root, filesScanned, dirsScanned, bytesScanned, currentPath, useSpotlight, entryLimit, nil, scanCacheReuse, newScanPublication(ctx, nil))
 }
 
 type scanCachePolicy uint8
@@ -170,7 +219,7 @@ const (
 	scanCacheBypass
 )
 
-func scanPathConcurrentWithLimiter(ctx context.Context, root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value, useSpotlight bool, entryLimit int, limiter *scanLimiter, cachePolicy scanCachePolicy) (scanResult, error) {
+func scanPathConcurrentWithLimiter(ctx context.Context, root string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value, useSpotlight bool, entryLimit int, limiter *scanLimiter, cachePolicy scanCachePolicy, publication *scanPublication) (scanResult, error) {
 	if err := ctx.Err(); err != nil {
 		return scanResult{}, err
 	}
@@ -307,7 +356,7 @@ scanChildren:
 						}
 					}
 					if result.TotalSize <= 0 {
-						result = scanSubdirWithCache(ctx, path, largeFileChan, &largeFileMinSize, limiter, dirSem, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath, cachePolicy)
+						result = scanSubdirWithCache(ctx, path, largeFileChan, &largeFileMinSize, limiter, dirSem, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath, cachePolicy, publication)
 					}
 					if ctx.Err() != nil {
 						return
@@ -385,7 +434,7 @@ scanChildren:
 				if ctx.Err() != nil {
 					return
 				}
-				result := scanSubdirWithCache(ctx, path, largeFileChan, &largeFileMinSize, limiter, dirSem, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath, cachePolicy)
+				result := scanSubdirWithCache(ctx, path, largeFileChan, &largeFileMinSize, limiter, dirSem, duSem, duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath, cachePolicy, publication)
 				if ctx.Err() != nil {
 					return
 				}
@@ -530,7 +579,7 @@ func loadCachedSubdirResult(ctx context.Context, path string, largeFileChan chan
 	return result, true
 }
 
-func scanSubdirWithCache(ctx context.Context, root string, largeFileChan chan<- fileEntry, largeFileMinSize *int64, limiter *scanLimiter, dirSem, duSem, duQueueSem chan struct{}, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value, cachePolicy scanCachePolicy) scanResult {
+func scanSubdirWithCache(ctx context.Context, root string, largeFileChan chan<- fileEntry, largeFileMinSize *int64, limiter *scanLimiter, dirSem, duSem, duQueueSem chan struct{}, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value, cachePolicy scanCachePolicy, publication *scanPublication) scanResult {
 	if ctx.Err() != nil {
 		return scanResult{}
 	}
@@ -549,7 +598,7 @@ func scanSubdirWithCache(ctx context.Context, root string, largeFileChan chan<- 
 		}
 	}
 
-	result, err := scanPathConcurrentWithLimiter(ctx, root, filesScanned, dirsScanned, bytesScanned, currentPath, false, maxEntries, limiter, cachePolicy)
+	result, err := scanPathConcurrentWithLimiter(ctx, root, filesScanned, dirsScanned, bytesScanned, currentPath, false, maxEntries, limiter, cachePolicy, publication)
 	if err == nil {
 		if ctx.Err() != nil {
 			return scanResult{}
@@ -562,9 +611,12 @@ func scanSubdirWithCache(ctx context.Context, root string, largeFileChan chan<- 
 		// dependent; caching it would poison standalone re-scans. Cheap
 		// subtrees are not persisted at all: see shouldPersistSubdirCache.
 		if !result.dedupedHardlink && shouldPersistSubdirCache(result) {
-			_ = saveCacheToDiskWithOptions(ctx, root, result, true)
-		} else if cachePolicy == scanCacheBypass && ctx.Err() == nil {
-			removeCacheEntry(root)
+			_ = saveCacheToDiskWithOptions(publication, root, result, true)
+		} else if cachePolicy == scanCacheBypass {
+			_ = publication.commit(func() error {
+				removeCacheEntry(root)
+				return nil
+			})
 		}
 		return result
 	}

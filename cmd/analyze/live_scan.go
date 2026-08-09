@@ -34,71 +34,58 @@ type liveScanTarget struct {
 	kind liveScanTargetKind
 }
 
-// liveScanEventStream serializes cancellation with event publication. Progress
-// is lossy and may use only the non-reserved portion of the buffer; one slot
-// per target plus the final completion slot stays available for required events.
+// liveScanEventStream uses the scan publication boundary for event delivery.
+// Progress is lossy and may use only the non-reserved portion of the buffer;
+// one slot per target plus the final completion slot stays available.
 type liveScanEventStream struct {
-	ctx           context.Context
-	cancelContext context.CancelFunc
+	publication   *scanPublication
 	events        chan liveScanEventMsg
 	requiredSlots int
-
-	mu       sync.Mutex
-	canceled bool
-	closed   bool
+	closed        bool
 }
 
-func newLiveScanEventStream(ctx context.Context, cancel context.CancelFunc, targetCount int) *liveScanEventStream {
+func newLiveScanEventStream(publication *scanPublication, targetCount int) *liveScanEventStream {
 	return &liveScanEventStream{
-		ctx:           ctx,
-		cancelContext: cancel,
+		publication:   publication,
 		events:        make(chan liveScanEventMsg, max(targetCount*4, 1)),
 		requiredSlots: targetCount + 1,
 	}
 }
 
 func (s *liveScanEventStream) cancel() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.canceled || s.closed {
-		return
-	}
-	s.canceled = true
-	s.cancelContext()
+	s.publication.cancel()
 }
 
 func (s *liveScanEventStream) publish(msg liveScanEventMsg) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.canceled || s.ctx.Err() != nil || s.closed {
-		return
-	}
-	// Progress publication reserves enough capacity that every target can emit
-	// one result or failure and the coordinator can emit final completion.
-	s.events <- msg
+	_ = s.publication.commit(func() error {
+		if s.closed {
+			return nil
+		}
+		// Progress publication reserves enough capacity that every target can
+		// emit one result or failure and the coordinator can emit completion.
+		s.events <- msg
+		return nil
+	})
 }
 
 func (s *liveScanEventStream) publishProgress(msg liveScanEventMsg) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.canceled || s.ctx.Err() != nil || s.closed {
-		return
-	}
-	if len(s.events) >= cap(s.events)-s.requiredSlots {
-		return
-	}
-	s.events <- msg
+	_ = s.publication.commit(func() error {
+		if s.closed || len(s.events) >= cap(s.events)-s.requiredSlots {
+			return nil
+		}
+		s.events <- msg
+		return nil
+	})
 }
 
 func (s *liveScanEventStream) close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return
-	}
-	s.closed = true
-	s.cancelContext()
-	close(s.events)
+	s.publication.finish(func() {
+		if s.closed {
+			return
+		}
+		s.closed = true
+		close(s.events)
+	})
 }
 
 func startLiveScanCmd(path string, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value) tea.Cmd {
@@ -124,7 +111,8 @@ func startLiveScanCmdWithPolicy(path string, filesScanned, dirsScanned, bytesSca
 			atomic.AddInt64(bytesScanned, totalSize)
 		}
 
-		stream := newLiveScanEventStream(ctx, cancelContext, len(targets))
+		publication := newScanPublication(ctx, cancelContext)
+		stream := newLiveScanEventStream(publication, len(targets))
 		go runLiveScan(ctx, id, path, entries, targets, totalSize, totalFiles, largeFiles, limiter, filesScanned, dirsScanned, bytesScanned, currentPath, stream, cachePolicy)
 
 		scanningPaths := make([]string, 0, len(targets))
@@ -417,7 +405,7 @@ func scanLiveTargetWithProgress(ctx context.Context, id int64, root string, targ
 		}
 	}()
 
-	result, err := scanLiveTarget(ctx, target, largeFileChan, largeFileMinSize, limiter, &filesScanned, &dirsScanned, &bytesScanned, localCurrentPath, cachePolicy)
+	result, err := scanLiveTarget(ctx, target, largeFileChan, largeFileMinSize, limiter, &filesScanned, &dirsScanned, &bytesScanned, localCurrentPath, cachePolicy, stream.publication)
 	close(done)
 	<-progressDone
 	if result.TotalFiles == 0 {
@@ -429,7 +417,7 @@ func scanLiveTargetWithProgress(ctx context.Context, id int64, root string, targ
 	return result, err
 }
 
-func scanLiveTarget(ctx context.Context, target liveScanTarget, largeFileChan chan<- fileEntry, largeFileMinSize *int64, limiter *scanLimiter, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value, cachePolicy scanCachePolicy) (scanResult, error) {
+func scanLiveTarget(ctx context.Context, target liveScanTarget, largeFileChan chan<- fileEntry, largeFileMinSize *int64, limiter *scanLimiter, filesScanned, dirsScanned, bytesScanned *int64, currentPath *atomic.Value, cachePolicy scanCachePolicy, publication *scanPublication) (scanResult, error) {
 	if err := ctx.Err(); err != nil {
 		return scanResult{}, err
 	}
@@ -461,7 +449,7 @@ func scanLiveTarget(ctx context.Context, target liveScanTarget, largeFileChan ch
 		return scanResult{}, err
 	}
 
-	result := scanSubdirWithCache(ctx, target.path, largeFileChan, largeFileMinSize, limiter, limiter.dirSem, limiter.duSem, limiter.duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath, cachePolicy)
+	result := scanSubdirWithCache(ctx, target.path, largeFileChan, largeFileMinSize, limiter, limiter.dirSem, limiter.duSem, limiter.duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath, cachePolicy, publication)
 	return result, ctx.Err()
 }
 
