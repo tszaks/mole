@@ -217,6 +217,17 @@ EOF
     [[ "$output" == *"Tart OCI/IPSW cache|\$HOME/.tart/cache|container_cache"* ]] || return 1
 }
 
+@test "whitelist inventory exposes Rust Cargo extracted sources" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+get_all_cache_items
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Rust Cargo extracted sources|\$HOME/.cargo/registry/src/*|compiler_cache"* ]]
+}
+
 @test "whitelist inventory exposes Chrome AI model stores" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

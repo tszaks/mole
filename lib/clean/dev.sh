@@ -506,17 +506,132 @@ resolve_tool_home() {
     printf '%s\n' "${default_home%/}"
 }
 
+# Cargo and rustc read registry sources throughout builds. Returns the shared
+# process tri-state: 0 active, 1 idle, 2 unknown.
+rust_build_process_state() {
+    mole_pgrep_any \
+        -x cargo \
+        -x rustc \
+        -x rustdoc \
+        -x clippy-driver \
+        -x cargo-nextest
+}
+
+# Resolve a Cargo cache root and prove it remains physically contained by the
+# selected CARGO_HOME. The home itself may be symlinked by a version manager,
+# but a nested cache root must not escape it.
+rust_cache_root_physical_path() {
+    local cargo_home="$1"
+    local cache_root="$2"
+    [[ -d "$cargo_home" && -d "$cache_root" ]] || return 1
+
+    local physical_home physical_root
+    physical_home=$(cd -P "$cargo_home" 2> /dev/null && pwd -P) || return 1
+    physical_root=$(cd -P "$cache_root" 2> /dev/null && pwd -P) || return 1
+    [[ "$physical_home" != "/" ]] || return 1
+    case "$physical_root" in
+        "$physical_home"/*)
+            printf '%s\n' "$physical_root"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# Combine the process state with the physical root identity for the final
+# safe_clean_guarded boundary. Returns 0 active, 1 idle/safe, 2 unknown/changed.
+rust_cache_cleanup_state() {
+    local process_state=0
+    rust_build_process_state || process_state=$?
+    [[ $process_state -eq 1 ]] || return "$process_state"
+
+    local physical_now
+    physical_now=$(rust_cache_root_physical_path \
+        "$_MOLE_RUST_CARGO_HOME" "$_MOLE_RUST_CACHE_ROOT") || return 2
+    [[ "$physical_now" == "$_MOLE_RUST_CACHE_PHYSICAL" ]] || return 2
+
+    # Production safe_clean_guarded supplies the exact leaf it is about to
+    # remove. Bind that object and its physical parent to safe_remove's final
+    # identity check so replacing registry/src (or another Cargo cache root)
+    # after this guard cannot redirect the pathname outside CARGO_HOME.
+    local guarded_path="${_MOLE_DEV_GUARDED_PATH:-}"
+    if [[ -n "$guarded_path" ]]; then
+        _mole_snapshot_path_identity "$guarded_path" || return 2
+        [[ "$_MOLE_PATH_SNAPSHOT_PARENT" == "$physical_now" ]] || return 2
+
+        local physical_after
+        physical_after=$(rust_cache_root_physical_path \
+            "$_MOLE_RUST_CARGO_HOME" "$_MOLE_RUST_CACHE_ROOT") || return 2
+        [[ "$physical_after" == "$physical_now" ]] || return 2
+
+        _MOLE_SAFE_CLEAN_BOUND_PATH="$guarded_path"
+        _MOLE_SAFE_CLEAN_EXPECTED_PARENT="$_MOLE_PATH_SNAPSHOT_PARENT"
+        _MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+        _MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+    fi
+    return 1
+}
+
+clean_rust_dependency_cache_root() {
+    local cargo_home="$1"
+    local cache_root="$2"
+    local display_name="$3"
+    [[ -d "$cache_root" ]] || return 0
+
+    local physical_root
+    if ! physical_root=$(rust_cache_root_physical_path "$cargo_home" "$cache_root"); then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (cache path leaves CARGO_HOME)"
+        note_activity
+        return 0
+    fi
+
+    local _MOLE_RUST_CARGO_HOME="$cargo_home"
+    local _MOLE_RUST_CACHE_ROOT="$cache_root"
+    local _MOLE_RUST_CACHE_PHYSICAL="$physical_root"
+    local _MOLE_DEV_PROCESS_GUARD_UNKNOWN_REASON="process or cache path state unknown"
+    _dev_safe_clean_process_guarded \
+        rust_cache_cleanup_state \
+        "Rust" \
+        "$display_name" \
+        "$cache_root"/* \
+        "$display_name"
+}
+
 # Rust/cargo caches. Honor CARGO_HOME / RUSTUP_HOME when they point at a
 # validated absolute path (mise and other version managers relocate these).
-# Scope stays regenerable cache only: registry/cache, git, downloads — never
-# bin, toolchains, registry/index, or registry/src.
+# Scope stays regenerable cache only: registry/cache, registry/src, git, and
+# downloads. Keep bin, toolchains, and registry/index.
 clean_dev_rust() {
     local cargo_home rustup_home
     cargo_home=$(resolve_tool_home "${CARGO_HOME:-}" "${HOME}/.cargo")
     rustup_home=$(resolve_tool_home "${RUSTUP_HOME:-}" "${HOME}/.rustup")
 
-    safe_clean "${cargo_home}/registry/cache"/* "Rust cargo cache"
-    safe_clean "${cargo_home}/git"/* "Cargo git cache"
+    if mole_cleanup_targets_exist \
+        "${cargo_home}/registry/cache"/* \
+        "${cargo_home}/registry/src"/* \
+        "${cargo_home}/git"/*; then
+        local rust_state=0
+        rust_build_process_state || rust_state=$?
+        if [[ $rust_state -eq 0 ]]; then
+            mole_defer_cleanup_family "Rust"
+        elif [[ $rust_state -eq 1 ]]; then
+            clean_rust_dependency_cache_root \
+                "$cargo_home" \
+                "${cargo_home}/registry/cache" \
+                "Rust cargo cache" || return 0
+            clean_rust_dependency_cache_root \
+                "$cargo_home" \
+                "${cargo_home}/registry/src" \
+                "Rust crate sources" || return 0
+            clean_rust_dependency_cache_root \
+                "$cargo_home" \
+                "${cargo_home}/git" \
+                "Cargo git cache" || return 0
+        else
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Rust dependency cache · stopped (process state unknown)"
+            note_activity
+        fi
+    fi
     safe_clean "${rustup_home}/downloads"/* "Rustup downloads cache"
 }
 # Ruby/gem ecosystem caches (not installed versions).
@@ -961,7 +1076,14 @@ _xctest_devices_delete_guard_allows() {
 }
 
 _dev_process_delete_guard_allows() {
-    mole_clean_process_guard "$_MOLE_DEV_PROCESS_GUARD_PROBE" "$_MOLE_DEV_PROCESS_GUARD_FAMILY started"
+    # safe_clean_guarded passes the leaf currently at its deletion boundary.
+    # Keep it in dynamic scope so compound probes such as the Cargo root guard
+    # can bind that exact object without changing ordinary process probes.
+    local _MOLE_DEV_GUARDED_PATH="${1:-}"
+    mole_clean_process_guard \
+        "$_MOLE_DEV_PROCESS_GUARD_PROBE" \
+        "$_MOLE_DEV_PROCESS_GUARD_FAMILY started" \
+        "${_MOLE_DEV_PROCESS_GUARD_UNKNOWN_REASON:-process state unknown}"
 }
 
 _dev_report_process_guard_stop() {
@@ -969,7 +1091,7 @@ _dev_report_process_guard_stop() {
     local family="$2"
     local reason="$3"
 
-    if [[ "$reason" == "process state unknown" ]]; then
+    if [[ "$reason" == "process state unknown" || "$reason" == "process or cache path state unknown" ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${reason})"
         note_activity
     else

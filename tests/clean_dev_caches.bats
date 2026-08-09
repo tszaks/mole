@@ -1429,6 +1429,11 @@ EOF
 @test "clean_dev_rust honors CARGO_HOME and RUSTUP_HOME when absolute" {
     # mise and friends relocate cargo/rustup via env; hardcoded ~/.cargo misses
     # the live cache (issue #1378). Scope stays regenerable leaves only.
+    mkdir -p \
+        "$HOME/.local/share/mise/cargo/registry/cache" \
+        "$HOME/.local/share/mise/cargo/registry/src" \
+        "$HOME/.local/share/mise/cargo/git"
+
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         CARGO_HOME="$HOME/.local/share/mise/cargo" \
         RUSTUP_HOME="$HOME/.local/share/mise/rustup" \
@@ -1437,18 +1442,51 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 safe_clean() { echo "$2|$1"; }
+mole_cleanup_targets_exist() { return 0; }
+rust_build_process_state() { return 1; }
 clean_dev_rust
 EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Rust cargo cache|$HOME/.local/share/mise/cargo/registry/cache/*"* ]] || return 1
+    [[ "$output" == *"Rust crate sources|$HOME/.local/share/mise/cargo/registry/src/*"* ]] || return 1
     [[ "$output" == *"Cargo git cache|$HOME/.local/share/mise/cargo/git/*"* ]] || return 1
     [[ "$output" == *"Rustup downloads cache|$HOME/.local/share/mise/rustup/downloads/*"* ]] || return 1
+    [[ "$output" != *"/registry/index/"* ]] || return 1
     [[ "$output" != *"/.cargo/"* ]] || return 1
     [[ "$output" != *"/.rustup/"* ]] || return 1
 }
 
+@test "clean_dev_rust rejects a registry source root that escapes CARGO_HOME" {
+    cargo_home="$HOME/custom-cargo"
+    outside_root="$HOME/outside-registry-sources"
+    mkdir -p "$cargo_home/registry" "$outside_root/crate-data"
+    ln -s "$outside_root" "$cargo_home/registry/src"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" CARGO_HOME="$cargo_home" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+mole_cleanup_targets_exist() { return 0; }
+rust_build_process_state() { return 1; }
+safe_clean() { printf 'DELETE=%s|%s\n' "$2" "$1"; }
+note_activity() { :; }
+clean_dev_rust
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Rust crate sources · stopped (cache path leaves CARGO_HOME)"* ]] || return 1
+    [[ "$output" != *"DELETE=Rust crate sources"* ]] || return 1
+    [[ -d "$outside_root/crate-data" ]]
+}
+
 @test "clean_dev_rust falls back to default homes without env" {
+    mkdir -p \
+        "$HOME/.cargo/registry/cache" \
+        "$HOME/.cargo/registry/src" \
+        "$HOME/.cargo/git"
+
     run env -u CARGO_HOME -u RUSTUP_HOME \
         HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
         /bin/bash --noprofile --norc << 'EOF'
@@ -1457,6 +1495,8 @@ unset CARGO_HOME RUSTUP_HOME
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 safe_clean() { echo "$2|$1"; }
+mole_cleanup_targets_exist() { return 0; }
+rust_build_process_state() { return 1; }
 clean_dev_rust
 EOF
 
@@ -1465,8 +1505,169 @@ EOF
         return 1
     }
     [[ "$output" == *"Rust cargo cache|$HOME/.cargo/registry/cache/*"* ]] || return 1
+    [[ "$output" == *"Rust crate sources|$HOME/.cargo/registry/src/*"* ]] || return 1
     [[ "$output" == *"Cargo git cache|$HOME/.cargo/git/*"* ]] || return 1
     [[ "$output" == *"Rustup downloads cache|$HOME/.rustup/downloads/*"* ]] || return 1
+    [[ "$output" != *"/registry/index/"* ]] || return 1
+}
+
+@test "clean_dev_rust skips dependency caches while cargo is active" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+mole_cleanup_targets_exist() { return 0; }
+rust_build_process_state() { return 0; }
+mole_defer_cleanup_family() { printf 'DEFER=%s\n' "$1"; }
+safe_clean() { printf 'DELETE=%s|%s\n' "$2" "$1"; }
+clean_dev_rust
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"DEFER=Rust"* ]] || return 1
+    [[ "$output" != *"DELETE=Rust cargo cache"* ]] || return 1
+    [[ "$output" != *"DELETE=Rust crate sources"* ]] || return 1
+    [[ "$output" != *"DELETE=Cargo git cache"* ]] || return 1
+    [[ "$output" == *"DELETE=Rustup downloads cache"* ]]
+}
+
+@test "clean_dev_rust fails closed when process state is unknown" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+mole_cleanup_targets_exist() { return 0; }
+rust_build_process_state() { return 2; }
+safe_clean() { printf 'DELETE=%s|%s\n' "$2" "$1"; }
+note_activity() { :; }
+clean_dev_rust
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Rust dependency cache · stopped (process state unknown)"* ]] || return 1
+    [[ "$output" != *"DELETE=Rust cargo cache"* ]] || return 1
+    [[ "$output" != *"DELETE=Rust crate sources"* ]] || return 1
+    [[ "$output" != *"DELETE=Cargo git cache"* ]] || return 1
+    [[ "$output" == *"DELETE=Rustup downloads cache"* ]]
+}
+
+@test "clean_dev_rust rechecks cargo at the deletion boundary" {
+    mkdir -p "$HOME/.cargo/registry/cache"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+mole_cleanup_targets_exist() { return 0; }
+probe_calls=0
+rust_build_process_state() {
+    probe_calls=$((probe_calls + 1))
+    [[ $probe_calls -eq 1 ]] && return 1
+    return 0
+}
+mole_defer_cleanup_family() { printf 'DEFER=%s\n' "$1"; }
+safe_clean() { printf 'DELETE=%s|%s\n' "$2" "$1"; }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    "$guard" || return 75
+    safe_clean "$@"
+}
+clean_dev_rust
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"DEFER=Rust"* ]] || return 1
+    [[ "$output" != *"DELETE="* ]]
+}
+
+@test "clean_dev_rust rechecks Cargo cache containment at the deletion boundary" {
+    cache_root="$HOME/.cargo/registry/src"
+    outside_root="$HOME/outside-rust-sources"
+    mkdir -p "$cache_root/crate" "$outside_root/private-data"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+mole_cleanup_targets_exist() { return 0; }
+rust_build_process_state() { return 1; }
+mole_defer_cleanup_family() { printf 'DEFER=%s\n' "$1"; }
+safe_clean() { printf 'DELETE=%s|%s\n' "$2" "$1"; }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    if [[ "$_MOLE_RUST_CACHE_ROOT" == "$HOME/.cargo/registry/src" ]]; then
+        mv "$HOME/.cargo/registry/src" "$HOME/.cargo/registry/src-original"
+        ln -s "$HOME/outside-rust-sources" "$HOME/.cargo/registry/src"
+    fi
+    "$guard" || return 75
+    safe_clean "$@"
+}
+clean_dev_rust
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"Rust crate sources · stopped (process or cache path state unknown)"* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"DELETE=Rust crate sources"* ]] || return 1
+    [[ -d "$outside_root/private-data" ]]
+}
+
+@test "clean_dev_rust binds each Cargo cache leaf to its checked root" {
+    cargo_home="$HOME/bound-cargo"
+    cache_root="$cargo_home/registry/src"
+    outside_root="$HOME/outside-rust-sources-after-guard"
+    mkdir -p "$cache_root/crate" "$outside_root/crate"
+    printf 'inside\n' > "$cache_root/crate/inside-marker"
+    printf 'outside\n' > "$outside_root/crate/outside-marker"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/bin/clean.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+start_inline_spinner() { :; }
+stop_inline_spinner() { :; }
+note_activity() { :; }
+rust_build_process_state() { return 1; }
+
+# Swap the checked Cargo root after the guard returns but before the real
+# safe_remove sink performs its final identity comparison.
+eval "$(declare -f safe_remove | sed '1s/safe_remove/_real_safe_remove/')"
+swapped=0
+safe_remove() {
+    if [[ $swapped -eq 0 ]]; then
+        swapped=1
+        mv "$HOME/bound-cargo/registry/src" "$HOME/bound-cargo/registry/src-original"
+        ln -s "$HOME/outside-rust-sources-after-guard" "$HOME/bound-cargo/registry/src"
+    fi
+    _real_safe_remove "$@"
+}
+
+clean_rust_dependency_cache_root \
+    "$HOME/bound-cargo" \
+    "$HOME/bound-cargo/registry/src" \
+    "Rust crate sources"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ -f "$cache_root-original/crate/inside-marker" ]] || return 1
+    [[ -f "$outside_root/crate/outside-marker" ]] || return 1
+    [[ "$output" != *"Rust crate sources ·"* ]]
 }
 
 @test "resolve_tool_home rejects relative and traversal env values" {
