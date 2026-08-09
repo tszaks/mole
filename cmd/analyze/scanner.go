@@ -33,8 +33,9 @@ type scanPublication struct {
 	ctx           context.Context
 	cancelContext context.CancelFunc
 
-	mu       sync.Mutex
-	canceled bool
+	mu        sync.Mutex
+	canceling atomic.Bool
+	canceled  bool
 }
 
 func newScanPublication(ctx context.Context, cancel context.CancelFunc) *scanPublication {
@@ -42,6 +43,7 @@ func newScanPublication(ctx context.Context, cancel context.CancelFunc) *scanPub
 }
 
 func (p *scanPublication) cancel() {
+	p.canceling.Store(true)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.canceled {
@@ -54,9 +56,12 @@ func (p *scanPublication) cancel() {
 }
 
 func (p *scanPublication) commit(action func() error) error {
+	if p.canceling.Load() {
+		return context.Canceled
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.canceled {
+	if p.canceling.Load() || p.canceled {
 		return context.Canceled
 	}
 	if err := p.ctx.Err(); err != nil {
@@ -66,6 +71,7 @@ func (p *scanPublication) commit(action func() error) error {
 }
 
 func (p *scanPublication) finish(action func()) {
+	p.canceling.Store(true)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.canceled = true
@@ -613,10 +619,7 @@ func scanSubdirWithCache(ctx context.Context, root string, largeFileChan chan<- 
 		if !result.dedupedHardlink && shouldPersistSubdirCache(result) {
 			_ = saveCacheToDiskWithOptions(publication, root, result, true)
 		} else if cachePolicy == scanCacheBypass {
-			_ = publication.commit(func() error {
-				removeCacheEntry(root)
-				return nil
-			})
+			_ = removeCacheEntryForScan(publication, root)
 		}
 		return result
 	}

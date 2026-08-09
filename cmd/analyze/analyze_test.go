@@ -127,6 +127,18 @@ func waitForTestPath(t *testing.T, path string) {
 	}
 }
 
+func waitForTestCondition(t *testing.T, description string, condition func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", description)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func rowContaining(view, needle string) string {
 	for line := range strings.SplitSeq(view, "\n") {
 		if strings.Contains(line, needle) {
@@ -1623,63 +1635,69 @@ func TestCanceledCacheSaveDoesNotPublish(t *testing.T) {
 	}
 }
 
-func TestScanPublicationLinearizesCacheMutations(t *testing.T) {
-	root := t.TempDir()
-	tmpPath := filepath.Join(root, "entry.tmp")
-	cachePath := filepath.Join(root, "entry.gob")
-	if err := os.WriteFile(tmpPath, []byte("cache"), 0o644); err != nil {
-		t.Fatalf("write temporary cache: %v", err)
+func TestCanceledCacheMutationsDoNotPublish(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("resolve cache path: %v", err)
 	}
 
 	ctx, cancelContext := context.WithCancel(context.Background())
 	publication := newScanPublication(ctx, cancelContext)
-	commitEntered := make(chan struct{})
-	releaseCommit := make(chan struct{})
-	commitDone := make(chan error, 1)
+	publication.mu.Lock()
+	saveDone := make(chan error, 1)
 	go func() {
-		commitDone <- publication.commit(func() error {
-			close(commitEntered)
-			<-releaseCommit
-			return os.Rename(tmpPath, cachePath)
-		})
+		saveDone <- saveCacheToDiskWithOptions(publication, target, scanResult{TotalSize: 42, TotalFiles: 1}, true)
 	}()
-	<-commitEntered
-
-	cancelStarted := make(chan struct{})
+	waitForTestCondition(t, "cache save to reach its temporary file", func() bool {
+		matches, globErr := filepath.Glob(filepath.Join(filepath.Dir(cachePath), "entry-*.tmp"))
+		return globErr == nil && len(matches) > 0
+	})
 	cancelDone := make(chan struct{})
 	go func() {
-		close(cancelStarted)
 		publication.cancel()
 		close(cancelDone)
 	}()
-	<-cancelStarted
-	select {
-	case <-cancelDone:
-		t.Fatal("cancellation returned before the active cache commit finished")
-	case <-time.After(20 * time.Millisecond):
+	waitForTestCondition(t, "cache-save cancellation to start", publication.canceling.Load)
+	publication.mu.Unlock()
+
+	if err := <-saveDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cache save to lose publication order, got %v", err)
+	}
+	<-cancelDone
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("canceled cache save published %s", cachePath)
 	}
 
-	close(releaseCommit)
-	if err := <-commitDone; err != nil {
-		t.Fatalf("cache commit that won publication order failed: %v", err)
+	if err := saveCacheToDisk(target, scanResult{TotalSize: 84, TotalFiles: 2}); err != nil {
+		t.Fatalf("seed cache entry: %v", err)
 	}
-	select {
-	case <-cancelDone:
-	case <-time.After(250 * time.Millisecond):
-		t.Fatal("cancellation did not resume after cache commit")
-	}
-	if _, err := os.Stat(cachePath); err != nil {
-		t.Fatalf("cache commit did not publish before cancellation returned: %v", err)
-	}
+	removeCtx, removeCancel := context.WithCancel(context.Background())
+	removePublication := newScanPublication(removeCtx, removeCancel)
+	removePublication.mu.Lock()
+	removeDone := make(chan error, 1)
+	go func() {
+		removeDone <- removeCacheEntryForScan(removePublication, target)
+	}()
+	removeCancelDone := make(chan struct{})
+	go func() {
+		removePublication.cancel()
+		close(removeCancelDone)
+	}()
+	waitForTestCondition(t, "cache-removal cancellation to start", removePublication.canceling.Load)
+	removePublication.mu.Unlock()
 
-	err := publication.commit(func() error {
-		return os.Remove(cachePath)
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected post-cancel cache removal to be rejected, got %v", err)
+	if err := <-removeDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cache removal to lose publication order, got %v", err)
 	}
+	<-removeCancelDone
 	if _, err := os.Stat(cachePath); err != nil {
-		t.Fatalf("post-cancel cache removal changed published state: %v", err)
+		t.Fatalf("canceled cache removal changed published state: %v", err)
 	}
 }
 

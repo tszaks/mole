@@ -705,6 +705,13 @@ func saveCacheToDiskWithOptions(publication *scanPublication, path string, resul
 	return nil
 }
 
+func removeCacheEntryForScan(publication *scanPublication, path string) error {
+	return publication.commit(func() error {
+		removeCacheEntry(path)
+		return nil
+	})
+}
+
 // peekCacheTotalFiles reads the total file count from cache, ignoring
 // expiration, for initial scan progress estimates. It shares
 // loadRawCacheFromDisk so a schema-stale or corrupt entry is rejected and
