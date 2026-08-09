@@ -644,10 +644,13 @@ func loadStaleCacheFromDisk(path string) (*cacheEntry, error) {
 }
 
 func saveCacheToDisk(path string, result scanResult) error {
-	return saveCacheToDiskWithOptions(path, result, false)
+	return saveCacheToDiskWithOptions(context.Background(), path, result, false)
 }
 
-func saveCacheToDiskWithOptions(path string, result scanResult, needsRefresh bool) error {
+func saveCacheToDiskWithOptions(ctx context.Context, path string, result scanResult, needsRefresh bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	cachePath, err := getCachePath(path)
 	if err != nil {
 		return err
@@ -688,6 +691,10 @@ func saveCacheToDiskWithOptions(path string, result scanResult, needsRefresh boo
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		_ = os.Remove(tmpPath)
 		return err
 	}

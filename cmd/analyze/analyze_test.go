@@ -1538,6 +1538,32 @@ func TestScanPathConcurrentWarmsChildCachesWithoutRecursiveSpotlight(t *testing.
 	}
 }
 
+func TestSpotlightConsumerStopsWhenScanIsCanceled(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "large.bin")
+	if err := os.WriteFile(file, []byte("large"), 0o644); err != nil {
+		t.Fatalf("write spotlight result: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	originalRunner := spotlightQueryRunner
+	spotlightQueryRunner = func(_ context.Context, _, _ string) ([]byte, error) {
+		cancel()
+		return []byte(strings.Repeat(file+"\n", 10_000)), nil
+	}
+	t.Cleanup(func() {
+		spotlightQueryRunner = originalRunner
+	})
+
+	files, err := findLargeFilesWithSpotlight(ctx, root, 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled Spotlight consumer, got %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("canceled Spotlight consumer returned %d files", len(files))
+	}
+}
+
 func TestScanCmdTreatsWarmedCacheAsStale(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1553,7 +1579,7 @@ func TestScanCmdTreatsWarmedCacheAsStale(t *testing.T) {
 		TotalSize:  42,
 		TotalFiles: 1,
 	}
-	if err := saveCacheToDiskWithOptions(target, result, true); err != nil {
+	if err := saveCacheToDiskWithOptions(context.Background(), target, result, true); err != nil {
 		t.Fatalf("saveCacheToDiskWithOptions: %v", err)
 	}
 
@@ -1568,6 +1594,30 @@ func TestScanCmdTreatsWarmedCacheAsStale(t *testing.T) {
 	}
 	if scanMsg.result.TotalFiles != result.TotalFiles {
 		t.Fatalf("expected cached result to survive stale load, got %d", scanMsg.result.TotalFiles)
+	}
+}
+
+func TestCanceledCacheSaveDoesNotPublish(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := saveCacheToDiskWithOptions(ctx, target, scanResult{TotalSize: 42, TotalFiles: 1}, true)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled cache save, got %v", err)
+	}
+
+	cachePath, err := getCachePath(target)
+	if err != nil {
+		t.Fatalf("resolve cache path: %v", err)
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("canceled cache save published %s", cachePath)
 	}
 }
 
@@ -2459,7 +2509,7 @@ func TestEnterSelectedDirRefreshesStaleInMemoryCache(t *testing.T) {
 		TotalSize:  1,
 		TotalFiles: 1,
 	}
-	if err := saveCacheToDiskWithOptions(child, warmed, true); err != nil {
+	if err := saveCacheToDiskWithOptions(context.Background(), child, warmed, true); err != nil {
 		t.Fatalf("saveCacheToDiskWithOptions: %v", err)
 	}
 
@@ -2525,7 +2575,7 @@ func TestGoBackRefreshesHistoryEntryNeedingRefresh(t *testing.T) {
 		TotalSize:  2,
 		TotalFiles: 1,
 	}
-	if err := saveCacheToDiskWithOptions(child, warmed, true); err != nil {
+	if err := saveCacheToDiskWithOptions(context.Background(), child, warmed, true); err != nil {
 		t.Fatalf("saveCacheToDiskWithOptions: %v", err)
 	}
 

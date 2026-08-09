@@ -485,7 +485,11 @@ scanChildren:
 
 	// Use Spotlight for large files when it expands the list.
 	if useSpotlight {
-		if spotlightFiles := findLargeFilesWithSpotlight(ctx, root, spotlightMinFileSize); len(spotlightFiles) > len(largeFiles) {
+		spotlightFiles, _ := findLargeFilesWithSpotlight(ctx, root, spotlightMinFileSize)
+		if err := ctx.Err(); err != nil {
+			return scanResult{}, err
+		}
+		if len(spotlightFiles) > len(largeFiles) {
 			largeFiles = spotlightFiles
 		}
 	}
@@ -558,8 +562,8 @@ func scanSubdirWithCache(ctx context.Context, root string, largeFileChan chan<- 
 		// dependent; caching it would poison standalone re-scans. Cheap
 		// subtrees are not persisted at all: see shouldPersistSubdirCache.
 		if !result.dedupedHardlink && shouldPersistSubdirCache(result) {
-			_ = saveCacheToDiskWithOptions(root, result, true)
-		} else if cachePolicy == scanCacheBypass {
+			_ = saveCacheToDiskWithOptions(ctx, root, result, true)
+		} else if cachePolicy == scanCacheBypass && ctx.Err() == nil {
 			removeCacheEntry(root)
 		}
 		return result
@@ -676,15 +680,15 @@ func calculateDirSizeFastWithLimiter(ctx context.Context, root string, limiter *
 }
 
 // Use Spotlight (mdfind) to quickly find large files.
-func findLargeFilesWithSpotlight(ctx context.Context, root string, minSize int64) []fileEntry {
+func findLargeFilesWithSpotlight(ctx context.Context, root string, minSize int64) ([]fileEntry, error) {
 	// Validate root path.
 	if err := validatePath(root); err != nil {
-		return nil
+		return nil, nil
 	}
 
 	// Validate minSize is reasonable (non-negative and not excessively large).
 	if minSize < 0 || minSize > 1<<50 { // 1 PB max
-		return nil
+		return nil, nil
 	}
 
 	query := fmt.Sprintf("kMDItemFSSize >= %d", minSize)
@@ -694,13 +698,16 @@ func findLargeFilesWithSpotlight(ctx context.Context, root string, minSize int64
 
 	output, err := spotlightQueryRunner(ctx, root, query)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	h := &largeFileHeap{}
 	heap.Init(h)
 
 	for line := range strings.Lines(strings.TrimSpace(string(output))) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if line == "" {
 			continue
 		}
@@ -745,7 +752,10 @@ func findLargeFilesWithSpotlight(ctx context.Context, root string, minSize int64
 		files[i] = heap.Pop(h).(fileEntry)
 	}
 
-	return files
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // isInFoldedDir checks if a path is inside a folded directory.
