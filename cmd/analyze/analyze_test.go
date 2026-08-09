@@ -77,8 +77,6 @@ func drainLiveScanToResultMsg(t *testing.T, start liveScanStartMsg) scanResultMs
 				return scanResultMsg{path: start.path, result: event.result}
 			case liveScanFailed:
 				return scanResultMsg{path: start.path, err: event.err}
-			case liveScanCanceled:
-				return scanResultMsg{path: start.path, err: event.err}
 			}
 		case <-deadline:
 			if start.cancel != nil {
@@ -1728,6 +1726,34 @@ func TestLiveScanCancellationStopsNestedFoldedDirectoryProbe(t *testing.T) {
 	}
 }
 
+func TestLiveScanEventStreamRejectsCompletionAfterCancellation(t *testing.T) {
+	ctx, cancelContext := context.WithCancel(context.Background())
+	stream := newLiveScanEventStream(ctx, cancelContext, 1)
+
+	stream.publishProgress(liveScanEventMsg{kind: liveScanChildProgress})
+	stream.publishProgress(liveScanEventMsg{kind: liveScanChildProgress})
+	stream.publish(liveScanEventMsg{kind: liveScanChildDone})
+
+	canceled := make(chan struct{})
+	go func() {
+		stream.cancel()
+		close(canceled)
+	}()
+	select {
+	case <-canceled:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("cancel blocked behind queued live-scan events")
+	}
+
+	stream.publish(liveScanEventMsg{kind: liveScanComplete})
+	stream.close()
+	for event := range stream.events {
+		if event.kind == liveScanComplete {
+			t.Fatal("stream published completion after cancellation")
+		}
+	}
+}
+
 func TestCanceledLiveScanPublishesNoResultsOrCache(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1756,16 +1782,12 @@ func TestCanceledLiveScanPublishesNoResultsOrCache(t *testing.T) {
 	waitForTestPath(t, started)
 	start.cancel()
 
-	seenCanceled := false
 	deadline := time.NewTimer(250 * time.Millisecond)
 	defer deadline.Stop()
 	for {
 		select {
 		case event, open := <-start.events:
 			if !open {
-				if !seenCanceled {
-					t.Fatal("canceled scan closed without a terminal canceled event")
-				}
 				cachePath, err := getCachePath(project)
 				if err != nil {
 					t.Fatalf("resolve project cache path: %v", err)
@@ -1776,8 +1798,6 @@ func TestCanceledLiveScanPublishesNoResultsOrCache(t *testing.T) {
 				return
 			}
 			switch event.kind {
-			case liveScanCanceled:
-				seenCanceled = true
 			case liveScanChildDone, liveScanComplete:
 				t.Fatalf("canceled scan published stale event kind %v", event.kind)
 			}
