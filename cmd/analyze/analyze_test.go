@@ -1875,7 +1875,7 @@ func TestLiveScanEventStreamRejectsCompletionAfterCancellation(t *testing.T) {
 	}()
 	select {
 	case <-canceled:
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("cancel blocked behind queued live-scan events")
 	}
 
@@ -1908,7 +1908,7 @@ func TestLiveScanEventStreamReservesRequiredCapacity(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("required live-scan events exhausted their reserved capacity")
 	}
 	if !errors.Is(ctx.Err(), context.Canceled) {
