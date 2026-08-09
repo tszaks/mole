@@ -2186,7 +2186,7 @@ _batch_execute_removals() {
                     _du_total=$(run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
                         du -skcP "${leftover_paths[@]}" 2> /dev/null | awk 'END {print $1}') || _du_rc=$?
                     [[ $_du_rc -eq 124 || $_du_rc -ge 128 ]] && return "$_du_rc"
-                    if [[ "$_du_total" =~ ^[0-9]+$ ]]; then
+                    if [[ $_du_rc -eq 0 && "$_du_total" =~ ^[0-9]+$ ]]; then
                         leftover_kb=$_du_total
                     fi
                 fi

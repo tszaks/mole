@@ -317,6 +317,7 @@ EOF
 
 @test "format_uninstall_preview_path includes per-path size" {
     dd if=/dev/zero of="$HOME/preview-size-file" bs=1024 count=1 > /dev/null 2>&1
+    expected_size_kb="$(du -skP "$HOME/preview-size-file" | awk '{print $1}')"
 
     result="$(
         HOME="$HOME" /bin/bash --noprofile --norc << 'EOF'
@@ -328,7 +329,7 @@ EOF
     )"
 
     [[ "$result" == *"~/preview-size-file"* ]] || return 1
-    [[ "$result" == *"1KB"* ]]
+    [[ "$result" == *"${expected_size_kb}KB"* ]]
 }
 
 @test "format_uninstall_preview_path propagates timed out and interrupted size probes" {
@@ -2874,7 +2875,7 @@ trace_file="$HOME/scan-feedback-trace.log"
 scan_temp="$HOME/scan-feedback-temp"
 
 MOLE_UNINSTALL_META_CACHE_DIR="$HOME/.cache/mole"
-MOLE_UNINSTALL_META_CACHE_FILE="$MOLE_UNINSTALL_META_CACHE_DIR/uninstall_app_metadata_v1"
+MOLE_UNINSTALL_META_CACHE_FILE="$MOLE_UNINSTALL_META_CACHE_DIR/uninstall_app_metadata_v2"
 MOLE_UNINSTALL_META_CACHE_LOCK="${MOLE_UNINSTALL_META_CACHE_FILE}.lock"
 
 create_temp_file() { printf '%s\n' "$scan_temp"; }

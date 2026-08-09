@@ -32,7 +32,7 @@ files_cleaned=0
 total_size_cleaned=0
 
 readonly MOLE_UNINSTALL_META_CACHE_DIR="$HOME/.cache/mole"
-readonly MOLE_UNINSTALL_META_CACHE_FILE="$MOLE_UNINSTALL_META_CACHE_DIR/uninstall_app_metadata_v1"
+readonly MOLE_UNINSTALL_META_CACHE_FILE="$MOLE_UNINSTALL_META_CACHE_DIR/uninstall_app_metadata_v2"
 readonly MOLE_UNINSTALL_META_CACHE_LOCK="${MOLE_UNINSTALL_META_CACHE_FILE}.lock"
 readonly MOLE_UNINSTALL_META_REFRESH_TTL=604800 # 7 days
 readonly MOLE_UNINSTALL_EPOCH_FLOOR=978307200
@@ -73,18 +73,18 @@ uninstall_quick_app_size_kb() {
         return 0
     }
 
-    local logical_size
-    logical_size=$(run_with_timeout "$MOLE_UNINSTALL_INLINE_MDLS_SIZE_TIMEOUT_SEC" mdls -name kMDItemLogicalSize -raw "$app_path" 2> /dev/null || echo "")
-    if [[ "$logical_size" =~ ^[0-9]+$ && "$logical_size" -gt 0 ]]; then
-        echo $(((logical_size + 1023) / 1024))
+    local physical_size
+    physical_size=$(run_with_timeout "$MOLE_UNINSTALL_INLINE_MDLS_SIZE_TIMEOUT_SEC" mdls -name kMDItemPhysicalSize -raw "$app_path" 2> /dev/null || echo "")
+    if [[ "$physical_size" =~ ^[0-9]+$ && "$physical_size" -gt 0 ]]; then
+        echo $(((physical_size + 1023) / 1024))
         return 0
     fi
 
     echo "0"
 }
 
-# du can underreport APFS-cloned bundles relative to Finder, so this only
-# stands in until the deferred refresh recomputes the logical size.
+# This bounded physical-size fallback stands in until the deferred refresh
+# can query Spotlight metadata.
 uninstall_inline_du_size_kb() {
     local app_path="$1"
     [[ -n "$app_path" && -d "$app_path" ]] || {
@@ -93,7 +93,7 @@ uninstall_inline_du_size_kb() {
     }
 
     local du_size_kb
-    du_size_kb=$(run_with_timeout "$MOLE_UNINSTALL_INLINE_DU_SIZE_TIMEOUT_SEC" du -sk "$app_path" 2> /dev/null | awk '{print $1; exit}') || du_size_kb=""
+    du_size_kb=$(run_with_timeout "$MOLE_UNINSTALL_INLINE_DU_SIZE_TIMEOUT_SEC" du -skP "$app_path" 2> /dev/null | awk '{print $1; exit}') || du_size_kb=""
     if [[ "$du_size_kb" =~ ^[0-9]+$ && "$du_size_kb" -gt 0 ]]; then
         echo "$du_size_kb"
         return 0

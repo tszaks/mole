@@ -2917,15 +2917,14 @@ safe_sudo_find_delete() {
 
 # Get path size in KB (returns 0 if not found)
 #
-# For regular files and symlinks, prefer 'stat' over 'du': it avoids the
-# fork+pipe cost of 'du | awk' on every call, which adds up in tight loops
-# (e.g. external-volume ._* sweeps, Application Support log scans). 'du -skP'
-# and 'stat -f%z' both report logical size without following symlinks on
-# macOS, and the 1KB-rounded outputs match for the file types we encounter
-# (logs, caches, leftovers). Directories still go through 'du' because 'stat'
+# For regular files and symlinks, prefer allocated blocks from 'stat' over
+# 'du': it avoids the fork+pipe cost of 'du | awk' on every call, which adds
+# up in tight loops (e.g. external-volume ._* sweeps, Application Support log
+# scans). macOS st_blocks and 'du -skP' use the same 512-byte allocation basis
+# without following symlinks. Directories still go through 'du' because 'stat'
 # only reports a single directory entry, not recursive content size. .app
-# bundles continue to go through mdls because APFS clones make 'du'
-# under-report large bundles like Xcode.
+# bundles use Spotlight's physical size when available so uninstall previews
+# do not add logical bundle bytes to physical leftover sizes.
 get_path_size_kb() {
     local path="$1"
     local size_timeout="${2:-$MOLE_TIMEOUT_DISK_VERIFY_SEC}"
@@ -2945,8 +2944,10 @@ get_path_size_kb() {
     [[ $timeout_budget -gt 0 ]] || timeout_budget=1
     local size_deadline=$((SECONDS + timeout_budget))
 
-    # For .app bundles, prefer mdls logical size as it matches Finder
-    # (APFS clone/sparse files make 'du' severely underreport apps like Xcode)
+    # Uninstall totals represent estimated disk occupancy. Keep .app bundles
+    # on the same physical-size basis as the directory fallback; logical size
+    # can be much larger for APFS-cloned bundles and must not be mixed into the
+    # same total as `du` results (#1404).
     if [[ "$path" == *.app || "$path" == *.app/ ]]; then
         local mdls_size
         local mdls_timeout=""
@@ -2956,30 +2957,29 @@ get_path_size_kb() {
         [[ $mdls_deadline_rc -eq 0 ]] || return "$mdls_deadline_rc"
         local mdls_rc=0
         mdls_size=$(run_with_timeout "$mdls_timeout" mdls \
-            -name kMDItemLogicalSize -raw "$path" < /dev/null 2> /dev/null) || mdls_rc=$?
+            -name kMDItemPhysicalSize -raw "$path" < /dev/null 2> /dev/null) || mdls_rc=$?
         [[ $mdls_rc -eq 124 || $mdls_rc -ge 128 ]] && return "$mdls_rc"
         if [[ "$mdls_size" =~ ^[0-9]+$ && "$mdls_size" -gt 0 ]]; then
-            # Return in KB
-            echo "$((mdls_size / 1024))"
+            echo $(((mdls_size + 1023) / 1024))
             return
         fi
     fi
 
-    # Fast path for regular files and symlinks: avoid forking 'du'.
+    # Fast path for regular files and symlinks: st_blocks is measured in
+    # 512-byte units and matches the physical basis of `du -skP`.
     if [[ -f "$path" || -L "$path" ]]; then
-        local bytes
+        local blocks
         local stat_timeout=""
         local stat_deadline_rc=0
         stat_timeout=$(_mole_timeout_with_deadline \
             "$size_timeout" "$size_deadline") || stat_deadline_rc=$?
         [[ $stat_deadline_rc -eq 0 ]] || return "$stat_deadline_rc"
         local stat_rc=0
-        bytes=$(run_with_timeout "$stat_timeout" stat \
-            -f%z "$path" < /dev/null 2> /dev/null) || stat_rc=$?
+        blocks=$(run_with_timeout "$stat_timeout" stat \
+            -f%b "$path" < /dev/null 2> /dev/null) || stat_rc=$?
         [[ $stat_rc -eq 124 || $stat_rc -ge 128 ]] && return "$stat_rc"
-        if [[ "$bytes" =~ ^[0-9]+$ ]]; then
-            # Round up to whole KB to match 'du -skP' semantics.
-            echo $(((bytes + 1023) / 1024))
+        if [[ "$blocks" =~ ^[0-9]+$ ]]; then
+            echo $(((blocks + 1) / 2))
             return
         fi
     fi
@@ -2997,7 +2997,10 @@ get_path_size_kb() {
     local du_rc=0
     size=$(run_with_timeout "$du_timeout" du -skP "$path" 2> /dev/null |
         awk 'NR==1 {print $1; exit}') || du_rc=$?
-    [[ $du_rc -eq 124 || $du_rc -ge 128 ]] && return "$du_rc"
+    # `du` may print a partial aggregate before reporting an unreadable child.
+    # Any nonzero status makes that number incomplete, so never return it as a
+    # successful size estimate (#1404).
+    [[ $du_rc -eq 0 ]] || return "$du_rc"
 
     if [[ "$size" =~ ^[0-9]+$ ]]; then
         echo "$size"
