@@ -60,7 +60,7 @@ func newLiveScanEventStream(ctx context.Context, cancel context.CancelFunc, targ
 func (s *liveScanEventStream) cancel() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.canceled {
+	if s.canceled || s.closed {
 		return
 	}
 	s.canceled = true
@@ -75,10 +75,7 @@ func (s *liveScanEventStream) publish(msg liveScanEventMsg) {
 	}
 	// Progress publication reserves enough capacity that every target can emit
 	// one result or failure and the coordinator can emit final completion.
-	select {
-	case s.events <- msg:
-	default:
-	}
+	s.events <- msg
 }
 
 func (s *liveScanEventStream) publishProgress(msg liveScanEventMsg) {
@@ -100,6 +97,7 @@ func (s *liveScanEventStream) close() {
 		return
 	}
 	s.closed = true
+	s.cancelContext()
 	close(s.events)
 }
 
