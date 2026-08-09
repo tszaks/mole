@@ -381,9 +381,12 @@ func scanLiveTarget(ctx context.Context, target liveScanTarget, largeFileChan ch
 			return scanResult{}, ctx.Err()
 		}
 		if err != nil || size <= 0 {
-			size = calculateDirSizeFastWithLimiter(target.path, limiter, filesScanned, dirsScanned, bytesScanned, currentPath)
+			size = calculateDirSizeFastWithLimiter(ctx, target.path, limiter, filesScanned, dirsScanned, bytesScanned, currentPath)
 		} else {
 			atomic.AddInt64(bytesScanned, size)
+		}
+		if ctx.Err() != nil {
+			return scanResult{}, ctx.Err()
 		}
 		return scanResult{TotalSize: size}, nil
 	}
@@ -392,7 +395,7 @@ func scanLiveTarget(ctx context.Context, target liveScanTarget, largeFileChan ch
 		return scanResult{}, err
 	}
 
-	result := scanSubdirWithCache(target.path, largeFileChan, largeFileMinSize, limiter, limiter.dirSem, limiter.duSem, limiter.duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath, cachePolicy)
+	result := scanSubdirWithCache(ctx, target.path, largeFileChan, largeFileMinSize, limiter, limiter.dirSem, limiter.duSem, limiter.duQueueSem, filesScanned, dirsScanned, bytesScanned, currentPath, cachePolicy)
 	return result, ctx.Err()
 }
 

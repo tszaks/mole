@@ -97,6 +97,38 @@ func cancelAndDrainLiveScan(start liveScanStartMsg) {
 	}
 }
 
+func installBlockingDuProbe(t *testing.T) string {
+	t.Helper()
+
+	binDir := t.TempDir()
+	started := filepath.Join(binDir, "du-started")
+	duStub := filepath.Join(binDir, "du")
+	stub := "#!/bin/sh\n" +
+		"printf started > \"$MOLE_TEST_DU_STARTED\"\n" +
+		"exec /usr/bin/tail -f /dev/null\n"
+	if err := os.WriteFile(duStub, []byte(stub), 0o755); err != nil {
+		t.Fatalf("write du stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MOLE_TEST_DU_STARTED", started)
+	return started
+}
+
+func waitForTestPath(t *testing.T, path string) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", path)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func rowContaining(view, needle string) string {
 	for line := range strings.SplitSeq(view, "\n") {
 		if strings.Contains(line, needle) {
@@ -141,7 +173,7 @@ func TestScanPathConcurrentBasic(t *testing.T) {
 	current := &atomic.Value{}
 	current.Store("")
 
-	result, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current)
+	result, err := scanPathConcurrent(context.Background(), root, &filesScanned, &dirsScanned, &bytesScanned, current)
 	if err != nil {
 		t.Fatalf("scanPathConcurrent returned error: %v", err)
 	}
@@ -221,7 +253,7 @@ func TestScanPathConcurrentDedupsHardlinks(t *testing.T) {
 	current := &atomic.Value{}
 	current.Store("")
 
-	result, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current)
+	result, err := scanPathConcurrent(context.Background(), root, &filesScanned, &dirsScanned, &bytesScanned, current)
 	if err != nil {
 		t.Fatalf("scanPathConcurrent returned error: %v", err)
 	}
@@ -1232,7 +1264,7 @@ func TestScanPathConcurrentWarmsChildDirectoryCache(t *testing.T) {
 	current := &atomic.Value{}
 	current.Store("")
 
-	if _, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current); err != nil {
+	if _, err := scanPathConcurrent(context.Background(), root, &filesScanned, &dirsScanned, &bytesScanned, current); err != nil {
 		t.Fatalf("scanPathConcurrent(root): %v", err)
 	}
 
@@ -1277,7 +1309,7 @@ func TestScanPathConcurrentSkipsCacheForCheapSubdir(t *testing.T) {
 	current := &atomic.Value{}
 	current.Store("")
 
-	result, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current)
+	result, err := scanPathConcurrent(context.Background(), root, &filesScanned, &dirsScanned, &bytesScanned, current)
 	if err != nil {
 		t.Fatalf("scanPathConcurrent(root): %v", err)
 	}
@@ -1321,7 +1353,7 @@ func TestAnalyzeIncludesParallelsVMStorageButKeepsOtherVirtualizationSkips(t *te
 	var filesScanned, dirsScanned, bytesScanned int64
 	current := &atomic.Value{}
 	current.Store("")
-	result, err := scanPathConcurrentWithOptions(root, &filesScanned, &dirsScanned, &bytesScanned, current, false, 0)
+	result, err := scanPathConcurrentWithOptions(context.Background(), root, &filesScanned, &dirsScanned, &bytesScanned, current, false, 0)
 	if err != nil {
 		t.Fatalf("scan root: %v", err)
 	}
@@ -1419,7 +1451,7 @@ func TestScanPathConcurrentUsesChildCacheLargeFiles(t *testing.T) {
 	var childFiles, childDirs, childBytes int64
 	childCurrent := &atomic.Value{}
 	childCurrent.Store("")
-	childResult, err := scanPathConcurrent(child, &childFiles, &childDirs, &childBytes, childCurrent)
+	childResult, err := scanPathConcurrent(context.Background(), child, &childFiles, &childDirs, &childBytes, childCurrent)
 	if err != nil {
 		t.Fatalf("scanPathConcurrent(child): %v", err)
 	}
@@ -1438,7 +1470,7 @@ func TestScanPathConcurrentUsesChildCacheLargeFiles(t *testing.T) {
 	current := &atomic.Value{}
 	current.Store("")
 
-	result, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current)
+	result, err := scanPathConcurrent(context.Background(), root, &filesScanned, &dirsScanned, &bytesScanned, current)
 	if err != nil {
 		t.Fatalf("scanPathConcurrent(root): %v", err)
 	}
@@ -1499,7 +1531,7 @@ func TestScanPathConcurrentWarmsChildCachesWithoutRecursiveSpotlight(t *testing.
 	current := &atomic.Value{}
 	current.Store("")
 
-	if _, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current); err != nil {
+	if _, err := scanPathConcurrent(context.Background(), root, &filesScanned, &dirsScanned, &bytesScanned, current); err != nil {
 		t.Fatalf("scanPathConcurrent(root): %v", err)
 	}
 
@@ -1611,20 +1643,7 @@ func TestLiveScanCancellationStopsFoldedDirectoryProbe(t *testing.T) {
 		t.Fatalf("create folded directory: %v", err)
 	}
 
-	binDir := filepath.Join(root, "bin")
-	if err := os.Mkdir(binDir, 0o755); err != nil {
-		t.Fatalf("create fake bin: %v", err)
-	}
-	started := filepath.Join(root, "du-started")
-	duStub := filepath.Join(binDir, "du")
-	stub := "#!/bin/sh\n" +
-		"printf started > \"$MOLE_TEST_DU_STARTED\"\n" +
-		"exec /usr/bin/tail -f /dev/null\n"
-	if err := os.WriteFile(duStub, []byte(stub), 0o755); err != nil {
-		t.Fatalf("write du stub: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("MOLE_TEST_DU_STARTED", started)
+	started := installBlockingDuProbe(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1651,16 +1670,7 @@ func TestLiveScanCancellationStopsFoldedDirectoryProbe(t *testing.T) {
 		done <- err
 	}()
 
-	startedDeadline := time.Now().Add(time.Second)
-	for {
-		if _, err := os.Stat(started); err == nil {
-			break
-		}
-		if time.Now().After(startedDeadline) {
-			t.Fatal("du probe did not start")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitForTestPath(t, started)
 
 	cancel()
 	select {
@@ -1670,6 +1680,51 @@ func TestLiveScanCancellationStopsFoldedDirectoryProbe(t *testing.T) {
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("folded-directory probe kept running after live scan cancellation")
+	}
+}
+
+func TestLiveScanCancellationStopsNestedFoldedDirectoryProbe(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.MkdirAll(filepath.Join(target, ".git"), 0o755); err != nil {
+		t.Fatalf("create nested folded directory: %v", err)
+	}
+	started := installBlockingDuProbe(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	limiter := newScanLimiter(1)
+	largeFileMinSize := int64(largeFileWarmupMinSize)
+	var filesScanned, dirsScanned, bytesScanned int64
+	currentPath := &atomic.Value{}
+	currentPath.Store("")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := scanLiveTarget(
+			ctx,
+			liveScanTarget{name: "target", path: target, kind: liveScanTargetDirectory},
+			make(chan fileEntry, maxLargeFiles*2),
+			&largeFileMinSize,
+			limiter,
+			&filesScanned,
+			&dirsScanned,
+			&bytesScanned,
+			currentPath,
+			scanCacheBypass,
+		)
+		done <- err
+	}()
+
+	waitForTestPath(t, started)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected canceled scan, got %v", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("nested folded-directory probe kept running after live scan cancellation")
 	}
 }
 
@@ -1936,7 +1991,7 @@ func TestCacheBypassSkipsHomeLibraryOverviewSnapshot(t *testing.T) {
 		var filesScanned, dirsScanned, bytesScanned int64
 		current := &atomic.Value{}
 		current.Store("")
-		result, err := scanPathConcurrentWithLimiter(home, &filesScanned, &dirsScanned, &bytesScanned, current, false, maxEntries, nil, policy)
+		result, err := scanPathConcurrentWithLimiter(context.Background(), home, &filesScanned, &dirsScanned, &bytesScanned, current, false, maxEntries, nil, policy)
 		if err != nil {
 			t.Fatalf("scan Home: %v", err)
 		}
@@ -2464,7 +2519,7 @@ func TestScanPathConcurrentWarmsChildCacheWithLiveProgress(t *testing.T) {
 	done := make(chan struct{})
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := scanPathConcurrent(root, &filesScanned, &dirsScanned, &bytesScanned, current)
+		_, err := scanPathConcurrent(context.Background(), root, &filesScanned, &dirsScanned, &bytesScanned, current)
 		errCh <- err
 		close(done)
 	}()
@@ -2943,7 +2998,7 @@ func TestScanPathPermissionError(t *testing.T) {
 	current.Store("")
 
 	// Scanning the locked dir itself should fail.
-	_, err := scanPathConcurrent(lockedDir, &files, &dirs, &bytes, current)
+	_, err := scanPathConcurrent(context.Background(), lockedDir, &files, &dirs, &bytes, current)
 	if err == nil {
 		t.Fatalf("expected error scanning locked directory, got nil")
 	}
@@ -2973,7 +3028,7 @@ func TestCalculateDirSizeFastHighFanoutCompletes(t *testing.T) {
 
 	done := make(chan int64, 1)
 	go func() {
-		done <- calculateDirSizeFast(root, &files, &dirs, &bytes, current)
+		done <- calculateDirSizeFast(context.Background(), root, &files, &dirs, &bytes, current)
 	}()
 
 	select {
