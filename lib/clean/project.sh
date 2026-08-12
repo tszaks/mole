@@ -852,31 +852,6 @@ find_purge_project_root_for_artifact() {
     return 1
 }
 
-# Derive a display-only project name when no indicator-based root exists.
-get_purge_fallback_project_name() {
-    local path="$1"
-    local -a search_roots=()
-    if [[ ${#PURGE_SEARCH_PATHS[@]} -gt 0 ]]; then
-        search_roots=("${PURGE_SEARCH_PATHS[@]}")
-    else
-        search_roots=("$HOME/www" "$HOME/dev" "$HOME/Projects")
-    fi
-
-    local root
-    for root in "${search_roots[@]}"; do
-        root="${root%/}"
-        if [[ -n "$root" && "$path" == "$root/"* ]]; then
-            local relative_path="${path#"$root"/}"
-            printf '%s\n' "${relative_path%%/*}"
-            return
-        fi
-    done
-
-    local grandparent="${path%/*}"
-    grandparent="${grandparent%/*}"
-    printf '%s\n' "${grandparent##*/}"
-}
-
 # Purge category selector.
 select_purge_categories() {
     local -a categories=("$@")
@@ -1677,8 +1652,10 @@ clean_project_artifacts() {
         # Format: "project_path  size | artifact_type"
         printf "%-*s %9s | %-*s" "$printf_width" "$truncated_path" "$size_str" "$artifact_col" "$artifact_type"
     }
-    # Resolve project ownership once per artifact. The identity is authoritative
-    # for grouping; display names and paths are never used as selectors.
+    # Resolve project ownership once per artifact. An indicator-backed root is
+    # preferred. Without one, the artifact's direct parent is the narrowest
+    # exact ownership boundary we can prove without grouping unrelated paths.
+    # The physical identity is authoritative; display text is never a selector.
     local -a _cached_basenames=()
     local -a _cached_project_names=()
     local -a _cached_project_paths=()
@@ -1693,10 +1670,10 @@ clean_project_artifacts() {
             _cached_project_paths[_pre_idx]="${project_root/#$HOME/~}"
             _cached_project_identities[_pre_idx]=$(mole_path_identity "$project_root")
         else
-            _cached_project_names[_pre_idx]=$(get_purge_fallback_project_name "$artifact_path")
-            local artifact_parent="${artifact_path%/*}"
-            _cached_project_paths[_pre_idx]="${artifact_parent/#$HOME/~}"
-            _cached_project_identities[_pre_idx]="artifact-row:${_pre_idx}"
+            project_root="${artifact_path%/*}"
+            _cached_project_names[_pre_idx]="${project_root##*/}"
+            _cached_project_paths[_pre_idx]="${project_root/#$HOME/~}"
+            _cached_project_identities[_pre_idx]=$(mole_path_identity "$project_root")
         fi
     done
 
