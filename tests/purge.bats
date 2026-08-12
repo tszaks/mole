@@ -1209,13 +1209,13 @@ EOF
 }
 
 @test "clean_project_artifacts: handles empty directory gracefully" {
-	run /bin/bash -c "
-        export HOME='$HOME'
-        source '$PROJECT_ROOT/lib/core/common.sh'
-        source '$PROJECT_ROOT/lib/clean/project.sh'
-        clean_project_artifacts
-        printf 'PURGE_OUTCOME=%s\n' "\$PURGE_RUN_OUTCOME"
-    " </dev/null
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+clean_project_artifacts </dev/null
+printf 'PURGE_OUTCOME=%s\n' "$PURGE_RUN_OUTCOME"
+EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"PURGE_OUTCOME=no_candidates"* ]]
