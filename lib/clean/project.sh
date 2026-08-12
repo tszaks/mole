@@ -1769,22 +1769,58 @@ clean_project_artifacts() {
         menu_options+=("$(format_purge_display "${raw_project_paths[idx]}" "${raw_artifact_types[idx]}" "$size_human_val" "$terminal_width" "$max_path_display_width" "$max_artifact_width")")
     done
 
-    # Sort by size descending (largest first) - requested in issue #311
-    # Use external sort for better performance with many items
+    # Keep every exact project together. Project groups are ordered by their
+    # aggregate known size, then artifacts within each group by item size. Only
+    # numeric local indices cross the sort boundary; canonical path identities
+    # remain in their aligned shell arrays.
     if [[ ${#item_sizes[@]} -gt 0 ]]; then
-        # Create temporary file with index|size pairs
-        local sort_temp
-        sort_temp=$(mktemp)
+        local -a group_project_identities=()
+        local -a group_total_sizes=()
+        local -a item_group_indices=()
+        local group_index existing_group_index
         for ((i = 0; i < ${#item_sizes[@]}; i++)); do
-            printf '%d|%d\n' "$i" "${item_sizes[i]}"
-        done > "$sort_temp"
+            group_index=-1
+            for ((existing_group_index = 0; existing_group_index < ${#group_project_identities[@]}; existing_group_index++)); do
+                if [[ "${group_project_identities[existing_group_index]}" == "${item_project_identities[i]}" ]]; then
+                    group_index=$existing_group_index
+                    break
+                fi
+            done
+            if [[ $group_index -lt 0 ]]; then
+                group_index=${#group_project_identities[@]}
+                group_project_identities+=("${item_project_identities[i]}")
+                group_total_sizes+=(0)
+            fi
+            item_group_indices+=("$group_index")
+            group_total_sizes[group_index]=$((group_total_sizes[group_index] + item_sizes[i]))
+        done
 
-        # Sort by size (field 2) descending, extract indices
+        local group_sort_temp
+        group_sort_temp=$(mktemp)
+        for ((group_index = 0; group_index < ${#group_project_identities[@]}; group_index++)); do
+            printf '%d|%d\n' "$group_index" "${group_total_sizes[group_index]}"
+        done > "$group_sort_temp"
+
+        local -a group_ranks=()
+        local group_rank=0
+        while IFS='|' read -r group_index group_total_size; do
+            group_ranks[group_index]=$group_rank
+            group_rank=$((group_rank + 1))
+        done < <(sort -t'|' -k2,2nr -k1,1n "$group_sort_temp")
+        rm -f "$group_sort_temp"
+
+        local item_sort_temp
+        item_sort_temp=$(mktemp)
+        for ((i = 0; i < ${#item_sizes[@]}; i++)); do
+            group_index=${item_group_indices[i]}
+            printf '%d|%d|%d\n' "${group_ranks[group_index]}" "${item_sizes[i]}" "$i"
+        done > "$item_sort_temp"
+
         local -a sorted_indices=()
-        while IFS='|' read -r idx size; do
+        while IFS='|' read -r group_rank size idx; do
             sorted_indices+=("$idx")
-        done < <(sort -t'|' -k2,2nr "$sort_temp")
-        rm -f "$sort_temp"
+        done < <(sort -t'|' -k1,1n -k2,2nr -k3,3n "$item_sort_temp")
+        rm -f "$item_sort_temp"
 
         # Rebuild arrays in sorted order
         local -a sorted_menu_options=()

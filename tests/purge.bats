@@ -1975,6 +1975,55 @@ SCRIPT
 	[[ "$path1" == *"alpha"* ]]
 }
 
+@test "sort: project groups use aggregate size before artifact size" {
+	mkdir -p "$HOME/www/alpha/node_modules" "$HOME/www/alpha/.venv"
+	mkdir -p "$HOME/www/beta/node_modules"
+	echo '{}' > "$HOME/www/alpha/package.json"
+	echo '{}' > "$HOME/www/beta/package.json"
+	dd if=/dev/zero of="$HOME/www/alpha/node_modules/data" bs=1024 count=130 2>/dev/null
+	dd if=/dev/zero of="$HOME/www/alpha/.venv/data" bs=1024 count=110 2>/dev/null
+	dd if=/dev/zero of="$HOME/www/beta/node_modules/data" bs=1024 count=200 2>/dev/null
+
+	local capture_file script_file
+	capture_file=$(mktemp "$HOME/group_sort_capture.XXXXXX")
+	script_file=$(mktemp "$HOME/group_sort_script.XXXXXX.sh")
+
+	cat > "$script_file" << SCRIPT
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+mkdir -p "$HOME/.cache/mole"
+export XDG_CACHE_HOME="$HOME/.cache"
+export TERM="dumb"
+PURGE_SEARCH_PATHS=("$HOME/www")
+
+select_purge_categories() {
+	local i=0
+	for path in "\${PURGE_CATEGORY_FULL_PATHS_ARRAY[@]}"; do
+		echo "PATH[\$i]=\$path" >> "$capture_file"
+		i=\$((i + 1))
+	done
+	PURGE_SELECTION_RESULT=""
+	return 1
+}
+
+clean_project_artifacts 2>/dev/null || true
+SCRIPT
+
+	_run_in_pty "$script_file"
+	rm -f "$script_file"
+
+	[ "$(grep -c '^PATH\[' "$capture_file")" -eq 3 ]
+	local path0 path1 path2
+	path0=$(grep '^PATH\[0\]=' "$capture_file" | cut -d= -f2-)
+	path1=$(grep '^PATH\[1\]=' "$capture_file" | cut -d= -f2-)
+	path2=$(grep '^PATH\[2\]=' "$capture_file" | cut -d= -f2-)
+	rm -f "$capture_file"
+
+	[[ "$path0" == *"alpha/node_modules"* ]] || return 1
+	[[ "$path1" == *"alpha/.venv"* ]] || return 1
+	[[ "$path2" == *"beta/node_modules"* ]]
+}
+
 @test "sort: cloud marker stays aligned across menu and full-path arrays" {
 	mkdir -p "$HOME/www/local-project/node_modules"
 	mkdir -p "$HOME/Library/CloudStorage/TestProvider/cloud-project/node_modules"
