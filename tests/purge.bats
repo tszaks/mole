@@ -857,6 +857,84 @@ EOF
 	[ "$status" -eq 0 ]
 }
 
+@test "scan_purge_targets: discards a failed find target scan prefix" {
+	mkdir -p "$HOME/.config/mole" "$HOME/www/test-project/node_modules"
+	printf '%s\n' "$HOME/www" > "$HOME/.config/mole/purge_paths"
+
+	local mock_bin="$HOME/mock-find-target-failure"
+	mkdir -p "$mock_bin"
+	cat > "$mock_bin/find" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$HOME/www/test-project/node_modules"
+exit 7
+EOF
+	chmod +x "$mock_bin/find"
+
+	local scan_output
+	scan_output="$(mktemp)"
+
+	run env HOME="$HOME" PATH="$mock_bin:$PATH" PROJECT_ROOT="$PROJECT_ROOT" SCAN_OUTPUT="$scan_output" \
+		/bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+scan_status=0
+MO_USE_FIND=1 scan_purge_targets "$HOME/www" "$SCAN_OUTPUT" || scan_status=$?
+printf 'STATUS=%s\n' "$scan_status"
+[[ ! -s "$SCAN_OUTPUT" ]] || exit 1
+EOF
+
+	rm -f "$scan_output"
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"STATUS=7"* ]] || return 1
+}
+
+@test "scan_purge_targets: discards target results when the tag scan fails" {
+	mkdir -p "$HOME/.config/mole" "$HOME/www/test-project/node_modules"
+	printf '%s\n' "$HOME/www" > "$HOME/.config/mole/purge_paths"
+
+	local mock_bin="$HOME/mock-find-tag-failure"
+	mkdir -p "$mock_bin"
+	cat > "$mock_bin/find" <<'EOF'
+#!/bin/bash
+result_type=""
+while [[ $# -gt 0 ]]; do
+	if [[ "$1" == "-type" && $# -gt 1 ]]; then
+		result_type="$2"
+		break
+	fi
+	shift
+done
+
+if [[ "$result_type" == "d" ]]; then
+	printf '%s\n' "$HOME/www/test-project/node_modules"
+	exit 0
+fi
+
+printf '%s\n' "$HOME/www/test-project/.cache/CACHEDIR.TAG"
+exit 9
+EOF
+	chmod +x "$mock_bin/find"
+
+	local scan_output
+	scan_output="$(mktemp)"
+
+	run env HOME="$HOME" PATH="$mock_bin:$PATH" PROJECT_ROOT="$PROJECT_ROOT" SCAN_OUTPUT="$scan_output" \
+		/bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+scan_status=0
+MO_USE_FIND=1 scan_purge_targets "$HOME/www" "$SCAN_OUTPUT" || scan_status=$?
+printf 'STATUS=%s\n' "$scan_status"
+[[ ! -s "$SCAN_OUTPUT" ]] || exit 1
+EOF
+
+	rm -f "$scan_output"
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"STATUS=9"* ]] || return 1
+}
+
 @test "is_recently_modified: detects recent projects" {
 	mkdir -p "$HOME/www/project/node_modules"
 	touch "$HOME/www/project/package.json"

@@ -426,6 +426,9 @@ is_protected_purge_artifact() {
 scan_purge_targets() {
     local search_path="$1"
     local output_file="$2"
+    local target_output="${output_file}.targets"
+    local tag_output="${output_file}.tags"
+    local processed_output="${output_file}.processed"
     local min_depth="$PURGE_MIN_DEPTH_DEFAULT"
     local max_depth="$PURGE_MAX_DEPTH_DEFAULT"
     if [[ ! "$min_depth" =~ ^[0-9]+$ ]]; then
@@ -440,6 +443,12 @@ scan_purge_targets() {
     if [[ ! -d "$search_path" ]]; then
         return
     fi
+
+    # A scan result is publishable only after every producer and filter for the
+    # root completes. Keep the caller-visible file empty until that point so a
+    # timeout or read failure cannot turn a partial prefix into delete candidates.
+    : > "$output_file"
+    rm -f "$target_output" "$tag_output" "$processed_output" 2> /dev/null || true
 
     local cachedir_tag_min_depth=$((min_depth + 1))
     local cachedir_tag_max_depth=$((max_depth + 1))
@@ -462,23 +471,38 @@ scan_purge_targets() {
     process_scan_results() {
         local input_file="$1"
         if [[ -f "$input_file" ]]; then
-            while IFS= read -r item; do
-                # Check if we should abort (scanning file removed by Ctrl+C)
-                if [[ ! -f "$stats_dir/purge_scanning" ]]; then
-                    return
-                fi
+            local process_status=0
+            (
+                while IFS= read -r item; do
+                    # Check if we should abort (scanning file removed by Ctrl+C)
+                    if [[ ! -f "$stats_dir/purge_scanning" ]]; then
+                        exit 130
+                    fi
 
-                if [[ -n "$item" ]] && is_safe_project_artifact "$item" "$search_path"; then
-                    echo "$item"
-                    # Update scanning path to show current project directory
-                    local project_dir="${item%/*}"
-                    echo "$project_dir" > "$stats_dir/purge_scanning" 2> /dev/null || true
-                fi
-            done < "$input_file" | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
-            rm -f "$input_file"
+                    if [[ -n "$item" ]] && is_safe_project_artifact "$item" "$search_path"; then
+                        echo "$item"
+                        # Update scanning path to show current project directory
+                        local project_dir="${item%/*}"
+                        echo "$project_dir" > "$stats_dir/purge_scanning" 2> /dev/null || true
+                    fi
+                done < "$input_file"
+            ) | filter_nested_artifacts | filter_protected_artifacts > "$processed_output" || process_status=$?
+
+            if [[ $process_status -ne 0 ]]; then
+                rm -f "$processed_output" 2> /dev/null || true
+                return "$process_status"
+            fi
+            if ! mv "$processed_output" "$output_file"; then
+                rm -f "$processed_output" 2> /dev/null || true
+                return 1
+            fi
         else
-            touch "$output_file"
+            return 1
         fi
+    }
+
+    cleanup_scan_outputs() {
+        rm -f "$target_output" "$tag_output" "$processed_output" 2> /dev/null || true
     }
 
     local use_find=true
@@ -524,14 +548,27 @@ scan_purge_targets() {
         # Empty scans are common in healthy project trees; falling back to find
         # doubles the scan cost and can make "nothing to clean" feel slow.
         local _scan_timeout="${MO_PURGE_SCAN_TIMEOUT_SEC:-60}"
-        if run_with_timeout "$_scan_timeout" fd "${fd_args[@]}" "$pattern" "$search_path" 2> /dev/null > "$output_file.raw"; then
+        local fd_status=0
+        run_with_timeout "$_scan_timeout" fd "${fd_args[@]}" "$pattern" "$search_path" \
+            2> /dev/null > "$target_output" || fd_status=$?
+        if [[ $fd_status -eq 0 ]]; then
             run_with_timeout "$_scan_timeout" fd "${fd_tag_args[@]}" "^${MOLE_CACHEDIR_TAG_NAME}$" "$search_path" \
-                2> /dev/null | emit_valid_cachedir_tag_dirs >> "$output_file.raw" || true
+                2> /dev/null > "$tag_output" || fd_status=$?
+        fi
+        if [[ $fd_status -eq 0 ]]; then
+            emit_valid_cachedir_tag_dirs < "$tag_output" >> "$target_output" || fd_status=$?
+        fi
+        if [[ $fd_status -eq 0 ]]; then
+            process_scan_results "$target_output" || fd_status=$?
+        fi
+        if [[ $fd_status -eq 0 ]]; then
             debug_log "Using fd for scanning"
-            process_scan_results "$output_file.raw"
+            cleanup_scan_outputs
             use_find=false
         else
-            debug_log "fd command failed, falling back to find"
+            debug_log "fd scan failed (status $fd_status), falling back to find"
+            cleanup_scan_outputs
+            : > "$output_file"
         fi
     fi
 
@@ -556,17 +593,31 @@ scan_purge_targets() {
         # Use plain `find` here for compatibility with environments where
         # `command find` behaves inconsistently in this complex expression.
         local _scan_timeout="${MO_PURGE_SCAN_TIMEOUT_SEC:-60}"
+        local find_status=0
         run_with_timeout "$_scan_timeout" find "$search_path" -mindepth "$min_depth" -maxdepth "$max_depth" -type d \
             \( "${prune_expr[@]}" \) -prune -o \
             \( "${target_expr[@]}" \) -print -prune \
-            2> /dev/null > "$output_file.raw" || true
+            2> /dev/null > "$target_output" || find_status=$?
 
-        run_with_timeout "$_scan_timeout" find "$search_path" -mindepth "$cachedir_tag_min_depth" -maxdepth "$cachedir_tag_max_depth" \
-            \( "${prune_expr[@]}" \) -prune -o \
-            -type f -name "$MOLE_CACHEDIR_TAG_NAME" -print \
-            2> /dev/null | emit_valid_cachedir_tag_dirs >> "$output_file.raw" || true
+        if [[ $find_status -eq 0 ]]; then
+            run_with_timeout "$_scan_timeout" find "$search_path" -mindepth "$cachedir_tag_min_depth" -maxdepth "$cachedir_tag_max_depth" \
+                \( "${prune_expr[@]}" \) -prune -o \
+                -type f -name "$MOLE_CACHEDIR_TAG_NAME" -print \
+                2> /dev/null > "$tag_output" || find_status=$?
+        fi
+        if [[ $find_status -eq 0 ]]; then
+            emit_valid_cachedir_tag_dirs < "$tag_output" >> "$target_output" || find_status=$?
+        fi
+        if [[ $find_status -eq 0 ]]; then
+            process_scan_results "$target_output" || find_status=$?
+        fi
 
-        process_scan_results "$output_file.raw"
+        cleanup_scan_outputs
+        if [[ $find_status -ne 0 ]]; then
+            : > "$output_file"
+            debug_log "find scan failed (status $find_status): $search_path"
+            return "$find_status"
+        fi
     fi
 }
 # Filter out nested artifacts (e.g. node_modules inside node_modules, .build inside build).
