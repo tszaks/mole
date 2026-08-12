@@ -170,8 +170,22 @@ save_discovered_paths() {
 load_purge_config() {
     PURGE_SEARCH_PATHS=()
 
+    local line existing_path already_found
     while IFS= read -r line; do
-        [[ -n "$line" ]] && PURGE_SEARCH_PATHS+=("$line")
+        [[ -n "$line" ]] || continue
+        # mole_purge_read_paths_config already folds case variants to the
+        # on-disk path, so a config listing ~/code and ~/Code yields the
+        # same resolved string twice. Drop the duplicate here so downstream
+        # scans and the menu show each path once (#1416).
+        already_found=false
+        for existing_path in "${PURGE_SEARCH_PATHS[@]+"${PURGE_SEARCH_PATHS[@]}"}"; do
+            if [[ "$line" == "$existing_path" ]]; then
+                already_found=true
+                break
+            fi
+        done
+        [[ "$already_found" == "true" ]] && continue
+        PURGE_SEARCH_PATHS+=("$line")
     done < <(mole_purge_read_paths_config "$PURGE_CONFIG_FILE")
 
     if [[ ${#PURGE_SEARCH_PATHS[@]} -eq 0 ]]; then
