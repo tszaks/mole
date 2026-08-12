@@ -520,6 +520,34 @@ EOF
 	[[ "$output" != *"Select Categories to Clean"* ]]
 }
 
+@test "select_purge_categories shows exact project boundaries and selection feedback" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+tput() {
+	case "${1:-}" in
+		cols) printf '100\n' ;;
+		lines) printf '24\n' ;;
+	esac
+}
+PURGE_CATEGORY_SIZES="100,50,25"
+PURGE_CATEGORY_PROJECT_IDS_ARRAY=("project-a" "project-a" "project-b")
+PURGE_CATEGORY_PROJECT_PATHS_ARRAY=("~/work/obelisk" "~/work/obelisk" "~/work/atlas")
+PURGE_CATEGORY_SIZE_UNKNOWN_FLAGS_ARRAY=("false" "false" "false")
+select_purge_categories "A node_modules" "A dist" "B target" <<< $'x\n'
+printf 'RESULT=%s\n' "$PURGE_SELECTION_RESULT"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"┌ A node_modules"* ]] || return 1
+	[[ "$output" == *"└ A dist"* ]] || return 1
+	[[ "$output" == *"─ B target"* ]] || return 1
+	[[ "$output" == *"~/work/obelisk · 154KB · 2/2 selected"* ]] || return 1
+	[[ "$output" == *"~/work/obelisk · 154KB · 0/2 selected"* ]] || return 1
+	[[ "$output" == *"RESULT=2"* ]]
+}
+
 @test "select_purge_categories skips every artifact with the current project ID" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1937,6 +1965,11 @@ select_purge_categories() {
 		echo "PROJECT_ID[\$i]=\$project_id" >> "$capture_file"
 		i=\$((i + 1))
 	done
+	i=0
+	for project_path in "\${PURGE_CATEGORY_PROJECT_PATHS_ARRAY[@]}"; do
+		echo "PROJECT_PATH[\$i]=\$project_path" >> "$capture_file"
+		i=\$((i + 1))
+	done
 	PURGE_SELECTION_RESULT=""
 	return 1
 }
@@ -1956,10 +1989,11 @@ SCRIPT
 	sizes_csv=$(grep '^SIZES=' "$capture_file" | cut -d= -f2-)
 	IFS=',' read -r -a sizes <<< "$sizes_csv"
 
-	local path0 path1 project_id0 expected_project_id0
+	local path0 path1 project_id0 project_path0 expected_project_id0
 	path0=$(grep '^PATH\[0\]=' "$capture_file" | head -1 | cut -d= -f2-)
 	path1=$(grep '^PATH\[1\]=' "$capture_file" | head -1 | cut -d= -f2-)
 	project_id0=$(grep '^PROJECT_ID\[0\]=' "$capture_file" | head -1 | cut -d= -f2-)
+	project_path0=$(grep '^PROJECT_PATH\[0\]=' "$capture_file" | head -1 | cut -d= -f2-)
 	rm -f "$capture_file"
 	expected_project_id0=$(/bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mole_path_identity '$HOME/www/beta'")
 
@@ -1970,6 +2004,7 @@ SCRIPT
 	# With the bug path0 = alpha (discovery order) → [[ ... == *beta* ]] fails.
 	[[ "$path0" == *"beta"* ]] || return 1
 	[ "$project_id0" = "$expected_project_id0" ] || return 1
+	[[ "$project_path0" == *"beta"* ]] || return 1
 
 	# Index 1 → smaller artifact → alpha's path.
 	[[ "$path1" == *"alpha"* ]]

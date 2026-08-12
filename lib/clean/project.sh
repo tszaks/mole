@@ -28,6 +28,8 @@ readonly PURGE_CONFIG_FILE="$HOME/.config/mole/purge_paths"
 PURGE_SEARCH_PATHS=()
 PURGE_CATEGORY_FULL_PATHS_ARRAY=()
 PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
+PURGE_CATEGORY_PROJECT_PATHS_ARRAY=()
+PURGE_CATEGORY_SIZE_UNKNOWN_FLAGS_ARRAY=()
 
 # Project indicators for container detection.
 # Monorepo indicators (higher priority)
@@ -897,7 +899,9 @@ select_purge_categories() {
                 term_height=24
             fi
         fi
-        local reserved=8
+        # Title, footer context, full path, controls, and spacing. The project
+        # context can use two lines on narrow terminals.
+        local reserved=10
         local available=$((term_height - reserved))
         if [[ $available -lt 3 ]]; then
             echo 3
@@ -1032,21 +1036,83 @@ select_purge_categories() {
         for ((i = top_index; i < end_index; i++)); do
             local checkbox="$ICON_EMPTY"
             [[ ${selected[i]} == true ]] && checkbox="$ICON_SOLID"
+            local group_marker="─"
+            local row_project_id="${PURGE_CATEGORY_PROJECT_IDS_ARRAY[i]:-}"
+            if [[ -n "$row_project_id" ]]; then
+                local previous_same_project=false
+                local next_same_project=false
+                if [[ $i -gt 0 && "${PURGE_CATEGORY_PROJECT_IDS_ARRAY[i - 1]:-}" == "$row_project_id" ]]; then
+                    previous_same_project=true
+                fi
+                if [[ $i -lt $((total_items - 1)) && "${PURGE_CATEGORY_PROJECT_IDS_ARRAY[i + 1]:-}" == "$row_project_id" ]]; then
+                    next_same_project=true
+                fi
+                if [[ "$previous_same_project" == "true" && "$next_same_project" == "true" ]]; then
+                    group_marker="├"
+                elif [[ "$next_same_project" == "true" ]]; then
+                    group_marker="┌"
+                elif [[ "$previous_same_project" == "true" ]]; then
+                    group_marker="└"
+                fi
+            fi
             local recent_marker=""
             local _age="${age_labels[i]:-}"
             [[ -n "$_age" ]] && recent_marker=" ${GRAY}| ${_age}${NC}"
             local rel_pos=$((i - top_index))
             if [[ $rel_pos -eq $cursor_pos ]]; then
-                printf "%s${CYAN}${ICON_ARROW} %s %s%s${NC}\n" "$clear_line" "$checkbox" "${categories[i]}" "$recent_marker"
+                printf "%s${CYAN}${ICON_ARROW} %s %s %s%s${NC}\n" "$clear_line" "$checkbox" "$group_marker" "${categories[i]}" "$recent_marker"
             else
-                printf "%s  %s %s%s\n" "$clear_line" "$checkbox" "${categories[i]}" "$recent_marker"
+                printf "%s  %s %s %s%s\n" "$clear_line" "$checkbox" "$group_marker" "${categories[i]}" "$recent_marker"
             fi
         done
 
         # Keep one blank line between the list and footer tips.
         printf "%s\n" "$clear_line"
 
+        local _term_w
+        _term_w=$(tput cols 2> /dev/null || echo 80)
+        [[ "$_term_w" =~ ^[0-9]+$ ]] || _term_w=80
+
         local current_index=$((top_index + cursor_pos))
+        local current_project_id="${PURGE_CATEGORY_PROJECT_IDS_ARRAY[current_index]:-}"
+        local current_project_path="${PURGE_CATEGORY_PROJECT_PATHS_ARRAY[current_index]:-}"
+        if [[ -n "$current_project_path" ]]; then
+            local group_size=0
+            local group_item_count=0
+            local group_selected_count=0
+            local group_has_unknown_size=false
+            for ((i = 0; i < total_items; i++)); do
+                if { [[ -n "$current_project_id" ]] && [[ "${PURGE_CATEGORY_PROJECT_IDS_ARRAY[i]:-}" == "$current_project_id" ]]; } || { [[ -z "$current_project_id" ]] && [[ $i -eq $current_index ]]; }; then
+                    group_item_count=$((group_item_count + 1))
+                    group_size=$((group_size + ${sizes[i]:-0}))
+                    [[ ${selected[i]} == true ]] && group_selected_count=$((group_selected_count + 1))
+                    [[ "${PURGE_CATEGORY_SIZE_UNKNOWN_FLAGS_ARRAY[i]:-false}" == "true" ]] && group_has_unknown_size=true
+                fi
+            done
+
+            local group_size_label
+            group_size_label=$(bytes_to_human_kb "$group_size")
+            if [[ "$group_has_unknown_size" == "true" ]]; then
+                if [[ $group_size -gt 0 ]]; then
+                    group_size_label="${group_size_label} + unknown"
+                else
+                    group_size_label="unknown size"
+                fi
+            fi
+
+            local project_label="Project: "
+            local project_summary=" · ${group_size_label} · ${group_selected_count}/${group_item_count} selected"
+            local project_path_width=$((_term_w - ${#project_label} - ${#project_summary}))
+            if [[ $project_path_width -ge 12 ]]; then
+                printf "%s${GRAY}%s${NC}%s%s\n" "$clear_line" "$project_label" "$(compact_purge_menu_path "$current_project_path" "$project_path_width")" "$project_summary"
+            else
+                project_path_width=$((_term_w - ${#project_label}))
+                [[ $project_path_width -lt 4 ]] && project_path_width=4
+                printf "%s${GRAY}%s${NC}%s\n" "$clear_line" "$project_label" "$(compact_purge_menu_path "$current_project_path" "$project_path_width")"
+                printf "%s${GRAY}Group:${NC} %s · %s/%s selected\n" "$clear_line" "$group_size_label" "$group_selected_count" "$group_item_count"
+            fi
+        fi
+
         local current_full_path=""
         local paths_len="${#PURGE_CATEGORY_FULL_PATHS_ARRAY[@]}"
         if [[ "$paths_len" -gt 0 && "$current_index" -lt "$paths_len" ]]; then
@@ -1058,10 +1124,6 @@ select_purge_categories() {
         fi
 
         # Adaptive footer hints, mirrors menu_paginated.sh pattern
-        local _term_w
-        _term_w=$(tput cols 2> /dev/null || echo 80)
-        [[ "$_term_w" =~ ^[0-9]+$ ]] || _term_w=80
-
         local _sep=" ${GRAY}|${NC} "
         local _nav="${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
         local _space="${GRAY}Space Select${NC}"
@@ -1576,8 +1638,8 @@ clean_project_artifacts() {
         if [[ -n "$max_path_width" ]]; then
             available_width="$max_path_width"
         else
-            # Standalone fallback: overhead = prefix(4)+space(1)+size(9)+sep(3)+artifact_col+recent(9) = artifact_col+26
-            local fixed_width=$((artifact_col + 26))
+            # Standalone fallback: include the two-column project-group marker.
+            local fixed_width=$((artifact_col + 28))
             available_width=$((terminal_width - fixed_width))
 
             local min_width=10
@@ -1645,6 +1707,7 @@ clean_project_artifacts() {
     local -a raw_artifact_types=()
     local -a item_display_paths=()
     local -a item_project_identities=()
+    local -a item_project_paths=()
     local _sz_idx=0
     for item in "${safe_to_clean[@]}"; do
         local item_index=$_sz_idx
@@ -1694,6 +1757,7 @@ clean_project_artifacts() {
         item_paths+=("$item")
         item_display_paths+=("$display_item_path")
         item_project_identities+=("${_cached_project_identities[$item_index]}")
+        item_project_paths+=("$display_project_path")
         item_sizes+=("$size_kb")
         item_size_unknown_flags+=("$size_unknown")
         item_recent_flags+=("$is_recent")
@@ -1738,8 +1802,8 @@ clean_project_artifacts() {
     [[ $max_artifact_width -lt 6 ]] && max_artifact_width=6
     [[ $max_artifact_width -gt 17 ]] && max_artifact_width=17
 
-    # Exact overhead: prefix(4) + space(1) + size(9) + " | "(3) + artifact_col + " | 11mo"(7) = artifact_col + 24
-    local fixed_overhead=$((max_artifact_width + 26))
+    # Include the two-column project-group marker in the selector prefix.
+    local fixed_overhead=$((max_artifact_width + 28))
     local available_for_path=$((terminal_width - fixed_overhead))
 
     local min_path_width=10
@@ -1830,6 +1894,7 @@ clean_project_artifacts() {
         local -a sorted_item_recent_flags=()
         local -a sorted_item_display_paths=()
         local -a sorted_item_project_identities=()
+        local -a sorted_item_project_paths=()
         local -a sorted_item_age_labels=()
         local -a sorted_item_cloud_flags=()
 
@@ -1841,6 +1906,7 @@ clean_project_artifacts() {
             sorted_item_recent_flags+=("${item_recent_flags[idx]}")
             sorted_item_display_paths+=("${item_display_paths[idx]}")
             sorted_item_project_identities+=("${item_project_identities[idx]}")
+            sorted_item_project_paths+=("${item_project_paths[idx]}")
             sorted_item_age_labels+=("${item_age_labels[idx]}")
             sorted_item_cloud_flags+=("${item_cloud_flags[idx]}")
         done
@@ -1853,6 +1919,7 @@ clean_project_artifacts() {
         item_recent_flags=("${sorted_item_recent_flags[@]}")
         item_display_paths=("${sorted_item_display_paths[@]}")
         item_project_identities=("${sorted_item_project_identities[@]}")
+        item_project_paths=("${sorted_item_project_paths[@]}")
         item_age_labels=("${sorted_item_age_labels[@]}")
         item_cloud_flags=("${sorted_item_cloud_flags[@]}")
     fi
@@ -1885,10 +1952,14 @@ clean_project_artifacts() {
     PURGE_SELECTION_RESULT=""
     PURGE_CATEGORY_FULL_PATHS_ARRAY=("${item_display_paths[@]}")
     PURGE_CATEGORY_PROJECT_IDS_ARRAY=("${item_project_identities[@]}")
+    PURGE_CATEGORY_PROJECT_PATHS_ARRAY=("${item_project_paths[@]}")
+    PURGE_CATEGORY_SIZE_UNKNOWN_FLAGS_ARRAY=("${item_size_unknown_flags[@]}")
     if [[ -t 0 ]]; then
         if ! select_purge_categories "${menu_options[@]}"; then
             PURGE_CATEGORY_FULL_PATHS_ARRAY=()
             PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
+            PURGE_CATEGORY_PROJECT_PATHS_ARRAY=()
+            PURGE_CATEGORY_SIZE_UNKNOWN_FLAGS_ARRAY=()
             unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
             PURGE_RUN_OUTCOME="cancelled"
             return 0
@@ -1919,6 +1990,8 @@ clean_project_artifacts() {
         printf '\n'
         PURGE_CATEGORY_FULL_PATHS_ARRAY=()
         PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
+        PURGE_CATEGORY_PROJECT_PATHS_ARRAY=()
+        PURGE_CATEGORY_SIZE_UNKNOWN_FLAGS_ARRAY=()
         unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
         PURGE_RUN_OUTCOME="cancelled"
         return 0
@@ -1947,6 +2020,8 @@ clean_project_artifacts() {
             printf '\n'
             PURGE_CATEGORY_FULL_PATHS_ARRAY=()
             PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
+            PURGE_CATEGORY_PROJECT_PATHS_ARRAY=()
+            PURGE_CATEGORY_SIZE_UNKNOWN_FLAGS_ARRAY=()
             unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
             PURGE_RUN_OUTCOME="cancelled"
             return 0
@@ -1954,6 +2029,8 @@ clean_project_artifacts() {
     fi
     PURGE_CATEGORY_FULL_PATHS_ARRAY=()
     PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
+    PURGE_CATEGORY_PROJECT_PATHS_ARRAY=()
+    PURGE_CATEGORY_SIZE_UNKNOWN_FLAGS_ARRAY=()
 
     # Clean selected items
     echo ""
