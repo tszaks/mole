@@ -1157,6 +1157,84 @@ EOF
 	[[ "$status" -eq 0 ]] || [[ "$status" -eq 2 ]]
 }
 
+@test "clean_project_artifacts: keeps completed roots and reports failed roots" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+good_root="$HOME/www"
+failed_root="$HOME/dev"
+good_artifact="$good_root/good-project/node_modules"
+failed_artifact="$failed_root/failed-project/node_modules"
+mkdir -p "$good_artifact" "$failed_artifact" "$HOME/.cache/mole"
+touch "$good_root/good-project/package.json" "$failed_root/failed-project/package.json"
+
+PURGE_SEARCH_PATHS=("$good_root" "$failed_root")
+scan_purge_targets() {
+	if [[ "$1" == "$good_root" ]]; then
+		printf '%s\n' "$good_artifact" > "$2"
+		return 0
+	fi
+	printf '%s\n' "$failed_artifact" > "$2"
+	return 7
+}
+get_dir_size_kb() { echo 4; }
+is_recently_modified() {
+	_PURGE_ACTIVITY_STATE=old
+	return 1
+}
+purge_target_activity_still_safe() { return 0; }
+safe_remove() {
+	printf 'REMOVE:%s\n' "$1"
+	return 0
+}
+
+export MOLE_DRY_RUN=1
+clean_project_artifacts </dev/null
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Skipped 1 project scan root because scanning did not complete"* ]] || return 1
+	[[ "$output" == *"~/dev (status 7)"* ]] || return 1
+	[[ "$output" == *"REMOVE:$HOME/www/good-project/node_modules"* ]] || return 1
+	[[ "$output" != *"REMOVE:$HOME/dev/failed-project/node_modules"* ]] || return 1
+}
+
+@test "clean_project_artifacts: refuses when every configured root scan fails" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+failed_root="$HOME/www"
+failed_artifact="$failed_root/failed-project/node_modules"
+mkdir -p "$failed_artifact" "$HOME/.cache/mole"
+touch "$failed_root/failed-project/package.json"
+
+PURGE_SEARCH_PATHS=("$failed_root")
+scan_purge_targets() {
+	printf '%s\n' "$failed_artifact" > "$2"
+	return 7
+}
+safe_remove() {
+	printf 'UNEXPECTED_REMOVE:%s\n' "$1"
+	return 1
+}
+
+purge_status=0
+clean_project_artifacts </dev/null || purge_status=$?
+printf 'PURGE_STATUS=%s\n' "$purge_status"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Skipped 1 project scan root because scanning did not complete"* ]] || return 1
+	[[ "$output" == *"~/www (status 7)"* ]] || return 1
+	[[ "$output" == *"PURGE_STATUS=3"* ]] || return 1
+	[[ "$output" != *"Great! No old project artifacts to clean"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_REMOVE:"* ]] || return 1
+}
+
 @test "clean_project_artifacts: handles empty menu options under set -u" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

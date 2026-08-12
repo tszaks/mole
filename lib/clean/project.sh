@@ -1181,6 +1181,7 @@ clean_project_artifacts() {
     # Note: Declared without 'local' so cleanup_scan trap can access them
     scan_pids=()
     scan_temps=()
+    scan_roots=()
     _cleanup_scan_done=false
     # shellcheck disable=SC2329
     cleanup_scan() {
@@ -1192,7 +1193,7 @@ clean_project_artifacts() {
         done
         # Clean up temp files
         for temp in "${scan_temps[@]+"${scan_temps[@]}"}"; do
-            rm -f "$temp" 2> /dev/null || true
+            rm -f "$temp" "${temp}.targets" "${temp}.tags" "${temp}.processed" 2> /dev/null || true
         done
         # Clean up purge scanning file
         local stats_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mole"
@@ -1212,6 +1213,7 @@ clean_project_artifacts() {
             local scan_output
             scan_output=$(mktemp)
             scan_temps+=("$scan_output")
+            scan_roots+=("$path")
             # Launch scan in background for true parallelism
             scan_purge_targets "$path" "$scan_output" < /dev/null &
             local scan_pid=$!
@@ -1219,8 +1221,15 @@ clean_project_artifacts() {
         fi
     done
     # Wait for all scans to complete
+    local -a scan_statuses=()
     for pid in "${scan_pids[@]+"${scan_pids[@]}"}"; do
-        wait "$pid" 2> /dev/null || true
+        local scan_status=0
+        if wait "$pid" 2> /dev/null; then
+            scan_status=0
+        else
+            scan_status=$?
+        fi
+        scan_statuses+=("$scan_status")
     done
 
     # Stop the scanning monitor (removes purge_scanning file to signal completion)
@@ -1236,11 +1245,25 @@ clean_project_artifacts() {
     # when overlapping search roots produce the same artifact many times.
     local dedupe_output
     dedupe_output=$(mktemp_file "mole-purge-dedupe") || return 1
-    for scan_output in "${scan_temps[@]+"${scan_temps[@]}"}"; do
-        if [[ -f "$scan_output" ]]; then
-            cat "$scan_output" >> "$dedupe_output"
-            rm -f "$scan_output"
+    local completed_scan_count=0
+    local failed_scan_count=0
+    local scan_index
+    for ((scan_index = 0; scan_index < ${#scan_temps[@]}; scan_index++)); do
+        scan_output="${scan_temps[$scan_index]}"
+        local scan_status="${scan_statuses[$scan_index]:-1}"
+        if [[ $scan_status -eq 0 && -f "$scan_output" ]]; then
+            if cat "$scan_output" >> "$dedupe_output"; then
+                completed_scan_count=$((completed_scan_count + 1))
+            else
+                scan_statuses[scan_index]=1
+                failed_scan_count=$((failed_scan_count + 1))
+                debug_log "Purge scan output unreadable: ${scan_roots[$scan_index]:-unknown root}"
+            fi
+        else
+            failed_scan_count=$((failed_scan_count + 1))
+            debug_log "Purge scan incomplete (status $scan_status): ${scan_roots[$scan_index]:-unknown root}"
         fi
+        rm -f "$scan_output" "${scan_output}.targets" "${scan_output}.tags" "${scan_output}.processed" 2> /dev/null || true
     done
     if [[ -s "$dedupe_output" ]]; then
         while IFS= read -r item; do
@@ -1254,6 +1277,24 @@ clean_project_artifacts() {
         # eval: restore caller traps captured by $(trap -p)
         [[ -n "$previous_int_trap" ]] && eval "$previous_int_trap"
         [[ -n "$previous_term_trap" ]] && eval "$previous_term_trap"
+    fi
+    if [[ $failed_scan_count -gt 0 ]]; then
+        local root_text="root"
+        [[ $failed_scan_count -ne 1 ]] && root_text="roots"
+        echo ""
+        echo -e "${YELLOW}${ICON_WARNING}${NC} Skipped ${failed_scan_count} project scan ${root_text} because scanning did not complete:"
+        for ((scan_index = 0; scan_index < ${#scan_roots[@]}; scan_index++)); do
+            local scan_status="${scan_statuses[$scan_index]:-1}"
+            if [[ $scan_status -ne 0 ]]; then
+                local display_root="${scan_roots[$scan_index]/#$HOME/~}"
+                echo -e "  ${GRAY}${display_root}${NC} (status ${scan_status})"
+            fi
+        done
+        echo -e "${GRAY}Re-run with 'mo purge --debug' to inspect the scan failure.${NC}"
+        if [[ $completed_scan_count -eq 0 ]]; then
+            printf '\n'
+            return 3
+        fi
     fi
     if [[ ${#all_found_items[@]} -eq 0 ]]; then
         echo ""
