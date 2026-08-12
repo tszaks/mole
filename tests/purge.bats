@@ -1310,7 +1310,8 @@ EOF
 
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"Skipped 1 project scan root because scanning did not complete"* ]] || return 1
-	[[ "$output" == *"~/dev (status "* ]] || return 1
+	[[ "$output" == *"~/dev"* ]] || return 1
+	[[ "$output" == *"(status 7)"* ]] || return 1
 	[[ "$output" == *"REMOVE:$HOME/www/good-project/node_modules"* ]] || return 1
 	[[ "$output" != *"REMOVE:$HOME/dev/failed-project/node_modules"* ]] || return 1
 }
@@ -1389,7 +1390,8 @@ EOF
 
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"Skipped 1 project scan root because scanning did not complete"* ]] || return 1
-	[[ "$output" == *"~/www (status "* ]] || return 1
+	[[ "$output" == *"~/www"* ]] || return 1
+	[[ "$output" == *"(status 7)"* ]] || return 1
 	[[ "$output" == *"PURGE_OUTCOME=scan_failed"* ]] || return 1
 	[[ "$output" != *"Great! No old project artifacts to clean"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_REMOVE:"* ]] || return 1
