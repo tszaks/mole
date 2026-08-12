@@ -214,7 +214,7 @@ find_purge_project_root_for_artifact "$artifact"
 EOF
 
 	[ "$status" -eq 0 ] || return 1
-	[ "$output" = "$HOME/www/obelisk" ]
+	[ "$output" = "$HOME/www/obelisk" ] || return 1
 }
 
 @test "filter_nested_artifacts: removes nested node_modules" {
@@ -517,7 +517,7 @@ EOF
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"Select Artifacts to Purge"* ]] || return 1
 	[[ "$output" == *"X Skip"* ]] || return 1
-	[[ "$output" != *"Select Categories to Clean"* ]]
+	[[ "$output" != *"Select Categories to Clean"* ]] || return 1
 }
 
 @test "select_purge_categories shows exact project boundaries and selection feedback" {
@@ -545,7 +545,7 @@ EOF
 	[[ "$output" == *"─ B target"* ]] || return 1
 	[[ "$output" == *"~/work/obelisk · 154KB · 2/2 selected"* ]] || return 1
 	[[ "$output" == *"~/work/obelisk · 154KB · 0/2 selected"* ]] || return 1
-	[[ "$output" == *"RESULT=2"* ]]
+	[[ "$output" == *"RESULT=2"* ]] || return 1
 }
 
 @test "select_purge_categories skips every artifact with the current project ID" {
@@ -560,7 +560,7 @@ printf 'RESULT=%s\n' "$PURGE_SELECTION_RESULT"
 EOF
 
 	[ "$status" -eq 0 ] || return 1
-	[[ "$output" == *"RESULT=2"* ]]
+	[[ "$output" == *"RESULT=2"* ]] || return 1
 }
 
 @test "select_purge_categories skips only the current row without a project ID" {
@@ -575,7 +575,7 @@ printf 'RESULT=%s\n' "$PURGE_SELECTION_RESULT"
 EOF
 
 	[ "$status" -eq 0 ] || return 1
-	[[ "$output" == *"RESULT=1"* ]]
+	[[ "$output" == *"RESULT=1"* ]] || return 1
 }
 
 @test "select_purge_categories does not group same-named projects" {
@@ -590,7 +590,7 @@ printf 'RESULT=%s\n' "$PURGE_SELECTION_RESULT"
 EOF
 
 	[ "$status" -eq 0 ] || return 1
-	[[ "$output" == *"RESULT=1"* ]]
+	[[ "$output" == *"RESULT=1"* ]] || return 1
 }
 
 @test "confirm_purge_cleanup accepts Enter" {
@@ -1266,8 +1266,8 @@ clean_project_artifacts </dev/null
 printf 'PURGE_OUTCOME=%s\n' "$PURGE_RUN_OUTCOME"
 EOF
 
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"PURGE_OUTCOME=no_candidates"* ]]
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"PURGE_OUTCOME=no_candidates"* ]] || return 1
 }
 
 @test "clean_project_artifacts: keeps completed roots and reports failed roots" {
@@ -1359,7 +1359,7 @@ EOF
 
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" != *"OVERLAPPING_SCAN"* ]] || return 1
-	[[ "$output" != *"Skipped 1 project scan root"* ]]
+	[[ "$output" != *"Skipped 1 project scan root"* ]] || return 1
 }
 
 @test "clean_project_artifacts: refuses when every configured root scan fails" {
@@ -1431,7 +1431,7 @@ printf 'UNEXPECTED_CONTINUATION\n'
 EOF
 
 	[ "$status" -eq 7 ] || return 1
-	[[ "$output" != *"UNEXPECTED_CONTINUATION"* ]]
+	[[ "$output" != *"UNEXPECTED_CONTINUATION"* ]] || return 1
 }
 
 @test "clean_project_artifacts: handles empty menu options under set -u" {
@@ -1678,7 +1678,7 @@ EOF
 	[[ "$output" == *"No items selected"* ]] ||
 		[[ "$output" == *"Purge complete"* ]] ||
 		[[ "$output" == *"No old"* ]] ||
-		[[ "$output" == *"Great"* ]]
+		[[ "$output" == *"Great"* ]] || return 1
 }
 
 @test "mo purge: command exists and is executable" {
@@ -2049,7 +2049,7 @@ SCRIPT
 	_run_in_pty "$script_file"
 	rm -f "$script_file"
 
-	[ "$(grep -c '^PATH\[' "$capture_file")" -eq 3 ]
+	[ "$(grep -c '^PATH\[' "$capture_file")" -eq 3 ] || return 1
 	local path0 path1 path2
 	path0=$(grep '^PATH\[0\]=' "$capture_file" | cut -d= -f2-)
 	path1=$(grep '^PATH\[1\]=' "$capture_file" | cut -d= -f2-)
@@ -2058,7 +2058,7 @@ SCRIPT
 
 	[[ "$path0" == *"alpha/node_modules"* ]] || return 1
 	[[ "$path1" == *"alpha/.venv"* ]] || return 1
-	[[ "$path2" == *"beta/node_modules"* ]]
+	[[ "$path2" == *"beta/node_modules"* ]] || return 1
 }
 
 @test "sort: cloud marker stays aligned across menu and full-path arrays" {
