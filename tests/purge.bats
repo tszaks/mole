@@ -499,6 +499,51 @@ EOF
     [[ "$output" == *"PASS"* ]]
 }
 
+@test "select_purge_categories skips every artifact with the current project ID" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+PURGE_CATEGORY_SIZES="1,2,3"
+PURGE_CATEGORY_PROJECT_IDS_ARRAY=("project-a" "project-a" "project-b")
+select_purge_categories "A node_modules" "A dist" "B target" <<< $'x\n' > /dev/null
+printf 'RESULT=%s\n' "$PURGE_SELECTION_RESULT"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"RESULT=2"* ]]
+}
+
+@test "select_purge_categories skips only the current row without a project ID" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+PURGE_CATEGORY_SIZES="1,2"
+PURGE_CATEGORY_PROJECT_IDS_ARRAY=("" "project-a")
+select_purge_categories "Unknown node_modules" "A dist" <<< $'x\n' > /dev/null
+printf 'RESULT=%s\n' "$PURGE_SELECTION_RESULT"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"RESULT=1"* ]]
+}
+
+@test "select_purge_categories does not group same-named projects" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+PURGE_CATEGORY_SIZES="1,2"
+PURGE_CATEGORY_PROJECT_IDS_ARRAY=("inode:1:10" "inode:1:20")
+select_purge_categories "~/client-a/obelisk node_modules" "~/client-b/obelisk dist" <<< $'x\n' > /dev/null
+printf 'RESULT=%s\n' "$PURGE_SELECTION_RESULT"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"RESULT=1"* ]]
+}
+
 @test "confirm_purge_cleanup accepts Enter" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

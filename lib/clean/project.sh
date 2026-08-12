@@ -964,6 +964,7 @@ select_purge_categories() {
         [[ -n "$_prev_exit" ]] && eval "$_prev_exit"
         [[ -n "$_prev_int" ]] && eval "$_prev_int"
         [[ -n "$_prev_term" ]] && eval "$_prev_term"
+        return 0
     }
     # shellcheck disable=SC2329
     handle_interrupt() {
@@ -1067,18 +1068,19 @@ select_purge_categories() {
         local _enter="${GRAY}Enter Confirm${NC}"
         local _all="${GRAY}A All${NC}"
         local _invert="${GRAY}I Invert${NC}"
+        local _skip_project="${GRAY}X Skip Project${NC}"
         local _quit="${GRAY}Q Quit${NC}"
 
         # Strip ANSI to measure real length
         _ph_len() { printf "%s" "$1" | LC_ALL=C awk '{gsub(/\033\[[0-9;]*[A-Za-z]/,""); printf "%d", length}'; }
 
-        # Level 0 (full): ↑↓ | Space Select | Enter Confirm | A All | I Invert | Q Quit
-        local _full="${_nav}${_sep}${_space}${_sep}${_enter}${_sep}${_all}${_sep}${_invert}${_sep}${_quit}"
+        # Level 0 (full): ↑↓ | Space Select | Enter Confirm | A All | I Invert | X Skip Project | Q Quit
+        local _full="${_nav}${_sep}${_space}${_sep}${_enter}${_sep}${_all}${_sep}${_invert}${_sep}${_skip_project}${_sep}${_quit}"
         if (($(_ph_len "$_full") <= _term_w)); then
             printf "%s${_full}${NC}\n" "$clear_line"
         else
-            # Level 1: ↑↓ | Enter Confirm | A All | I Invert | Q Quit
-            local _l1="${_nav}${_sep}${_enter}${_sep}${_all}${_sep}${_invert}${_sep}${_quit}"
+            # Level 1: ↑↓ | Enter Confirm | A All | X Skip Project | Q Quit
+            local _l1="${_nav}${_sep}${_enter}${_sep}${_all}${_sep}${_skip_project}${_sep}${_quit}"
             if (($(_ph_len "$_l1") <= _term_w)); then
                 printf "%s${_l1}${NC}\n" "$clear_line"
             else
@@ -1171,6 +1173,19 @@ select_purge_categories() {
                         selected[i]=true
                     fi
                 done
+                ;;
+            "x" | "X") # Deselect the current artifact's exact project
+                local current_index=$((top_index + cursor_pos))
+                local project_id="${PURGE_CATEGORY_PROJECT_IDS_ARRAY[current_index]:-}"
+                if [[ -n "$project_id" ]]; then
+                    for ((i = 0; i < total_items; i++)); do
+                        if [[ "${PURGE_CATEGORY_PROJECT_IDS_ARRAY[i]:-}" == "$project_id" ]]; then
+                            selected[i]=false
+                        fi
+                    done
+                else
+                    selected[current_index]=false
+                fi
                 ;;
             "q" | "Q" | $'\x03') # Quit or Ctrl-C
                 restore_terminal
