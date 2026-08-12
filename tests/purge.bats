@@ -2117,18 +2117,19 @@ SCRIPT
 	rm -f "$script_file"
 
 	[ "$(grep -c '^PROJECT_ID\[' "$capture_file")" -eq 2 ] || return 1
-	local project_id0 project_id1 project_path0 project_path1 expected_project_id
+	local project_id0 project_id1 project_path0 project_path1 expected_project_id expected_project_path
 	project_id0=$(grep '^PROJECT_ID\[0\]=' "$capture_file" | cut -d= -f2-)
 	project_id1=$(grep '^PROJECT_ID\[1\]=' "$capture_file" | cut -d= -f2-)
 	project_path0=$(grep '^PROJECT_PATH\[0\]=' "$capture_file" | cut -d= -f2-)
 	project_path1=$(grep '^PROJECT_PATH\[1\]=' "$capture_file" | cut -d= -f2-)
 	rm -f "$capture_file"
 	expected_project_id=$(/bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mole_path_identity '$HOME/www/unmarked'")
+	printf -v expected_project_path '~%s' '/www/unmarked'
 
 	[ "$project_id0" = "$expected_project_id" ] || return 1
 	[ "$project_id1" = "$expected_project_id" ] || return 1
-	[ "$project_path0" = "~/www/unmarked" ] || return 1
-	[ "$project_path1" = "~/www/unmarked" ] || return 1
+	[ "$project_path0" = "$expected_project_path" ] || return 1
+	[ "$project_path1" = "$expected_project_path" ] || return 1
 }
 
 @test "sort: cloud marker stays aligned across menu and full-path arrays" {
