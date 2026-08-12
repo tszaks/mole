@@ -200,6 +200,23 @@ EOF
 	[[ "$output" == \~/www/app/node_modules ]]
 }
 
+@test "find_purge_project_root_for_artifact prefers the owning monorepo" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+artifact="$HOME/www/obelisk/apps/web/node_modules"
+mkdir -p "$artifact"
+touch "$HOME/www/obelisk/pnpm-workspace.yaml"
+touch "$HOME/www/obelisk/apps/web/package.json"
+
+find_purge_project_root_for_artifact "$artifact"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[ "$output" = "$HOME/www/obelisk" ]
+}
+
 @test "filter_nested_artifacts: removes nested node_modules" {
 	mkdir -p "$HOME/www/project/node_modules/package/node_modules"
 
@@ -1801,6 +1818,11 @@ select_purge_categories() {
 		echo "PATH[\$i]=\$p" >> "$capture_file"
 		i=\$((i + 1))
 	done
+	i=0
+	for project_id in "\${PURGE_CATEGORY_PROJECT_IDS_ARRAY[@]}"; do
+		echo "PROJECT_ID[\$i]=\$project_id" >> "$capture_file"
+		i=\$((i + 1))
+	done
 	PURGE_SELECTION_RESULT=""
 	return 1
 }
@@ -1820,10 +1842,12 @@ SCRIPT
 	sizes_csv=$(grep '^SIZES=' "$capture_file" | cut -d= -f2-)
 	IFS=',' read -r -a sizes <<< "$sizes_csv"
 
-	local path0 path1
+	local path0 path1 project_id0 expected_project_id0
 	path0=$(grep '^PATH\[0\]=' "$capture_file" | head -1 | cut -d= -f2-)
 	path1=$(grep '^PATH\[1\]=' "$capture_file" | head -1 | cut -d= -f2-)
+	project_id0=$(grep '^PROJECT_ID\[0\]=' "$capture_file" | head -1 | cut -d= -f2-)
 	rm -f "$capture_file"
+	expected_project_id0=$(/bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mole_path_identity '$HOME/www/beta'")
 
 	# PURGE_CATEGORY_SIZES must be sorted descending (largest first).
 	[ "${sizes[0]}" -gt "${sizes[1]}" ]
@@ -1831,6 +1855,7 @@ SCRIPT
 	# Index 0 → largest artifact → beta's path.
 	# With the bug path0 = alpha (discovery order) → [[ ... == *beta* ]] fails.
 	[[ "$path0" == *"beta"* ]] || return 1
+	[ "$project_id0" = "$expected_project_id0" ] || return 1
 
 	# Index 1 → smaller artifact → alpha's path.
 	[[ "$path1" == *"alpha"* ]]

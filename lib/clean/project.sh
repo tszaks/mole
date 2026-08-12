@@ -27,6 +27,7 @@ readonly PURGE_CONFIG_FILE="$HOME/.config/mole/purge_paths"
 # Resolved search paths.
 PURGE_SEARCH_PATHS=()
 PURGE_CATEGORY_FULL_PATHS_ARRAY=()
+PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
 
 # Project indicators for container detection.
 # Monorepo indicators (higher priority)
@@ -792,6 +793,88 @@ get_dir_size_kb() {
         echo "ERROR"
     fi
 }
+
+# Resolve the owning project for a purge artifact. Monorepo indicators take
+# precedence so every artifact in one workspace shares the same identity.
+find_purge_project_root_for_artifact() {
+    local path="$1"
+    local current_dir="${path%/*}"
+    [[ -z "$current_dir" ]] && current_dir="/"
+    local monorepo_root=""
+    local project_root=""
+
+    while [[ "$current_dir" != "/" && "$current_dir" != "$HOME" && -n "$current_dir" ]]; do
+        if [[ -z "$monorepo_root" ]]; then
+            for indicator in "${MONOREPO_INDICATORS[@]}"; do
+                if [[ -e "$current_dir/$indicator" ]]; then
+                    monorepo_root="$current_dir"
+                    break
+                fi
+            done
+        fi
+
+        if [[ -z "$project_root" ]]; then
+            for indicator in "${PROJECT_INDICATORS[@]}"; do
+                if [[ -e "$current_dir/$indicator" ]]; then
+                    project_root="$current_dir"
+                    break
+                fi
+            done
+        fi
+
+        if [[ -n "$monorepo_root" ]]; then
+            break
+        fi
+
+        local relative_to_home="${current_dir#"$HOME"}"
+        local without_slashes="${relative_to_home//\//}"
+        local depth=$((${#relative_to_home} - ${#without_slashes}))
+        if [[ -n "$project_root" && $depth -lt 2 ]]; then
+            break
+        fi
+
+        local parent="${current_dir%/*}"
+        current_dir="${parent:-/}"
+    done
+
+    if [[ -n "$monorepo_root" ]]; then
+        printf '%s\n' "$monorepo_root"
+        return 0
+    fi
+
+    if [[ -n "$project_root" ]]; then
+        printf '%s\n' "$project_root"
+        return 0
+    fi
+
+    return 1
+}
+
+# Derive a display-only project name when no indicator-based root exists.
+get_purge_fallback_project_name() {
+    local path="$1"
+    local -a search_roots=()
+    if [[ ${#PURGE_SEARCH_PATHS[@]} -gt 0 ]]; then
+        search_roots=("${PURGE_SEARCH_PATHS[@]}")
+    else
+        search_roots=("$HOME/www" "$HOME/dev" "$HOME/Projects")
+    fi
+
+    local root
+    for root in "${search_roots[@]}"; do
+        root="${root%/}"
+        if [[ -n "$root" && "$path" == "$root/"* ]]; then
+            local relative_path="${path#"$root"/}"
+            printf '%s\n' "${relative_path%%/*}"
+            return
+        fi
+    done
+
+    local grandparent="${path%/*}"
+    grandparent="${grandparent%/*}"
+    printf '%s\n' "${grandparent##*/}"
+}
+
 # Purge category selector.
 select_purge_categories() {
     local -a categories=("$@")
@@ -1408,151 +1491,25 @@ clean_project_artifacts() {
     local -a item_recent_flags=()
     local -a item_age_labels=()
     local -a item_cloud_flags=()
-    # Find the best project root for an artifact once; callers decide how to
-    # display it. Monorepo indicators win over plain project indicators.
-    find_purge_project_root_for_artifact() {
-        local path="$1"
-        local current_dir="${path%/*}"
-        [[ -z "$current_dir" ]] && current_dir="/"
-        local monorepo_root=""
-        local project_root=""
-
-        while [[ "$current_dir" != "/" && "$current_dir" != "$HOME" && -n "$current_dir" ]]; do
-            if [[ -z "$monorepo_root" ]]; then
-                for indicator in "${MONOREPO_INDICATORS[@]}"; do
-                    if [[ -e "$current_dir/$indicator" ]]; then
-                        monorepo_root="$current_dir"
-                        break
-                    fi
-                done
-            fi
-
-            if [[ -z "$project_root" ]]; then
-                for indicator in "${PROJECT_INDICATORS[@]}"; do
-                    if [[ -e "$current_dir/$indicator" ]]; then
-                        project_root="$current_dir"
-                        break
-                    fi
-                done
-            fi
-
-            if [[ -n "$monorepo_root" ]]; then
-                break
-            fi
-
-            local _rel="${current_dir#"$HOME"}"
-            local _stripped="${_rel//\//}"
-            local depth=$((${#_rel} - ${#_stripped}))
-            if [[ -n "$project_root" && $depth -lt 2 ]]; then
-                break
-            fi
-
-            local _parent="${current_dir%/*}"
-            current_dir="${_parent:-/}"
-        done
-
-        if [[ -n "$monorepo_root" ]]; then
-            echo "$monorepo_root"
-            return 0
-        fi
-
-        if [[ -n "$project_root" ]]; then
-            echo "$project_root"
-            return 0
-        fi
-
-        return 1
-    }
-
-    # Helper to get project name from path.
-    get_project_name() {
-        local path="$1"
-        local project_root=""
-
-        if project_root=$(find_purge_project_root_for_artifact "$path"); then
-            echo "${project_root##*/}"
-            return
-        fi
-
-        local result=""
-        local search_roots=()
-        if [[ ${#PURGE_SEARCH_PATHS[@]} -gt 0 ]]; then
-            search_roots=("${PURGE_SEARCH_PATHS[@]}")
-        else
-            search_roots=("$HOME/www" "$HOME/dev" "$HOME/Projects")
-        fi
-        for root in "${search_roots[@]}"; do
-            root="${root%/}"
-            if [[ -n "$root" && "$path" == "$root/"* ]]; then
-                local relative_path="${path#"$root"/}"
-                result="${relative_path%%/*}"
-                break
-            fi
-        done
-
-        if [[ -z "$result" ]]; then
-            local _gp="${path%/*}"
-            _gp="${_gp%/*}"
-            result="${_gp##*/}"
-        fi
-
-        echo "$result"
-    }
-
-    # Helper to get project path (more complete than just project name).
-    get_project_path() {
-        local path="$1"
-        local project_root=""
-        if ! project_root=$(find_purge_project_root_for_artifact "$path"); then
-            project_root="${path%/*}"
-        fi
-        echo "${project_root/#$HOME/~}"
-    }
-
     # Helper to get artifact display name
     # For duplicate artifact names within same project, include parent directory for context
-    # Uses pre-computed _cached_basenames and _cached_project_names arrays when available.
     get_artifact_display_name() {
         local path="$1"
+        local item_index="$2"
         local artifact_name="${path##*/}"
         local parent_name="${path%/*}"
         parent_name="${parent_name##*/}"
-
-        local project_name
-        if [[ -n "${_cached_project_names[*]+x}" ]]; then
-            # Fast path: use pre-computed cache
-            local _idx
-            project_name=""
-            for _idx in "${!safe_to_clean[@]}"; do
-                if [[ "${safe_to_clean[$_idx]}" == "$path" ]]; then
-                    project_name="${_cached_project_names[$_idx]}"
-                    break
-                fi
-            done
-        else
-            project_name=$(get_project_name "$path")
-        fi
+        local project_name="${_cached_project_names[item_index]}"
 
         # Check if there are other items with same artifact name AND same project
         local has_duplicate=false
-        if [[ -n "${_cached_basenames[*]+x}" ]]; then
-            local _idx
-            for _idx in "${!safe_to_clean[@]}"; do
-                if [[ "${safe_to_clean[$_idx]}" != "$path" && "${_cached_basenames[$_idx]}" == "$artifact_name" && "${_cached_project_names[$_idx]}" == "$project_name" ]]; then
-                    has_duplicate=true
-                    break
-                fi
-            done
-        else
-            for other_item in "${safe_to_clean[@]}"; do
-                if [[ "$other_item" != "$path" && "${other_item##*/}" == "$artifact_name" ]]; then
-                    if [[ "$(get_project_name "$other_item")" == "$project_name" ]]; then
-                        has_duplicate=true
-                        break
-                    fi
-                fi
-            done
-        fi
+        local other_index
+        for other_index in "${!safe_to_clean[@]}"; do
+            if [[ "$other_index" != "$item_index" && "${_cached_basenames[other_index]}" == "$artifact_name" && "${_cached_project_names[other_index]}" == "$project_name" ]]; then
+                has_duplicate=true
+                break
+            fi
+        done
 
         # If duplicate exists in same project and parent is not the project itself, show parent/artifact
         if [[ "$has_duplicate" == "true" && "$parent_name" != "$project_name" && "$parent_name" != "." && "$parent_name" != "/" ]]; then
@@ -1620,16 +1577,27 @@ clean_project_artifacts() {
         # Format: "project_path  size | artifact_type"
         printf "%-*s %9s | %-*s" "$printf_width" "$truncated_path" "$size_str" "$artifact_col" "$artifact_type"
     }
-    # Pre-compute basenames and project names once so get_artifact_display_name()
-    # can avoid repeated filesystem traversals during the O(N^2) duplicate check.
+    # Resolve project ownership once per artifact. The identity is authoritative
+    # for grouping; display names and paths are never used as selectors.
     local -a _cached_basenames=()
     local -a _cached_project_names=()
     local -a _cached_project_paths=()
+    local -a _cached_project_identities=()
     local _pre_idx
     for _pre_idx in "${!safe_to_clean[@]}"; do
-        _cached_basenames[_pre_idx]="${safe_to_clean[$_pre_idx]##*/}"
-        _cached_project_names[_pre_idx]=$(get_project_name "${safe_to_clean[$_pre_idx]}")
-        _cached_project_paths[_pre_idx]=$(get_project_path "${safe_to_clean[$_pre_idx]}")
+        local artifact_path="${safe_to_clean[$_pre_idx]}"
+        local project_root=""
+        _cached_basenames[_pre_idx]="${artifact_path##*/}"
+        if project_root=$(find_purge_project_root_for_artifact "$artifact_path"); then
+            _cached_project_names[_pre_idx]="${project_root##*/}"
+            _cached_project_paths[_pre_idx]="${project_root/#$HOME/~}"
+            _cached_project_identities[_pre_idx]=$(mole_path_identity "$project_root")
+        else
+            _cached_project_names[_pre_idx]=$(get_purge_fallback_project_name "$artifact_path")
+            local artifact_parent="${artifact_path%/*}"
+            _cached_project_paths[_pre_idx]="${artifact_parent/#$HOME/~}"
+            _cached_project_identities[_pre_idx]="artifact-row:${_pre_idx}"
+        fi
     done
 
     # Build menu options - one line per artifact
@@ -1638,12 +1606,13 @@ clean_project_artifacts() {
     local -a raw_project_paths=()
     local -a raw_artifact_types=()
     local -a item_display_paths=()
+    local -a item_project_identities=()
     local _sz_idx=0
     for item in "${safe_to_clean[@]}"; do
         local item_index=$_sz_idx
         local project_path="${_cached_project_paths[$item_index]}"
         local artifact_type
-        artifact_type=$(get_artifact_display_name "$item")
+        artifact_type=$(get_artifact_display_name "$item" "$item_index")
         local size_raw
         size_raw=$(cat "${_size_tmpfiles[$item_index]}" 2> /dev/null || echo "0")
         rm -f "${_size_tmpfiles[$item_index]}" 2> /dev/null || true
@@ -1686,6 +1655,7 @@ clean_project_artifacts() {
         raw_artifact_types+=("$artifact_type")
         item_paths+=("$item")
         item_display_paths+=("$display_item_path")
+        item_project_identities+=("${_cached_project_identities[$item_index]}")
         item_sizes+=("$size_kb")
         item_size_unknown_flags+=("$size_unknown")
         item_recent_flags+=("$is_recent")
@@ -1785,6 +1755,7 @@ clean_project_artifacts() {
         local -a sorted_item_size_unknown_flags=()
         local -a sorted_item_recent_flags=()
         local -a sorted_item_display_paths=()
+        local -a sorted_item_project_identities=()
         local -a sorted_item_age_labels=()
         local -a sorted_item_cloud_flags=()
 
@@ -1795,6 +1766,7 @@ clean_project_artifacts() {
             sorted_item_size_unknown_flags+=("${item_size_unknown_flags[idx]}")
             sorted_item_recent_flags+=("${item_recent_flags[idx]}")
             sorted_item_display_paths+=("${item_display_paths[idx]}")
+            sorted_item_project_identities+=("${item_project_identities[idx]}")
             sorted_item_age_labels+=("${item_age_labels[idx]}")
             sorted_item_cloud_flags+=("${item_cloud_flags[idx]}")
         done
@@ -1806,6 +1778,7 @@ clean_project_artifacts() {
         item_size_unknown_flags=("${sorted_item_size_unknown_flags[@]}")
         item_recent_flags=("${sorted_item_recent_flags[@]}")
         item_display_paths=("${sorted_item_display_paths[@]}")
+        item_project_identities=("${sorted_item_project_identities[@]}")
         item_age_labels=("${sorted_item_age_labels[@]}")
         item_cloud_flags=("${sorted_item_cloud_flags[@]}")
     fi
@@ -1837,9 +1810,11 @@ clean_project_artifacts() {
     # Interactive selection (only if terminal is available)
     PURGE_SELECTION_RESULT=""
     PURGE_CATEGORY_FULL_PATHS_ARRAY=("${item_display_paths[@]}")
+    PURGE_CATEGORY_PROJECT_IDS_ARRAY=("${item_project_identities[@]}")
     if [[ -t 0 ]]; then
         if ! select_purge_categories "${menu_options[@]}"; then
             PURGE_CATEGORY_FULL_PATHS_ARRAY=()
+            PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
             unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
             PURGE_RUN_OUTCOME="cancelled"
             return 0
@@ -1869,6 +1844,7 @@ clean_project_artifacts() {
         echo -e "${GRAY}No items selected${NC}"
         printf '\n'
         PURGE_CATEGORY_FULL_PATHS_ARRAY=()
+        PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
         unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
         PURGE_RUN_OUTCOME="cancelled"
         return 0
@@ -1896,12 +1872,14 @@ clean_project_artifacts() {
             echo -e "${GRAY}Purge cancelled${NC}"
             printf '\n'
             PURGE_CATEGORY_FULL_PATHS_ARRAY=()
+            PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
             unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
             PURGE_RUN_OUTCOME="cancelled"
             return 0
         fi
     fi
     PURGE_CATEGORY_FULL_PATHS_ARRAY=()
+    PURGE_CATEGORY_PROJECT_IDS_ARRAY=()
 
     # Clean selected items
     echo ""
