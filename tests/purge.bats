@@ -217,6 +217,23 @@ EOF
 	[ "$output" = "$HOME/www/obelisk" ] || return 1
 }
 
+@test "find_purge_project_root_for_artifact prefers a worktree over its nested package" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+artifact="$HOME/.codex/worktrees/obelisk/apps/web/node_modules"
+mkdir -p "$artifact"
+touch "$HOME/.codex/worktrees/obelisk/.git"
+touch "$HOME/.codex/worktrees/obelisk/apps/web/package.json"
+
+find_purge_project_root_for_artifact "$artifact"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[ "$output" = "$HOME/.codex/worktrees/obelisk" ] || return 1
+}
+
 @test "filter_nested_artifacts: removes nested node_modules" {
 	mkdir -p "$HOME/www/project/node_modules/package/node_modules"
 
