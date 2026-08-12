@@ -1306,8 +1306,32 @@ clean_project_artifacts() {
     previous_term_trap=$(trap -p TERM || true)
     trap cleanup_scan INT TERM
     trap_installed_by_this_call=true
+    local -a scan_statuses=()
+    local max_scan_jobs
+    max_scan_jobs=$(get_optimal_parallel_jobs io)
+    if ! [[ "$max_scan_jobs" =~ ^[0-9]+$ ]] || [[ "$max_scan_jobs" -lt 1 ]]; then
+        max_scan_jobs=1
+    elif [[ "$max_scan_jobs" -gt 4 ]]; then
+        max_scan_jobs=4
+    fi
+
+    _wait_for_purge_scan_batch() {
+        local pid
+        for pid in "${scan_pids[@]+"${scan_pids[@]}"}"; do
+            local scan_status=0
+            if wait "$pid" 2> /dev/null; then
+                scan_status=0
+            else
+                scan_status=$?
+            fi
+            scan_statuses+=("$scan_status")
+        done
+        scan_pids=()
+    }
+
     # Scanning is started from purge.sh with start_inline_spinner
-    # Launch all scans in parallel
+    # Keep root-level concurrency bounded because each fd scan has its own
+    # worker pool. Batches preserve launch-order alignment with scan_statuses.
     for path in "${PURGE_SEARCH_PATHS[@]}"; do
         if [[ -d "$path" ]]; then
             local scan_output
@@ -1318,19 +1342,12 @@ clean_project_artifacts() {
             scan_purge_targets "$path" "$scan_output" < /dev/null &
             local scan_pid=$!
             scan_pids+=("$scan_pid")
+            if [[ ${#scan_pids[@]} -ge $max_scan_jobs ]]; then
+                _wait_for_purge_scan_batch
+            fi
         fi
     done
-    # Wait for all scans to complete
-    local -a scan_statuses=()
-    for pid in "${scan_pids[@]+"${scan_pids[@]}"}"; do
-        local scan_status=0
-        if wait "$pid" 2> /dev/null; then
-            scan_status=0
-        else
-            scan_status=$?
-        fi
-        scan_statuses+=("$scan_status")
-    done
+    _wait_for_purge_scan_batch
 
     # Stop the scanning monitor (removes purge_scanning file to signal completion)
     local stats_dir="${XDG_CACHE_HOME:-$HOME/.cache}/mole"

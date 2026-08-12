@@ -1265,6 +1265,52 @@ EOF
 	[[ "$output" != *"REMOVE:$HOME/dev/failed-project/node_modules"* ]] || return 1
 }
 
+@test "clean_project_artifacts: bounds concurrent root scans" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+first_root="$HOME/www"
+second_root="$HOME/dev"
+first_artifact="$first_root/first-project/node_modules"
+second_artifact="$second_root/second-project/node_modules"
+scan_lock="$HOME/scan-active"
+mkdir -p "$first_artifact" "$second_artifact" "$HOME/.cache/mole"
+touch "$first_root/first-project/package.json" "$second_root/second-project/package.json"
+
+PURGE_SEARCH_PATHS=("$first_root" "$second_root")
+get_optimal_parallel_jobs() { echo 1; }
+scan_purge_targets() {
+	if ! mkdir "$scan_lock" 2>/dev/null; then
+		printf 'OVERLAPPING_SCAN\n'
+		return 7
+	fi
+	if [[ "$1" == "$first_root" ]]; then
+		printf '%s\n' "$first_artifact" > "$2"
+	else
+		printf '%s\n' "$second_artifact" > "$2"
+	fi
+	sleep 0.05
+	rmdir "$scan_lock"
+}
+get_dir_size_kb() { echo 4; }
+is_recently_modified() {
+	_PURGE_ACTIVITY_STATE=old
+	return 1
+}
+purge_target_activity_still_safe() { return 0; }
+safe_remove() { return 0; }
+
+export MOLE_DRY_RUN=1
+clean_project_artifacts </dev/null
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" != *"OVERLAPPING_SCAN"* ]] || return 1
+	[[ "$output" != *"Skipped 1 project scan root"* ]]
+}
+
 @test "clean_project_artifacts: refuses when every configured root scan fails" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
