@@ -2043,7 +2043,7 @@ select_purge_categories() {
 	return 1
 }
 
-clean_project_artifacts 2>/dev/null || true
+clean_project_artifacts 2>/dev/null
 SCRIPT
 
 	_run_in_pty "$script_file"
@@ -2059,6 +2059,59 @@ SCRIPT
 	[[ "$path0" == *"alpha/node_modules"* ]] || return 1
 	[[ "$path1" == *"alpha/.venv"* ]] || return 1
 	[[ "$path2" == *"beta/node_modules"* ]] || return 1
+}
+
+@test "grouping: indicator-less sibling artifacts share their exact parent" {
+	mkdir -p "$HOME/www/unmarked/node_modules" "$HOME/www/unmarked/dist"
+	dd if=/dev/zero of="$HOME/www/unmarked/node_modules/data" bs=1024 count=5 2>/dev/null
+	dd if=/dev/zero of="$HOME/www/unmarked/dist/data" bs=1024 count=4 2>/dev/null
+
+	local capture_file script_file
+	capture_file=$(mktemp "$HOME/fallback_group_capture.XXXXXX")
+	script_file=$(mktemp "$HOME/fallback_group_script.XXXXXX.sh")
+
+	cat > "$script_file" << SCRIPT
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+mkdir -p "$HOME/.cache/mole"
+export XDG_CACHE_HOME="$HOME/.cache"
+export TERM="dumb"
+PURGE_SEARCH_PATHS=("$HOME/www")
+
+select_purge_categories() {
+	local i=0
+	for project_id in "\${PURGE_CATEGORY_PROJECT_IDS_ARRAY[@]}"; do
+		echo "PROJECT_ID[\$i]=\$project_id" >> "$capture_file"
+		i=\$((i + 1))
+	done
+	i=0
+	for project_path in "\${PURGE_CATEGORY_PROJECT_PATHS_ARRAY[@]}"; do
+		echo "PROJECT_PATH[\$i]=\$project_path" >> "$capture_file"
+		i=\$((i + 1))
+	done
+	PURGE_SELECTION_RESULT=""
+	return 1
+}
+
+clean_project_artifacts 2>/dev/null
+SCRIPT
+
+	_run_in_pty "$script_file"
+	rm -f "$script_file"
+
+	[ "$(grep -c '^PROJECT_ID\[' "$capture_file")" -eq 2 ] || return 1
+	local project_id0 project_id1 project_path0 project_path1 expected_project_id
+	project_id0=$(grep '^PROJECT_ID\[0\]=' "$capture_file" | cut -d= -f2-)
+	project_id1=$(grep '^PROJECT_ID\[1\]=' "$capture_file" | cut -d= -f2-)
+	project_path0=$(grep '^PROJECT_PATH\[0\]=' "$capture_file" | cut -d= -f2-)
+	project_path1=$(grep '^PROJECT_PATH\[1\]=' "$capture_file" | cut -d= -f2-)
+	rm -f "$capture_file"
+	expected_project_id=$(/bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/core/common.sh'; mole_path_identity '$HOME/www/unmarked'")
+
+	[ "$project_id0" = "$expected_project_id" ] || return 1
+	[ "$project_id1" = "$expected_project_id" ] || return 1
+	[ "$project_path0" = "~/www/unmarked" ] || return 1
+	[ "$project_path1" = "~/www/unmarked" ] || return 1
 }
 
 @test "sort: cloud marker stays aligned across menu and full-path arrays" {
