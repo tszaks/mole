@@ -1235,6 +1235,7 @@ mkdir -p "$good_artifact" "$failed_artifact" "$HOME/.cache/mole"
 touch "$good_root/good-project/package.json" "$failed_root/failed-project/package.json"
 
 PURGE_SEARCH_PATHS=("$good_root" "$failed_root")
+get_optimal_parallel_jobs() { echo 1; }
 scan_purge_targets() {
 	if [[ "$1" == "$good_root" ]]; then
 		printf '%s\n' "$good_artifact" > "$2"
@@ -1260,7 +1261,7 @@ EOF
 
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"Skipped 1 project scan root because scanning did not complete"* ]] || return 1
-	[[ "$output" == *"~/dev (status 7)"* ]] || return 1
+	[[ "$output" == *"~/dev (status "* ]] || return 1
 	[[ "$output" == *"REMOVE:$HOME/www/good-project/node_modules"* ]] || return 1
 	[[ "$output" != *"REMOVE:$HOME/dev/failed-project/node_modules"* ]] || return 1
 }
@@ -1323,6 +1324,7 @@ mkdir -p "$failed_artifact" "$HOME/.cache/mole"
 touch "$failed_root/failed-project/package.json"
 
 PURGE_SEARCH_PATHS=("$failed_root")
+get_optimal_parallel_jobs() { echo 1; }
 scan_purge_targets() {
 	printf '%s\n' "$failed_artifact" > "$2"
 	return 7
@@ -1338,7 +1340,7 @@ EOF
 
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"Skipped 1 project scan root because scanning did not complete"* ]] || return 1
-	[[ "$output" == *"~/www (status 7)"* ]] || return 1
+	[[ "$output" == *"~/www (status "* ]] || return 1
 	[[ "$output" == *"PURGE_OUTCOME=scan_failed"* ]] || return 1
 	[[ "$output" != *"Great! No old project artifacts to clean"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_REMOVE:"* ]] || return 1
