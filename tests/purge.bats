@@ -1152,9 +1152,11 @@ EOF
         source '$PROJECT_ROOT/lib/core/common.sh'
         source '$PROJECT_ROOT/lib/clean/project.sh'
         clean_project_artifacts
+        printf 'PURGE_OUTCOME=%s\n' "\$PURGE_RUN_OUTCOME"
     " </dev/null
 
-	[[ "$status" -eq 0 ]] || [[ "$status" -eq 2 ]]
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"PURGE_OUTCOME=no_candidates"* ]]
 }
 
 @test "clean_project_artifacts: keeps completed roots and reports failed roots" {
@@ -1222,17 +1224,53 @@ safe_remove() {
 	return 1
 }
 
-purge_status=0
-clean_project_artifacts </dev/null || purge_status=$?
-printf 'PURGE_STATUS=%s\n' "$purge_status"
+clean_project_artifacts </dev/null
+printf 'PURGE_OUTCOME=%s\n' "$PURGE_RUN_OUTCOME"
 EOF
 
 	[ "$status" -eq 0 ] || return 1
 	[[ "$output" == *"Skipped 1 project scan root because scanning did not complete"* ]] || return 1
 	[[ "$output" == *"~/www (status 7)"* ]] || return 1
-	[[ "$output" == *"PURGE_STATUS=3"* ]] || return 1
+	[[ "$output" == *"PURGE_OUTCOME=scan_failed"* ]] || return 1
 	[[ "$output" != *"Great! No old project artifacts to clean"* ]] || return 1
 	[[ "$output" != *"UNEXPECTED_REMOVE:"* ]] || return 1
+}
+
+@test "perform_purge: suppresses completion summary for non-completed outcomes" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_SKIP_MAIN=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/purge.sh"
+
+clean_project_artifacts() {
+	PURGE_RUN_OUTCOME="cancelled"
+	return 0
+}
+print_summary_block() {
+	printf 'UNEXPECTED_SUMMARY\n'
+}
+
+perform_purge </dev/null
+printf 'PERFORM_RETURNED\n'
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"PERFORM_RETURNED"* ]] || return 1
+	[[ "$output" != *"UNEXPECTED_SUMMARY"* ]] || return 1
+}
+
+@test "perform_purge: preserves errexit for unexpected cleanup failures" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_SKIP_MAIN=1 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/purge.sh"
+
+clean_project_artifacts() { return 7; }
+
+perform_purge </dev/null
+printf 'UNEXPECTED_CONTINUATION\n'
+EOF
+
+	[ "$status" -eq 7 ] || return 1
+	[[ "$output" != *"UNEXPECTED_CONTINUATION"* ]]
 }
 
 @test "clean_project_artifacts: handles empty menu options under set -u" {
@@ -1471,13 +1509,15 @@ EOF
 
 	run /bin/bash -c "
         export HOME='$HOME'
-        $timeout_cmd 5 '$PROJECT_ROOT/bin/purge.sh' 2>&1 < /dev/null || true
+        exec $timeout_cmd 5 '$PROJECT_ROOT/bin/purge.sh' 2>&1 < /dev/null
     "
 
-	[[ "$output" =~ "Scanning" ]] ||
-		[[ "$output" =~ "Purge complete" ]] ||
-		[[ "$output" =~ "No old" ]] ||
-		[[ "$output" =~ "Great" ]]
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Purge Project Artifacts"* ]] || return 1
+	[[ "$output" == *"No items selected"* ]] ||
+		[[ "$output" == *"Purge complete"* ]] ||
+		[[ "$output" == *"No old"* ]] ||
+		[[ "$output" == *"Great"* ]]
 }
 
 @test "mo purge: command exists and is executable" {

@@ -224,17 +224,13 @@ perform_purge() {
     fi
 
     clean_project_artifacts
-    local exit_code=$?
+    local purge_outcome="${PURGE_RUN_OUTCOME:-scan_failed}"
 
     # Clean up
     trap - INT TERM
     cleanup_monitor
 
-    # Exit codes:
-    # 0 = success, show summary
-    # 1 = user cancelled
-    # 2 = nothing to clean
-    if [[ $exit_code -ne 0 ]]; then
+    if [[ "$purge_outcome" != "completed" ]]; then
         return 0
     fi
 

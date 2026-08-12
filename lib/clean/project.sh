@@ -1168,8 +1168,10 @@ confirm_purge_cleanup() {
     esac
 }
 
-# Main cleanup function - scans and prompts user to select artifacts to clean
+# Main cleanup function - scans and prompts user to select artifacts to clean.
+# Sets PURGE_RUN_OUTCOME to completed, no_candidates, cancelled, or scan_failed.
 clean_project_artifacts() {
+    PURGE_RUN_OUTCOME="completed"
     local -a all_found_items=()
     local -a safe_to_clean=()
     local -a safe_recent_flags=()
@@ -1293,14 +1295,20 @@ clean_project_artifacts() {
         echo -e "${GRAY}Re-run with 'mo purge --debug' to inspect the scan failure.${NC}"
         if [[ $completed_scan_count -eq 0 ]]; then
             printf '\n'
-            return 3
+            PURGE_RUN_OUTCOME="scan_failed"
+            return 0
         fi
     fi
     if [[ ${#all_found_items[@]} -eq 0 ]]; then
         echo ""
-        echo -e "${GREEN}${ICON_SUCCESS}${NC} Great! No old project artifacts to clean"
+        if [[ $failed_scan_count -gt 0 ]]; then
+            echo -e "${GRAY}No artifacts found in the completed project scans${NC}"
+        else
+            echo -e "${GREEN}${ICON_SUCCESS}${NC} Great! No old project artifacts to clean"
+        fi
         printf '\n'
-        return 2 # Special code: nothing to clean
+        PURGE_RUN_OUTCOME="no_candidates"
+        return 0
     fi
     # Mark recently modified items (for default selection state)
     if [[ -t 1 ]]; then
@@ -1810,6 +1818,7 @@ clean_project_artifacts() {
         echo ""
         echo -e "${GRAY}No artifacts found to purge${NC}"
         printf '\n'
+        PURGE_RUN_OUTCOME="no_candidates"
         return 0
     fi
     # Set global vars for selector
@@ -1832,7 +1841,8 @@ clean_project_artifacts() {
         if ! select_purge_categories "${menu_options[@]}"; then
             PURGE_CATEGORY_FULL_PATHS_ARRAY=()
             unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
-            return 1
+            PURGE_RUN_OUTCOME="cancelled"
+            return 0
         fi
     else
         # Non-interactive: select all non-recent items
@@ -1860,6 +1870,7 @@ clean_project_artifacts() {
         printf '\n'
         PURGE_CATEGORY_FULL_PATHS_ARRAY=()
         unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
+        PURGE_RUN_OUTCOME="cancelled"
         return 0
     fi
     IFS=',' read -r -a selected_indices <<< "$PURGE_SELECTION_RESULT"
@@ -1886,7 +1897,8 @@ clean_project_artifacts() {
             printf '\n'
             PURGE_CATEGORY_FULL_PATHS_ARRAY=()
             unset PURGE_CATEGORY_SIZES PURGE_RECENT_CATEGORIES PURGE_AGE_LABELS PURGE_SELECTION_RESULT
-            return 1
+            PURGE_RUN_OUTCOME="cancelled"
+            return 0
         fi
     fi
     PURGE_CATEGORY_FULL_PATHS_ARRAY=()
