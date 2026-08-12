@@ -499,6 +499,27 @@ EOF
     [[ "$output" == *"PASS"* ]]
 }
 
+@test "select_purge_categories names the destructive choice and keeps project skip visible when narrow" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+tput() {
+	[[ "${1:-}" == "cols" ]] && printf '32\n'
+}
+PURGE_CATEGORY_SIZES="1"
+PURGE_RECENT_CATEGORIES="false"
+if select_purge_categories "~/work/obelisk 4KB | node_modules" <<< $'q\n'; then
+	exit 1
+fi
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"Select Artifacts to Purge"* ]] || return 1
+	[[ "$output" == *"X Skip"* ]] || return 1
+	[[ "$output" != *"Select Categories to Clean"* ]]
+}
+
 @test "select_purge_categories skips every artifact with the current project ID" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail

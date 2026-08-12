@@ -1019,7 +1019,7 @@ select_purge_categories() {
             scroll_indicator=" ${GRAY}[${current_pos}/${total_items}]${NC}"
         fi
 
-        printf "%s${PURPLE_BOLD}Select Categories to Clean${NC}%s${GRAY}, ${selected_size_human}, ${selected_count} selected${NC}\n" "$clear_line" "$scroll_indicator"
+        printf "%s${PURPLE_BOLD}Select Artifacts to Purge${NC}%s${GRAY}, ${selected_size_human}, ${selected_count} selected${NC}\n" "$clear_line" "$scroll_indicator"
         printf "%s\n" "$clear_line"
 
         IFS=',' read -r -a recent_flags <<< "${PURGE_RECENT_CATEGORIES:-}"
@@ -1084,8 +1084,14 @@ select_purge_categories() {
             if (($(_ph_len "$_l1") <= _term_w)); then
                 printf "%s${_l1}${NC}\n" "$clear_line"
             else
-                # Level 2 (minimal): ↑↓ | Enter | Q Quit
-                printf "%s${_nav}${_sep}${_enter}${_sep}${_quit}${NC}\n" "$clear_line"
+                # Level 2: keep the project action discoverable on narrow terminals.
+                local _l2="${_nav}${_sep}${GRAY}Enter${NC}${_sep}${_skip_project}${_sep}${_quit}"
+                if (($(_ph_len "$_l2") <= _term_w)); then
+                    printf "%s${_l2}${NC}\n" "$clear_line"
+                else
+                    # Level 3 (minimal): ↑↓ | Enter | X Skip | Q
+                    printf "%s${_nav}${_sep}${GRAY}Enter${NC}${_sep}${GRAY}X Skip${NC}${_sep}${GRAY}Q${NC}\n" "$clear_line"
+                fi
             fi
         fi
 
