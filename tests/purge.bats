@@ -1406,6 +1406,51 @@ EOF
 	[ -d "$HOME/.cache/mole" ] || [ -d "${XDG_CACHE_HOME:-$HOME/.cache}/mole" ]
 }
 
+@test "mo purge skips whitelisted project artifacts (#1427)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+protected="$HOME/www/protected/node_modules"
+unprotected="$HOME/www/unprotected/node_modules"
+mkdir -p "$protected" "$unprotected" "$HOME/.config/mole" "$HOME/.cache/mole"
+printf 'keep\n' > "$protected/keep.js"
+printf 'remove\n' > "$unprotected/remove.js"
+touch "$HOME/www/protected/package.json" "$HOME/www/unprotected/package.json"
+touch -t 202001010101 \
+    "$protected/keep.js" "$protected" "$HOME/www/protected/package.json" "$HOME/www/protected" \
+    "$unprotected/remove.js" "$unprotected" "$HOME/www/unprotected/package.json" "$HOME/www/unprotected"
+printf '%s\n' "$protected" > "$HOME/.config/mole/whitelist"
+
+export MOLE_SKIP_MAIN=1
+export MOLE_TEST_NO_AUTH=1
+source "$PROJECT_ROOT/bin/purge.sh"
+PURGE_SEARCH_PATHS=("$HOME/www")
+scan_purge_targets() {
+    printf '%s\n' "$protected" "$unprotected" > "$2"
+}
+get_dir_size_kb() { echo 1; }
+get_file_mtime() { echo 1577836800; }
+is_recently_modified() { return 1; }
+purge_target_activity_still_safe() { return 0; }
+
+start_purge
+clean_project_artifacts </dev/null
+
+protected_loaded=false
+for pattern in "${WHITELIST_PATTERNS[@]}"; do
+    if [[ "$pattern" == "$protected" ]]; then
+        protected_loaded=true
+        break
+    fi
+done
+[[ "$protected_loaded" == "true" ]] || exit 1
+[[ -d "$protected" ]] || exit 1
+[[ ! -e "$unprotected" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
 # .NET bin directory detection tests
 @test "is_dotnet_bin_dir: finds .NET context in parent directory with Debug dir" {
 	mkdir -p "$HOME/www/dotnet-app/bin/Debug"

@@ -221,6 +221,97 @@ ensure_safety_whitelist_patterns() {
     done
 }
 
+# Load and validate the invoking user's clean whitelist. Both `clean` and
+# `purge` use safe_remove as their final deletion sink, so they must share the
+# same source of WHITELIST_PATTERNS before either command starts scanning.
+# Keeping this here also makes the validation rules independent of a command
+# entrypoint, which prevents a new cleanup command from silently skipping the
+# whitelist initialization (see #1427).
+load_mole_whitelist() {
+    local whitelist_home="${1:-}"
+    if [[ -z "$whitelist_home" ]]; then
+        whitelist_home=$(get_invoking_home)
+    fi
+    [[ -n "$whitelist_home" ]] || whitelist_home="${HOME:-}"
+    MOLE_USER_HOME="$whitelist_home"
+
+    WHITELIST_PATTERNS=()
+    WHITELIST_WARNINGS=()
+
+    local whitelist_file="$MOLE_USER_HOME/.config/mole/whitelist"
+    if [[ -f "$whitelist_file" ]]; then
+        local line duplicate existing
+        while IFS= read -r line; do
+            # shellcheck disable=SC2295
+            line="${line#"${line%%[![:space:]]*}"}"
+            # shellcheck disable=SC2295
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+            [[ "$line" == ~* ]] && line="${line/#~/$MOLE_USER_HOME}"
+            line="${line//\$HOME/$MOLE_USER_HOME}"
+            line="${line//\$\{HOME\}/$MOLE_USER_HOME}"
+            if [[ "$line" =~ \.\. ]]; then
+                WHITELIST_WARNINGS+=("Path traversal not allowed: $line")
+                continue
+            fi
+
+            if [[ "$line" != "$FINDER_METADATA_SENTINEL" ]]; then
+                if [[ "$line" =~ [[:cntrl:]] ]]; then
+                    WHITELIST_WARNINGS+=("Invalid path format: $line")
+                    continue
+                fi
+
+                if [[ "$line" != /* ]]; then
+                    WHITELIST_WARNINGS+=("Must be absolute path: $line")
+                    continue
+                fi
+            fi
+
+            if [[ "$line" =~ // ]]; then
+                WHITELIST_WARNINGS+=("Consecutive slashes: $line")
+                continue
+            fi
+
+            case "$line" in
+                / | /System | /System/* | /bin | /bin/* | /sbin | /sbin/* | /usr/bin | /usr/bin/* | /usr/sbin | /usr/sbin/* | /etc | /etc/* | /var/db | /var/db/*)
+                    WHITELIST_WARNINGS+=("Protected system path: $line")
+                    continue
+                    ;;
+            esac
+
+            duplicate="false"
+            if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+                for existing in "${WHITELIST_PATTERNS[@]}"; do
+                    if [[ "$line" == "$existing" ]]; then
+                        duplicate="true"
+                        break
+                    fi
+                done
+            fi
+            [[ "$duplicate" == "true" ]] && continue
+            WHITELIST_PATTERNS+=("$line")
+        done < "$whitelist_file"
+    elif [[ ${#DEFAULT_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+        WHITELIST_PATTERNS=("${DEFAULT_WHITELIST_PATTERNS[@]}")
+    fi
+
+    # Expand patterns once, before hot cleanup loops call is_path_whitelisted.
+    if [[ ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+        local -a expanded_patterns=()
+        local pattern expanded
+        for pattern in "${WHITELIST_PATTERNS[@]}"; do
+            expanded="${pattern/#\~/$MOLE_USER_HOME}"
+            expanded_patterns+=("$expanded")
+        done
+        WHITELIST_PATTERNS=("${expanded_patterns[@]}")
+    fi
+
+    # Existing user files replace convenience defaults; hard safety entries
+    # remain enforced for every command that loads this shared policy.
+    ensure_safety_whitelist_patterns
+}
+
 # ============================================================================
 # BSD Stat Compatibility
 # ============================================================================
