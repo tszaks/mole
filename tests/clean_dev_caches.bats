@@ -22,6 +22,322 @@ teardown_file() {
     fi
 }
 
+make_gh_cache_stub() {
+    mkdir -p "$HOME/bin"
+    cat > "$HOME/bin/gh" <<'SCRIPT'
+#!/bin/bash
+printf '%s\n' "$*" >> "$GH_TRACE"
+if [[ "${GH_TRACE_CACHE_ROOT:-0}" == "1" ]]; then
+    printf 'ROOT:%s\n' "${XDG_CACHE_HOME:-<unset>}" >> "$GH_TRACE"
+fi
+if [[ "$*" == "config clear-cache --help" ]]; then
+    if [[ -n "${GH_SWAP_LINK:-}" && -n "${GH_SWAP_TARGET:-}" ]]; then
+        /bin/unlink "$GH_SWAP_LINK"
+        /bin/ln -s "$GH_SWAP_TARGET" "$GH_SWAP_LINK"
+    fi
+    if [[ -n "${GH_REPLACE_ROOT:-}" && -n "${GH_REPLACE_TARGET:-}" ]]; then
+        /bin/mv "$GH_REPLACE_ROOT" "$GH_REPLACE_ROOT-old"
+        /bin/ln -s "$GH_REPLACE_TARGET" "$GH_REPLACE_ROOT"
+    fi
+    exit "${GH_HELP_RC:-0}"
+fi
+if [[ "$*" == "config clear-cache" ]]; then
+    exit "${GH_CLEAR_RC:-0}"
+fi
+exit 2
+SCRIPT
+    chmod +x "$HOME/bin/gh"
+}
+
+@test "clean_github_cli_cache uses gh owner command for the default cache" {
+    local trace="$HOME/gh-default.trace"
+    mkdir -p "$HOME/.cache/gh"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" PATH="$HOME/bin:/usr/bin:/bin" PROJECT_ROOT="$PROJECT_ROOT" \
+        GH_TRACE="$trace" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+clean_tool_cache() {
+    local description="$1"
+    local cache_path="$2"
+    shift 2
+    printf 'CACHE:%s|%s\n' "$description" "$cache_path"
+    "$@"
+}
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CACHE:GitHub CLI cache|$HOME/.cache/gh"* ]] || return 1
+    [ "$(grep -cFx 'config clear-cache --help' "$trace")" -eq 1 ] || return 1
+    [ "$(grep -cFx 'config clear-cache' "$trace")" -eq 1 ] || return 1
+}
+
+@test "clean_github_cli_cache dry-run never invokes the mutating command" {
+    local trace="$HOME/gh-dry-run.trace"
+    mkdir -p "$HOME/.cache/gh"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" PATH="$HOME/bin:/usr/bin:/bin" PROJECT_ROOT="$PROJECT_ROOT" \
+        GH_TRACE="$trace" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=true
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"GitHub CLI cache · would clean"* ]] || return 1
+    [ "$(grep -cFx 'config clear-cache --help' "$trace")" -eq 1 ] || return 1
+    run grep -qFx 'config clear-cache' "$trace"
+    [ "$status" -eq 1 ] || return 1
+}
+
+@test "clean_github_cli_cache honors custom XDG cache whitelists" {
+    local trace="$HOME/gh-xdg-whitelist.trace"
+    local xdg_cache="$HOME/custom-cache"
+    mkdir -p "$xdg_cache/gh"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" XDG_CACHE_HOME="$xdg_cache" PATH="$HOME/bin:/usr/bin:/bin" \
+        PROJECT_ROOT="$PROJECT_ROOT" GH_TRACE="$trace" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+is_path_whitelisted() { [[ "$1" == "$XDG_CACHE_HOME/gh" ]]; }
+should_protect_path() { return 1; }
+note_activity() { :; }
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"GitHub CLI cache · skipped (whitelist)"* ]] || return 1
+    [ ! -e "$trace" ] || return 1
+}
+
+@test "clean_github_cli_cache honors the physical target of a symlinked XDG root" {
+    local trace="$HOME/gh-xdg-symlink.trace"
+    local physical_cache="$HOME/physical-cache"
+    mkdir -p "$physical_cache/gh"
+    ln -s "$physical_cache" "$HOME/xdg-cache"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" XDG_CACHE_HOME="$HOME/xdg-cache" PATH="$HOME/bin:/usr/bin:/bin" \
+        PROJECT_ROOT="$PROJECT_ROOT" GH_TRACE="$trace" PHYSICAL_CACHE="$physical_cache/gh" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+is_path_whitelisted() { [[ "$1" == "$PHYSICAL_CACHE" ]]; }
+should_protect_path() { return 1; }
+note_activity() { :; }
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"GitHub CLI cache · skipped (whitelist)"* ]] || return 1
+    [ ! -e "$trace" ] || return 1
+}
+
+@test "clean_github_cli_cache binds the owner command to the verified physical root" {
+    local trace="$HOME/gh-xdg-swap.trace"
+    local physical_cache="$HOME/physical-cache"
+    local swapped_cache="$HOME/swapped-cache"
+    local xdg_link="$HOME/xdg-cache"
+    rm -rf "$physical_cache" "$swapped_cache" "$xdg_link"
+    mkdir -p "$physical_cache/gh" "$swapped_cache/gh"
+    ln -s "$physical_cache" "$xdg_link"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" XDG_CACHE_HOME="$xdg_link" PATH="$HOME/bin:/usr/bin:/bin" \
+        PROJECT_ROOT="$PROJECT_ROOT" GH_TRACE="$trace" GH_TRACE_CACHE_ROOT=1 \
+        GH_SWAP_LINK="$xdg_link" GH_SWAP_TARGET="$swapped_cache" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+note_activity() { :; }
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(grep -cFx "ROOT:$physical_cache" "$trace")" -eq 2 ] || return 1
+    run grep -qFx "ROOT:$swapped_cache" "$trace"
+    [ "$status" -eq 1 ] || return 1
+    local link_target
+    link_target=$(readlink "$xdg_link" 2> /dev/null || true)
+    [ "$link_target" = "$swapped_cache" ] || {
+        printf 'expected swapped link %s, got %s\n' "$swapped_cache" "${link_target:-<missing>}"
+        return 1
+    }
+}
+
+@test "clean_github_cli_cache rejects a replaced physical root at the owner command" {
+    local trace="$HOME/gh-physical-root-swap.trace"
+    local physical_cache="$HOME/replaceable-cache"
+    local swapped_cache="$HOME/replacement-cache"
+    rm -rf "$physical_cache" "$physical_cache-old" "$swapped_cache"
+    mkdir -p "$physical_cache/gh" "$swapped_cache/gh"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" XDG_CACHE_HOME="$physical_cache" PATH="$HOME/bin:/usr/bin:/bin" \
+        PROJECT_ROOT="$PROJECT_ROOT" GH_TRACE="$trace" \
+        GH_REPLACE_ROOT="$physical_cache" GH_REPLACE_TARGET="$swapped_cache" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+note_activity() { :; }
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(grep -cFx 'config clear-cache --help' "$trace")" -eq 1 ] || return 1
+    run grep -qFx 'config clear-cache' "$trace"
+    [ "$status" -eq 1 ] || return 1
+    [ -L "$physical_cache" ] || return 1
+    [ -d "$swapped_cache/gh" ] || return 1
+}
+
+@test "clean_github_cli_cache preserves a symlinked cache leaf" {
+    local trace="$HOME/gh-leaf-symlink.trace"
+    local cache_target="$HOME/relocated-gh-cache"
+    rm -rf "$HOME/.cache/gh" "$cache_target"
+    mkdir -p "$HOME/.cache" "$cache_target"
+    ln -s "$cache_target" "$HOME/.cache/gh"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" PATH="$HOME/bin:/usr/bin:/bin" PROJECT_ROOT="$PROJECT_ROOT" \
+        GH_TRACE="$trace" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+debug_log() { printf 'DEBUG:%s\n' "$*"; }
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"cache leaf is not a real directory"* ]] || return 1
+    [ -L "$HOME/.cache/gh" ] || return 1
+    [ ! -e "$trace" ] || return 1
+}
+
+@test "clean_github_cli_cache rejects unsafe XDG paths before probing gh" {
+    local trace="$HOME/gh-invalid-xdg.trace"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" XDG_CACHE_HOME="relative/cache" PATH="$HOME/bin:/usr/bin:/bin" \
+        PROJECT_ROOT="$PROJECT_ROOT" GH_TRACE="$trace" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+debug_log() { printf 'DEBUG:%s\n' "$*" >&2; }
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"unsafe XDG_CACHE_HOME"* ]] || return 1
+    [ ! -e "$trace" ] || return 1
+}
+
+@test "clean_dev_cloud continues when gh cache clearing fails" {
+    local trace="$HOME/gh-failure.trace"
+    rm -rf "$HOME/.cache/gh"
+    rm -f "$trace"
+    mkdir -p "$HOME/.cache/gh"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" PATH="$HOME/bin:/usr/bin:/bin" PROJECT_ROOT="$PROJECT_ROOT" \
+        GH_TRACE="$trace" GH_CLEAR_RC=2 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+safe_clean() { printf 'SAFE:%s\n' "$2"; }
+clean_dev_cloud
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(grep -cFx 'config clear-cache' "$trace")" -eq 1 ] || return 1
+    [[ "$output" == *"SAFE:AWS CLI cache"* ]] || return 1
+    [[ "$output" == *"SAFE:Google Cloud logs"* ]] || return 1
+}
+
+@test "clean_dev_cloud stops on GitHub CLI probe or clear cancellation" {
+    local failure_phase failure_rc
+    for failure_phase in help clear; do
+        for failure_rc in 124 130; do
+            local trace="$HOME/gh-$failure_phase-$failure_rc.trace"
+            local help_rc=0
+            local clear_rc=0
+            if [[ "$failure_phase" == "help" ]]; then
+                help_rc="$failure_rc"
+            else
+                clear_rc="$failure_rc"
+            fi
+            rm -rf "$HOME/.cache/gh"
+            rm -f "$trace"
+            mkdir -p "$HOME/.cache/gh"
+            make_gh_cache_stub
+
+            run env HOME="$HOME" PATH="$HOME/bin:/usr/bin:/bin" PROJECT_ROOT="$PROJECT_ROOT" \
+                GH_TRACE="$trace" GH_HELP_RC="$help_rc" GH_CLEAR_RC="$clear_rc" \
+                MOLE_CURRENT_COMMAND=clean MOLE_CLEAN_CANCEL_STATUS=0 \
+                /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+safe_clean() { printf 'UNEXPECTED:%s\n' "$2"; }
+set +e
+_run_developer_cleanup_step clean_dev_cloud
+rc=$?
+set -e
+printf 'RC=%s CANCEL=%s\n' "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+EOF
+
+            [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+            [[ "$output" == *"RC=$failure_rc CANCEL=$failure_rc"* ]] || return 1
+            [[ "$output" != *"UNEXPECTED:"* ]] || return 1
+        done
+    done
+}
+
 @test "clean_dev_npm prunes pnpm store without deleting orphaned global store" {
     # Real file on PATH so type -P prefers the stub over any host pnpm.
     mkdir -p "$HOME/bin"

@@ -184,6 +184,33 @@ declare -a SAFETY_WHITELIST_PATTERNS=(
     "$FINDER_METADATA_SENTINEL"
 )
 
+# Resolve the cache root used by GitHub CLI without following filesystem
+# links. Both cleanup and whitelist inventory consume this value so a custom
+# XDG_CACHE_HOME cannot make the saved protection point at a different path.
+mole_github_cli_cache_root() {
+    local cache_root
+    if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+        cache_root="$XDG_CACHE_HOME"
+    else
+        [[ "${HOME:-}" == /* ]] || return 1
+        cache_root="$HOME/.cache"
+    fi
+
+    [[ "$cache_root" == /* && ! "$cache_root" =~ [[:cntrl:]] ]] || return 1
+    case "$cache_root" in
+        *'/../'* | */.. | *'/./'* | */. | *'//'*) return 1 ;;
+    esac
+
+    cache_root="${cache_root%/}"
+    local home_root="${HOME:-}"
+    home_root="${home_root%/}"
+    case "$cache_root" in
+        "" | / | "$home_root") return 1 ;;
+    esac
+
+    printf '%s\n' "$cache_root"
+}
+
 # Append any missing SAFETY_WHITELIST_PATTERNS to WHITELIST_PATTERNS.
 # When CURRENT_WHITELIST_PATTERNS is declared (manage UI), keep it in sync.
 ensure_safety_whitelist_patterns() {

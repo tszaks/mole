@@ -171,6 +171,10 @@ Trash|$HOME/.Trash|system_cache
 iOS/iPadOS device firmware (.ipsw) from iTunes/Finder|$HOME/Library/iTunes/*Software Updates/*.ipsw|system_cache
 Apple Configurator 2 device firmware (.ipsw)|$HOME/Library/Group Containers/*.group.com.apple.configurator/**/*.ipsw|system_cache
 EOF
+    local github_cache_root
+    if github_cache_root=$(mole_github_cli_cache_root); then
+        printf 'GitHub CLI cache|%s/gh|network_tools\n' "$github_cache_root"
+    fi
     # Add FINDER_METADATA with constant reference
     echo "Finder metadata, .DS_Store|$FINDER_METADATA_SENTINEL|system_cache"
 }

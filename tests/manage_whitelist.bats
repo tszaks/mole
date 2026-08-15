@@ -228,6 +228,65 @@ EOF
     [[ "$output" == *"Rust Cargo extracted sources|\$HOME/.cargo/registry/src/*|compiler_cache"* ]]
 }
 
+@test "whitelist inventory resolves the GitHub CLI cache location" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+get_all_cache_items
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"GitHub CLI cache|$HOME/.cache/gh|network_tools"* ]] || return 1
+
+    local xdg_cache="$HOME/custom-cache"
+    run env HOME="$HOME" XDG_CACHE_HOME="$xdg_cache" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+get_all_cache_items
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"GitHub CLI cache|$xdg_cache/gh|network_tools"* ]] || return 1
+    [[ "$output" != *"GitHub CLI cache|$HOME/.cache/gh|network_tools"* ]] || return 1
+}
+
+@test "saved custom XDG GitHub CLI cache whitelist blocks the owner command" {
+    local xdg_cache="$HOME/custom-cache"
+    local trace="$HOME/gh-xdg-manager.trace"
+    mkdir -p "$xdg_cache/gh" "$HOME/bin"
+    cat > "$HOME/bin/gh" <<'SCRIPT'
+#!/bin/bash
+printf '%s\n' "$*" >> "$GH_TRACE"
+exit 0
+SCRIPT
+    chmod +x "$HOME/bin/gh"
+
+    run env HOME="$HOME" XDG_CACHE_HOME="$xdg_cache" PATH="$HOME/bin:/usr/bin:/bin" \
+        PROJECT_ROOT="$PROJECT_ROOT" GH_TRACE="$trace" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+github_cache_pattern=""
+while IFS='|' read -r name pattern _; do
+    if [[ "$name" == "GitHub CLI cache" ]]; then
+        github_cache_pattern="$pattern"
+        break
+    fi
+done < <(get_all_cache_items)
+[[ "$github_cache_pattern" == "$XDG_CACHE_HOME/gh" ]]
+save_whitelist_patterns "$github_cache_pattern"
+load_mole_whitelist "$HOME"
+
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+clean_github_cli_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"GitHub CLI cache · skipped (whitelist)"* ]] || return 1
+    [ ! -e "$trace" ] || return 1
+}
+
 @test "whitelist inventory exposes Chrome AI model stores" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

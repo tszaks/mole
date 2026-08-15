@@ -81,6 +81,107 @@ clean_uv_cache() {
     fi
 }
 
+_run_github_cli_clear_cache_bound() {
+    local cache_path="$1"
+    local expected_parent="$2"
+    local expected_parent_id="$3"
+    local expected_target_id="$4"
+
+    if ! _mole_path_matches_identity \
+        "$cache_path" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
+        _MOLE_GITHUB_CLI_CLEAR_STATUS=1
+        return 1
+    fi
+
+    local command_status=0
+    run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" \
+        env XDG_CACHE_HOME="$expected_parent" gh config clear-cache || command_status=$?
+    _MOLE_GITHUB_CLI_CLEAR_STATUS=$command_status
+    return "$command_status"
+}
+
+clean_github_cli_cache() {
+    local cache_root
+    if ! cache_root=$(mole_github_cli_cache_root); then
+        debug_log "Skipping GitHub CLI cache for unsafe XDG_CACHE_HOME: ${XDG_CACHE_HOME:-<unset>}"
+        return 0
+    fi
+
+    local cache_path="$cache_root/gh"
+    [[ -e "$cache_path" || -L "$cache_path" ]] || return 0
+    if [[ ! -d "$cache_path" || -L "$cache_path" ]]; then
+        debug_log "Skipping GitHub CLI cache because its cache leaf is not a real directory: $cache_path"
+        return 0
+    fi
+
+    local cache_parent="${cache_path%/*}"
+    local physical_parent
+    if [[ ! -d "$cache_parent" ]] ||
+        ! physical_parent=$(cd "$cache_parent" 2> /dev/null && pwd -P) ||
+        [[ -z "$physical_parent" || "$physical_parent" != /* ]]; then
+        debug_log "Skipping GitHub CLI cache because its physical parent could not be verified: $cache_path"
+        return 0
+    fi
+    case "$physical_parent" in
+        / | "$HOME")
+            debug_log "Skipping GitHub CLI cache because its physical parent is unsafe: $physical_parent"
+            return 0
+            ;;
+    esac
+    local physical_cache_path="${physical_parent%/}/${cache_path##*/}"
+
+    if ! _mole_snapshot_path_identity "$physical_cache_path" ||
+        [[ "$_MOLE_PATH_SNAPSHOT_PARENT" != "$physical_parent" ]]; then
+        debug_log "Skipping GitHub CLI cache because its identity could not be verified: $cache_path"
+        return 0
+    fi
+    local expected_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+    local expected_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+    local expected_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+
+    if ! validate_path_for_deletion "$cache_path" > /dev/null 2>&1 ||
+        ! validate_path_for_deletion "$physical_cache_path" > /dev/null 2>&1; then
+        debug_log "Skipping GitHub CLI cache because its path failed deletion policy: $cache_path"
+        return 0
+    fi
+
+    local whitelist_path=""
+    if is_path_whitelisted "$cache_path"; then
+        whitelist_path="$cache_path"
+    elif is_path_whitelisted "$physical_cache_path"; then
+        whitelist_path="$physical_cache_path"
+    fi
+    if [[ -n "$whitelist_path" ]]; then
+        clean_tool_cache "GitHub CLI cache" "$whitelist_path" :
+        return 0
+    fi
+    if should_protect_path "$cache_path" 2> /dev/null || should_protect_path "$physical_cache_path" 2> /dev/null; then
+        debug_log "Skipping protected GitHub CLI cache path: $cache_path"
+        return 0
+    fi
+
+    command -v gh > /dev/null 2>&1 || return 0
+    local probe_status=0
+    run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        env XDG_CACHE_HOME="$physical_parent" gh config clear-cache --help > /dev/null 2>&1 || probe_status=$?
+    if [[ $probe_status -eq 124 || $probe_status -ge 128 ]]; then
+        return "$probe_status"
+    fi
+    if [[ $probe_status -ne 0 ]]; then
+        debug_log "Skipping GitHub CLI cache because gh config clear-cache is unavailable"
+        return 0
+    fi
+
+    local _MOLE_GITHUB_CLI_CLEAR_STATUS=0
+    clean_tool_cache "GitHub CLI cache" "$physical_cache_path" \
+        _run_github_cli_clear_cache_bound "$physical_cache_path" \
+        "$expected_parent" "$expected_parent_id" "$expected_target_id"
+    if [[ $_MOLE_GITHUB_CLI_CLEAR_STATUS -eq 124 || $_MOLE_GITHUB_CLI_CLEAR_STATUS -ge 128 ]]; then
+        return "$_MOLE_GITHUB_CLI_CLEAR_STATUS"
+    fi
+    return 0
+}
+
 conda_cache_whitelisted() {
     local root
     for root in "$@"; do
@@ -735,6 +836,7 @@ clean_dev_nix() {
 }
 # Cloud CLI caches.
 clean_dev_cloud() {
+    clean_github_cli_cache || return $?
     safe_clean ~/.kube/cache/* "Kubernetes cache"
     safe_clean ~/.local/share/containers/storage/tmp/* "Container storage temp"
     safe_clean ~/.aws/cli/cache/* "AWS CLI cache"
