@@ -717,4 +717,3 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == "test-cask-app" ]]
 }
-
