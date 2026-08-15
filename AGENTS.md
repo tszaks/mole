@@ -96,7 +96,7 @@ Public docs and examples should prefer the installed `mo` command. Use `./mole` 
 
 ## Working Rules
 
-- Before reviewing, auditing, debugging, or accepting a contributed PR, read `.claude/skills/bugs/SKILL.md`. Load its shell/test reference only when that surface is touched.
+- Treat `.claude/skills/bugs/SKILL.md` as an on-demand incident catalog, not a universal review preflight. Load it when the current symptom or diff touches deletion evidence and guards, uncertain discovery probes, bounded scans or TTY behavior, Bash 3.2 or system-output parsing, persisted derivations or competing totals, silent progress, regression-test validity, or multi-cause refusal gates. For a whole-project audit, classify the touched surfaces first and load the matching catalog sections; unrelated documentation, release-copy, and administrative work should not pay for it. Load its shell/test reference only for Shell code, Bats tests, install/update flows, timeout wrappers, TTY handling, plist fixtures, or macOS-specific CI.
 - Check `should_protect_path()` before adding cleanup behavior.
 - Check app protection helpers before adding app cache, uninstall, or leftover cleanup behavior.
 - Bundle protection matching is case-sensitive glob (`bundle_matches_pattern`), and macOS system bundles report inconsistent casing across releases (macOS 26 ships `com.apple.bootcampassistant` alongside the older `com.apple.BootCampAssistant`). When the monthly bundle drift audit reports gaps, add the exact IDs as the audit printed them, and check the runtime blanket `com.apple.*` guard before rating the gap's severity. The audit workflow's issue path requires the `bundle-drift` label to exist in the repo.
