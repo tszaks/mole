@@ -130,6 +130,7 @@ pre-commit hooks cache|$HOME/.cache/pre-commit/*|compiler_cache
 Ruff Python linter cache|$HOME/.cache/ruff/*|compiler_cache
 MyPy type checker cache|$HOME/.cache/mypy/*|compiler_cache
 Pytest test cache|$HOME/.pytest_cache/*|compiler_cache
+PyInstaller binary cache|$HOME/Library/Application Support/pyinstaller/bincache*|compiler_cache
 Flutter SDK cache|$HOME/.cache/flutter/*|compiler_cache
 Swift Package Manager cache|$HOME/.cache/swift-package-manager/*|compiler_cache
 Zig compiler cache|$HOME/.cache/zig/*|compiler_cache
@@ -174,6 +175,10 @@ EOF
     local github_cache_root
     if github_cache_root=$(mole_github_cli_cache_root); then
         printf 'GitHub CLI cache|%s/gh|network_tools\n' "$github_cache_root"
+    fi
+    local darwin_user_cache
+    if darwin_user_cache=$(mole_darwin_user_cache_root); then
+        printf 'Clang module cache|%s/clang/*|compiler_cache\n' "$darwin_user_cache"
     fi
     # Add FINDER_METADATA with constant reference
     echo "Finder metadata, .DS_Store|$FINDER_METADATA_SENTINEL|system_cache"

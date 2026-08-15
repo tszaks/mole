@@ -228,6 +228,21 @@ EOF
     [[ "$output" == *"Rust Cargo extracted sources|\$HOME/.cargo/registry/src/*|compiler_cache"* ]]
 }
 
+@test "whitelist inventory exposes guarded PyInstaller and Clang caches" {
+    local darwin_cache="$HOME/darwin-cache"
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DARWIN_CACHE="$darwin_cache" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+mole_darwin_user_cache_root() { printf '%s\n' "$DARWIN_CACHE"; }
+get_all_cache_items
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"PyInstaller binary cache|\$HOME/Library/Application Support/pyinstaller/bincache*|compiler_cache"* ]] || return 1
+    [[ "$output" == *"Clang module cache|$darwin_cache/clang/*|compiler_cache"* ]]
+}
+
 @test "whitelist inventory resolves the GitHub CLI cache location" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail

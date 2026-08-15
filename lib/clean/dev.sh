@@ -488,6 +488,226 @@ clean_dev_npm() {
     safe_clean ~/.yarn/cache/* "Yarn cache"
     safe_clean ~/Library/Caches/Yarn/* "Yarn v1 cache"
 }
+# Resolve a cache root to its physical location and prove that it remains a
+# descendant of its owner container. Both directories must be ordinary,
+# invoking-user-owned directories; user-managed redirect symlinks are kept.
+guarded_dev_cache_root_physical_path() {
+    local container_root="${1%/}"
+    local cache_root="${2%/}"
+
+    [[ "$container_root" == /* && "$cache_root" == /* ]] || return 1
+    [[ ! "$container_root" =~ [[:cntrl:]] && ! "$cache_root" =~ [[:cntrl:]] ]] || return 1
+    case "$container_root" in
+        *'/../'* | */.. | *'/./'* | */. | *'//'*) return 1 ;;
+    esac
+    case "$cache_root" in
+        *'/../'* | */.. | *'/./'* | */. | *'//'*) return 1 ;;
+    esac
+    [[ -d "$container_root" && ! -L "$container_root" ]] || return 1
+    [[ -d "$cache_root" && ! -L "$cache_root" ]] || return 1
+
+    local physical_container physical_root invoking_uid container_uid root_uid
+    physical_container=$(cd -P "$container_root" 2> /dev/null && pwd -P) || return 1
+    physical_root=$(cd -P "$cache_root" 2> /dev/null && pwd -P) || return 1
+    [[ "$physical_container" != "/" ]] || return 1
+    case "$physical_root" in
+        "$physical_container"/*) ;;
+        *) return 1 ;;
+    esac
+
+    invoking_uid=$(get_invoking_uid 2> /dev/null) || return 1
+    [[ "$invoking_uid" =~ ^[0-9]+$ ]] || return 1
+    container_uid=$($STAT_BSD -f%u "$physical_container" 2> /dev/null) || return 1
+    root_uid=$($STAT_BSD -f%u "$physical_root" 2> /dev/null) || return 1
+    [[ "$container_uid" == "$invoking_uid" && "$root_uid" == "$invoking_uid" ]] || return 1
+    should_protect_path "$cache_root" && return 1
+    should_protect_path "$physical_root" && return 1
+
+    printf '%s\n' "$physical_root"
+}
+
+# Compound sink-time guard for rebuildable developer caches. It rechecks both
+# process ownership and the container/root/leaf identities immediately before
+# safe_remove, so a path swap after discovery cannot redirect deletion.
+guarded_dev_cache_cleanup_state() {
+    local process_state=0
+    "$_MOLE_DEV_CACHE_PROCESS_PROBE" || process_state=$?
+    [[ $process_state -eq 1 ]] || return "$process_state"
+
+    local physical_now=""
+    physical_now=$(guarded_dev_cache_root_physical_path \
+        "$_MOLE_DEV_CACHE_CONTAINER" "$_MOLE_DEV_CACHE_ROOT") || return 2
+    [[ "$physical_now" == "$_MOLE_DEV_CACHE_PHYSICAL" ]] || return 2
+    _mole_path_matches_identity \
+        "$_MOLE_DEV_CACHE_CONTAINER" \
+        "$_MOLE_DEV_CACHE_CONTAINER_PARENT" \
+        "$_MOLE_DEV_CACHE_CONTAINER_PARENT_ID" \
+        "$_MOLE_DEV_CACHE_CONTAINER_TARGET_ID" || return 2
+    _mole_path_matches_identity \
+        "$_MOLE_DEV_CACHE_ROOT" \
+        "$_MOLE_DEV_CACHE_ROOT_PARENT" \
+        "$_MOLE_DEV_CACHE_ROOT_PARENT_ID" \
+        "$_MOLE_DEV_CACHE_ROOT_TARGET_ID" || return 2
+
+    local guarded_path="${_MOLE_DEV_GUARDED_PATH:-}"
+    if [[ -n "$guarded_path" ]]; then
+        [[ ! -L "$guarded_path" ]] || return 2
+        _mole_snapshot_path_identity "$guarded_path" || return 2
+        [[ "$_MOLE_PATH_SNAPSHOT_PARENT" == "$physical_now" ]] || return 2
+
+        local leaf_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+        local leaf_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+        local leaf_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+        physical_now=$(guarded_dev_cache_root_physical_path \
+            "$_MOLE_DEV_CACHE_CONTAINER" "$_MOLE_DEV_CACHE_ROOT") || return 2
+        [[ "$physical_now" == "$_MOLE_DEV_CACHE_PHYSICAL" ]] || return 2
+        _mole_path_matches_identity \
+            "$_MOLE_DEV_CACHE_ROOT" \
+            "$_MOLE_DEV_CACHE_ROOT_PARENT" \
+            "$_MOLE_DEV_CACHE_ROOT_PARENT_ID" \
+            "$_MOLE_DEV_CACHE_ROOT_TARGET_ID" || return 2
+
+        _MOLE_SAFE_CLEAN_BOUND_PATH="$guarded_path"
+        _MOLE_SAFE_CLEAN_EXPECTED_PARENT="$leaf_parent"
+        _MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID="$leaf_parent_id"
+        _MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID="$leaf_target_id"
+    fi
+    return 1
+}
+
+clean_guarded_dev_cache_root() {
+    local container_root="${1%/}"
+    local cache_root="${2%/}"
+    local process_probe="$3"
+    local family="$4"
+    local display_name="$5"
+    shift 5
+    [[ $# -gt 0 ]] || return 0
+    mole_cleanup_targets_exist "$@" || return 0
+
+    local _MOLE_CLEAN_GUARD_REASON=""
+    if ! mole_clean_process_guard "$process_probe" "$family started"; then
+        mole_report_guard_stop "$display_name" mole_defer_cleanup_family "$family"
+        return 0
+    fi
+
+    local physical_root=""
+    if ! physical_root=$(guarded_dev_cache_root_physical_path "$container_root" "$cache_root"); then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (cache path unsafe)"
+        note_activity
+        return 0
+    fi
+
+    if ! _mole_snapshot_path_identity "$container_root"; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (cache path unsafe)"
+        note_activity
+        return 0
+    fi
+    local container_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+    local container_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+    local container_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+    if ! _mole_snapshot_path_identity "$cache_root"; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (cache path unsafe)"
+        note_activity
+        return 0
+    fi
+    local root_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+    local root_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+    local root_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+
+    local _MOLE_DEV_CACHE_CONTAINER="$container_root"
+    local _MOLE_DEV_CACHE_ROOT="$cache_root"
+    local _MOLE_DEV_CACHE_PHYSICAL="$physical_root"
+    local _MOLE_DEV_CACHE_CONTAINER_PARENT="$container_parent"
+    local _MOLE_DEV_CACHE_CONTAINER_PARENT_ID="$container_parent_id"
+    local _MOLE_DEV_CACHE_CONTAINER_TARGET_ID="$container_target_id"
+    local _MOLE_DEV_CACHE_ROOT_PARENT="$root_parent"
+    local _MOLE_DEV_CACHE_ROOT_PARENT_ID="$root_parent_id"
+    local _MOLE_DEV_CACHE_ROOT_TARGET_ID="$root_target_id"
+    local _MOLE_DEV_CACHE_PROCESS_PROBE="$process_probe"
+    local _MOLE_DEV_PROCESS_GUARD_UNKNOWN_REASON="process or cache path state unknown"
+    local clean_rc=0
+    _dev_safe_clean_process_guarded \
+        guarded_dev_cache_cleanup_state \
+        "$family" \
+        "$display_name" \
+        "$@" \
+        "$display_name" || clean_rc=$?
+    [[ $clean_rc -eq 1 ]] && return 0
+    return "$clean_rc"
+}
+
+pyinstaller_build_process_state() {
+    mole_pgrep_any \
+        -x pyinstaller \
+        -f "[p]yinstaller" \
+        -f "[P]yInstaller"
+}
+
+clean_pyinstaller_bincache() {
+    local container_root="$HOME/Library/Application Support"
+    local cache_root="$container_root/pyinstaller"
+    [[ -d "$cache_root" || -L "$cache_root" ]] || return 0
+
+    local -a candidates=()
+    local candidate
+    for candidate in "$cache_root"/bincache*; do
+        [[ -e "$candidate" || -L "$candidate" ]] || continue
+        [[ ! -L "$candidate" ]] || continue
+        candidates+=("$candidate")
+    done
+    [[ ${#candidates[@]} -gt 0 ]] || return 0
+
+    clean_guarded_dev_cache_root \
+        "$container_root" \
+        "$cache_root" \
+        pyinstaller_build_process_state \
+        "PyInstaller" \
+        "PyInstaller binary cache" \
+        "${candidates[@]}"
+}
+
+clang_module_cache_process_state() {
+    local xcode_state=0
+    xcode_build_tooling_process_state || xcode_state=$?
+    [[ $xcode_state -eq 1 ]] || return "$xcode_state"
+    mole_pgrep_any \
+        -x clang \
+        -x clangd \
+        -x swiftc \
+        -x sourcekit-lsp \
+        -x SourceKitService
+}
+
+clean_clang_module_cache() {
+    local darwin_user_cache=""
+    local resolver_rc=0
+    darwin_user_cache=$(mole_darwin_user_cache_root) || resolver_rc=$?
+    if [[ $resolver_rc -ne 0 ]]; then
+        [[ $resolver_rc -eq 124 || $resolver_rc -ge 128 ]] && return "$resolver_rc"
+        return 0
+    fi
+
+    local cache_root="$darwin_user_cache/clang"
+    [[ -d "$cache_root" || -L "$cache_root" ]] || return 0
+    local -a candidates=()
+    local candidate
+    for candidate in "$cache_root"/* "$cache_root"/.[!.]* "$cache_root"/..?*; do
+        [[ -e "$candidate" || -L "$candidate" ]] || continue
+        [[ ! -L "$candidate" ]] || continue
+        candidates+=("$candidate")
+    done
+    [[ ${#candidates[@]} -gt 0 ]] || return 0
+
+    clean_guarded_dev_cache_root \
+        "$darwin_user_cache" \
+        "$cache_root" \
+        clang_module_cache_process_state \
+        "Clang" \
+        "Clang module cache" \
+        "${candidates[@]}"
+}
+
 # Python/pip ecosystem caches.
 clean_dev_python() {
     # Check pip3 is functional (not just macOS stub that triggers CLT install dialog)
@@ -506,6 +726,7 @@ clean_dev_python() {
     safe_clean ~/.cache/ruff/* "Ruff cache"
     safe_clean ~/.cache/mypy/* "MyPy cache"
     safe_clean ~/.pytest_cache/* "Pytest cache"
+    clean_pyinstaller_bincache
     safe_clean ~/.jupyter/runtime/* "Jupyter runtime cache"
     safe_clean ~/.cache/huggingface/* "Hugging Face cache"
     safe_clean ~/.cache/torch/* "PyTorch cache"
@@ -3386,6 +3607,7 @@ clean_dev_other_langs() {
     safe_clean ~/.cache/bazel/* "Bazel cache"
     safe_clean ~/.cache/zig/* "Zig cache"
     safe_clean ~/Library/Caches/deno/* "Deno cache"
+    clean_clang_module_cache
 }
 # CI/CD and DevOps caches.
 clean_dev_cicd() {

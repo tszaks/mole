@@ -446,6 +446,44 @@ EOF
     [[ "$output" == *"inactive=1 unknown=2"* ]]
 }
 
+@test "mole_darwin_user_cache_root validates trusted getconf output" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+resolver_mode=valid
+run_with_timeout() {
+    [[ "$2" == "/usr/bin/getconf" && "$3" == "DARWIN_USER_CACHE_DIR" ]] || return 3
+    case "$resolver_mode" in
+        valid) printf '/var/folders/example/C/\n' ;;
+        relative) printf 'tmp/cache\n' ;;
+        traversal) printf '/var/folders/../private\n' ;;
+        root) printf '/\n' ;;
+        timeout) return 124 ;;
+    esac
+}
+
+valid=$(mole_darwin_user_cache_root)
+relative_rc=0
+traversal_rc=0
+root_rc=0
+timeout_rc=0
+resolver_mode=relative
+mole_darwin_user_cache_root > /dev/null 2>&1 || relative_rc=$?
+resolver_mode=traversal
+mole_darwin_user_cache_root > /dev/null 2>&1 || traversal_rc=$?
+resolver_mode=root
+mole_darwin_user_cache_root > /dev/null 2>&1 || root_rc=$?
+resolver_mode=timeout
+mole_darwin_user_cache_root > /dev/null 2>&1 || timeout_rc=$?
+printf 'valid=%s relative=%s traversal=%s root=%s timeout=%s\n' \
+    "$valid" "$relative_rc" "$traversal_rc" "$root_rc" "$timeout_rc"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"valid=/var/folders/example/C relative=1 traversal=1 root=1 timeout=124"* ]]
+}
+
 @test "create_temp_file and create_temp_dir are tracked and cleaned" {
     HOME="$HOME" /bin/bash --noprofile --norc << 'EOF'
 source "$PROJECT_ROOT/lib/core/common.sh"
