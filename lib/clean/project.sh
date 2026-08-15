@@ -1818,23 +1818,35 @@ clean_project_artifacts() {
         local -a group_project_identities=()
         local -a group_total_sizes=()
         local -a item_group_indices=()
-        local group_index existing_group_index
+        local group_index
+
+        # Sort an injective, line-safe encoding of each identity once, then
+        # assign adjacent rows to the same group. This keeps grouping O(n log n)
+        # when a large workspace contains hundreds of distinct projects.
+        local grouping_temp
+        grouping_temp=$(mktemp)
         for ((i = 0; i < ${#item_sizes[@]}; i++)); do
-            group_index=-1
-            for ((existing_group_index = 0; existing_group_index < ${#group_project_identities[@]}; existing_group_index++)); do
-                if [[ "${group_project_identities[existing_group_index]}" == "${item_project_identities[i]}" ]]; then
-                    group_index=$existing_group_index
-                    break
-                fi
-            done
-            if [[ $group_index -lt 0 ]]; then
+            local encoded_identity="${item_project_identities[i]}"
+            encoded_identity="${encoded_identity//%/%25}"
+            encoded_identity="${encoded_identity//|/%7C}"
+            encoded_identity="${encoded_identity//$'\n'/%0A}"
+            printf '%s|%d|%d\n' "$encoded_identity" "$i" "${item_sizes[i]}"
+        done > "$grouping_temp"
+
+        local previous_encoded_identity=""
+        local have_previous_identity=false
+        while IFS='|' read -r encoded_identity i item_size; do
+            if [[ "$have_previous_identity" != "true" || "$encoded_identity" != "$previous_encoded_identity" ]]; then
                 group_index=${#group_project_identities[@]}
                 group_project_identities+=("${item_project_identities[i]}")
                 group_total_sizes+=(0)
+                previous_encoded_identity="$encoded_identity"
+                have_previous_identity=true
             fi
-            item_group_indices+=("$group_index")
-            group_total_sizes[group_index]=$((group_total_sizes[group_index] + item_sizes[i]))
-        done
+            item_group_indices[i]=$group_index
+            group_total_sizes[group_index]=$((group_total_sizes[group_index] + item_size))
+        done < <(LC_ALL=C sort -t'|' -k1,1 -k2,2n "$grouping_temp")
+        rm -f "$grouping_temp" # SAFE: this is the exact scratch file created by mktemp above.
 
         local group_sort_temp
         group_sort_temp=$(mktemp)
