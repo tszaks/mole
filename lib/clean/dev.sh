@@ -506,6 +506,9 @@ clean_dev_python() {
     safe_clean ~/.cache/ruff/* "Ruff cache"
     safe_clean ~/.cache/mypy/* "MyPy cache"
     safe_clean ~/.pytest_cache/* "Pytest cache"
+    local user_tmp="${TMPDIR:-/tmp}"
+    safe_clean "${user_tmp%/}"/pytest-of-* "pytest temp dirs"
+    safe_clean ~/Library/Application\ Support/pyinstaller/* "PyInstaller cache"
     safe_clean ~/.jupyter/runtime/* "Jupyter runtime cache"
     safe_clean ~/.cache/huggingface/* "Hugging Face cache"
     safe_clean ~/.cache/torch/* "PyTorch cache"
@@ -856,6 +859,9 @@ clean_dev_frontend() {
     safe_clean ~/.parcel-cache/* "Parcel cache"
     safe_clean ~/.cache/eslint/* "ESLint cache"
     safe_clean ~/.cache/prettier/* "Prettier cache"
+    local user_tmp="${TMPDIR:-/tmp}"
+    safe_clean "${user_tmp%/}"/node-compile-cache/* "Node compile cache"
+    safe_clean "${user_tmp%/}"/jest_* "Jest temp cache"
 }
 # Check for multiple Android NDK versions.
 check_android_ndk() {
@@ -3386,6 +3392,13 @@ clean_dev_other_langs() {
     safe_clean ~/.cache/bazel/* "Bazel cache"
     safe_clean ~/.cache/zig/* "Zig cache"
     safe_clean ~/Library/Caches/deno/* "Deno cache"
+    # Module cache for command-line clang builds; Xcode's own copy lives in
+    # DerivedData and is handled by the Xcode cleanup.
+    local darwin_user_cache
+    darwin_user_cache=$(getconf DARWIN_USER_CACHE_DIR 2> /dev/null || echo "")
+    if [[ "$darwin_user_cache" == /* ]]; then
+        safe_clean "${darwin_user_cache%/}"/clang/* "Clang module cache"
+    fi
 }
 # CI/CD and DevOps caches.
 clean_dev_cicd() {
