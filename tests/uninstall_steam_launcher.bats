@@ -125,6 +125,37 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "uninstall_steam_launcher_appid rejects URLs in comments or multi-command scripts" {
+    app="$HOME/Applications/RegularApp.app"
+    create_regular_app "$app"
+
+    cat > "$app/Contents/MacOS/RegularApp" <<'SH'
+#!/bin/bash
+# open steam://run/1091500
+open https://example.com
+SH
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/uninstall/steam.sh"
+uninstall_steam_launcher_appid "$HOME/Applications/RegularApp.app"
+EOF
+    [ "$status" -ne 0 ]
+
+    cat > "$app/Contents/MacOS/RegularApp" <<'SH'
+#!/bin/bash
+open steam://run/1091500
+printf 'ordinary app work\n'
+SH
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/uninstall/steam.sh"
+uninstall_steam_launcher_appid "$HOME/Applications/RegularApp.app"
+EOF
+    [ "$status" -ne 0 ]
+}
+
 @test "uninstall_normalize_size_display hides shortcut size for Steam-managed apps" {
     app="$HOME/Applications/SteamGame.app"
     create_steam_launcher_app "$app" "1091500"
@@ -140,6 +171,34 @@ printf '%s\n' "$(uninstall_normalize_size_display "420MB" "$HOME/Applications/Re
 EOF
 
     [ "$status" -eq 0 ]
+    [[ "$output" == *"N/A (Steam-managed)"* ]]
+    [[ "$output" != *"93KB"* ]]
+}
+
+@test "uninstall selection labels Steam launchers before opening the menu" {
+    app="$HOME/Applications/SteamGame.app"
+    create_steam_launcher_app "$app" "1091500"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TERM="dumb" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/uninstall/steam.sh"
+source "$PROJECT_ROOT/lib/ui/app_selector.sh"
+eval "$(sed -n '/^uninstall_normalize_size_display()/,/^}/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+apps_data=("1700000000|$HOME/Applications/SteamGame.app|SteamGame|com.example.steamgame|93KB|Today|95")
+selected_apps=()
+drain_pending_input() { :; }
+paginated_multi_select() {
+    printf '%s\n' "$2"
+    MOLE_SELECTION_RESULT=""
+    return 1
+}
+
+select_apps_for_uninstall
+EOF
+
+    [ "$status" -ne 0 ]
     [[ "$output" == *"N/A (Steam-managed)"* ]]
     [[ "$output" != *"93KB"* ]]
 }

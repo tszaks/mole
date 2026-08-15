@@ -31,16 +31,45 @@ uninstall_steam_launcher_appid() {
     fi
 
     local script="$app_path/Contents/MacOS/$exec_name"
-    [[ -f "$script" && -r "$script" ]] || return 1
+    [[ -f "$script" && -r "$script" && -x "$script" ]] || return 1
 
-    # Steam launchers are generated shell scripts. Requiring a shebang keeps
-    # this from matching a Mach-O binary that merely embeds a steam:// URL.
-    local shebang
-    shebang=$(head -c 64 "$script" 2> /dev/null | LC_ALL=C grep -a '^#!' || true)
-    [[ -n "$shebang" ]] || return 1
+    # Steam-generated launchers are tiny shell wrappers with one active
+    # command. Bound and parse the whole script so a URL in a comment, a dead
+    # branch, or a larger script containing unrelated commands cannot label a
+    # normal application as launcher-only.
+    local script_size
+    script_size=$(wc -c < "$script" 2> /dev/null | tr -d '[:space:]') || return 1
+    [[ "$script_size" =~ ^[0-9]+$ && "$script_size" -le 4096 ]] || return 1
 
     local appid
-    appid=$(head -c 4096 "$script" 2> /dev/null | LC_ALL=C grep -aoE 'steam://(run|rungameid|launch)/[0-9]+' | head -n 1 | grep -oE '[0-9]+$' || true)
+    appid=$(LC_ALL=C awk '
+        NR == 1 {
+            if ($0 !~ /^#![[:space:]]*((\/usr\/bin\/env[[:space:]]+)?(\/bin\/)?(ba|z)?sh)([[:space:]]|$)/) {
+                exit 1
+            }
+            next
+        }
+        {
+            sub(/\r$/, "")
+            if ($0 ~ /^[[:space:]]*($|#)/) {
+                next
+            }
+            active++
+            if (active > 1 || $0 !~ /^[[:space:]]*(exec[[:space:]]+)?(\/usr\/bin\/)?open[[:space:]]+["'\'' ]?steam:\/\/(run|rungameid|launch)\/[0-9]+["'\'' ]?[[:space:]]*$/) {
+                exit 1
+            }
+            appid = $0
+            sub(/^.*\//, "", appid)
+            gsub(/["'\''[:space:]]/, "", appid)
+        }
+        END {
+            if (active == 1 && appid ~ /^[0-9]+$/) {
+                print appid
+            } else {
+                exit 1
+            }
+        }
+    ' "$script" 2> /dev/null) || return 1
     [[ "$appid" =~ ^[0-9]+$ ]] || return 1
     printf '%s\n' "$appid"
 }
