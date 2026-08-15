@@ -217,7 +217,11 @@ EOF
     [[ "$output" == *"Tart OCI/IPSW cache|\$HOME/.tart/cache|container_cache"* ]] || return 1
 }
 
-@test "whitelist inventory exposes Rust Cargo extracted sources" {
+@test "whitelist inventory offers no protection for paths Mole never deletes" {
+    # Every inventory row is a protection the user can switch on. Offering one
+    # for a path no cleanup path touches invites the reader to conclude Mole
+    # would otherwise delete it. registry/src is kept by clean_dev_rust, so it
+    # must not reappear here.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/manage/whitelist.sh"
@@ -225,7 +229,8 @@ get_all_cache_items
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Rust Cargo extracted sources|\$HOME/.cargo/registry/src/*|compiler_cache"* ]]
+    [[ "$output" == *"Rust Cargo registry cache|\$HOME/.cargo/registry/cache/*|compiler_cache"* ]] || return 1
+    [[ "$output" != *"registry/src"* ]]
 }
 
 @test "whitelist inventory exposes guarded PyInstaller and Clang caches" {

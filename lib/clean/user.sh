@@ -2578,6 +2578,10 @@ check_large_file_candidates() {
     done
     _report_large_review_dir "Lima data" "$HOME/.lima"
     _report_large_review_dir "Maven local repository" "$HOME/.m2/repository"
+    _report_large_review_dir "Ivy local repository" "$HOME/.ivy2/cache"
+    _report_large_review_dir "NuGet packages" "$HOME/.nuget/packages"
+    _report_large_review_dir "Go module cache" "$HOME/go/pkg/mod"
+    _report_large_review_dir "Deno module cache" "$HOME/Library/Caches/deno"
     _report_large_review_dir "pnpm store" "$HOME/Library/pnpm/store"
     _report_large_review_dir "Conda packages" "$HOME/.conda/pkgs"
     _report_large_review_dir "Anaconda packages" "$HOME/anaconda3/pkgs"

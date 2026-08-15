@@ -1926,7 +1926,8 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"Rust cargo cache|$HOME/.local/share/mise/cargo/registry/cache/*"* ]] || return 1
-    [[ "$output" == *"Rust crate sources|$HOME/.local/share/mise/cargo/registry/src/*"* ]] || return 1
+    # registry/src keeps offline builds working after registry/cache is emptied.
+    [[ "$output" != *"/registry/src"* ]] || return 1
     [[ "$output" == *"Cargo git cache|$HOME/.local/share/mise/cargo/git/*"* ]] || return 1
     [[ "$output" == *"Rustup downloads cache|$HOME/.local/share/mise/rustup/downloads/*"* ]] || return 1
     [[ "$output" != *"/registry/index/"* ]] || return 1
@@ -1934,11 +1935,11 @@ EOF
     [[ "$output" != *"/.rustup/"* ]] || return 1
 }
 
-@test "clean_dev_rust rejects a registry source root that escapes CARGO_HOME" {
+@test "clean_dev_rust rejects a registry cache root that escapes CARGO_HOME" {
     cargo_home="$HOME/custom-cargo"
-    outside_root="$HOME/outside-registry-sources"
+    outside_root="$HOME/outside-registry-cache"
     mkdir -p "$cargo_home/registry" "$outside_root/crate-data"
-    ln -s "$outside_root" "$cargo_home/registry/src"
+    ln -s "$outside_root" "$cargo_home/registry/cache"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" CARGO_HOME="$cargo_home" \
         /bin/bash --noprofile --norc <<'EOF'
@@ -1953,8 +1954,8 @@ clean_dev_rust
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Rust crate sources · stopped (cache path leaves CARGO_HOME)"* ]] || return 1
-    [[ "$output" != *"DELETE=Rust crate sources"* ]] || return 1
+    [[ "$output" == *"Rust cargo cache · stopped (cache path leaves CARGO_HOME)"* ]] || return 1
+    [[ "$output" != *"DELETE=Rust cargo cache"* ]] || return 1
     [[ -d "$outside_root/crate-data" ]]
 }
 
@@ -1982,7 +1983,7 @@ EOF
         return 1
     }
     [[ "$output" == *"Rust cargo cache|$HOME/.cargo/registry/cache/*"* ]] || return 1
-    [[ "$output" == *"Rust crate sources|$HOME/.cargo/registry/src/*"* ]] || return 1
+    [[ "$output" != *"/registry/src"* ]] || return 1
     [[ "$output" == *"Cargo git cache|$HOME/.cargo/git/*"* ]] || return 1
     [[ "$output" == *"Rustup downloads cache|$HOME/.rustup/downloads/*"* ]] || return 1
     [[ "$output" != *"/registry/index/"* ]] || return 1
@@ -2059,8 +2060,8 @@ EOF
 }
 
 @test "clean_dev_rust rechecks Cargo cache containment at the deletion boundary" {
-    cache_root="$HOME/.cargo/registry/src"
-    outside_root="$HOME/outside-rust-sources"
+    cache_root="$HOME/.cargo/registry/cache"
+    outside_root="$HOME/outside-rust-cache"
     mkdir -p "$cache_root/crate" "$outside_root/private-data"
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
@@ -2075,9 +2076,9 @@ safe_clean() { printf 'DELETE=%s|%s\n' "$2" "$1"; }
 safe_clean_guarded() {
     local guard="$1"
     shift
-    if [[ "$_MOLE_RUST_CACHE_ROOT" == "$HOME/.cargo/registry/src" ]]; then
-        mv "$HOME/.cargo/registry/src" "$HOME/.cargo/registry/src-original"
-        ln -s "$HOME/outside-rust-sources" "$HOME/.cargo/registry/src"
+    if [[ "$_MOLE_RUST_CACHE_ROOT" == "$HOME/.cargo/registry/cache" ]]; then
+        mv "$HOME/.cargo/registry/cache" "$HOME/.cargo/registry/cache-original"
+        ln -s "$HOME/outside-rust-cache" "$HOME/.cargo/registry/cache"
     fi
     "$guard" || return 75
     safe_clean "$@"
@@ -2086,18 +2087,18 @@ clean_dev_rust
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Rust crate sources · stopped (process or cache path state unknown)"* ]] || {
+    [[ "$output" == *"Rust cargo cache · stopped (process or cache path state unknown)"* ]] || {
         echo "$output"
         return 1
     }
-    [[ "$output" != *"DELETE=Rust crate sources"* ]] || return 1
+    [[ "$output" != *"DELETE=Rust cargo cache"* ]] || return 1
     [[ -d "$outside_root/private-data" ]]
 }
 
 @test "clean_dev_rust binds each Cargo cache leaf to its checked root" {
     cargo_home="$HOME/bound-cargo"
-    cache_root="$cargo_home/registry/src"
-    outside_root="$HOME/outside-rust-sources-after-guard"
+    cache_root="$cargo_home/registry/cache"
+    outside_root="$HOME/outside-rust-cache-after-guard"
     mkdir -p "$cache_root/crate" "$outside_root/crate"
     printf 'inside\n' > "$cache_root/crate/inside-marker"
     printf 'outside\n' > "$outside_root/crate/outside-marker"
@@ -2126,16 +2127,16 @@ swapped=0
 safe_remove() {
     if [[ $swapped -eq 0 ]]; then
         swapped=1
-        mv "$HOME/bound-cargo/registry/src" "$HOME/bound-cargo/registry/src-original"
-        ln -s "$HOME/outside-rust-sources-after-guard" "$HOME/bound-cargo/registry/src"
+        mv "$HOME/bound-cargo/registry/cache" "$HOME/bound-cargo/registry/cache-original"
+        ln -s "$HOME/outside-rust-cache-after-guard" "$HOME/bound-cargo/registry/cache"
     fi
     _real_safe_remove "$@"
 }
 
 clean_rust_dependency_cache_root \
     "$HOME/bound-cargo" \
-    "$HOME/bound-cargo/registry/src" \
-    "Rust crate sources"
+    "$HOME/bound-cargo/registry/cache" \
+    "Rust cargo cache"
 EOF
 
     [ "$status" -eq 0 ] || {
@@ -2144,7 +2145,7 @@ EOF
     }
     [[ -f "$cache_root-original/crate/inside-marker" ]] || return 1
     [[ -f "$outside_root/crate/outside-marker" ]] || return 1
-    [[ "$output" != *"Rust crate sources ·"* ]]
+    [[ "$output" != *"Rust cargo cache ·"* ]]
 }
 
 @test "resolve_tool_home rejects relative and traversal env values" {
@@ -2236,7 +2237,10 @@ EOF
     [[ "$output" == *"Ruby Bundler cache|"* ]]
 }
 
-@test "clean_dev_perl cleans CPAN build and source caches" {
+@test "clean_dev_perl clears the CPAN build tree but keeps the source store" {
+    # ~/.cpan/sources holds the distribution tarballs CPAN installs from and
+    # reuses across installs, so dropping it costs a re-download. The build
+    # tree next to it is throwaway scratch.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -2247,7 +2251,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"CPAN build artifacts|"* ]] || return 1
-    [[ "$output" == *"CPAN source cache|"* ]]
+    [[ "$output" != *"/.cpan/sources"* ]]
 }
 
 @test "clean_dev_other_langs no longer includes Ruby Bundler cache" {
@@ -2261,6 +2265,126 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"Ruby Bundler cache"* ]]
+}
+
+@test "clean_dev_python keeps downloaded model weights and run artifacts" {
+    # Hugging Face, PyTorch, TensorFlow and Weights & Biases store multi-GB
+    # downloads and experiment output, not rebuildable build products. Only
+    # ~/.cache/huggingface was ever covered by DEFAULT_WHITELIST_PATTERNS, and
+    # that array stops applying once a user saves their own whitelist file, so
+    # the other three were deleted for everyone.
+    mkdir -p "$HOME/.cache/huggingface/hub" "$HOME/.cache/torch/hub" \
+        "$HOME/.cache/tensorflow/datasets" "$HOME/.cache/wandb/run-1"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_tool_cache() { echo "$1|$2"; }
+clean_uv_cache() { :; }
+clean_pyinstaller_bincache() { :; }
+clean_conda_metadata_caches() { :; }
+note_activity() { :; }
+clean_dev_python
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"huggingface"* ]] || return 1
+    [[ "$output" != *"/.cache/torch"* ]] || return 1
+    [[ "$output" != *"/.cache/tensorflow"* ]] || return 1
+    [[ "$output" != *"/.cache/wandb"* ]] || return 1
+    # The rebuildable linter and type-checker caches next to them still go.
+    [[ "$output" == *"Ruff cache"* ]] || return 1
+    [[ "$output" == *"MyPy cache"* ]]
+}
+
+@test "clean_dev_go keeps the module store and clears only the build cache" {
+    # `go clean -modcache` empties GOMODCACHE, which every Go build resolves
+    # against. Go has no default per-project vendor directory, so that turns
+    # every dependency of every project on the machine back into a download.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+is_path_whitelisted() { return 1; }
+note_activity() { :; }
+clean_tool_cache() { printf 'TOOL=%s|CMD=%s\n' "$1" "${*:3}"; }
+clean_dev_go
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"modcache"* ]] || return 1
+    [[ "$output" == *"go clean -cache"* ]] || return 1
+    [[ "$output" == *"TOOL=Go build cache"* ]]
+}
+
+@test "clean_dev_jvm keeps the Ivy store and the sbt toolchain" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+clean_maven_repository() { :; }
+mole_cleanup_targets_exist() { return 1; }
+safe_clean() { echo "$2|$1"; }
+clean_dev_jvm
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"/.ivy2/"* ]] || return 1
+    [[ "$output" != *"/.sbt/"* ]]
+}
+
+@test "clean_dev_other_langs keeps the Deno module store" {
+    # DENO_DIR is the only place a Deno project's remote imports live; there
+    # is no node_modules to fall back on.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_clang_module_cache() { :; }
+clean_dev_other_langs
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"Deno"* ]] || return 1
+    [[ "$output" != *"Caches/deno"* ]] || return 1
+    [[ "$output" == *"Zig cache"* ]]
+}
+
+@test "clean_dev_other_langs keeps the NuGet global packages folder" {
+    # ~/.nuget/packages is the restore target itself, the .NET counterpart of
+    # ~/.m2/repository, which clean_large_files only reports for review.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_clang_module_cache() { :; }
+clean_dev_other_langs
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *".nuget"* ]] || return 1
+    [[ "$output" != *"NuGet"* ]] || return 1
+    [[ "$output" == *"Zig cache"* ]]
 }
 
 @test "clean_project_caches cleans flutter .dart_tool and build directories" {

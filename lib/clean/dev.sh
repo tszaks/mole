@@ -728,44 +728,39 @@ clean_dev_python() {
     safe_clean ~/.pytest_cache/* "Pytest cache"
     clean_pyinstaller_bincache
     safe_clean ~/.jupyter/runtime/* "Jupyter runtime cache"
-    safe_clean ~/.cache/huggingface/* "Hugging Face cache"
-    safe_clean ~/.cache/torch/* "PyTorch cache"
-    safe_clean ~/.cache/tensorflow/* "TensorFlow cache"
+    # Hugging Face, PyTorch, TensorFlow and Weights & Biases keep downloaded
+    # model weights, datasets and run artifacts here, not rebuildable build
+    # output. Restoring them costs a multi-gigabyte download, so they stay off
+    # the delete path exactly like LM Studio models and ~/.ollama/models, which
+    # `clean_large_files` only reports for review. `~/.cache/huggingface` used
+    # to rely on DEFAULT_WHITELIST_PATTERNS, which stops applying the moment a
+    # user saves their own whitelist file, so the protection was uneven.
     clean_conda_metadata_caches
-    safe_clean ~/.cache/wandb/* "Weights & Biases cache"
 }
 # Go build/module caches.
 clean_dev_go() {
     command -v go > /dev/null 2>&1 || return 0
 
-    local go_build_cache go_mod_cache
+    local go_build_cache
     go_build_cache=$(go env GOCACHE 2> /dev/null || echo "$HOME/Library/Caches/go-build")
-    go_mod_cache=$(go env GOMODCACHE 2> /dev/null || echo "$HOME/go/pkg/mod")
 
-    local build_protected=false mod_protected=false
-    is_path_whitelisted "$go_build_cache" && build_protected=true
-    is_path_whitelisted "$go_mod_cache" && mod_protected=true
-
-    if [[ "$build_protected" == "true" && "$mod_protected" == "true" ]]; then
+    # GOMODCACHE is excluded on purpose. It is the module store `go build`
+    # resolves against rather than a second copy of something already
+    # materialized: Go has no per-project vendor directory by default, so
+    # `go clean -modcache` turns every dependency of every project on the
+    # machine back into a download. `clean_large_files` reports it for review
+    # instead. GOCACHE below is compiler output Go rebuilds locally.
+    if is_path_whitelisted "$go_build_cache"; then
         if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Go cache · would skip (whitelist)"
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Go build cache · would skip (whitelist)"
         else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go cache · skipped (whitelist)"
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go build cache · skipped (whitelist)"
             note_activity
         fi
         return 0
     fi
 
-    if [[ "$build_protected" != "true" && "$mod_protected" != "true" ]]; then
-        clean_tool_cache "Go cache" "" bash -c 'go clean -modcache > /dev/null 2>&1 || true; go clean -cache > /dev/null 2>&1 || true'
-    elif [[ "$build_protected" == "true" ]]; then
-        clean_tool_cache "Go module cache" "" bash -c 'go clean -modcache > /dev/null 2>&1 || true'
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go build cache · skipped (whitelist)"
-        note_activity
-    else
-        clean_tool_cache "Go build cache" "" bash -c 'go clean -cache > /dev/null 2>&1 || true'
-        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go module cache · skipped (whitelist)"
-    fi
+    clean_tool_cache "Go build cache" "" bash -c 'go clean -cache > /dev/null 2>&1 || true'
     note_activity
 }
 
@@ -921,8 +916,15 @@ clean_rust_dependency_cache_root() {
 
 # Rust/cargo caches. Honor CARGO_HOME / RUSTUP_HOME when they point at a
 # validated absolute path (mise and other version managers relocate these).
-# Scope stays regenerable cache only: registry/cache, registry/src, git, and
-# downloads. Keep bin, toolchains, and registry/index.
+# Scope stays regenerable cache only: registry/cache, git, and downloads.
+# Keep bin, toolchains, and registry/index.
+#
+# registry/src is deliberately excluded. It holds the extracted crate sources
+# cargo builds against, so with it present a project still builds after
+# registry/cache is emptied; removing both turns every previously working
+# offline build into a crates.io round trip. rust-analyzer also reads it
+# continuously and is not part of rust_build_process_state, so a deletion
+# would break IDE navigation for an editor Mole cannot see.
 clean_dev_rust() {
     local cargo_home rustup_home
     cargo_home=$(resolve_tool_home "${CARGO_HOME:-}" "${HOME}/.cargo")
@@ -930,7 +932,6 @@ clean_dev_rust() {
 
     if mole_cleanup_targets_exist \
         "${cargo_home}/registry/cache"/* \
-        "${cargo_home}/registry/src"/* \
         "${cargo_home}/git"/*; then
         local rust_state=0
         rust_build_process_state || rust_state=$?
@@ -941,10 +942,6 @@ clean_dev_rust() {
                 "$cargo_home" \
                 "${cargo_home}/registry/cache" \
                 "Rust cargo cache" || return 0
-            clean_rust_dependency_cache_root \
-                "$cargo_home" \
-                "${cargo_home}/registry/src" \
-                "Rust crate sources" || return 0
             clean_rust_dependency_cache_root \
                 "$cargo_home" \
                 "${cargo_home}/git" \
@@ -965,8 +962,9 @@ clean_dev_ruby() {
 }
 # Perl ecosystem caches (not installed modules).
 clean_dev_perl() {
+    # ~/.cpan/sources is the distribution store CPAN installs from and reuses
+    # across installs, so it stays. Only the throwaway build tree goes.
     safe_clean ~/.cpan/build/* "CPAN build artifacts"
-    safe_clean ~/.cpan/sources/* "CPAN source cache"
 }
 
 # Helper: Check for multiple versions in a directory.
@@ -2719,9 +2717,11 @@ clean_dev_jvm() {
     if declare -f clean_maven_repository > /dev/null 2>&1; then
         clean_maven_repository
     fi
-    safe_clean ~/.sbt/boot/* "SBT boot cache"
-    safe_clean ~/.sbt/launchers/* "SBT launcher cache"
-    safe_clean ~/.ivy2/cache/* "Ivy cache"
+    # Excluded on purpose: ~/.sbt/boot and ~/.sbt/launchers hold the Scala
+    # compiler and sbt launcher jars themselves, so emptying them re-downloads
+    # a toolchain, and ~/.ivy2/cache is the resolution store sbt and Ivy read
+    # dependencies from, the JVM sibling of ~/.m2/repository that
+    # clean_large_files already reports rather than deletes.
     if mole_cleanup_targets_exist \
         "$HOME/.gradle/caches/build-cache-"*/* \
         "$HOME/.gradle/notifications"/* \
@@ -3602,11 +3602,17 @@ clean_dev_ai_agents() {
 clean_dev_other_langs() {
     safe_clean ~/.composer/cache/* "PHP Composer cache (legacy)"
     safe_clean ~/Library/Caches/composer/* "PHP Composer cache"
-    safe_clean ~/.nuget/packages/* "NuGet packages cache"
+    # ~/.nuget/packages is NuGet's global packages folder, the restore target
+    # itself rather than an HTTP cache, so it is the .NET equivalent of
+    # ~/.m2/repository: emptying it forces a full re-download on the next
+    # build. Both stay off the delete path and are surfaced by
+    # `clean_large_files` for review instead.
     # safe_clean ~/.pub-cache/* "Dart Pub cache"
     safe_clean ~/.cache/bazel/* "Bazel cache"
     safe_clean ~/.cache/zig/* "Zig cache"
-    safe_clean ~/Library/Caches/deno/* "Deno cache"
+    # DENO_DIR is Deno's only module store. There is no node_modules to fall
+    # back on, so emptying it re-downloads every remote import of every Deno
+    # project and breaks --cached-only runs. clean_large_files reports it.
     clean_clang_module_cache
 }
 # CI/CD and DevOps caches.
@@ -4792,11 +4798,10 @@ clean_dev_network() {
 clean_dev_elixir() {
     safe_clean ~/.hex/cache/* "Hex cache"
 }
-# Haskell ecosystem.
-# Note: ~/.stack/programs contains Stack-installed GHC compilers - excluded from cleanup
-clean_dev_haskell() {
-    safe_clean ~/.cabal/packages/* "Cabal install cache"
-}
+# Haskell has no cleanup stage: ~/.stack/programs holds Stack-installed GHC
+# compilers and ~/.cabal/packages is the downloaded source-tarball store cabal
+# resolves builds against, so both are toolchain or dependency state rather
+# than a redundant copy Mole can drop.
 # OCaml ecosystem.
 clean_dev_ocaml() {
     safe_clean ~/.opam/download-cache/* "Opam cache"
@@ -4860,7 +4865,6 @@ clean_developer_tools() {
     _run_developer_cleanup_step clean_dev_network || return $?
     _run_developer_cleanup_step clean_dev_misc || return $?
     _run_developer_cleanup_step clean_dev_elixir || return $?
-    _run_developer_cleanup_step clean_dev_haskell || return $?
     _run_developer_cleanup_step clean_dev_ocaml || return $?
 
     # GUI developer applications
