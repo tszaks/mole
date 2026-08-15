@@ -1029,13 +1029,6 @@ clean_remote_desktop() {
     safe_clean ~/Library/Caches/com.sunlogin.*/* "Sunlogin cache"
 }
 # Main entry for GUI app cleanup.
-# Shared electron-updater download staging (~/Library/Application
-# Support/Caches/<app>-updater). Only the pending payloads are removed:
-# an interrupted update is re-downloaded by the app's updater on demand.
-clean_electron_updater_caches() {
-    safe_clean ~/Library/Application\ Support/Caches/*-updater/pending/* "Electron updater downloads"
-}
-
 clean_user_gui_applications() {
     stop_section_spinner
     clean_communication_apps
@@ -1058,5 +1051,4 @@ clean_user_gui_applications() {
     clean_note_apps
     clean_launcher_apps
     clean_remote_desktop
-    clean_electron_updater_caches
 }

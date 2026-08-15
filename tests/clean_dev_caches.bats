@@ -1742,6 +1742,167 @@ EOF
     [[ "$output" == *"PHP Composer cache|"* ]]
 }
 
+@test "PyInstaller cleanup keeps non-bincache state" {
+    local cache_root="$HOME/Library/Application Support/pyinstaller"
+    mkdir -p "$cache_root/bincache00py311" "$cache_root/hooks"
+    printf 'state\n' > "$cache_root/config.json"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pyinstaller_build_process_state() { return 1; }
+safe_clean() {
+    local description="${!#}"
+    while [[ $# -gt 1 ]]; do
+        printf 'CLEAN=%s|%s\n' "$description" "$1"
+        shift
+    done
+}
+clean_pyinstaller_bincache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN=PyInstaller binary cache|$cache_root/bincache00py311"* ]] || return 1
+    [[ "$output" != *"$cache_root/hooks"* ]] || return 1
+    [[ "$output" != *"$cache_root/config.json"* ]]
+}
+
+@test "PyInstaller cleanup reaches the guarded deletion sink" {
+    local cache_root="$HOME/Library/Application Support/pyinstaller"
+    mkdir -p "$cache_root/bincache00py310"
+    printf 'cache\n' > "$cache_root/bincache00py310/module.bin"
+    printf 'keep\n' > "$cache_root/config.json"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+pyinstaller_build_process_state() { return 1; }
+clean_pyinstaller_bincache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ ! -e "$cache_root/bincache00py310" ] || return 1
+    [ -f "$cache_root/config.json" ]
+}
+
+@test "PyInstaller cleanup fails closed when the process state is unknown" {
+    local cache_root="$HOME/Library/Application Support/pyinstaller"
+    mkdir -p "$cache_root/bincache00py312"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pyinstaller_build_process_state() { return 2; }
+safe_clean() { printf 'UNEXPECTED_CLEAN=%s\n' "$1"; }
+note_activity() { :; }
+clean_pyinstaller_bincache
+EOF
+
+    if [[ -L "$cache_root" && -d "$cache_root-original" ]]; then
+        /bin/unlink "$cache_root"
+        /bin/mv "$cache_root-original" "$cache_root"
+    fi
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"PyInstaller binary cache · stopped (process state unknown)"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN="* ]]
+}
+
+@test "PyInstaller cleanup rechecks the process at the deletion boundary" {
+    local cache_root="$HOME/Library/Application Support/pyinstaller"
+    mkdir -p "$cache_root/bincache00py313"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+probe_calls=0
+pyinstaller_build_process_state() {
+    probe_calls=$((probe_calls + 1))
+    [[ $probe_calls -eq 1 ]] && return 1
+    return 0
+}
+mole_defer_cleanup_family() { printf 'DEFER=%s\n' "$1"; }
+safe_clean() { printf 'UNEXPECTED_CLEAN=%s\n' "$1"; }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    "$guard" "$1" || return 75
+    safe_clean "$@"
+}
+clean_pyinstaller_bincache
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"DEFER=PyInstaller"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN="* ]]
+}
+
+@test "PyInstaller cleanup rejects a root replaced before deletion" {
+    local cache_root="$HOME/Library/Application Support/pyinstaller"
+    local outside_root="$HOME/outside-pyinstaller"
+    mkdir -p "$cache_root/bincache00py314" "$outside_root/bincache00py314"
+    printf 'keep\n' > "$outside_root/bincache00py314/private-data"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+pyinstaller_build_process_state() { return 1; }
+safe_clean() { printf 'UNEXPECTED_CLEAN=%s\n' "$1"; }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local cache_root="$HOME/Library/Application Support/pyinstaller"
+    /bin/mv "$cache_root" "$cache_root-original"
+    /bin/ln -s "$HOME/outside-pyinstaller" "$cache_root"
+    "$guard" "$1" || return 75
+    safe_clean "$@"
+}
+note_activity() { :; }
+clean_pyinstaller_bincache
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"PyInstaller binary cache · stopped (process or cache path state unknown)"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_CLEAN="* ]] || return 1
+    [ -f "$outside_root/bincache00py314/private-data" ]
+}
+
+@test "Clang cleanup uses the macOS cache root and keeps symlink entries" {
+    local darwin_cache="$HOME/darwin-cache"
+    local cache_root="$darwin_cache/clang"
+    local outside_root="$HOME/outside-clang"
+    mkdir -p "$cache_root/module-cache" "$cache_root/.locks" "$outside_root/private-data"
+    ln -s "$outside_root" "$cache_root/redirected"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DARWIN_CACHE="$darwin_cache" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+mole_darwin_user_cache_root() { printf '%s\n' "$DARWIN_CACHE"; }
+clang_module_cache_process_state() { return 1; }
+safe_clean() {
+    local description="${!#}"
+    while [[ $# -gt 1 ]]; do
+        printf 'CLEAN=%s|%s\n' "$description" "$1"
+        shift
+    done
+}
+clean_clang_module_cache
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN=Clang module cache|$cache_root/module-cache"* ]] || return 1
+    [[ "$output" == *"CLEAN=Clang module cache|$cache_root/.locks"* ]] || return 1
+    [[ "$output" != *"$cache_root/redirected"* ]] || return 1
+    [ -d "$outside_root/private-data" ]
+}
+
 @test "clean_dev_rust honors CARGO_HOME and RUSTUP_HOME when absolute" {
     # mise and friends relocate cargo/rustup via env; hardcoded ~/.cargo misses
     # the live cache (issue #1378). Scope stays regenerable leaves only.

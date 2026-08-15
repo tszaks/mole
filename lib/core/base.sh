@@ -211,6 +211,32 @@ mole_github_cli_cache_root() {
     printf '%s\n' "$cache_root"
 }
 
+# Resolve the per-user cache root reported by macOS. Keep the resolver shared
+# so cleanup and whitelist inventory always describe the same path.
+mole_darwin_user_cache_root() {
+    declare -f run_with_timeout > /dev/null 2>&1 || return 1
+
+    local cache_root=""
+    local resolver_rc=0
+    cache_root=$(run_with_timeout "${MOLE_TIMEOUT_QUICK_DETECT_SEC:-3}" \
+        /usr/bin/getconf DARWIN_USER_CACHE_DIR 2> /dev/null) || resolver_rc=$?
+    [[ $resolver_rc -eq 0 ]] || return "$resolver_rc"
+
+    [[ "$cache_root" == /* && ! "$cache_root" =~ [[:cntrl:]] ]] || return 1
+    case "$cache_root" in
+        *'/../'* | */.. | *'/./'* | */. | *'//'*) return 1 ;;
+    esac
+
+    cache_root="${cache_root%/}"
+    local home_root="${HOME:-}"
+    home_root="${home_root%/}"
+    case "$cache_root" in
+        "" | / | "$home_root") return 1 ;;
+    esac
+
+    printf '%s\n' "$cache_root"
+}
+
 # Append any missing SAFETY_WHITELIST_PATTERNS to WHITELIST_PATTERNS.
 # When CURRENT_WHITELIST_PATTERNS is declared (manage UI), keep it in sync.
 ensure_safety_whitelist_patterns() {
