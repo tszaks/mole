@@ -77,6 +77,10 @@ readonly MOLE_PURGE_MONOREPO_INDICATORS=(
     "pnpm-workspace.yaml"
     "nx.json"
     "rush.json"
+    # A repository or worktree is the project-wide ownership boundary even
+    # when nested packages have their own manifests. Keep .git in the project
+    # indicators too because container discovery consumes that list directly.
+    ".git"
 )
 
 readonly MOLE_PURGE_PROJECT_INDICATORS=(
