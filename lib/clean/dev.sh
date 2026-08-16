@@ -824,6 +824,18 @@ clean_go_cache_root() {
     local display_name="$4"
     [[ -e "$cache_root" || -L "$cache_root" ]] || return 0
 
+    # `go clean -modcache` removes the module root itself, not just its
+    # contents, so handing it the resolved physical path of a symlinked
+    # GOMODCACHE deletes the target directory and leaves the owner's own root a
+    # dangling link that the next build cannot use. GOCACHE is safe here
+    # because `go clean -cache` empties the cache subdirectories and leaves the
+    # root in place.
+    if [[ "$cache_kind" == "GOMODCACHE" && -L "$cache_root" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (symlinked module root)"
+        note_activity
+        return 0
+    fi
+
     local physical_root=""
     if ! physical_root=$(go_cache_root_physical_path "$cache_root"); then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (cache path unsafe)"
@@ -2883,17 +2895,13 @@ clean_dev_mobile() {
 # JVM ecosystem caches.
 # Gradle: Respects whitelist, cleaned when not protected via: mo clean --whitelist
 clean_dev_jvm() {
-    # Source Maven cleanup module (requires bash for BASH_SOURCE)
-    # shellcheck disable=SC1091
-    source "$(dirname "${BASH_SOURCE[0]}")/maven.sh" 2> /dev/null || true
-    if declare -f clean_maven_repository > /dev/null 2>&1; then
-        clean_maven_repository
-    fi
-    # Excluded on purpose: ~/.sbt/boot and ~/.sbt/launchers hold the Scala
-    # compiler and sbt launcher jars themselves, so emptying them re-downloads
-    # a toolchain, and ~/.ivy2/cache is the resolution store sbt and Ivy read
-    # dependencies from, the JVM sibling of ~/.m2/repository that
-    # clean_large_files already reports rather than deletes.
+    # Excluded on purpose, all for the same reason: ~/.m2/repository and
+    # ~/.ivy2/cache are the stores Maven, sbt and Ivy resolve dependencies
+    # from, and ~/.sbt/boot with ~/.sbt/launchers hold the Scala compiler and
+    # sbt launcher jars themselves. clean_large_files reports them for review.
+    # Maven used to be cleaned here and relied on DEFAULT_WHITELIST_PATTERNS to
+    # stay safe, which stops applying as soon as a user saves any whitelist
+    # entry of their own, so the delete path is gone rather than guarded.
     if mole_cleanup_targets_exist \
         "$HOME/.gradle/caches/build-cache-"*/* \
         "$HOME/.gradle/notifications"/* \

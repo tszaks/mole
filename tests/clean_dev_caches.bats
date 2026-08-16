@@ -2303,7 +2303,11 @@ EOF
     [[ "$output" == *"MyPy cache"* ]]
 }
 
-@test "clean_dev_go resets both owner-reported caches and supports a symlinked module root" {
+@test "clean_dev_go refuses a symlinked module root but still clears the build cache" {
+    # `go clean -modcache` removes the module root directory itself, so handing
+    # it the resolved physical path of a symlinked GOMODCACHE deletes the target
+    # and leaves the owner's root dangling for the next build. `go clean -cache`
+    # empties GOCACHE in place, so a symlinked build root stays supported.
     local module_physical="$HOME/go-module-physical"
     local module_link="$HOME/go-module-link"
     local build_root="$HOME/go-build-cache"
@@ -2338,9 +2342,15 @@ clean_dev_go
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"Go module cache"* ]] || return 1
+    [[ "$output" == *"Go module cache · stopped (symlinked module root)"* ]] || {
+        echo "$output"
+        return 1
+    }
     [[ "$output" == *"Go build cache"* ]] || return 1
-    grep -qFx "env GOMODCACHE=$module_physical go clean -modcache" "$trace" || return 1
+    # Nothing may be handed to the owner command for the symlinked root, and
+    # the physical directory the link points at must survive.
+    ! grep -q -- "-modcache" "$trace" || return 1
+    [[ -d "$module_physical" ]] || return 1
     grep -qFx "env GOCACHE=$build_root go clean -cache" "$trace" || return 1
     rm -f "$trace" "$module_link"
     rm -rf "$module_physical" "$build_root"
@@ -2528,7 +2538,6 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
-clean_maven_repository() { :; }
 mole_cleanup_targets_exist() { return 1; }
 safe_clean() { echo "$2|$1"; }
 clean_dev_jvm

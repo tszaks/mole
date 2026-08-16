@@ -104,6 +104,45 @@ clean_trash() {
     fi
 }
 
+# Re-resolve the Deno root at the deletion boundary and refuse any candidate
+# that has become it, or that now contains it. Excluding the root while the
+# candidate list is built only proves where it pointed at that moment: a
+# symlinked DENO_DIR retargeted afterwards makes the sink delete whatever the
+# root points at now. Failing closed here costs one skipped cache directory;
+# guessing costs the user's Deno state.
+_user_cache_deno_delete_guard() {
+    local candidate="${1:-}"
+    [[ -n "$candidate" ]] || return 1
+
+    local deno_root=""
+    deno_root=$(mole_deno_cache_root 2> /dev/null) || return 1
+
+    local candidate_physical=""
+    if [[ -d "$candidate" ]]; then
+        candidate_physical=$(cd -P "$candidate" 2> /dev/null && pwd -P) || return 1
+    fi
+    local deno_physical=""
+    if [[ -d "$deno_root" ]]; then
+        deno_physical=$(cd -P "$deno_root" 2> /dev/null && pwd -P) || return 1
+    fi
+
+    local candidate_probe deno_probe
+    for candidate_probe in "$candidate" "$candidate_physical"; do
+        [[ -n "$candidate_probe" ]] || continue
+        for deno_probe in "$deno_root" "$deno_physical"; do
+            [[ -n "$deno_probe" ]] || continue
+            # The candidate is the root, sits inside it, or contains it.
+            case "$deno_probe" in
+                "$candidate_probe" | "$candidate_probe"/*) return 1 ;;
+            esac
+            case "$candidate_probe" in
+                "$deno_probe"/*) return 1 ;;
+            esac
+        done
+    done
+    return 0
+}
+
 clean_user_essentials() {
     start_section_spinner "Scanning caches..."
     # Deno's default root sits inside the otherwise broad user-cache sweep,
@@ -143,7 +182,13 @@ clean_user_essentials() {
         done
     fi
     if [[ ${#user_cache_targets[@]} -gt 0 ]]; then
-        safe_clean "${user_cache_targets[@]}" "User app cache"
+        local user_cache_rc=0
+        safe_clean_guarded _user_cache_deno_delete_guard \
+            "${user_cache_targets[@]}" "User app cache" || user_cache_rc=$?
+        if [[ $user_cache_rc -eq 75 ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} User app cache · stopped (Deno root changed during cleanup)"
+            note_activity
+        fi
     elif [[ "$deno_cache_root_valid" != "true" ]]; then
         # Refusing here is right, but staying silent about it is not: the whole
         # category would just be missing from the section. Name the cause the

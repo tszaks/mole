@@ -50,7 +50,7 @@ save_whitelist_patterns() {
         header_text="# Mole Optimization Whitelist - These checks will be skipped during optimization"
     else
         config_file="$WHITELIST_CONFIG_CLEAN"
-        header_text="# Mole Whitelist - Protected paths won't be deleted\n# Default protections: Playwright browsers, Maven repo, Ollama models, Surge Mac, R renv, Finder metadata\n# Add one pattern per line to keep items safe."
+        header_text="# Mole Whitelist - Protected paths won't be deleted\n# Default protections: Playwright browsers, Ollama models, Surge Mac, R renv, Finder metadata\n# Add one pattern per line to keep items safe."
     fi
 
     ensure_user_file "$config_file"
@@ -98,7 +98,6 @@ Gradle worker cache|$HOME/.gradle/workers/*|ide_cache
 Xcode DerivedData (build outputs, indexes)|$HOME/Library/Developer/Xcode/DerivedData/*|ide_cache
 Xcode internal cache files|$HOME/Library/Caches/com.apple.dt.Xcode/*|ide_cache
 Xcode iOS device support symbols|$HOME/Library/Developer/Xcode/iOS DeviceSupport/*/Symbols/System/Library/Caches/*|ide_cache
-Maven local repository (Java dependencies)|$HOME/.m2/repository/*|ide_cache
 JetBrains IDEs data (IntelliJ, PyCharm, WebStorm, GoLand)|$HOME/Library/Application Support/JetBrains/*|ide_cache
 JetBrains IDEs cache|$HOME/Library/Caches/JetBrains/*|ide_cache
 Android Studio cache and indexes|$HOME/Library/Caches/Google/AndroidStudio*/*|ide_cache
@@ -357,7 +356,13 @@ ${GRAY}Edit: ${display_config}${NC}"
         index=$((index + 1))
     done <<< "$items_source"
 
-    # Identify custom patterns (not in predefined list)
+    # Identify custom patterns (not in predefined list).
+    #
+    # Hard-safety entries have no inventory row on purpose: they are not
+    # opt-in protections the user picks from a menu. Without this check they
+    # fall through to custom_patterns, which both mislabels them as
+    # user-added and writes them into the saved file as if the user had chosen
+    # them, so a mandatory rule becomes an editable one on first save.
     local -a custom_patterns=()
     if [[ ${#CURRENT_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
         for current_pattern in "${CURRENT_WHITELIST_PATTERNS[@]}"; do
@@ -368,6 +373,15 @@ ${GRAY}Edit: ${display_config}${NC}"
                     break
                 fi
             done
+            if [[ "$is_predefined" == "false" && ${#SAFETY_WHITELIST_PATTERNS[@]} -gt 0 ]]; then
+                local safety_pattern
+                for safety_pattern in "${SAFETY_WHITELIST_PATTERNS[@]}"; do
+                    if patterns_equivalent "$current_pattern" "$safety_pattern"; then
+                        is_predefined=true
+                        break
+                    fi
+                done
+            fi
             if [[ "$is_predefined" == "false" ]]; then
                 custom_patterns+=("$current_pattern")
             fi

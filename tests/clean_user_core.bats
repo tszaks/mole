@@ -36,6 +36,23 @@ stop_section_spinner() { :; }
 safe_clean() { echo "$2"; }
 note_activity() { :; }
 is_path_whitelisted() { [[ "$1" == "$HOME/.Trash" ]]; }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local label="${!#}"
+    local -a targets=("${@:1:$#-1}")
+    local -a kept=()
+    local target
+    for target in "${targets[@]}"; do
+        if "$guard" "$target"; then
+            kept+=("$target")
+        fi
+    done
+    if [[ ${#kept[@]} -eq 0 ]]; then
+        return 75
+    fi
+    safe_clean "${kept[@]}" "$label"
+}
 clean_user_essentials
 EOF
 
@@ -59,6 +76,23 @@ _clean_mail_downloads() { :; }
 getconf() { echo "WRONG:getconf"; return 99; }
 lsof() { echo "WRONG:lsof"; return 99; }
 mole_truncate_log_file() { echo "WRONG:truncate"; return 99; }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local label="${!#}"
+    local -a targets=("${@:1:$#-1}")
+    local -a kept=()
+    local target
+    for target in "${targets[@]}"; do
+        if "$guard" "$target"; then
+            kept+=("$target")
+        fi
+    done
+    if [[ ${#kept[@]} -eq 0 ]]; then
+        return 75
+    fi
+    safe_clean "${kept[@]}" "$label"
+}
 clean_user_essentials
 EOF
 
@@ -91,6 +125,23 @@ safe_clean() {
         printf 'CLEAN=%s|%s\n' "$description" "$path"
         rm -rf "$path"
     done
+}
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local label="${!#}"
+    local -a targets=("${@:1:$#-1}")
+    local -a kept=()
+    local target
+    for target in "${targets[@]}"; do
+        if "$guard" "$target"; then
+            kept+=("$target")
+        fi
+    done
+    if [[ ${#kept[@]} -eq 0 ]]; then
+        return 75
+    fi
+    safe_clean "${kept[@]}" "$label"
 }
 clean_user_essentials
 [[ -d "$HOME/Library/Caches/deno/origin-data" ]]
@@ -131,6 +182,23 @@ safe_clean() {
         shift
     done
 }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local label="${!#}"
+    local -a targets=("${@:1:$#-1}")
+    local -a kept=()
+    local target
+    for target in "${targets[@]}"; do
+        if "$guard" "$target"; then
+            kept+=("$target")
+        fi
+    done
+    if [[ ${#kept[@]} -eq 0 ]]; then
+        return 75
+    fi
+    safe_clean "${kept[@]}" "$label"
+}
 clean_user_essentials
 [[ -d "$HOME/Library/Caches/tool-root/deno/origin-data" ]]
 [[ ! -e "$HOME/Library/Caches/ordinary-app" ]]
@@ -152,6 +220,23 @@ safe_clean() {
         rm -rf "$1"
         shift
     done
+}
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local label="${!#}"
+    local -a targets=("${@:1:$#-1}")
+    local -a kept=()
+    local target
+    for target in "${targets[@]}"; do
+        if "$guard" "$target"; then
+            kept+=("$target")
+        fi
+    done
+    if [[ ${#kept[@]} -eq 0 ]]; then
+        return 75
+    fi
+    safe_clean "${kept[@]}" "$label"
 }
 clean_user_essentials
 [[ -L "$HOME/Library/Caches/deno" ]]
@@ -178,6 +263,23 @@ clean_trash() { :; }
 _clean_recent_items() { :; }
 _clean_mail_downloads() { :; }
 safe_clean() { printf 'CLEAN=%s\n' "${!#}"; }
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local label="${!#}"
+    local -a targets=("${@:1:$#-1}")
+    local -a kept=()
+    local target
+    for target in "${targets[@]}"; do
+        if "$guard" "$target"; then
+            kept+=("$target")
+        fi
+    done
+    if [[ ${#kept[@]} -eq 0 ]]; then
+        return 75
+    fi
+    safe_clean "${kept[@]}" "$label"
+}
 clean_user_essentials
 EOF
 
@@ -188,6 +290,62 @@ EOF
     # way for the user to tell cleanup from a stopped gate.
     [[ "$output" == *"User app cache · stopped (DENO_DIR unresolved)"* ]] || {
         echo "$output"
+        return 1
+    }
+    rm -rf "$test_home"
+}
+
+@test "a Deno root retargeted mid-sweep is refused for later candidates" {
+    # Excluding the root while the candidate list is built only proves where it
+    # pointed then. Discovery-time exclusion alone let every later candidate in
+    # the same batch be deleted against a stale root. Rebinding per candidate
+    # narrows the window to the single instruction between guard and unlink,
+    # which no shell can close; what it does close is the whole rest of the
+    # batch, which is where a long sweep actually spends its time.
+    local test_home="$HOME/deno-race-home"
+    mkdir -p "$test_home/Library/Caches/deno-old" \
+        "$test_home/Library/Caches/aaa-first" \
+        "$test_home/Library/Caches/ordinary-app"
+    printf 'deno\n' > "$test_home/Library/Caches/deno-old/d.txt"
+    printf 'first\n' > "$test_home/Library/Caches/aaa-first/f.txt"
+    printf 'app\n' > "$test_home/Library/Caches/ordinary-app/a.txt"
+    ln -s "$test_home/Library/Caches/deno-old" "$test_home/Library/Caches/deno"
+
+    run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=false
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_trash() { :; }
+_clean_recent_items() { :; }
+_clean_mail_downloads() { :; }
+
+# Retarget while the first candidate is being removed, so the guard for
+# every later candidate in the same batch sees the new root.
+eval "$(declare -f safe_remove | sed '1s/safe_remove/_real_safe_remove/')"
+safe_remove() {
+    if [[ "$1" == *"/aaa-first" ]]; then
+        rm -f "$HOME/Library/Caches/deno"
+        ln -s "$HOME/Library/Caches/ordinary-app" "$HOME/Library/Caches/deno"
+    fi
+    _real_safe_remove "$@"
+}
+clean_user_essentials
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ -d "$test_home/Library/Caches/ordinary-app" ]] || {
+        echo "sink deleted the retargeted Deno root"
+        return 1
+    }
+    [[ -e "$test_home/Library/Caches/deno" ]] || {
+        echo "Deno root left dangling"
+        return 1
+    }
+    [[ ! -d "$test_home/Library/Caches/aaa-first" ]] || {
+        echo "the ordinary candidate before the retarget was not cleaned"
         return 1
     }
     rm -rf "$test_home"
@@ -289,6 +447,23 @@ safe_remove() {
     return 0
 }
 
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local label="${!#}"
+    local -a targets=("${@:1:$#-1}")
+    local -a kept=()
+    local target
+    for target in "${targets[@]}"; do
+        if "$guard" "$target"; then
+            kept+=("$target")
+        fi
+    done
+    if [[ ${#kept[@]} -eq 0 ]]; then
+        return 75
+    fi
+    safe_clean "${kept[@]}" "$label"
+}
 clean_user_essentials
 [[ ! -e "$HOME/.Trash/one.tmp" ]] || exit 1
 [[ ! -e "$HOME/.Trash/two.tmp" ]] || exit 1
@@ -324,6 +499,23 @@ safe_clean() {
     done
 }
 
+safe_clean_guarded() {
+    local guard="$1"
+    shift
+    local label="${!#}"
+    local -a targets=("${@:1:$#-1}")
+    local -a kept=()
+    local target
+    for target in "${targets[@]}"; do
+        if "$guard" "$target"; then
+            kept+=("$target")
+        fi
+    done
+    if [[ ${#kept[@]} -eq 0 ]]; then
+        return 75
+    fi
+    safe_clean "${kept[@]}" "$label"
+}
 clean_user_essentials
 
 [[ -d "$HOME/Library/Logs/mole" ]]
