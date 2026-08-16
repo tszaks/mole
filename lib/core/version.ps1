@@ -13,7 +13,7 @@ $script:MOLE_VERSION_HELPERS_LOADED = $true
 # Keep this equal to VERSION: released ZIP/EXE installs read it, not the file
 # (issue #635 shipped v1.29.1 reporting v1.29.0 from exactly this constant).
 # Locked by the "compiled-in fallback" test in tests/Core.Tests.ps1.
-$script:MoleDefaultVersion = "1.29.1"
+$script:MoleDefaultVersion = "1.30.0"
 
 function Get-MoleVersionFilePath {
     param([string]$RootDir)
