@@ -1589,6 +1589,84 @@ EOF
 	[[ "$output" == *"REMOVE:$BATS_TEST_TMPDIR/var-www/site/node_modules"* ]]
 }
 
+@test "clean_project_artifacts refuses a candidate reached through a replaced configured root" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+configured_root="$HOME/www"
+original_root="$HOME/www-original"
+redirected_root="$HOME/redirected"
+artifact="$configured_root/project/node_modules"
+redirected_artifact="$redirected_root/project/node_modules"
+mkdir -p "$artifact" "$redirected_artifact" "$HOME/.cache/mole"
+touch "$configured_root/project/package.json" "$redirected_root/project/package.json"
+
+PURGE_SEARCH_PATHS=("$configured_root")
+scan_purge_targets() { printf '%s\n' "$artifact" > "$2"; }
+get_dir_size_kb() { echo 1; }
+is_recently_modified() {
+	_PURGE_ACTIVITY_STATE=old
+	return 1
+}
+purge_target_activity_still_safe() {
+	mv "$configured_root" "$original_root"
+	ln -s "$redirected_root" "$configured_root"
+	return 0
+}
+
+clean_project_artifacts </dev/null
+
+original_preserved=false
+redirected_preserved=false
+[[ -d "$original_root/project/node_modules" ]] && original_preserved=true
+[[ -d "$redirected_artifact" ]] && redirected_preserved=true
+rm "$configured_root"
+mv "$original_root" "$configured_root"
+rm -rf "$redirected_root"
+[[ "$original_preserved" == "true" ]] || exit 1
+[[ "$redirected_preserved" == "true" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+}
+
+@test "clean_project_artifacts refuses a replacement at the selected artifact leaf" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+configured_root="$HOME/www"
+artifact="$configured_root/project/node_modules"
+original_artifact="$configured_root/project/node_modules-original"
+replacement="$HOME/replacement-node-modules"
+mkdir -p "$artifact" "$replacement" "$HOME/.cache/mole"
+touch "$configured_root/project/package.json"
+
+PURGE_SEARCH_PATHS=("$configured_root")
+scan_purge_targets() { printf '%s\n' "$artifact" > "$2"; }
+get_dir_size_kb() { echo 1; }
+is_recently_modified() {
+	_PURGE_ACTIVITY_STATE=old
+	return 1
+}
+purge_target_activity_still_safe() {
+	mv "$artifact" "$original_artifact"
+	mv "$replacement" "$artifact"
+	return 0
+}
+
+clean_project_artifacts </dev/null
+
+[[ -d "$original_artifact" ]] || exit 1
+[[ -d "$artifact" ]] || exit 1
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+}
+
 @test "clean_project_artifacts: non-interactive dry-run shows cloud marker and preserves artifact" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
