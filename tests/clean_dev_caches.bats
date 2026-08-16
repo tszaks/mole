@@ -2356,6 +2356,69 @@ EOF
     rm -rf "$module_physical" "$build_root"
 }
 
+@test "clean_dev_go refuses a module root that becomes a symlink after entry" {
+    # The entry check only proves the root was a real directory when the caller
+    # looked. Swap it for a link afterwards and the parent/target identity
+    # comparison still passes, so the owner command would run against whatever
+    # the link resolves to.
+    local module_root="$HOME/go-module-swap"
+    local outside_root="$HOME/go-outside-target"
+    local build_root="$HOME/go-build-swap"
+    local trace="$HOME/go-clean-swap.trace"
+    mkdir -p "$module_root" "$outside_root" "$build_root"
+    printf 'keep\n' > "$outside_root/victim.txt"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        GO_MODULE_ROOT="$module_root" GO_BUILD_ROOT="$build_root" GO_TRACE="$trace" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+go() { :; }
+run_with_timeout() {
+    shift
+    if [[ "$1" == "go" && "$2" == "env" ]]; then
+        case "$3" in
+            GOMODCACHE) printf '%s\n' "$GO_MODULE_ROOT" ;;
+            GOCACHE) printf '%s\n' "$GO_BUILD_ROOT" ;;
+        esac
+        return 0
+    fi
+    printf '%s\n' "$*" >> "$GO_TRACE"
+}
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+note_activity() { :; }
+# Fires inside the bound command, after the entry check has passed.
+swapped=0
+go_cache_process_state() {
+    if [[ "${1:-}" == "GOMODCACHE" && $swapped -eq 0 ]]; then
+        swapped=1
+        rmdir "$GO_MODULE_ROOT" 2> /dev/null || true
+        ln -s "$HOME/go-outside-target" "$GO_MODULE_ROOT"
+    fi
+    return 1
+}
+clean_dev_go
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"Go module cache · stopped (symlinked module root)"* ]] || {
+        echo "$output"
+        return 1
+    }
+    ! grep -q -- "-modcache" "$trace" || {
+        cat "$trace"
+        return 1
+    }
+    [[ -f "$outside_root/victim.txt" ]] || return 1
+    # The concurrency-safe build cache is unaffected by the module-root swap.
+    grep -qFx "env GOCACHE=$build_root go clean -cache" "$trace" || return 1
+    rm -f "$trace" "$module_root"
+    rm -rf "$outside_root" "$build_root"
+}
+
 @test "clean_dev_go uses owner dry-run for the same cache roots" {
     local module_root="$HOME/go-module-dry"
     local build_root="$HOME/go-build-dry"
@@ -2549,6 +2612,39 @@ EOF
     }
     [[ "$output" != *"/.ivy2/"* ]] || return 1
     [[ "$output" != *"/.sbt/"* ]]
+}
+
+@test "clean_dev_python clears Poetry package caches but keeps its virtualenvs" {
+    # virtualenvs is hard-safety whitelisted, and protecting a nested path
+    # protects its parent, so the whole pypoetry root drops out of the generic
+    # ~/Library/Caches sweep. Without naming the rebuildable siblings the
+    # protection silently costs all of Poetry's reclaimable space.
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+safe_clean() { echo "$2|$1"; }
+clean_tool_cache() { echo "$1|$2"; }
+clean_uv_cache() { :; }
+clean_pyinstaller_bincache() { :; }
+clean_conda_metadata_caches() { :; }
+note_activity() { :; }
+clean_dev_python
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Poetry artifacts cache|$HOME/Library/Caches/pypoetry/artifacts/"* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"Poetry package cache|$HOME/Library/Caches/pypoetry/cache/"* ]] || return 1
+    [[ "$output" != *"pypoetry/virtualenvs"* ]] || {
+        echo "$output"
+        return 1
+    }
 }
 
 @test "clean_dev_other_langs keeps the Deno module store" {

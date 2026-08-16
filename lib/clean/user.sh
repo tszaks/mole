@@ -183,6 +183,10 @@ clean_user_essentials() {
     fi
     if [[ ${#user_cache_targets[@]} -gt 0 ]]; then
         local user_cache_rc=0
+        # Ask twice on purpose: safe_clean_guarded filters the batch, and the
+        # sink guard re-asks after every other check, immediately before rm,
+        # because safe_remove does real work between the two.
+        local _MOLE_SAFE_REMOVE_FINAL_GUARD=_user_cache_deno_delete_guard
         safe_clean_guarded _user_cache_deno_delete_guard \
             "${user_cache_targets[@]}" "User app cache" || user_cache_rc=$?
         if [[ $user_cache_rc -eq 75 ]]; then

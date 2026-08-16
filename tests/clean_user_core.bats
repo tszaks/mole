@@ -295,13 +295,11 @@ EOF
     rm -rf "$test_home"
 }
 
-@test "a Deno root retargeted mid-sweep is refused for later candidates" {
-    # Excluding the root while the candidate list is built only proves where it
-    # pointed then. Discovery-time exclusion alone let every later candidate in
-    # the same batch be deleted against a stale root. Rebinding per candidate
-    # narrows the window to the single instruction between guard and unlink,
-    # which no shell can close; what it does close is the whole rest of the
-    # batch, which is where a long sweep actually spends its time.
+@test "a Deno root retargeted inside safe_remove is refused before rm" {
+    # Excluding the root while the candidate list is built only proves where
+    # it pointed then, and the batch guard fires before safe_remove does its
+    # own validation, sizing and identity work. The root is re-asked at the
+    # last hop before rm so a swap anywhere in that span is refused.
     local test_home="$HOME/deno-race-home"
     mkdir -p "$test_home/Library/Caches/deno-old" \
         "$test_home/Library/Caches/aaa-first" \
@@ -322,11 +320,13 @@ clean_trash() { :; }
 _clean_recent_items() { :; }
 _clean_mail_downloads() { :; }
 
-# Retarget while the first candidate is being removed, so the guard for
-# every later candidate in the same batch sees the new root.
+# Retarget the root for the candidate that is being removed right now,
+# after the batch guard already cleared it. safe_remove still runs path
+# validation, process and identity checks before rm, so the only honest
+# test is one that moves the root inside that span.
 eval "$(declare -f safe_remove | sed '1s/safe_remove/_real_safe_remove/')"
 safe_remove() {
-    if [[ "$1" == *"/aaa-first" ]]; then
+    if [[ "$1" == *"/ordinary-app" ]]; then
         rm -f "$HOME/Library/Caches/deno"
         ln -s "$HOME/Library/Caches/ordinary-app" "$HOME/Library/Caches/deno"
     fi
@@ -1144,12 +1144,21 @@ if [[ -e "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/k
     && [[ ! -e "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/drop.db" ]]; then
     echo "PASS"
 else
+    # A bare FAIL cannot be told apart from a size-probe timeout under a
+    # loaded parallel run, which is how this case reports when the suite is
+    # busy. Print what actually survived.
     echo "FAIL"
+    echo "keep.db present: $([[ -e "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/keep.db" ]] && echo yes || echo no)"
+    echo "drop.db present: $([[ -e "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches/drop.db" ]] && echo yes || echo no)"
+    ls -la "$HOME/Library/Group Containers/group.com.example.tool/Library/Caches" 2> /dev/null || true
     exit 1
 fi
 EOF
 
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
     [[ "$output" == *"PASS"* ]]
 }
 

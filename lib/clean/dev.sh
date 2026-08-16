@@ -722,6 +722,15 @@ clean_dev_python() {
     fi
     safe_clean ~/.pyenv/cache/* "pyenv cache"
     safe_clean ~/.cache/poetry/* "Poetry cache"
+    # ~/Library/Caches/pypoetry is Poetry's macOS cache root, and its
+    # virtualenvs child holds the live interpreters every project points at, so
+    # that child is hard-safety whitelisted. Whitelisting a nested path also
+    # protects its parent, which takes the whole root out of the generic
+    # user-cache sweep and the rebuildable siblings with it. Name those
+    # siblings here: artifacts holds built wheels and cache holds repository
+    # downloads, both of which Poetry refetches, while virtualenvs stays.
+    safe_clean ~/Library/Caches/pypoetry/artifacts/* "Poetry artifacts cache"
+    safe_clean ~/Library/Caches/pypoetry/cache/* "Poetry package cache"
     clean_uv_cache
     safe_clean ~/.cache/ruff/* "Ruff cache"
     safe_clean ~/.cache/mypy/* "MyPy cache"
@@ -791,6 +800,17 @@ _run_go_cache_clean_bound() {
     local owner_dry_run="${11}"
 
     _MOLE_GO_CACHE_BOUND_REASON=""
+
+    # The entry check only proves the root was not a symlink when the caller
+    # looked. A directory swapped for a link afterwards survives the identity
+    # comparison below, and `go clean -modcache` would then remove whatever the
+    # link resolves to instead of the module root. Re-read the link bit here,
+    # at the last hop before the owner command runs.
+    if [[ "$cache_kind" == "GOMODCACHE" && -L "$cache_root" ]]; then
+        _MOLE_GO_CACHE_BOUND_REASON="symlinked module root"
+        return 1
+    fi
+
     local process_state=0
     go_cache_process_state "$cache_kind" || process_state=$?
     if [[ $process_state -eq 0 ]]; then
