@@ -213,6 +213,7 @@ $filesToInclude = @(
     @{Source = "$projectRoot\install.ps1"; Dest = "$tempBuildDir\install.ps1"},
     @{Source = "$projectRoot\go.mod"; Dest = "$tempBuildDir\go.mod"},
     @{Source = "$projectRoot\go.sum"; Dest = "$tempBuildDir\go.sum"},
+    @{Source = "$projectRoot\VERSION"; Dest = "$tempBuildDir\VERSION"},
     @{Source = "$projectRoot\LICENSE"; Dest = "$tempBuildDir\LICENSE"},
     @{Source = "$projectRoot\README.md"; Dest = "$tempBuildDir\README.md"}
 )

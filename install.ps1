@@ -362,6 +362,9 @@ function Install-Mole {
         Write-Info "Copying files..."
 
         $filesToCopy = @(
+            # VERSION travels with the install: without it every command falls
+            # back to the compiled-in default and reports a stale version.
+            "VERSION"
             "mole.ps1"
             "go.mod"
             "go.sum"

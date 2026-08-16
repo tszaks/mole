@@ -406,5 +406,14 @@ Describe "Version Helpers" {
             $expected = (Get-Content $script:VersionFile -Raw).Trim()
             Get-MoleVersionFromScriptFile -WindowsDir $script:WindowsDir | Should -Be $expected
         }
+
+        It "Should keep the compiled-in fallback in sync with VERSION" {
+            # A root with no VERSION file is what a released artifact looked
+            # like before this version: the fallback is then the only version
+            # the user ever sees, so it must never drift from VERSION.
+            $expected = (Get-Content $script:VersionFile -Raw).Trim()
+            $rootWithoutVersionFile = Join-Path $script:WindowsDir "no-version-file-here"
+            Get-MoleVersionString -RootDir $rootWithoutVersionFile | Should -Be $expected
+        }
     }
 }
