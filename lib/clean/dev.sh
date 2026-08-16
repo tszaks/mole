@@ -81,22 +81,40 @@ clean_uv_cache() {
     fi
 }
 
+github_cli_process_state() {
+    mole_pgrep_any -x gh
+}
+
 _run_github_cli_clear_cache_bound() {
     local cache_path="$1"
     local expected_parent="$2"
     local expected_parent_id="$3"
     local expected_target_id="$4"
 
+    _MOLE_GITHUB_CLI_CLEAR_REASON=""
+    local process_state=0
+    github_cli_process_state || process_state=$?
+    if [[ $process_state -eq 0 ]]; then
+        _MOLE_GITHUB_CLI_CLEAR_REASON="owner active"
+        return 1
+    fi
+    if [[ $process_state -ne 1 ]]; then
+        _MOLE_GITHUB_CLI_CLEAR_REASON="process state unknown"
+        return 1
+    fi
+
     if ! _mole_path_matches_identity \
         "$cache_path" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
-        _MOLE_GITHUB_CLI_CLEAR_STATUS=1
+        _MOLE_GITHUB_CLI_CLEAR_REASON="cache path changed"
         return 1
     fi
 
     local command_status=0
     run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" \
         env XDG_CACHE_HOME="$expected_parent" gh config clear-cache || command_status=$?
-    _MOLE_GITHUB_CLI_CLEAR_STATUS=$command_status
+    if [[ $command_status -ne 0 && $command_status -ne 124 && $command_status -lt 128 ]]; then
+        _MOLE_GITHUB_CLI_CLEAR_REASON="owner cleanup failed"
+    fi
     return "$command_status"
 }
 
@@ -161,6 +179,11 @@ clean_github_cli_cache() {
     fi
 
     command -v gh > /dev/null 2>&1 || return 0
+    local _MOLE_CLEAN_GUARD_REASON=""
+    if ! mole_clean_process_guard github_cli_process_state "GitHub CLI started"; then
+        mole_report_guard_stop "GitHub CLI cache" mole_defer_cleanup_family "GitHub CLI"
+        return 0
+    fi
     local probe_status=0
     run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
         env XDG_CACHE_HOME="$physical_parent" gh config clear-cache --help > /dev/null 2>&1 || probe_status=$?
@@ -172,13 +195,46 @@ clean_github_cli_cache() {
         return 0
     fi
 
-    local _MOLE_GITHUB_CLI_CLEAR_STATUS=0
-    clean_tool_cache "GitHub CLI cache" "$physical_cache_path" \
-        _run_github_cli_clear_cache_bound "$physical_cache_path" \
-        "$expected_parent" "$expected_parent_id" "$expected_target_id"
-    if [[ $_MOLE_GITHUB_CLI_CLEAR_STATUS -eq 124 || $_MOLE_GITHUB_CLI_CLEAR_STATUS -ge 128 ]]; then
-        return "$_MOLE_GITHUB_CLI_CLEAR_STATUS"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} GitHub CLI cache · would clean"
+        note_activity
+        return 0
     fi
+
+    local _MOLE_GITHUB_CLI_CLEAR_REASON=""
+    local clear_status=0
+    if [[ -t 1 ]]; then
+        start_section_spinner "Cleaning GitHub CLI cache..."
+    fi
+    _run_github_cli_clear_cache_bound "$physical_cache_path" \
+        "$expected_parent" "$expected_parent_id" "$expected_target_id" \
+        > /dev/null 2>&1 || clear_status=$?
+    if [[ -t 1 ]]; then
+        stop_section_spinner
+    fi
+
+    if [[ $clear_status -eq 0 ]]; then
+        echo -e "  ${GREEN}${ICON_SUCCESS}${NC} GitHub CLI cache"
+        note_activity
+        return 0
+    fi
+    if [[ $clear_status -eq 124 || $clear_status -ge 128 ]]; then
+        return "$clear_status"
+    fi
+
+    case "$_MOLE_GITHUB_CLI_CLEAR_REASON" in
+        "owner active")
+            mole_defer_cleanup_family "GitHub CLI"
+            ;;
+        "process state unknown" | "cache path changed" | "owner cleanup failed")
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} GitHub CLI cache · stopped (${_MOLE_GITHUB_CLI_CLEAR_REASON})"
+            note_activity
+            ;;
+        *)
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} GitHub CLI cache · stopped (owner cleanup failed)"
+            note_activity
+            ;;
+    esac
     return 0
 }
 

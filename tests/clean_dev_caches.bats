@@ -74,7 +74,7 @@ clean_github_cli_cache
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [[ "$output" == *"CACHE:GitHub CLI cache|$HOME/.cache/gh"* ]] || return 1
+    [[ "$output" == *"GitHub CLI cache"* ]] || return 1
     [ "$(grep -cFx 'config clear-cache --help' "$trace")" -eq 1 ] || return 1
     [ "$(grep -cFx 'config clear-cache' "$trace")" -eq 1 ] || return 1
 }
@@ -220,6 +220,43 @@ EOF
     [ -d "$swapped_cache/gh" ] || return 1
 }
 
+@test "clean_github_cli_cache refuses when gh starts at the owner command boundary" {
+    local trace="$HOME/gh-process-race.trace"
+    rm -rf "$HOME/.cache/gh"
+    rm -f "$trace"
+    mkdir -p "$HOME/.cache/gh"
+    make_gh_cache_stub
+
+    run env HOME="$HOME" PATH="$HOME/bin:/usr/bin:/bin" PROJECT_ROOT="$PROJECT_ROOT" \
+        GH_TRACE="$trace" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+run_with_timeout() { shift; "$@"; }
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+mole_defer_cleanup_family() { printf 'DEFER:%s\n' "$1"; }
+pgrep_calls=0
+pgrep() {
+    pgrep_calls=$((pgrep_calls + 1))
+    [[ $pgrep_calls -ge 2 ]]
+}
+clean_github_cli_cache
+printf 'PGREP_CALLS=%s\n' "$pgrep_calls"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"DEFER:GitHub CLI"* ]] || return 1
+    [[ "$output" == *"PGREP_CALLS=2"* ]] || return 1
+    [ "$(grep -cFx 'config clear-cache --help' "$trace")" -eq 1 ] || return 1
+    run grep -qFx 'config clear-cache' "$trace"
+    [ "$status" -eq 1 ] || return 1
+}
+
 @test "clean_github_cli_cache preserves a symlinked cache leaf" {
     local trace="$HOME/gh-leaf-symlink.trace"
     local cache_target="$HOME/relocated-gh-cache"
@@ -288,6 +325,7 @@ EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [ "$(grep -cFx 'config clear-cache' "$trace")" -eq 1 ] || return 1
+    [[ "$output" == *"GitHub CLI cache · stopped (owner cleanup failed)"* ]] || return 1
     [[ "$output" == *"SAFE:AWS CLI cache"* ]] || return 1
     [[ "$output" == *"SAFE:Google Cloud logs"* ]] || return 1
 }
