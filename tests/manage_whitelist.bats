@@ -82,8 +82,30 @@ setup() {
         defaults+=("$line")
     done < "$HOME/default_whitelist.txt"
 
-    [ "${#current[@]}" -eq "${#defaults[@]}" ]
+    # Every convenience default must survive, and the hard-safety entries are
+    # merged on top. Asserting a count would re-pin a number that changes
+    # whenever either list grows; assert the containment instead.
+    [ "${#defaults[@]}" -gt 0 ]
+    local expected
+    for expected in "${defaults[@]}"; do
+        expected="${expected/\$HOME/$HOME}"
+        printf '%s\n' "${current[@]}" | grep -qxF "$expected" || {
+            echo "missing default: $expected"
+            return 1
+        }
+    done
     [ "${current[0]}" = "${defaults[0]/\$HOME/$HOME}" ]
+
+    safety=()
+    while IFS= read -r line; do
+        safety+=("$line")
+    done < <(HOME="$HOME" /bin/bash --noprofile --norc -c "source '$PROJECT_ROOT/lib/manage/whitelist.sh'; printf '%s\n' \"\${SAFETY_WHITELIST_PATTERNS[@]}\"")
+    for expected in "${safety[@]}"; do
+        printf '%s\n' "${current[@]}" | grep -qxF "$expected" || {
+            echo "missing safety entry: $expected"
+            return 1
+        }
+    done
 }
 
 @test "is_whitelisted matches saved patterns exactly" {
@@ -163,13 +185,28 @@ for p in "${WHITELIST_PATTERNS[@]}"; do
     [[ "$p" == "$FINDER_METADATA_SENTINEL" ]] && sentinel_count=$((sentinel_count + 1))
     [[ "$p" == "$HOME/.cache/custom-keep/*" ]] && custom_count=$((custom_count + 1))
 done
-printf 'sentinel=%s custom=%s total=%s\n' "$sentinel_count" "$custom_count" "${#WHITELIST_PATTERNS[@]}"
+# Every safety entry must appear exactly once after two calls, and the total
+# is derived from the array rather than pinned, so growing hard safety does
+# not turn an idempotency test into a counting test.
+duplicated=0
+for safety in "${SAFETY_WHITELIST_PATTERNS[@]}"; do
+    seen=0
+    for p in "${WHITELIST_PATTERNS[@]}"; do
+        [[ "$p" == "$safety" ]] && seen=$((seen + 1))
+    done
+    [[ $seen -eq 1 ]] || duplicated=$((duplicated + 1))
+done
+expected_total=$((1 + ${#SAFETY_WHITELIST_PATTERNS[@]}))
+printf 'sentinel=%s custom=%s duplicated=%s total_matches_expected=%s\n' \
+    "$sentinel_count" "$custom_count" "$duplicated" \
+    "$([[ ${#WHITELIST_PATTERNS[@]} -eq $expected_total ]] && echo yes || echo no)"
 EOF
 
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     [[ "$output" == *"sentinel=1"* ]] || { echo "$output"; return 1; }
     [[ "$output" == *"custom=1"* ]] || { echo "$output"; return 1; }
-    [[ "$output" == *"total=2"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"duplicated=0"* ]] || { echo "$output"; return 1; }
+    [[ "$output" == *"total_matches_expected=yes"* ]] || { echo "$output"; return 1; }
 }
 
 @test "legacy optimize whitelist with only removed task ids migrates safely on Bash 3.2" {
@@ -230,7 +267,39 @@ EOF
 
     [ "$status" -eq 0 ] || return 1
     [[ "$output" == *"Rust Cargo registry cache|\$HOME/.cargo/registry/cache/*|compiler_cache"* ]] || return 1
-    [[ "$output" != *"registry/src"* ]]
+    [[ "$output" != *"registry/src"* ]] || return 1
+    [[ "$output" != *"Cargo git"* ]] || return 1
+    [[ "$output" != *"Deno cache"* ]] || return 1
+    [[ "$output" != *"SBT Scala"* ]] || return 1
+    [[ "$output" != *"Ivy dependency"* ]] || return 1
+    [[ "$output" != *"PyTorch model"* ]] || return 1
+    [[ "$output" != *"TensorFlow model"* ]] || return 1
+    [[ "$output" != *"HuggingFace models"* ]] || return 1
+    [[ "$output" != *"Weights & Biases"* ]]
+}
+
+@test "whitelist inventory follows relocated Go cache roots" {
+    local build_root="$HOME/custom-go-build"
+    local module_root="$HOME/custom-go-mod"
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        BUILD_ROOT="$build_root" MODULE_ROOT="$module_root" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/manage/whitelist.sh"
+mole_go_cache_root() {
+    if [[ "$1" == "GOCACHE" ]]; then
+        printf '%s\n' "$BUILD_ROOT"
+    else
+        printf '%s\n' "$MODULE_ROOT"
+    fi
+}
+get_all_cache_items
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"Go build cache|$build_root/*|compiler_cache"* ]] || return 1
+    [[ "$output" == *"Go module cache|$module_root/*|compiler_cache"* ]] || return 1
+    [[ "$output" != *"\$HOME/go/pkg/mod"* ]]
 }
 
 @test "whitelist inventory exposes guarded PyInstaller and Clang caches" {

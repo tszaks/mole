@@ -1905,7 +1905,7 @@ EOF
 
 @test "clean_dev_rust honors CARGO_HOME and RUSTUP_HOME when absolute" {
     # mise and friends relocate cargo/rustup via env; hardcoded ~/.cargo misses
-    # the live cache (issue #1378). Scope stays regenerable leaves only.
+    # the live cache (issue #1378). Scope stays redundant download copies only.
     mkdir -p \
         "$HOME/.local/share/mise/cargo/registry/cache" \
         "$HOME/.local/share/mise/cargo/registry/src" \
@@ -1928,7 +1928,8 @@ EOF
     [[ "$output" == *"Rust cargo cache|$HOME/.local/share/mise/cargo/registry/cache/*"* ]] || return 1
     # registry/src keeps offline builds working after registry/cache is emptied.
     [[ "$output" != *"/registry/src"* ]] || return 1
-    [[ "$output" == *"Cargo git cache|$HOME/.local/share/mise/cargo/git/*"* ]] || return 1
+    # Cargo owns age-aware GC for git checkouts; Mole must not sweep the store.
+    [[ "$output" != *"/cargo/git"* ]] || return 1
     [[ "$output" == *"Rustup downloads cache|$HOME/.local/share/mise/rustup/downloads/*"* ]] || return 1
     [[ "$output" != *"/registry/index/"* ]] || return 1
     [[ "$output" != *"/.cargo/"* ]] || return 1
@@ -1984,7 +1985,7 @@ EOF
     }
     [[ "$output" == *"Rust cargo cache|$HOME/.cargo/registry/cache/*"* ]] || return 1
     [[ "$output" != *"/registry/src"* ]] || return 1
-    [[ "$output" == *"Cargo git cache|$HOME/.cargo/git/*"* ]] || return 1
+    [[ "$output" != *"/.cargo/git"* ]] || return 1
     [[ "$output" == *"Rustup downloads cache|$HOME/.rustup/downloads/*"* ]] || return 1
     [[ "$output" != *"/registry/index/"* ]] || return 1
 }
@@ -2302,28 +2303,224 @@ EOF
     [[ "$output" == *"MyPy cache"* ]]
 }
 
-@test "clean_dev_go keeps the module store and clears only the build cache" {
-    # `go clean -modcache` empties GOMODCACHE, which every Go build resolves
-    # against. Go has no default per-project vendor directory, so that turns
-    # every dependency of every project on the machine back into a download.
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+@test "clean_dev_go resets both owner-reported caches and supports a symlinked module root" {
+    local module_physical="$HOME/go-module-physical"
+    local module_link="$HOME/go-module-link"
+    local build_root="$HOME/go-build-cache"
+    local trace="$HOME/go-clean.trace"
+    mkdir -p "$module_physical" "$build_root"
+    ln -s "$module_physical" "$module_link"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        GO_MODULE_ROOT="$module_link" GO_BUILD_ROOT="$build_root" GO_TRACE="$trace" \
+        /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 DRY_RUN=false
+go() { :; }
+run_with_timeout() {
+    shift
+    if [[ "$1" == "go" && "$2" == "env" ]]; then
+        case "$3" in
+            GOMODCACHE) printf '%s\n' "$GO_MODULE_ROOT" ;;
+            GOCACHE) printf '%s\n' "$GO_BUILD_ROOT" ;;
+        esac
+        return 0
+    fi
+    printf '%s\n' "$*" >> "$GO_TRACE"
+}
 is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+go_cache_process_state() { return 1; }
 note_activity() { :; }
-clean_tool_cache() { printf 'TOOL=%s|CMD=%s\n' "$1" "${*:3}"; }
 clean_dev_go
 EOF
 
-    [ "$status" -eq 0 ] || {
-        echo "$output"
-        return 1
-    }
-    [[ "$output" != *"modcache"* ]] || return 1
-    [[ "$output" == *"go clean -cache"* ]] || return 1
-    [[ "$output" == *"TOOL=Go build cache"* ]]
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"Go module cache"* ]] || return 1
+    [[ "$output" == *"Go build cache"* ]] || return 1
+    grep -qFx "env GOMODCACHE=$module_physical go clean -modcache" "$trace" || return 1
+    grep -qFx "env GOCACHE=$build_root go clean -cache" "$trace" || return 1
+    rm -f "$trace" "$module_link"
+    rm -rf "$module_physical" "$build_root"
+}
+
+@test "clean_dev_go uses owner dry-run for the same cache roots" {
+    local module_root="$HOME/go-module-dry"
+    local build_root="$HOME/go-build-dry"
+    local trace="$HOME/go-clean-dry.trace"
+    mkdir -p "$module_root" "$build_root"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        GO_MODULE_ROOT="$module_root" GO_BUILD_ROOT="$build_root" GO_TRACE="$trace" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=true
+go() { :; }
+run_with_timeout() {
+    shift
+    if [[ "$1" == "go" && "$2" == "env" ]]; then
+        if [[ "$3" == "GOMODCACHE" ]]; then
+            printf '%s\n' "$GO_MODULE_ROOT"
+        else
+            printf '%s\n' "$GO_BUILD_ROOT"
+        fi
+        return 0
+    fi
+    printf '%s\n' "$*" >> "$GO_TRACE"
+}
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+go_cache_process_state() { return 1; }
+note_activity() { :; }
+clean_dev_go
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"Go module cache · would clean"* ]] || return 1
+    [[ "$output" == *"Go build cache · would clean"* ]] || return 1
+    grep -qFx "env GOMODCACHE=$module_root go clean -n -modcache" "$trace" || return 1
+    grep -qFx "env GOCACHE=$build_root go clean -n -cache" "$trace" || return 1
+    rm -f "$trace"
+    rm -rf "$module_root" "$build_root"
+}
+
+@test "clean_dev_go keeps module and build cache whitelist decisions independent" {
+    local module_root="$HOME/go-module-whitelist"
+    local build_root="$HOME/go-build-whitelist"
+    local trace="$HOME/go-clean-whitelist.trace"
+    mkdir -p "$module_root" "$build_root"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        GO_MODULE_ROOT="$module_root" GO_BUILD_ROOT="$build_root" GO_TRACE="$trace" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+go() { :; }
+run_with_timeout() {
+    shift
+    if [[ "$1" == "go" && "$2" == "env" ]]; then
+        if [[ "$3" == "GOMODCACHE" ]]; then
+            printf '%s\n' "$GO_MODULE_ROOT"
+        else
+            printf '%s\n' "$GO_BUILD_ROOT"
+        fi
+        return 0
+    fi
+    printf '%s\n' "$*" >> "$GO_TRACE"
+}
+is_path_whitelisted() { [[ "$1" == "$GO_MODULE_ROOT" ]]; }
+should_protect_path() { return 1; }
+go_cache_process_state() { return 1; }
+clean_tool_cache() { printf 'SKIP=%s|%s\n' "$1" "$2"; }
+note_activity() { :; }
+clean_dev_go
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"SKIP=Go module cache|$module_root"* ]] || return 1
+    grep -qFx "env GOCACHE=$build_root go clean -cache" "$trace" || return 1
+    [[ "$(cat "$trace")" != *"-modcache"* ]] || return 1
+    rm -f "$trace"
+    rm -rf "$module_root" "$build_root"
+}
+
+@test "Go process gating does not block the concurrency-safe build cache" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+mole_pgrep_any() {
+    printf 'PROBE=%s\n' "$*"
+    return 0
+}
+build_rc=0
+module_rc=0
+go_cache_process_state GOCACHE || build_rc=$?
+go_cache_process_state GOMODCACHE || module_rc=$?
+printf 'build=%s module=%s\n' "$build_rc" "$module_rc"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"PROBE=-x go -x gopls"* ]] || return 1
+    [[ "$output" == *"build=1 module=0"* ]]
+}
+
+@test "clean_dev_go propagates owner cleanup cancellation" {
+    local module_root="$HOME/go-module-cancel"
+    mkdir -p "$module_root"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        GO_MODULE_ROOT="$module_root" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+go() { :; }
+run_with_timeout() {
+    shift
+    if [[ "$1" == "go" && "$2" == "env" ]]; then
+        [[ "$3" == "GOMODCACHE" ]] && printf '%s\n' "$GO_MODULE_ROOT" || return 1
+        return 0
+    fi
+    return 124
+}
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+go_cache_process_state() { return 1; }
+note_activity() { :; }
+clean_rc=0
+clean_dev_go || clean_rc=$?
+printf 'rc=%s\n' "$clean_rc"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"rc=124"* ]] || return 1
+    rm -rf "$module_root"
+}
+
+@test "clean_go_cache_root refuses a path replaced before the owner command" {
+    local cache_root="$HOME/go-cache-swap"
+    local outside_root="$HOME/go-cache-outside"
+    local trace="$HOME/go-clean-swap.trace"
+    mkdir -p "$cache_root" "$outside_root/private"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" \
+        GO_CACHE_ROOT="$cache_root" GO_OUTSIDE_ROOT="$outside_root" GO_TRACE="$trace" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+DRY_RUN=false
+go() { :; }
+run_with_timeout() {
+    shift
+    printf '%s\n' "$*" >> "$GO_TRACE"
+}
+is_path_whitelisted() { return 1; }
+should_protect_path() { return 1; }
+go_cache_process_state() { return 1; }
+note_activity() { :; }
+eval "$(declare -f _run_go_cache_clean_bound | sed '1s/_run_go_cache_clean_bound/_original_run_go_cache_clean_bound/')"
+_run_go_cache_clean_bound() {
+    mv "$GO_CACHE_ROOT" "$GO_CACHE_ROOT-old"
+    ln -s "$GO_OUTSIDE_ROOT" "$GO_CACHE_ROOT"
+    _original_run_go_cache_clean_bound "$@"
+}
+clean_go_cache_root "$GO_CACHE_ROOT" GOCACHE -cache "Go build cache"
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"Go build cache · stopped (cache path state unknown)"* ]] || return 1
+    [ ! -e "$trace" ] || return 1
+    [ -d "$outside_root/private" ] || return 1
+    rm -f "$cache_root"
+    rm -rf "$cache_root-old" "$outside_root"
 }
 
 @test "clean_dev_jvm keeps the Ivy store and the sbt toolchain" {
@@ -2346,8 +2543,8 @@ EOF
 }
 
 @test "clean_dev_other_langs keeps the Deno module store" {
-    # DENO_DIR is the only place a Deno project's remote imports live; there
-    # is no node_modules to fall back on.
+    # DENO_DIR mixes remote imports with origin storage and runtime payloads;
+    # the owner clean command resets the whole root rather than a narrow leaf.
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"

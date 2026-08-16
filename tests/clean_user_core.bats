@@ -45,6 +45,7 @@ EOF
 }
 
 @test "clean_user_essentials avoids Darwin runtime probes and live-log truncation" {
+    mkdir -p "$HOME/Library/Caches/ordinary-app"
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -63,6 +64,178 @@ EOF
 
     [ "$status" -eq 0 ] || return 1
     [ "$output" = $'SAFE:User app cache\nSAFE:User app logs\nTRASH' ]
+    rm -rf "$HOME/Library/Caches/ordinary-app"
+}
+
+@test "clean_user_essentials preserves default Deno state from the generic cache sweep" {
+    local test_home="$HOME/deno-default-home"
+    mkdir -p \
+        "$test_home/Library/Caches/deno/origin-data" \
+        "$test_home/Library/Caches/ordinary-app/junk"
+
+    run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_trash() { :; }
+_clean_recent_items() { :; }
+_clean_mail_downloads() { :; }
+safe_clean() {
+    local description="${!#}"
+    local path
+    while [[ $# -gt 1 ]]; do
+        path="$1"
+        shift
+        printf 'CLEAN=%s|%s\n' "$description" "$path"
+        rm -rf "$path"
+    done
+}
+clean_user_essentials
+[[ -d "$HOME/Library/Caches/deno/origin-data" ]]
+[[ ! -e "$HOME/Library/Caches/ordinary-app" ]]
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"User app cache|$test_home/Library/Caches/deno"* ]] || return 1
+    [[ "$output" == *"User app cache|$test_home/Library/Caches/ordinary-app"* ]] || return 1
+    rm -rf "$test_home"
+}
+
+@test "clean_user_essentials preserves nested and physical Deno roots" {
+    local nested_home="$HOME/deno-nested-home"
+    local linked_home="$HOME/deno-linked-home"
+    mkdir -p \
+        "$nested_home/Library/Caches/tool-root/deno/origin-data" \
+        "$nested_home/Library/Caches/ordinary-app/junk" \
+        "$linked_home/Library/Caches/physical-deno/origin-data" \
+        "$linked_home/Library/Caches/ordinary-app/junk"
+    ln -s "$linked_home/Library/Caches/physical-deno" \
+        "$linked_home/Library/Caches/deno"
+
+    run env HOME="$nested_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        DENO_DIR="$nested_home/Library/Caches/tool-root/deno" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_trash() { :; }
+_clean_recent_items() { :; }
+_clean_mail_downloads() { :; }
+safe_clean() {
+    while [[ $# -gt 1 ]]; do
+        rm -rf "$1"
+        shift
+    done
+}
+clean_user_essentials
+[[ -d "$HOME/Library/Caches/tool-root/deno/origin-data" ]]
+[[ ! -e "$HOME/Library/Caches/ordinary-app" ]]
+EOF
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+
+    run env HOME="$linked_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_trash() { :; }
+_clean_recent_items() { :; }
+_clean_mail_downloads() { :; }
+safe_clean() {
+    while [[ $# -gt 1 ]]; do
+        rm -rf "$1"
+        shift
+    done
+}
+clean_user_essentials
+[[ -L "$HOME/Library/Caches/deno" ]]
+[[ -d "$HOME/Library/Caches/physical-deno/origin-data" ]]
+[[ ! -e "$HOME/Library/Caches/ordinary-app" ]]
+EOF
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    rm -rf "$nested_home" "$linked_home"
+}
+
+@test "clean_user_essentials fails closed on a broad DENO_DIR" {
+    local test_home="$HOME/deno-broad-home"
+    mkdir -p "$test_home/Library/Caches/ordinary-app/junk"
+
+    run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        DENO_DIR="$test_home/Library/Caches" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+clean_trash() { :; }
+_clean_recent_items() { :; }
+_clean_mail_downloads() { :; }
+safe_clean() { printf 'CLEAN=%s\n' "${!#}"; }
+clean_user_essentials
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"CLEAN=User app cache"* ]] || return 1
+    [[ "$output" == *"CLEAN=User app logs"* ]] || return 1
+    # Refusing silently would drop the whole category from the section with no
+    # way for the user to tell cleanup from a stopped gate.
+    [[ "$output" == *"User app cache · stopped (DENO_DIR unresolved)"* ]] || {
+        echo "$output"
+        return 1
+    }
+    rm -rf "$test_home"
+}
+
+@test "a custom whitelist still protects system caches and Poetry virtualenvs" {
+    # clean_user_essentials sweeps every child of ~/Library/Caches, and
+    # load_mole_whitelist replaces DEFAULT_WHITELIST_PATTERNS wholesale once a
+    # user saves one entry of their own. Anything that breaks macOS search,
+    # fonts or iCloud, or that holds live interpreters rather than downloads,
+    # has to survive that replacement.
+    local test_home="$HOME/custom-whitelist-home"
+    mkdir -p "$test_home/.config/mole" \
+        "$test_home/Library/Caches/com.apple.spotlight" \
+        "$test_home/Library/Caches/com.apple.FontRegistry" \
+        "$test_home/Library/Caches/CloudKit" \
+        "$test_home/Library/Caches/pypoetry/virtualenvs/proj-abc123"
+    printf '%s\n' "$test_home/.cache/keep-my-own-thing/*" > "$test_home/.config/mole/whitelist"
+
+    run env HOME="$test_home" PROJECT_ROOT="$PROJECT_ROOT" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+load_mole_whitelist "$HOME"
+for probe in \
+    "$HOME/Library/Caches/com.apple.spotlight" \
+    "$HOME/Library/Caches/com.apple.FontRegistry" \
+    "$HOME/Library/Caches/CloudKit" \
+    "$HOME/Library/Caches/pypoetry/virtualenvs/proj-abc123"; do
+    if is_path_whitelisted "$probe"; then
+        printf 'PROTECTED=%s\n' "${probe#"$HOME"/}"
+    else
+        printf 'EXPOSED=%s\n' "${probe#"$HOME"/}"
+    fi
+done
+# The user's own entry must survive too.
+is_path_whitelisted "$HOME/.cache/keep-my-own-thing/x" && printf 'CUSTOM_KEPT\n'
+EOF
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"EXPOSED="* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"PROTECTED=Library/Caches/com.apple.spotlight"* ]] || return 1
+    [[ "$output" == *"PROTECTED=Library/Caches/pypoetry/virtualenvs/proj-abc123"* ]] || return 1
+    [[ "$output" == *"CUSTOM_KEPT"* ]] || return 1
+    rm -rf "$test_home"
 }
 
 @test "clean_trash dry run stays silent for compiled-model-only items" {
@@ -1588,7 +1761,9 @@ EOF
     mkdir -p \
         "$review_home/Library/Developer/Xcode/DerivedData" \
         "$review_home/Library/Developer/CoreSimulator/Devices" \
-        "$review_home/Library/Containers/com.docker.docker/Data"
+        "$review_home/Library/Containers/com.docker.docker/Data" \
+        "$review_home/Library/Caches/deno" \
+        "$review_home/go/pkg/mod"
 
     run env HOME="$review_home" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
@@ -1614,7 +1789,12 @@ EOF
     [[ "$output" == *"⊙"* ]] &&
         [[ "$output" == *"Xcode DerivedData"* ]] &&
         [[ "$output" == *"Simulator data"* ]] &&
-        [[ "$output" == *"Docker Desktop data"* ]] || {
+        [[ "$output" == *"Docker Desktop data"* ]] &&
+        [[ "$output" == *"Deno module cache"* ]] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"Go module cache"* ]] || {
         echo "$output"
         return 1
     }

@@ -50,7 +50,7 @@ save_whitelist_patterns() {
         header_text="# Mole Optimization Whitelist - These checks will be skipped during optimization"
     else
         config_file="$WHITELIST_CONFIG_CLEAN"
-        header_text="# Mole Whitelist - Protected paths won't be deleted\n# Default protections: Playwright browsers, HuggingFace models, Maven repo, Ollama models, Surge Mac, R renv, Finder metadata\n# Add one pattern per line to keep items safe."
+        header_text="# Mole Whitelist - Protected paths won't be deleted\n# Default protections: Playwright browsers, Maven repo, Ollama models, Surge Mac, R renv, Finder metadata\n# Add one pattern per line to keep items safe."
     fi
 
     ensure_user_file "$config_file"
@@ -112,15 +112,11 @@ Codex Desktop update staging|$HOME/Library/Caches/com.openai.codex/org.sparkle-p
 Chrome on-device AI models|$HOME/Library/Application Support/Google/Chrome/OptGuideOnDevice*/*|ai_ml_cache
 Chrome optimization guide models|$HOME/Library/Application Support/Google/Chrome/optimization_guide_model_store/*|ai_ml_cache
 Bazel build cache|$HOME/.cache/bazel/*|compiler_cache
-Go build cache|$HOME/Library/Caches/go-build/*|compiler_cache
-Go module cache|$HOME/go/pkg/mod/*|compiler_cache
 Rust Cargo registry cache|$HOME/.cargo/registry/cache/*|compiler_cache
 Rust documentation cache|$HOME/.rustup/toolchains/*/share/doc/*|compiler_cache
 Rustup toolchain downloads|$HOME/.rustup/downloads/*|compiler_cache
 ccache compiler cache|$HOME/.ccache/*|compiler_cache
 sccache distributed compiler cache|$HOME/.cache/sccache/*|compiler_cache
-SBT Scala build cache|$HOME/.sbt/*|compiler_cache
-Ivy dependency cache|$HOME/.ivy2/cache/*|compiler_cache
 Turbo monorepo build cache|$HOME/.turbo/*|compiler_cache
 Next.js build cache|$HOME/.next/*|compiler_cache
 Vite build cache|$HOME/.vite/*|compiler_cache
@@ -133,7 +129,6 @@ PyInstaller binary cache|$HOME/Library/Application Support/pyinstaller/bincache*
 Flutter SDK cache|$HOME/.cache/flutter/*|compiler_cache
 Swift Package Manager cache|$HOME/.cache/swift-package-manager/*|compiler_cache
 Zig compiler cache|$HOME/.cache/zig/*|compiler_cache
-Deno cache|$HOME/Library/Caches/deno/*|compiler_cache
 CocoaPods cache (iOS dependencies)|$HOME/Library/Caches/CocoaPods/*|package_manager
 npm package cache|$HOME/.npm/_cacache/*|package_manager
 pip Python package cache|$HOME/.cache/pip/*|package_manager
@@ -148,13 +143,9 @@ Composer PHP dependencies cache|$HOME/Library/Caches/composer/*|package_manager
 RubyGems cache|$HOME/.gem/cache/*|package_manager
 Conda package metadata/tarball cache|$HOME/.conda/pkgs|package_manager
 Anaconda package metadata/tarball cache|$HOME/anaconda3/pkgs|package_manager
-PyTorch model cache|$HOME/.cache/torch/*|ai_ml_cache
-TensorFlow model and dataset cache|$HOME/.cache/tensorflow/*|ai_ml_cache
-HuggingFace models and datasets|$HOME/.cache/huggingface/*|ai_ml_cache
 Playwright browser binaries|$HOME/Library/Caches/ms-playwright*|ai_ml_cache
 Selenium WebDriver binaries|$HOME/.cache/selenium/*|ai_ml_cache
 Ollama local AI models|$HOME/.ollama/models/*|ai_ml_cache
-Weights & Biases ML experiments cache|$HOME/.cache/wandb/*|ai_ml_cache
 Safari web browser cache|$HOME/Library/Caches/com.apple.Safari/*|browser_cache
 Chrome browser cache|$HOME/Library/Caches/Google/Chrome/*|browser_cache
 Firefox browser cache|$HOME/Library/Caches/Firefox/*|browser_cache
@@ -171,6 +162,13 @@ Trash|$HOME/.Trash|system_cache
 iOS/iPadOS device firmware (.ipsw) from iTunes/Finder|$HOME/Library/iTunes/*Software Updates/*.ipsw|system_cache
 Apple Configurator 2 device firmware (.ipsw)|$HOME/Library/Group Containers/*.group.com.apple.configurator/**/*.ipsw|system_cache
 EOF
+    local go_cache_root
+    if go_cache_root=$(mole_go_cache_root GOCACHE); then
+        printf 'Go build cache|%s/*|compiler_cache\n' "$go_cache_root"
+    fi
+    if go_cache_root=$(mole_go_cache_root GOMODCACHE); then
+        printf 'Go module cache|%s/*|compiler_cache\n' "$go_cache_root"
+    fi
     local github_cache_root
     if github_cache_root=$(mole_github_cli_cache_root); then
         printf 'GitHub CLI cache|%s/gh|network_tools\n' "$github_cache_root"

@@ -106,7 +106,51 @@ clean_trash() {
 
 clean_user_essentials() {
     start_section_spinner "Scanning caches..."
-    safe_clean ~/Library/Caches/* "User app cache"
+    # Deno's default root sits inside the otherwise broad user-cache sweep,
+    # but `deno clean` removes the entire DENO_DIR, including origin storage
+    # and downloaded runtime payloads. Keep the effective root for review and
+    # clean every sibling through the normal funnel.
+    local deno_cache_root=""
+    local deno_cache_root_valid=true
+    if ! deno_cache_root=$(mole_deno_cache_root 2> /dev/null); then
+        # An explicitly broad or malformed DENO_DIR is not safe to report as a
+        # cache root, but sweeping past an unresolved owner root is worse.
+        # Keep the generic cache batch empty and continue with the other user
+        # cleanup categories.
+        deno_cache_root_valid=false
+    fi
+    local deno_physical_root=""
+    if [[ "$deno_cache_root_valid" == "true" && -d "$deno_cache_root" ]]; then
+        deno_physical_root=$(cd -P "$deno_cache_root" 2> /dev/null && pwd -P) || deno_physical_root=""
+    fi
+    local -a user_cache_targets=()
+    local user_cache_target
+    if [[ "$deno_cache_root_valid" == "true" ]]; then
+        for user_cache_target in "$HOME/Library/Caches"/*; do
+            [[ -e "$user_cache_target" || -L "$user_cache_target" ]] || continue
+            case "$deno_cache_root" in
+                "$user_cache_target" | "$user_cache_target"/*) continue ;;
+            esac
+            if [[ -n "$deno_physical_root" && -d "$user_cache_target" ]]; then
+                local user_cache_physical_target=""
+                user_cache_physical_target=$(cd -P "$user_cache_target" 2> /dev/null && pwd -P) ||
+                    user_cache_physical_target=""
+                case "$deno_physical_root" in
+                    "$user_cache_physical_target" | "$user_cache_physical_target"/*) continue ;;
+                esac
+            fi
+            user_cache_targets+=("$user_cache_target")
+        done
+    fi
+    if [[ ${#user_cache_targets[@]} -gt 0 ]]; then
+        safe_clean "${user_cache_targets[@]}" "User app cache"
+    elif [[ "$deno_cache_root_valid" != "true" ]]; then
+        # Refusing here is right, but staying silent about it is not: the whole
+        # category would just be missing from the section. Name the cause the
+        # way every other guard in this file does.
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} User app cache · stopped (DENO_DIR unresolved)"
+        note_activity
+    fi
     stop_section_spinner
 
     safe_clean ~/Library/Logs/* "User app logs"
@@ -2580,8 +2624,10 @@ check_large_file_candidates() {
     _report_large_review_dir "Maven local repository" "$HOME/.m2/repository"
     _report_large_review_dir "Ivy local repository" "$HOME/.ivy2/cache"
     _report_large_review_dir "NuGet packages" "$HOME/.nuget/packages"
-    _report_large_review_dir "Go module cache" "$HOME/go/pkg/mod"
-    _report_large_review_dir "Deno module cache" "$HOME/Library/Caches/deno"
+    local deno_module_cache=""
+    if deno_module_cache=$(mole_deno_cache_root 2> /dev/null); then
+        _report_large_review_dir "Deno module cache" "$deno_module_cache"
+    fi
     _report_large_review_dir "pnpm store" "$HOME/Library/pnpm/store"
     _report_large_review_dir "Conda packages" "$HOME/.conda/pkgs"
     _report_large_review_dir "Anaconda packages" "$HOME/anaconda3/pkgs"

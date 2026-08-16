@@ -729,39 +729,214 @@ clean_dev_python() {
     clean_pyinstaller_bincache
     safe_clean ~/.jupyter/runtime/* "Jupyter runtime cache"
     # Hugging Face, PyTorch, TensorFlow and Weights & Biases keep downloaded
-    # model weights, datasets and run artifacts here, not rebuildable build
-    # output. Restoring them costs a multi-gigabyte download, so they stay off
-    # the delete path exactly like LM Studio models and ~/.ollama/models, which
-    # `clean_large_files` only reports for review. `~/.cache/huggingface` used
-    # to rely on DEFAULT_WHITELIST_PATTERNS, which stops applying the moment a
-    # user saves their own whitelist file, so the protection was uneven.
+    # model weights, datasets and run artifacts here. Their roots are not
+    # blanket caches: Hugging Face's own prune warns that interruption can
+    # corrupt its cache, while the other roots mix reusable payloads with run
+    # state. Keep all four off the automatic delete path.
     clean_conda_metadata_caches
 }
-# Go build/module caches.
-clean_dev_go() {
-    command -v go > /dev/null 2>&1 || return 0
 
-    local go_build_cache
-    go_build_cache=$(go env GOCACHE 2> /dev/null || echo "$HOME/Library/Caches/go-build")
+go_cache_process_state() {
+    local cache_kind="${1:-GOMODCACHE}"
+    # Go documents GOCACHE as safe for multiple local processes. The module
+    # cache's whole-root RemoveAll has no equivalent operation-wide lock, so
+    # only that root needs the active owner-process gate.
+    [[ "$cache_kind" == "GOCACHE" ]] && return 1
+    mole_pgrep_any -x go -x gopls
+}
 
-    # GOMODCACHE is excluded on purpose. It is the module store `go build`
-    # resolves against rather than a second copy of something already
-    # materialized: Go has no per-project vendor directory by default, so
-    # `go clean -modcache` turns every dependency of every project on the
-    # machine back into a download. `clean_large_files` reports it for review
-    # instead. GOCACHE below is compiler output Go rebuilds locally.
-    if is_path_whitelisted "$go_build_cache"; then
-        if [[ "$DRY_RUN" == "true" ]]; then
-            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Go build cache · would skip (whitelist)"
-        else
-            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Go build cache · skipped (whitelist)"
-            note_activity
-        fi
+# Resolve an owner-reported Go cache root to a stable physical directory. A
+# custom Go root is allowed, but broad home/cache parents, protected paths, and
+# directories not owned by the invoking user fail closed. A leaf symlink is
+# accepted only because the owner command receives the resolved physical root
+# and both identities are rebound immediately before it runs.
+go_cache_root_physical_path() {
+    local cache_root="${1%/}"
+    [[ -d "$cache_root" ]] || return 1
+
+    local physical_root=""
+    physical_root=$(cd -P "$cache_root" 2> /dev/null && pwd -P) || return 1
+    case "$physical_root" in
+        / | "$HOME" | "$HOME/Library" | "$HOME/Library/Caches" | \
+            "$HOME/.cache" | "$HOME/go")
+            return 1
+            ;;
+    esac
+
+    validate_path_for_deletion "$cache_root" > /dev/null 2>&1 || return 1
+    validate_path_for_deletion "$physical_root" > /dev/null 2>&1 || return 1
+    should_protect_path "$cache_root" 2> /dev/null && return 1
+    should_protect_path "$physical_root" 2> /dev/null && return 1
+
+    local invoking_uid=""
+    local root_uid=""
+    invoking_uid=$(get_invoking_uid 2> /dev/null) || return 1
+    root_uid=$($STAT_BSD -f%u "$physical_root" 2> /dev/null) || return 1
+    [[ "$invoking_uid" =~ ^[0-9]+$ && "$root_uid" == "$invoking_uid" ]] || return 1
+
+    printf '%s\n' "$physical_root"
+}
+
+_run_go_cache_clean_bound() {
+    local cache_root="$1"
+    local physical_root="$2"
+    local lexical_parent="$3"
+    local lexical_parent_id="$4"
+    local lexical_target_id="$5"
+    local physical_parent="$6"
+    local physical_parent_id="$7"
+    local physical_target_id="$8"
+    local cache_kind="$9"
+    local clean_flag="${10}"
+    local owner_dry_run="${11}"
+
+    _MOLE_GO_CACHE_BOUND_REASON=""
+    local process_state=0
+    go_cache_process_state "$cache_kind" || process_state=$?
+    if [[ $process_state -eq 0 ]]; then
+        _MOLE_GO_CACHE_BOUND_REASON="Go started"
+        return 1
+    elif [[ $process_state -ne 1 ]]; then
+        _MOLE_GO_CACHE_BOUND_REASON="process state unknown"
+        return 1
+    fi
+
+    if ! _mole_path_matches_identity \
+        "$cache_root" "$lexical_parent" "$lexical_parent_id" "$lexical_target_id" ||
+        ! _mole_path_matches_identity \
+            "$physical_root" "$physical_parent" "$physical_parent_id" "$physical_target_id"; then
+        _MOLE_GO_CACHE_BOUND_REASON="cache path state unknown"
+        return 1
+    fi
+
+    local -a command_args=(env "$cache_kind=$physical_root" go clean)
+    if [[ "$owner_dry_run" == "true" ]]; then
+        command_args+=(-n)
+    fi
+    command_args+=("$clean_flag")
+    run_with_timeout "$MOLE_TIMEOUT_PKG_CLEANUP_SEC" "${command_args[@]}" > /dev/null 2>&1
+}
+
+clean_go_cache_root() {
+    local cache_root="$1"
+    local cache_kind="$2"
+    local clean_flag="$3"
+    local display_name="$4"
+    [[ -e "$cache_root" || -L "$cache_root" ]] || return 0
+
+    local physical_root=""
+    if ! physical_root=$(go_cache_root_physical_path "$cache_root"); then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (cache path unsafe)"
+        note_activity
         return 0
     fi
 
-    clean_tool_cache "Go build cache" "" bash -c 'go clean -cache > /dev/null 2>&1 || true'
-    note_activity
+    local whitelist_path=""
+    if is_path_whitelisted "$cache_root"; then
+        whitelist_path="$cache_root"
+    elif is_path_whitelisted "$physical_root"; then
+        whitelist_path="$physical_root"
+    fi
+    if [[ -n "$whitelist_path" ]]; then
+        clean_tool_cache "$display_name" "$whitelist_path" :
+        return 0
+    fi
+
+    local process_state=0
+    go_cache_process_state "$cache_kind" || process_state=$?
+    if [[ $process_state -eq 0 ]]; then
+        mole_defer_cleanup_family "Go"
+        return 0
+    elif [[ $process_state -ne 1 ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (process state unknown)"
+        note_activity
+        return 0
+    fi
+
+    if ! _mole_snapshot_path_identity "$cache_root"; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (cache path unsafe)"
+        note_activity
+        return 0
+    fi
+    local lexical_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+    local lexical_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+    local lexical_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+    if ! _mole_snapshot_path_identity "$physical_root"; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (cache path unsafe)"
+        note_activity
+        return 0
+    fi
+    local physical_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+    local physical_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+    local physical_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+
+    local _MOLE_GO_CACHE_BOUND_REASON=""
+    local command_status=0
+    if [[ "$DRY_RUN" != "true" && -t 1 ]]; then
+        start_section_spinner "Cleaning $display_name..."
+    fi
+    _run_go_cache_clean_bound \
+        "$cache_root" "$physical_root" \
+        "$lexical_parent" "$lexical_parent_id" "$lexical_target_id" \
+        "$physical_parent" "$physical_parent_id" "$physical_target_id" \
+        "$cache_kind" "$clean_flag" "$DRY_RUN" || command_status=$?
+    if [[ "$DRY_RUN" != "true" && -t 1 ]]; then
+        stop_section_spinner
+    fi
+
+    if [[ $command_status -eq 0 ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} $display_name · would clean"
+        else
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} $display_name"
+        fi
+        note_activity
+        return 0
+    fi
+    if [[ $command_status -eq 124 || $command_status -ge 128 ]]; then
+        return "$command_status"
+    fi
+
+    if [[ "$_MOLE_GO_CACHE_BOUND_REASON" == "Go started" ]]; then
+        mole_defer_cleanup_family "Go"
+    elif [[ -n "$_MOLE_GO_CACHE_BOUND_REASON" ]]; then
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (${_MOLE_GO_CACHE_BOUND_REASON})"
+        note_activity
+    else
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} ${display_name} · stopped (owner cleanup failed)"
+        note_activity
+    fi
+    return 0
+}
+
+# Go explicitly documents both roots as caches and provides the removal
+# command. Re-download cost is an acceptable clean tradeoff; the effective
+# roots remain independently whitelistable and are rebound at the command
+# boundary before the owner command runs.
+clean_dev_go() {
+    command -v go > /dev/null 2>&1 || return 0
+
+    local go_mod_cache=""
+    local go_build_cache=""
+    local resolver_rc=0
+    go_mod_cache=$(mole_go_cache_root GOMODCACHE) || resolver_rc=$?
+    if [[ $resolver_rc -eq 124 || $resolver_rc -ge 128 ]]; then
+        return "$resolver_rc"
+    fi
+    resolver_rc=0
+    go_build_cache=$(mole_go_cache_root GOCACHE) || resolver_rc=$?
+    if [[ $resolver_rc -eq 124 || $resolver_rc -ge 128 ]]; then
+        return "$resolver_rc"
+    fi
+
+    if [[ -n "$go_mod_cache" ]]; then
+        clean_go_cache_root \
+            "$go_mod_cache" GOMODCACHE -modcache "Go module cache" || return $?
+    fi
+    if [[ -n "$go_build_cache" ]]; then
+        clean_go_cache_root \
+            "$go_build_cache" GOCACHE -cache "Go build cache" || return $?
+    fi
 }
 
 get_mise_cache_path() {
@@ -916,23 +1091,24 @@ clean_rust_dependency_cache_root() {
 
 # Rust/cargo caches. Honor CARGO_HOME / RUSTUP_HOME when they point at a
 # validated absolute path (mise and other version managers relocate these).
-# Scope stays regenerable cache only: registry/cache, git, and downloads.
-# Keep bin, toolchains, and registry/index.
+# Scope stays redundant download copies only: registry/cache and rustup
+# downloads. Keep bin, toolchains, registry/src, registry/index, and git.
 #
 # registry/src is deliberately excluded. It holds the extracted crate sources
 # cargo builds against, so with it present a project still builds after
 # registry/cache is emptied; removing both turns every previously working
 # offline build into a crates.io round trip. rust-analyzer also reads it
 # continuously and is not part of rust_build_process_state, so a deletion
-# would break IDE navigation for an editor Mole cannot see.
+# would break IDE navigation for an editor Mole cannot see. Cargo 1.88+ owns
+# age-aware garbage collection for registry sources and git dependencies, so
+# Mole does not race that store with a second whole-tree policy.
 clean_dev_rust() {
     local cargo_home rustup_home
     cargo_home=$(resolve_tool_home "${CARGO_HOME:-}" "${HOME}/.cargo")
     rustup_home=$(resolve_tool_home "${RUSTUP_HOME:-}" "${HOME}/.rustup")
 
     if mole_cleanup_targets_exist \
-        "${cargo_home}/registry/cache"/* \
-        "${cargo_home}/git"/*; then
+        "${cargo_home}/registry/cache"/*; then
         local rust_state=0
         rust_build_process_state || rust_state=$?
         if [[ $rust_state -eq 0 ]]; then
@@ -942,10 +1118,6 @@ clean_dev_rust() {
                 "$cargo_home" \
                 "${cargo_home}/registry/cache" \
                 "Rust cargo cache" || return 0
-            clean_rust_dependency_cache_root \
-                "$cargo_home" \
-                "${cargo_home}/git" \
-                "Cargo git cache" || return 0
         else
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Rust dependency cache · stopped (process state unknown)"
             note_activity
@@ -3610,9 +3782,9 @@ clean_dev_other_langs() {
     # safe_clean ~/.pub-cache/* "Dart Pub cache"
     safe_clean ~/.cache/bazel/* "Bazel cache"
     safe_clean ~/.cache/zig/* "Zig cache"
-    # DENO_DIR is Deno's only module store. There is no node_modules to fall
-    # back on, so emptying it re-downloads every remote import of every Deno
-    # project and breaks --cached-only runs. clean_large_files reports it.
+    # DENO_DIR mixes remote imports with origin storage and downloaded runtime
+    # payloads. The owner clean command resets the whole root, so Mole keeps it
+    # review-only and the generic user-cache sweep excludes it as well.
     clean_clang_module_cache
 }
 # CI/CD and DevOps caches.

@@ -1581,7 +1581,10 @@ perform_cleanup() {
 
         for pattern in "${WHITELIST_PATTERNS[@]}"; do
             local is_predefined=false
-            for default in "${DEFAULT_WHITELIST_PATTERNS[@]}"; do
+            # Hard safety entries are the most core protection Mole ships, so
+            # count them with the defaults. Attributing them to the user reads
+            # as "you added these" for rules nobody opted into.
+            for default in "${DEFAULT_WHITELIST_PATTERNS[@]}" "${SAFETY_WHITELIST_PATTERNS[@]}"; do
                 local expanded_default="${default/#\~/$HOME}"
                 if [[ "$pattern" == "$expanded_default" ]]; then
                     is_predefined=true
