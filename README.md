@@ -43,6 +43,16 @@ Homebrew follows Homebrew's supported macOS tiers. Use macOS 14 or later for the
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 ```
 
+The script defaults to `/usr/local/bin`, which normally asks for an administrator password. For a per-user install whose future `mo update` runs stay password-free:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash -s -- --prefix "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Add the same `PATH` export to your shell profile for new terminals. Mole updates the installation you invoked, so it keeps using this user-owned directory. Commands that actually change system-owned files may still request administrator access; read-only and user-only work does not.
+
 > Note: Mole is built for macOS. An experimental Windows version is available in the [windows branch](https://github.com/tw93/Mole/tree/windows) for early adopters.
 
 **Run**
