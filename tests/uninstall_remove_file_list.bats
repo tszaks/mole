@@ -39,6 +39,25 @@ source "$PROJECT_ROOT/lib/uninstall/batch.sh"
 EOF
 }
 
+@test "remove_file_list refuses shared XDG roots regardless of display-name casing (#1446)" {
+    mkdir -p "$HOME/.Local/bin" "$HOME/.Config" "$HOME/.Cache"
+    touch "$HOME/.Local/bin/unrelated-cli" "$HOME/.Config/unrelated-config" "$HOME/.Cache/unrelated-cache"
+    local list
+    printf -v list '%s\n%s\n%s' "$HOME/.Local" "$HOME/.Config" "$HOME/.Cache"
+
+    run /bin/bash --noprofile --norc <<EOF
+$(prelude)
+remove_file_list "$list" "false"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"0"* ]]
+    [[ -f "$HOME/.Local/bin/unrelated-cli" ]]
+    [[ -f "$HOME/.Config/unrelated-config" ]]
+    [[ -f "$HOME/.Cache/unrelated-cache" ]]
+    [[ ! -d "$MOLE_TEST_TRASH_DIR" ]]
+}
+
 @test "remove_file_list batches eligible Trash moves into a single helper call" {
     local f1="$SANDBOX/a.plist"
     local f2="$SANDBOX/b.plist"
