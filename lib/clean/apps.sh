@@ -936,6 +936,9 @@ clean_orphaned_system_services() {
     local orphaned_count=0
     local -a orphaned_files=()
     local -a orphaned_identities=()
+    local -a orphaned_parents=()
+    local -a orphaned_parent_ids=()
+    local -a orphaned_target_ids=()
     # Force-protect list: if a plist's bundle ID matches one of these patterns AND
     # the associated app IS installed, skip removal even if the binary appears missing.
     # Format: "bundle_id_glob:pipe-separated app paths"
@@ -1248,12 +1251,39 @@ clean_orphaned_system_services() {
         printf '%s\n' "$identity"
     }
 
-    _record_orphan_service_candidate() {
+    _orphan_service_snapshot() {
         local candidate="$1"
+        _ORPHAN_SERVICE_IDENTITY=""
+        _ORPHAN_SERVICE_PARENT=""
+        _ORPHAN_SERVICE_PARENT_ID=""
+        _ORPHAN_SERVICE_TARGET_ID=""
+
+        _mole_snapshot_path_identity "$candidate" || return 1
+        local snapshot_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+        local snapshot_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+        local snapshot_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
         local identity=""
         identity=$(_orphan_service_identity "$candidate") || return $?
+        [[ "${identity%:*}" == "$snapshot_target_id" ]] || return 1
+
+        _ORPHAN_SERVICE_IDENTITY="$identity"
+        _ORPHAN_SERVICE_PARENT="$snapshot_parent"
+        _ORPHAN_SERVICE_PARENT_ID="$snapshot_parent_id"
+        _ORPHAN_SERVICE_TARGET_ID="$snapshot_target_id"
+    }
+
+    _record_orphan_service_candidate() {
+        local candidate="$1"
+        local _ORPHAN_SERVICE_IDENTITY=""
+        local _ORPHAN_SERVICE_PARENT=""
+        local _ORPHAN_SERVICE_PARENT_ID=""
+        local _ORPHAN_SERVICE_TARGET_ID=""
+        _orphan_service_snapshot "$candidate" || return $?
         orphaned_files+=("$candidate")
-        orphaned_identities+=("$identity")
+        orphaned_identities+=("$_ORPHAN_SERVICE_IDENTITY")
+        orphaned_parents+=("$_ORPHAN_SERVICE_PARENT")
+        orphaned_parent_ids+=("$_ORPHAN_SERVICE_PARENT_ID")
+        orphaned_target_ids+=("$_ORPHAN_SERVICE_TARGET_ID")
         orphaned_count=$((orphaned_count + 1))
     }
 
@@ -1515,6 +1545,9 @@ clean_orphaned_system_services() {
     if [[ $orphaned_count -gt 0 && ${#WHITELIST_PATTERNS[@]} -gt 0 ]]; then
         local -a kept_files=()
         local -a kept_identities=()
+        local -a kept_parents=()
+        local -a kept_parent_ids=()
+        local -a kept_target_ids=()
         local whitelist_index=0
         for ((whitelist_index = 0; whitelist_index < orphaned_count; whitelist_index++)); do
             local orphan_file="${orphaned_files[$whitelist_index]}"
@@ -1524,6 +1557,9 @@ clean_orphaned_system_services() {
             fi
             kept_files+=("$orphan_file")
             kept_identities+=("${orphaned_identities[$whitelist_index]}")
+            kept_parents+=("${orphaned_parents[$whitelist_index]}")
+            kept_parent_ids+=("${orphaned_parent_ids[$whitelist_index]}")
+            kept_target_ids+=("${orphaned_target_ids[$whitelist_index]}")
         done
         orphaned_count=${#kept_files[@]}
         # Guard the empty-array expansion: macOS /bin/bash is 3.2, which treats
@@ -1533,9 +1569,15 @@ clean_orphaned_system_services() {
         if ((orphaned_count > 0)); then
             orphaned_files=("${kept_files[@]}")
             orphaned_identities=("${kept_identities[@]}")
+            orphaned_parents=("${kept_parents[@]}")
+            orphaned_parent_ids=("${kept_parent_ids[@]}")
+            orphaned_target_ids=("${kept_target_ids[@]}")
         else
             orphaned_files=()
             orphaned_identities=()
+            orphaned_parents=()
+            orphaned_parent_ids=()
+            orphaned_target_ids=()
         fi
     fi
 
@@ -1552,6 +1594,9 @@ clean_orphaned_system_services() {
         for ((orphan_index = 0; orphan_index < orphaned_count; orphan_index++)); do
             local orphan_file="${orphaned_files[$orphan_index]}"
             local expected_identity="${orphaned_identities[$orphan_index]}"
+            local expected_parent="${orphaned_parents[$orphan_index]}"
+            local expected_parent_id="${orphaned_parent_ids[$orphan_index]}"
+            local expected_target_id="${orphaned_target_ids[$orphan_index]}"
             local eligibility_rc=0
             _orphan_service_candidate_still_eligible "$orphan_file" "$expected_identity" || eligibility_rc=$?
             if [[ $eligibility_rc -eq 124 ]]; then
@@ -1588,7 +1633,7 @@ clean_orphaned_system_services() {
                 fi
                 if [[ $orphan_size_rc -eq 124 ]]; then
                     echo -e "  ${YELLOW}${ICON_WARNING}${NC} Orphaned system services · ${GRAY}time limit reached, stopped cleanup${NC}"
-                    debug_log "Orphaned services stopped by deadline at stage: launchctl bootout"
+                    debug_log "Orphaned services stopped by deadline at stage: dry-run sizing"
                     note_activity
                     return 0
                 fi
@@ -1623,38 +1668,12 @@ clean_orphaned_system_services() {
                 fi
                 [[ $file_size_rc -eq 0 && "$file_size_kb" =~ ^[0-9]+$ ]] || file_size_kb=0
 
-                # Unload if it's a LaunchDaemon/LaunchAgent
-                if [[ "$orphan_file" == *.plist ]]; then
-                    local pre_unload_rc=0
-                    _orphan_service_candidate_still_eligible "$orphan_file" \
-                        "$expected_identity" || pre_unload_rc=$?
-                    if [[ $pre_unload_rc -eq 124 ]]; then
-                        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Orphaned system services · ${GRAY}time limit reached, stopped cleanup${NC}"
-                        debug_log "Orphaned services stopped by deadline at stage: privileged plist removal"
-                        note_activity
-                        return 0
-                    elif [[ $pre_unload_rc -ge 128 ]]; then
-                        return "$pre_unload_rc"
-                    elif [[ $pre_unload_rc -ne 0 ]]; then
-                        debug_log "Keeping changed or no-longer-orphaned service before unload: $orphan_file"
-                        continue
-                    fi
-                    local unload_rc=0
-                    local unload_timeout=""
-                    unload_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" \
-                        "$service_cleanup_deadline") || unload_rc=$?
-                    if [[ $unload_rc -eq 0 ]]; then
-                        _mole_bounded_sudo "$unload_timeout" \
-                            -n launchctl unload "$orphan_file" < /dev/null 2> /dev/null || unload_rc=$?
-                    fi
-                    if [[ $unload_rc -eq 124 ]]; then
-                        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Orphaned system services · ${GRAY}unload timed out, stopped cleanup${NC}"
-                        note_activity
-                        return 0
-                    elif [[ $unload_rc -ge 128 ]]; then
-                        return "$unload_rc"
-                    fi
-                fi
+                # Removing an orphaned registration is file cleanup, not launchd
+                # state management. Legacy load/unload does not report whether a
+                # job changed state and selects its domain from the invoking user,
+                # so a refused removal could otherwise leave a live service offline.
+                # Keep the running job untouched; launchd drops the absent plist on
+                # the next boot/login after a successful file removal. See #1447.
                 local final_eligibility_rc=0
                 _orphan_service_candidate_still_eligible "$orphan_file" \
                     "$expected_identity" || final_eligibility_rc=$?
@@ -1670,7 +1689,8 @@ clean_orphaned_system_services() {
                     continue
                 fi
                 local remove_rc=0
-                safe_sudo_remove "$orphan_file" "" "$service_cleanup_deadline" || remove_rc=$?
+                safe_sudo_remove "$orphan_file" "$file_size_kb" "$service_cleanup_deadline" \
+                    "$expected_parent" "$expected_parent_id" "$expected_target_id" || remove_rc=$?
                 if [[ $remove_rc -eq 0 ]]; then
                     debug_log "Removed orphaned service: $orphan_file"
                     removed_count=$((removed_count + 1))

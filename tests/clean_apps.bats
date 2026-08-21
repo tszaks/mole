@@ -1699,7 +1699,7 @@ EOF
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
-@test "clean_orphaned_system_services stops before removal when launchctl unload times out" {
+@test "clean_orphaned_system_services never changes launchd state when removal is refused (#1447)" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1708,12 +1708,12 @@ source "$PROJECT_ROOT/lib/clean/apps.sh"
 
 start_section_spinner() { :; }
 stop_section_spinner() { :; }
-note_activity() { printf 'ACTIVITY\n'; }
+note_activity() { :; }
 debug_log() { :; }
 should_protect_path() { return 1; }
 
 tmp_dir=$(mktemp -d)
-tmp_plist="$tmp_dir/com.example.unload-timeout.plist"
+tmp_plist="$tmp_dir/com.example.refused-removal.plist"
 touch "$tmp_plist"
 _mole_materialize_bounded_sudo_find() {
     if [[ "$3" == "/Library/LaunchDaemons" ]]; then
@@ -1736,28 +1736,27 @@ sudo() {
         /usr/bin/stat) command "$@" ;;
         du) printf '4\n' ;;
         launchctl)
-            printf 'LAUNCHCTL_TIMEOUT\n'
-            return 124
+            printf 'UNEXPECTED_LAUNCHCTL:%s\n' "$*"
+            return 99
             ;;
         *) return 0 ;;
     esac
 }
 safe_sudo_remove() {
-    printf 'UNEXPECTED_REMOVE:%s\n' "$1"
-    return 99
+    printf 'REMOVE_REFUSED:%s\n' "$1"
+    return "$MOLE_ERR_PROTECTED_PATH"
 }
 
 clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"LAUNCHCTL_TIMEOUT"* ]] || return 1
-    [[ "$output" == *"unload timed out, stopped cleanup"* ]] || return 1
-    [[ "$output" == *"ACTIVITY"* ]] || return 1
-    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+    [[ "$output" == *"REMOVE_REFUSED:"* ]] || return 1
+    [[ "$output" == *"Orphaned services · skipped 1 protected"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_LAUNCHCTL"* ]]
 }
 
-@test "clean_orphaned_system_services does not unload a plist replaced after classification" {
+@test "clean_orphaned_system_services does not remove a plist replaced after classification" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
         DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -1802,10 +1801,7 @@ sudo() {
             fi
             printf '4\n'
             ;;
-        launchctl)
-            printf 'UNEXPECTED_UNLOAD\n'
-            return 99
-            ;;
+        launchctl) printf 'UNEXPECTED_LAUNCHCTL\n'; return 99 ;;
         *) return 0 ;;
     esac
 }
@@ -1818,8 +1814,77 @@ clean_orphaned_system_services
 EOF
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"Keeping changed or no-longer-orphaned service before unload"* ]] || return 1
-    [[ "$output" != *"UNEXPECTED_UNLOAD"* ]] || return 1
+    [[ "$output" == *"Keeping changed or no-longer-orphaned service before removal"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_LAUNCHCTL"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
+}
+
+@test "clean_orphaned_system_services binds the discovered plist identity to the sudo sink" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+        DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+should_protect_path() { return 1; }
+debug_log() { printf '%s\n' "$*"; }
+
+tmp_dir=$(mktemp -d)
+tmp_plist="$tmp_dir/com.example.sink-race.plist"
+replacement="$tmp_dir/replacement.plist"
+touch "$tmp_plist" "$replacement"
+_mole_materialize_bounded_sudo_find() {
+    if [[ "$3" == "/Library/LaunchDaemons" ]]; then
+        printf '%s\0' "$tmp_plist" > "$1"
+    else
+        : > "$1"
+    fi
+}
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        test) return 1 ;;
+        /usr/libexec/PlistBuddy)
+            case "${3:-}" in
+                "Print :ProgramArguments:0") return 1 ;;
+                "Print :Program") printf '%s\n' "$tmp_dir/missing" ;;
+            esac
+            ;;
+        /usr/bin/stat) command "$@" ;;
+        du) printf '4\n' ;;
+        launchctl) printf 'UNEXPECTED_LAUNCHCTL\n'; return 99 ;;
+        *) return 0 ;;
+    esac
+}
+safe_sudo_remove() {
+    local expected_parent="${4:-}"
+    local expected_parent_id="${5:-}"
+    local expected_target_id="${6:-}"
+    printf 'BOUND:%s:%s:%s\n' "$expected_parent" "$expected_parent_id" "$expected_target_id"
+    rm -f "$1"
+    mv "$replacement" "$1"
+    if _mole_path_matches_identity \
+        "$1" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
+        printf 'UNEXPECTED_REMOVE:%s\n' "$1"
+        rm -f "$1"
+        return 0
+    fi
+    return 1
+}
+
+clean_orphaned_system_services
+[[ -e "$tmp_plist" ]] && printf 'REPLACEMENT_SURVIVED\n'
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"BOUND:/"*":"*":"* ]] || return 1
+    [[ "$output" == *"REPLACEMENT_SURVIVED"* ]] || return 1
+    [[ "$output" == *"Orphaned services · 1 failed"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_LAUNCHCTL"* ]] || return 1
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
@@ -1913,7 +1978,7 @@ note_activity() { :; }
 debug_log() { :; }
 bundle_has_installed_app() { return 1; }
 safe_sudo_remove() {
-  echo "removed:$1"
+  printf 'removed:%s bound:%s:%s:%s\n' "$1" "${4:-}" "${5:-}" "${6:-}"
   return 0
 }
 
@@ -1952,10 +2017,7 @@ sudo() {
     echo "4 $tmp_helper"
     return 0
   fi
-  if [[ "$1" == "launchctl" ]]; then
-    echo "launchctl-unload:$*"
-    return 0
-  fi
+  if [[ "$1" == "launchctl" ]]; then echo "UNEXPECTED_LAUNCHCTL"; return 99; fi
   command "$@"
 }
 
@@ -1965,9 +2027,8 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Orphaned services · cleaned 1"* ]] || return 1
     [[ "$output" == *"removed:"*"org.amnezia.awg.plist"* ]] || return 1
-    # A LaunchDaemon orphan is unloaded before removal, so this call is the
-    # expected order rather than a stray one.
-    [[ "$output" == *"launchctl-unload:"*"org.amnezia.awg.plist"* ]]
+    [[ "$output" == *"bound:/"*":"*":"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_LAUNCHCTL"* ]]
 }
 
 @test "clean_orphaned_system_services keeps a live helper app LaunchDaemon loaded (#1447)" {
