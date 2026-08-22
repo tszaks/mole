@@ -1770,6 +1770,47 @@ INNER
     [[ -d "$old_one" && ! -d "$old_two" ]]
 }
 
+@test "clean_autodesk_fusion_old_bundles avoids a duplicate real-mode post-size guard" {
+    local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
+    rm -rf "$HOME/Library/Application Support/Autodesk"
+    local current="$prod/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    local old="$prod/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    make_fusion_version_dir "$current" "2.0.200"
+    make_fusion_version_dir "$old" "2.0.100"
+    ln -s "$current/Autodesk Fusion.app" "$prod/Autodesk Fusion.app"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+pgrep() { return 1; }
+get_path_size_kb() { echo "1"; }
+guard_calls=0
+_autodesk_fusion_delete_guard_allows() {
+    guard_calls=$((guard_calls + 1))
+    return 0
+}
+safe_remove() {
+    local final_guard="${_MOLE_SAFE_REMOVE_FINAL_GUARD:-}"
+    [[ -n "$final_guard" ]] || return 99
+    "$final_guard" "$1" || return $?
+    command rm -rf "$1"
+}
+note_activity() { :; }
+debug_log() { :; }
+DRY_RUN=false
+clean_autodesk_fusion_old_bundles
+printf 'GUARD_CALLS:%s\n' "$guard_calls"
+INNER
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"GUARD_CALLS:2"* ]] || return 1
+    [[ ! -d "$old" ]]
+}
+
 @test "clean_autodesk_fusion_old_bundles propagates a final sink interrupt" {
     local prod="$HOME/Library/Application Support/Autodesk/webdeploy/production"
     rm -rf "$HOME/Library/Application Support/Autodesk"
@@ -1788,7 +1829,7 @@ get_path_size_kb() { echo "1"; }
 guard_calls=0
 _autodesk_fusion_delete_guard_allows() {
     guard_calls=$((guard_calls + 1))
-    [[ $guard_calls -lt 3 ]] && return 0
+    [[ $guard_calls -lt 2 ]] && return 0
     _MOLE_AUTODESK_FUSION_GUARD_REASON="interrupted"
     return 130
 }
@@ -1809,7 +1850,7 @@ INNER
         echo "$output"
         return 1
     }
-    [[ "$output" == *"RC:130 CANCEL:130 CALLS:3"* ]] || return 1
+    [[ "$output" == *"RC:130 CANCEL:130 CALLS:2"* ]] || return 1
     [[ -d "$old" ]]
 }
 

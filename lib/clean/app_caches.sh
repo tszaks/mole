@@ -1222,19 +1222,21 @@ clean_autodesk_fusion_old_bundles() {
             continue
         fi
 
-        guard_rc=0
-        _autodesk_fusion_delete_guard_allows "$dir" || guard_rc=$?
-        if [[ $guard_rc -eq 124 ]]; then
-            stopped_reason="verification timed out"
-            break
-        elif [[ $guard_rc -ge 128 ]]; then
-            return "$guard_rc"
-        elif [[ $guard_rc -ne 0 ]]; then
-            stopped_reason="$_MOLE_AUTODESK_FUSION_GUARD_REASON"
-            break
-        fi
-
         if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            # Dry-run has no deletion sink to perform the final rebind. Recheck
+            # after sizing so its preview uses the same current/process verdict
+            # that a real safe_remove final guard would enforce.
+            guard_rc=0
+            _autodesk_fusion_delete_guard_allows "$dir" || guard_rc=$?
+            if [[ $guard_rc -eq 124 ]]; then
+                stopped_reason="verification timed out"
+                break
+            elif [[ $guard_rc -ge 128 ]]; then
+                return "$guard_rc"
+            elif [[ $guard_rc -ne 0 ]]; then
+                stopped_reason="$_MOLE_AUTODESK_FUSION_GUARD_REASON"
+                break
+            fi
             if declare -f record_dry_run_cleanup_target > /dev/null 2>&1; then
                 record_dry_run_cleanup_target "$dir" "$size_kb" 1 true || continue
             fi
@@ -1260,6 +1262,17 @@ clean_autodesk_fusion_old_bundles() {
             return "$remove_rc"
         elif [[ -n "$_MOLE_AUTODESK_FUSION_GUARD_REASON" ]]; then
             stopped_reason="$_MOLE_AUTODESK_FUSION_GUARD_REASON"
+            break
+        elif ! _mole_path_matches_identity \
+            "$dir" \
+            "$_MOLE_AUTODESK_FUSION_GUARD_PARENT" \
+            "$_MOLE_AUTODESK_FUSION_GUARD_PARENT_ID" \
+            "$_MOLE_AUTODESK_FUSION_GUARD_TARGET_ID"; then
+            # safe_remove performs its generic identity rebind before the
+            # caller-specific final guard. Diagnose that refusal after the
+            # failed sink without adding a third full Fusion guard to the
+            # successful deletion path.
+            stopped_reason="candidate replaced"
             break
         else
             failed_count=$((failed_count + 1))
