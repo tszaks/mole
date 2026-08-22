@@ -96,7 +96,7 @@ curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash -s
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash -s -- main
 ```
 
-`main` installs unreleased code from the default branch, so expect rough edges.
+`main` installs unreleased code from the default branch, so expect rough edges. `latest` still works as a legacy alias for `main`; despite the name it does not install the newest stable release.
 
 The script normally installs to `/usr/local/bin`, which may ask for an administrator password. Install into a user-owned directory if you want future `mo update` runs to stay password-free:
 
