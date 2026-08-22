@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Mole</h1>
-  <p><em>🐹 Clean, uninstall, analyze, optimize, and monitor your Mac from the terminal.</em></p>
+  <p><em>🐹 Clean, uninstall, analyze, optimize, and monitor your Mac. Free open-source CLI, plus a native Mac app.</em></p>
 </div>
 
 <p align="center">
@@ -16,7 +16,7 @@
   <img src="https://gw.alipayobjects.com/zos/k/ro/ZzF8e8.png" alt="Mole - 95.50GB freed" width="1000" />
 </p>
 
-> 💡 The CLI is free and open source. Prefer a native Mac app? [Mole for Mac](https://mole.fit) adds visual cleanup review, app updates, uninstall, maintenance, disk maps, live status, and a menu bar HUD. One license covers 2 Macs, with lifetime updates and a 14-day refund.
+> 💡 Mole comes in two forms. The `mo` command line tool on this page is free and open source. [Mole for Mac](https://mole.fit) is the native SwiftUI app, with a graphical cleanup review before anything is deleted, app updates, uninstall, maintenance, disk maps, live status, and a menu bar HUD. One license covers 2 Macs, with lifetime updates and a 14-day refund.
 
 ## Features
 
