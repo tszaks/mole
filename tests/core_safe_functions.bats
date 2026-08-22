@@ -369,10 +369,13 @@ run_with_timeout() { shift; "$@"; }
 export GLOBIGNORE='*.db'
 validation_state=0
 validate_path_for_deletion "$cache_dir" || validation_state=$?
-[[ $validation_state -eq 1 ]]
-[[ "$GLOBIGNORE" == '*.db' ]]
-[[ "$(declare -p GLOBIGNORE)" == 'declare -x GLOBIGNORE='* ]]
-shopt -q dotglob
+# Every assertion exits explicitly. `set -e` does NOT abort a script bash reads
+# from stdin, which is exactly how this heredoc is fed, so a bare `[[ ... ]]`
+# here is decorative: it fails, execution continues, and the test still passes.
+[[ $validation_state -eq 1 ]] || exit 1
+[[ "$GLOBIGNORE" == '*.db' ]] || exit 1
+[[ "$(declare -p GLOBIGNORE)" == 'declare -x GLOBIGNORE='* ]] || exit 1
+shopt -q dotglob || exit 1
 EOF
 
     [ "$status" -eq 0 ]
@@ -390,13 +393,19 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
-lsof_calls=0
-lsof() { lsof_calls=$((lsof_calls + 1)); return 1; }
+# Counted through a file, not a variable: the probe reads lsof's stdout, so it
+# runs inside a command substitution and a subshell counter never comes back.
+lsof_log=$(mktemp)
+lsof() { printf 'call\n' >> "$lsof_log"; return 1; }
 run_with_timeout() { shift; "$@"; }
 guard_state=0
 _mole_should_refuse_live_user_cache_path "$cache_dir" || guard_state=$?
-[[ $guard_state -eq 1 ]]
-[[ $lsof_calls -eq 3 ]]
+[[ $guard_state -eq 1 ]] || exit 1
+# One call for the whole Cache.db / -wal / -shm family. If family dedup breaks,
+# each member is probed as its own family and this becomes 3.
+lsof_calls=$(wc -l < "$lsof_log" | tr -d ' ')
+rm -f "$lsof_log"
+[[ $lsof_calls -eq 1 ]] || exit 1
 EOF
 
     [ "$status" -eq 0 ]
