@@ -1094,6 +1094,23 @@ clean_orphaned_system_services() {
         printf '%s\n' "$binary"
     }
 
+    # Confirm that a plist can be parsed at all. `_plist_binary_path` returns 1
+    # both for a valid plist with no usable Program key and for an ordinary
+    # PlistBuddy read failure, which is sufficient for discovery but not for a
+    # sink-time proof that no registration references a helper.
+    _plist_document_is_readable() {
+        local plist="$1"
+        local plist_probe_timeout=""
+        local plist_probe_rc=0
+        plist_probe_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" \
+            "$service_cleanup_deadline") || plist_probe_rc=$?
+        if [[ $plist_probe_rc -eq 0 ]]; then
+            _mole_bounded_sudo "$plist_probe_timeout" \
+                -n /usr/libexec/PlistBuddy -c "Print" "$plist" < /dev/null > /dev/null 2>&1 || plist_probe_rc=$?
+        fi
+        return "$plist_probe_rc"
+    }
+
     # Returns 0 if the binary path is managed by a package manager or lives in a
     # system directory; these should never be treated as orphans even when missing.
     _is_package_managed_binary() {
@@ -1127,6 +1144,18 @@ clean_orphaned_system_services() {
             return "$binary_path_rc"
         fi
         [[ $binary_path_rc -eq 0 ]] || return 1 # no Program key → skip
+
+        # A standalone helper app is an owned service unit even while its
+        # updater temporarily swaps the nested executable. Treat the verified
+        # absolute Program shape itself as protection: absence of the leaf is
+        # not proof that the registration is orphaned. This intentionally
+        # prefers a stale plist false negative over deleting a live updater's
+        # registration. See #1447.
+        case "$binary" in
+            /Library/PrivilegedHelperTools/*.app/Contents/MacOS/*)
+                return 1
+                ;;
+        esac
 
         # Self-protecting software (Intego and similar antivirus / endpoint
         # agents) makes its install directories root-only readable, so an
@@ -1177,16 +1206,6 @@ clean_orphaned_system_services() {
         # is gone, the binary itself is orphaned, so this plist is too. See #1082.
         if [[ "$binary_exists" == "true" ]]; then
             if [[ "$binary" == /Library/PrivilegedHelperTools/* ]]; then
-                # Some services are installed as standalone helper apps with no
-                # parent under /Applications. Their existing nested executable
-                # is exact ownership evidence, so running the parent-app resolver
-                # would falsely orphan and unload them. Chrome Remote Desktop's
-                # broker is one such service. See #1447.
-                case "$binary" in
-                    /Library/PrivilegedHelperTools/*.app/Contents/MacOS/*)
-                        return 1
-                        ;;
-                esac
                 local helper_bundle_id
                 local helper_id_rc=0
                 helper_bundle_id=$(_privileged_helper_bundle_id_from_binary \
@@ -1287,6 +1306,101 @@ clean_orphaned_system_services() {
         orphaned_count=$((orphaned_count + 1))
     }
 
+    # Returns 0 only after a complete, bounded scan proves that no surviving
+    # LaunchDaemon or LaunchAgent references this helper. A plist removal and
+    # its Program helper form one cleanup family: if the registration survives,
+    # is replaced, or cannot be read conclusively, the helper must survive too.
+    _orphan_service_helper_is_unreferenced() {
+        local helper="$1"
+        local deadline="$2"
+        local service_cleanup_deadline="$deadline"
+        local reference_scan_file=""
+
+        if ! reference_scan_file=$(create_temp_file 2> /dev/null); then
+            return 2
+        fi
+
+        local reference_scan_rc=0
+        local service_root=""
+        # Declared here on purpose: `plist` is also the read variable of the two
+        # discovery loops in this function's enclosing scope, and bash scoping
+        # is dynamic.
+        local plist=""
+        for service_root in /Library/LaunchDaemons /Library/LaunchAgents; do
+            [[ -d "$service_root" ]] || continue
+            if [[ $SECONDS -ge $service_cleanup_deadline ]]; then
+                reference_scan_rc=124
+                break
+            fi
+
+            local scan_timeout=""
+            local scan_rc=0
+            scan_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" \
+                "$service_cleanup_deadline") || scan_rc=$?
+            if [[ $scan_rc -eq 0 ]]; then
+                _mole_materialize_bounded_sudo_find "$reference_scan_file" \
+                    "$scan_timeout" "$service_root" \
+                    -maxdepth 1 -name "*.plist" -print0 || scan_rc=$?
+            fi
+            if [[ $scan_rc -ne 0 ]]; then
+                reference_scan_rc=$scan_rc
+                break
+            fi
+
+            while IFS= read -r -d '' plist; do
+                if [[ $SECONDS -ge $service_cleanup_deadline ]]; then
+                    reference_scan_rc=124
+                    break
+                fi
+                local referenced_binary=""
+                local binary_rc=0
+                referenced_binary=$(_plist_binary_path "$plist") || binary_rc=$?
+                if [[ $binary_rc -eq 124 || $binary_rc -ge 128 ]]; then
+                    reference_scan_rc=$binary_rc
+                    break
+                fi
+                if [[ $binary_rc -ne 0 ]]; then
+                    # Distinguish a valid plist with no absolute Program from a
+                    # read failure. Re-read the key after proving the document
+                    # parses so a transient failed probe cannot become absence
+                    # evidence. Any still-inconclusive document keeps helpers.
+                    local readable_rc=0
+                    _plist_document_is_readable "$plist" || readable_rc=$?
+                    if [[ $readable_rc -eq 124 || $readable_rc -ge 128 ]]; then
+                        reference_scan_rc=$readable_rc
+                        break
+                    elif [[ $readable_rc -ne 0 ]]; then
+                        reference_scan_rc=2
+                        break
+                    fi
+
+                    binary_rc=0
+                    referenced_binary=$(_plist_binary_path "$plist") || binary_rc=$?
+                    if [[ $binary_rc -eq 124 || $binary_rc -ge 128 ]]; then
+                        reference_scan_rc=$binary_rc
+                        break
+                    elif [[ $binary_rc -ne 0 && $binary_rc -ne 1 ]]; then
+                        reference_scan_rc=2
+                        break
+                    elif [[ $binary_rc -eq 1 ]]; then
+                        continue
+                    fi
+                fi
+
+                if [[ "$referenced_binary" == "$helper" ]] ||
+                    [[ "$(mole_path_identity "$referenced_binary")" == "$(mole_path_identity "$helper")" ]]; then
+                    reference_scan_rc=1
+                    break
+                fi
+            done < "$reference_scan_file"
+
+            [[ $reference_scan_rc -eq 0 ]] || break
+        done
+
+        rm -f -- "$reference_scan_file" 2> /dev/null || true # SAFE: exact tracked temp file created above
+        return "$reference_scan_rc"
+    }
+
     _orphan_service_candidate_still_eligible() {
         local candidate="$1"
         local expected_identity="$2"
@@ -1326,6 +1440,17 @@ clean_orphaned_system_services() {
                 return "$helper_resolver_rc"
             fi
             [[ $SECONDS -lt $service_cleanup_deadline ]] || return 124
+
+            if [[ "$candidate" == /Library/PrivilegedHelperTools/* ]]; then
+                local reference_rc=0
+                _orphan_service_helper_is_unreferenced "$candidate" \
+                    "$service_cleanup_deadline" || reference_rc=$?
+                if [[ $reference_rc -eq 124 || $reference_rc -ge 128 ]]; then
+                    return "$reference_rc"
+                elif [[ $reference_rc -ne 0 ]]; then
+                    return 1
+                fi
+            fi
         fi
 
         # Classification may touch Spotlight and application bundles. Reject a

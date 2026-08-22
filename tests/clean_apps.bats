@@ -2106,6 +2106,168 @@ EOF
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]] || return 1
 }
 
+@test "clean_orphaned_system_services keeps a standalone helper app plist during an executable update gap" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+        DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { printf 'DEBUG:%s\n' "$*"; }
+should_protect_path() { return 1; }
+bundle_has_installed_app() {
+    printf 'UNEXPECTED_PARENT_RESOLVER:%s\n' "$1"
+    return 1
+}
+
+tmp_dir=$(mktemp -d)
+tmp_plist="$tmp_dir/org.chromium.chromoting.broker.plist"
+helper_binary="/Library/PrivilegedHelperTools/ChromeRemoteDesktopHost.app/Contents/MacOS/remoting_agent_process_broker"
+/usr/libexec/PlistBuddy -c "Add :Program string $helper_binary" "$tmp_plist" > /dev/null 2>&1
+
+_mole_materialize_bounded_sudo_find() {
+    if [[ "$3" == "/Library/LaunchDaemons" ]]; then
+        printf '%s\0' "$tmp_plist" > "$1"
+    else
+        : > "$1"
+    fi
+}
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        test) return 1 ;; # The updater temporarily moved the executable away.
+        /usr/libexec/PlistBuddy | /usr/bin/stat) command "$@" ;;
+        du) printf '4\n' ;;
+        *) return 0 ;;
+    esac
+}
+safe_sudo_remove() {
+    printf 'UNEXPECTED_REMOVE:%s\n' "$1"
+    return 0
+}
+
+clean_orphaned_system_services
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" != *"UNEXPECTED_PARENT_RESOLVER"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]] || return 1
+    [[ "$output" != *"Orphaned services · cleaned"* ]]
+}
+
+@test "orphan helper eligibility refuses a helper still referenced by a surviving plist" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+        DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { :; }
+should_protect_path() { return 1; }
+bundle_has_installed_app() { return 1; }
+
+tmp_dir=$(mktemp -d)
+tmp_plist="$tmp_dir/com.example.helper.plist"
+helper_binary="/Library/PrivilegedHelperTools/com.example.helper"
+/usr/libexec/PlistBuddy -c "Add :Program string $helper_binary" "$tmp_plist" > /dev/null 2>&1
+
+reference_scan=false
+_mole_materialize_bounded_sudo_find() {
+    if [[ "$reference_scan" == "true" && "$3" == "/Library/LaunchDaemons" ]]; then
+        printf '%s\0' "$tmp_plist" > "$1"
+    else
+        : > "$1"
+    fi
+}
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        /usr/libexec/PlistBuddy) command "$@" ;;
+        *) return 0 ;;
+    esac
+}
+
+# Define the function-local eligibility helpers without discovering candidates.
+clean_orphaned_system_services
+
+reference_scan=true
+service_cleanup_deadline=$((SECONDS + 30))
+known_protect_patterns=("never.match:/Applications/Never.app")
+_orphan_service_identity() { printf '90:902:100\n'; }
+
+eligibility_rc=0
+_orphan_service_candidate_still_eligible \
+    "$helper_binary" "90:902:100" || eligibility_rc=$?
+printf 'ELIGIBILITY_RC:%s\n' "$eligibility_rc"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"ELIGIBILITY_RC:1"* ]] || return 1
+    [[ "$output" != *"ELIGIBILITY_RC:0"* ]]
+}
+
+@test "orphan helper reference scan fails closed when a surviving plist is unreadable" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 \
+        DRY_RUN=false MOLE_DRY_RUN=0 /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/apps.sh"
+
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+debug_log() { :; }
+should_protect_path() { return 1; }
+bundle_has_installed_app() { return 1; }
+
+tmp_dir=$(mktemp -d)
+tmp_plist="$tmp_dir/com.example.unreadable.plist"
+: > "$tmp_plist"
+reference_scan=false
+_mole_materialize_bounded_sudo_find() {
+    if [[ "$reference_scan" == "true" && "$3" == "/Library/LaunchDaemons" ]]; then
+        printf '%s\0' "$tmp_plist" > "$1"
+    else
+        : > "$1"
+    fi
+}
+sudo() {
+    [[ "${1:-}" == "-n" ]] && shift
+    case "${1:-}" in
+        true) return 0 ;;
+        /usr/libexec/PlistBuddy)
+            [[ "$reference_scan" == "true" ]] && return 73
+            command "$@"
+            ;;
+        *) return 0 ;;
+    esac
+}
+
+# Define the function-local reference helper without discovering candidates.
+clean_orphaned_system_services
+
+reference_scan=true
+service_cleanup_deadline=$((SECONDS + 30))
+reference_rc=0
+_orphan_service_helper_is_unreferenced \
+    "/Library/PrivilegedHelperTools/com.example.helper" \
+    "$service_cleanup_deadline" || reference_rc=$?
+printf 'REFERENCE_RC:%s\n' "$reference_rc"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"REFERENCE_RC:2"* ]] || return 1
+    [[ "$output" != *"REFERENCE_RC:0"* ]]
+}
+
 @test "_privileged_helper_bundle_id_from_binary prefers Info.plist bundle ID over directory and executable names" {
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
