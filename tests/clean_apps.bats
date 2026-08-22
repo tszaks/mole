@@ -222,7 +222,7 @@ mv() { return 73; }
 scan_installed_apps "$HOME/installed.txt"
 grep -Fx "com.example.CurrentScan" "$HOME/installed.txt"
 grep -Fx "com.example.Previous" "$cache_file"
-[[ "$(tail -n 1 "$cache_file")" == "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" ]]
+[[ "$(tail -n 1 "$cache_file")" == "$INSTALLED_APPS_CACHE_COMPLETE_MARKER" ]] || exit 1
 if find "$(dirname "$cache_file")" -maxdepth 1 -name 'installed_apps_cache.tmp.*' -print -quit | grep -q .; then
     exit 1
 fi

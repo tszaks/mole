@@ -1389,7 +1389,7 @@ set +e
 safe_remove "$db" true
 rc=$?
 set -e
-[[ $rc -ne 0 ]]
+[[ $rc -ne 0 ]] || exit 1
 [[ -f "$db" ]]
 INNER
 

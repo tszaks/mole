@@ -169,7 +169,7 @@ _mole_snapshot_path_identity() {
 }
 mole_delete() { echo "UNEXPECTED_FALLBACK:\$1"; return 99; }
 remove_file_list "$list" "false"
-[[ -f "$outside_parent/cache/OUTSIDE_SENTINEL" ]]
+[[ -f "$outside_parent/cache/OUTSIDE_SENTINEL" ]] || exit 1
 [[ -f "$original_parent/cache/OWNED_SENTINEL" ]]
 EOF
 

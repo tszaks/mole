@@ -144,7 +144,7 @@ safe_clean_guarded() {
     safe_clean "${kept[@]}" "$label"
 }
 clean_user_essentials
-[[ -d "$HOME/Library/Caches/deno/origin-data" ]]
+[[ -d "$HOME/Library/Caches/deno/origin-data" ]] || exit 1
 [[ ! -e "$HOME/Library/Caches/ordinary-app" ]]
 EOF
 
@@ -200,7 +200,7 @@ safe_clean_guarded() {
     safe_clean "${kept[@]}" "$label"
 }
 clean_user_essentials
-[[ -d "$HOME/Library/Caches/tool-root/deno/origin-data" ]]
+[[ -d "$HOME/Library/Caches/tool-root/deno/origin-data" ]] || exit 1
 [[ ! -e "$HOME/Library/Caches/ordinary-app" ]]
 EOF
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -239,8 +239,8 @@ safe_clean_guarded() {
     safe_clean "${kept[@]}" "$label"
 }
 clean_user_essentials
-[[ -L "$HOME/Library/Caches/deno" ]]
-[[ -d "$HOME/Library/Caches/physical-deno/origin-data" ]]
+[[ -L "$HOME/Library/Caches/deno" ]] || exit 1
+[[ -d "$HOME/Library/Caches/physical-deno/origin-data" ]] || exit 1
 [[ ! -e "$HOME/Library/Caches/ordinary-app" ]]
 EOF
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -518,8 +518,8 @@ safe_clean_guarded() {
 }
 clean_user_essentials
 
-[[ -d "$HOME/Library/Logs/mole" ]]
-[[ -f "$HOME/Library/Logs/mole/operations.log" ]]
+[[ -d "$HOME/Library/Logs/mole" ]] || exit 1
+[[ -f "$HOME/Library/Logs/mole/operations.log" ]] || exit 1
 [[ ! -e "$HOME/Library/Logs/OtherApp/old.log" ]]
 EOF
 
