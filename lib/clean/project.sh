@@ -52,6 +52,24 @@ is_project_container() {
     [[ "$basename" == "Pictures" ]] && return 1
     [[ "$basename" == "Public" ]] && return 1
 
+    # A purge target is an artifact, never a container. A stray ~/node_modules
+    # is otherwise globbed as one: every npm package ships package.json, the
+    # first project indicator, so the maxdepth-2 probe matches immediately and
+    # each package becomes a "project root". The scan then starts below the
+    # artifact, so filter_nested_artifacts never sees node_modules itself and
+    # emits package-internal dist/ and build/ instead. Deleting those leaves
+    # the package half-installed: package.json stays, npm reports the tree as
+    # up to date, and recovery needs a network restore, which purge must never
+    # require (#1459). Same shape for vendor/ and Pods/. A container that
+    # happens to share an artifact name stays reachable through
+    # ~/.config/mole/purge_paths, which bypasses discovery.
+    local purge_target
+    for purge_target in "${PURGE_TARGETS[@]}"; do
+        if [[ "$basename" == "$purge_target" ]]; then
+            return 1
+        fi
+    done
+
     # Single find expression for indicators.
     local -a find_args=("$dir" "-maxdepth" "$max_depth" "(")
     local first=true

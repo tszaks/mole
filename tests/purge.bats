@@ -398,6 +398,66 @@ EOF
 	[[ "$output" == *"yes"* ]]
 }
 
+@test "is_project_container rejects purge targets so artifacts are never scanned into (#1459)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+# Every npm package ships package.json, the first project indicator, so a
+# stray ~/node_modules matches the container probe unless targets are rejected.
+mkdir -p "$HOME/node_modules/markdown-it/dist"
+printf '{"name":"markdown-it"}' > "$HOME/node_modules/markdown-it/package.json"
+mkdir -p "$HOME/vendor/acme/lib"
+printf '{"name":"acme/lib"}' > "$HOME/vendor/acme/composer.json"
+mkdir -p "$HOME/Pods/SomePod"
+printf 'x' > "$HOME/Pods/SomePod/Package.swift"
+
+for artifact in node_modules vendor Pods; do
+    if is_project_container "$HOME/$artifact" 2; then
+        echo "FAIL: $artifact classified as container"
+        exit 1
+    fi
+done
+
+# A directory that is not a purge target still works.
+mkdir -p "$HOME/Sources/app"
+touch "$HOME/Sources/app/package.json"
+is_project_container "$HOME/Sources" 2 || exit 1
+echo ok
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"ok"* ]]
+}
+
+@test "purge emits no candidates inside a stray home-level node_modules (#1459)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+
+mkdir -p "$HOME/node_modules/markdown-it/dist" "$HOME/node_modules/khroma/build"
+printf '{"name":"markdown-it"}' > "$HOME/node_modules/markdown-it/package.json"
+printf '{"name":"khroma"}' > "$HOME/node_modules/khroma/package.json"
+
+# Deleting node_modules/<pkg>/dist leaves the package half-installed and needs
+# a network restore, so the container must never be discovered as a scan root.
+if discover_project_dirs | grep -q "^$HOME/node_modules$"; then
+    echo "FAIL: stray node_modules discovered as a purge search path"
+    exit 1
+fi
+echo ok
+EOF
+
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	[[ "$output" == *"ok"* ]]
+}
+
 @test "discover_project_dirs includes detected containers" {
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
