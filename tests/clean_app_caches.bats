@@ -1057,6 +1057,224 @@ EOF
     [ -d "$HOME/obsolete-victim" ]
 }
 
+make_extension_dir() {
+    local ext_root="$1" dir_name="$2" publisher="$3" name="$4" version="$5"
+    mkdir -p "$ext_root/$dir_name"
+    printf '{"publisher":"%s","name":"%s","version":"%s"}\n' \
+        "$publisher" "$name" "$version" > "$ext_root/$dir_name/package.json"
+}
+
+write_extension_registry() {
+    local registry="$1"
+    shift
+    mkdir -p "$(dirname "$registry")"
+    {
+        printf '['
+        local first=true dir
+        for dir in "$@"; do
+            [[ "$first" == "true" ]] || printf ','
+            first=false
+            printf '{"relativeLocation":"%s","location":{"path":"/x/%s","scheme":"file"}}' "$dir" "$dir"
+        done
+        printf ']\n'
+    } > "$registry"
+}
+
+run_editor_extension_cleanup() {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "CLEAN:$1"; }
+note_activity() { :; }
+mole_defer_cleanup_family() { echo "DEFER:$1"; }
+clean_editor_obsolete_extensions
+EOF
+}
+
+@test "unregistered extensions are offered when .obsolete is zero-byte (#1461)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor" "$HOME/Library/Application Support/Code"
+    local ext_root="$HOME/.vscode/extensions"
+    make_extension_dir "$ext_root" "pub.ext-1.1.0" "Pub" "ext" "1.1.0"
+    make_extension_dir "$ext_root" "pub.ext-1.0.0" "Pub" "ext" "1.0.0"
+    write_extension_registry "$ext_root/extensions.json" "pub.ext-1.1.0"
+    : > "$ext_root/.obsolete"
+    mkdir -p "$HOME/Library/Application Support/Code/User/profiles"
+
+    run_editor_extension_cleanup
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN:$ext_root/pub.ext-1.0.0"* ]] || return 1
+    [[ "$output" != *"pub.ext-1.1.0"* ]] || return 1
+}
+
+@test "an extension only a non-default profile registers is preserved (#1461)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor" "$HOME/Library/Application Support/Code"
+    local ext_root="$HOME/.vscode/extensions"
+    make_extension_dir "$ext_root" "pub.ext-1.1.0" "Pub" "ext" "1.1.0"
+    make_extension_dir "$ext_root" "pub.ext-1.0.0" "Pub" "ext" "1.0.0"
+    make_extension_dir "$ext_root" "pub.gone-0.9.0" "Pub" "gone" "0.9.0"
+    write_extension_registry "$ext_root/extensions.json" "pub.ext-1.1.0"
+    write_extension_registry \
+        "$HOME/Library/Application Support/Code/User/profiles/abc/extensions.json" "pub.ext-1.0.0"
+    : > "$ext_root/.obsolete"
+
+    run_editor_extension_cleanup
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN:$ext_root/pub.gone-0.9.0"* ]] || return 1
+    [[ "$output" != *"pub.ext-1.0.0"* ]] || return 1
+    [[ "$output" != *"pub.ext-1.1.0"* ]] || return 1
+}
+
+@test "a malformed registry disables reconciliation entirely (#1461)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor" "$HOME/Library/Application Support/Code"
+    local ext_root="$HOME/.vscode/extensions"
+    make_extension_dir "$ext_root" "pub.ext-1.0.0" "Pub" "ext" "1.0.0"
+    printf 'not json at all' > "$ext_root/extensions.json"
+    : > "$ext_root/.obsolete"
+    mkdir -p "$HOME/Library/Application Support/Code/User/profiles"
+
+    run_editor_extension_cleanup
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"CLEAN:"* ]] || return 1
+
+    # Positive control: the same fixture with a readable registry does offer
+    # the directory, so the assertion above cannot pass by doing nothing.
+    write_extension_registry "$ext_root/extensions.json" "pub.registered-9.9.9"
+    run_editor_extension_cleanup
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN:$ext_root/pub.ext-1.0.0"* ]] || return 1
+}
+
+@test "a malformed profile registry disables reconciliation entirely (#1461)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor" "$HOME/Library/Application Support/Code"
+    local ext_root="$HOME/.vscode/extensions"
+    make_extension_dir "$ext_root" "pub.ext-1.0.0" "Pub" "ext" "1.0.0"
+    write_extension_registry "$ext_root/extensions.json" "pub.other-2.0.0"
+    mkdir -p "$HOME/Library/Application Support/Code/User/profiles/abc"
+    printf '{{{' > "$HOME/Library/Application Support/Code/User/profiles/abc/extensions.json"
+    : > "$ext_root/.obsolete"
+
+    run_editor_extension_cleanup
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" != *"CLEAN:"* ]] || return 1
+
+    # Positive control: repairing only the profile registry releases the same
+    # candidate, so the assertion above is about the malformed file.
+    write_extension_registry \
+        "$HOME/Library/Application Support/Code/User/profiles/abc/extensions.json" "pub.registered-9.9.9"
+    run_editor_extension_cleanup
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN:$ext_root/pub.ext-1.0.0"* ]] || return 1
+}
+
+@test "a running or unknown-state editor skips reconciliation (#1461)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor" "$HOME/Library/Application Support/Code"
+    local ext_root="$HOME/.vscode/extensions"
+    make_extension_dir "$ext_root" "pub.ext-1.0.0" "Pub" "ext" "1.0.0"
+    write_extension_registry "$ext_root/extensions.json" "pub.other-2.0.0"
+    : > "$ext_root/.obsolete"
+    mkdir -p "$HOME/Library/Application Support/Code/User/profiles"
+
+    local state
+    for state in 0 2; do
+        run env STATE="$state" HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "CLEAN:$1"; }
+note_activity() { :; }
+mole_defer_cleanup_family() { echo "DEFER:$1"; }
+mole_pgrep_any() { return "$STATE"; }
+clean_editor_obsolete_extensions
+EOF
+        [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+        [[ "$output" != *"CLEAN:"* ]] || return 1
+    done
+
+    # Positive control: state 1 is "not running", and the same fixture then
+    # offers the directory, so the two assertions above are about the state.
+    run env STATE=1 HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/app_caches.sh"
+safe_clean() { echo "CLEAN:$1"; }
+note_activity() { :; }
+mole_defer_cleanup_family() { echo "DEFER:$1"; }
+mole_pgrep_any() { return "$STATE"; }
+clean_editor_obsolete_extensions
+EOF
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN:$ext_root/pub.ext-1.0.0"* ]] || return 1
+}
+
+@test "reconciliation keeps directories it cannot identify (#1461)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor" "$HOME/Library/Application Support/Code"
+    local ext_root="$HOME/.vscode/extensions"
+    make_extension_dir "$ext_root" "pub.real-1.0.0" "Pub" "real" "1.0.0"
+    # No manifest at all.
+    mkdir -p "$ext_root/pub.nomanifest-1.0.0"
+    # Manifest that describes a different extension than the directory name.
+    make_extension_dir "$ext_root" "pub.renamed-1.0.0" "Other" "thing" "3.0.0"
+    # A symlink is never followed into a delete.
+    mkdir -p "$HOME/symlink-victim"
+    ln -s "$HOME/symlink-victim" "$ext_root/pub.link-1.0.0"
+    write_extension_registry "$ext_root/extensions.json" "pub.registered-9.9.9"
+    : > "$ext_root/.obsolete"
+    mkdir -p "$HOME/Library/Application Support/Code/User/profiles"
+
+    run_editor_extension_cleanup
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN:$ext_root/pub.real-1.0.0"* ]] || return 1
+    [[ "$output" != *"nomanifest"* ]] || return 1
+    [[ "$output" != *"renamed"* ]] || return 1
+    [[ "$output" != *"pub.link-1.0.0"* ]] || return 1
+    [ -d "$HOME/symlink-victim" ]
+}
+
+@test "identity matching accepts the publisher casing editors lowercase (#1461)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor" "$HOME/Library/Application Support/Code"
+    local ext_root="$HOME/.vscode/extensions"
+    # Real registries carry PKief / Anthropic / shadesOfBuntu while the
+    # directory is lowercased, and a platform suffix may follow the version.
+    make_extension_dir "$ext_root" "pkief.material-icon-theme-5.38.0" "PKief" "material-icon-theme" "5.38.0"
+    make_extension_dir "$ext_root" "anthropic.claude-code-2.1.241-darwin-arm64" "Anthropic" "claude-code" "2.1.241"
+    write_extension_registry "$ext_root/extensions.json" "pub.registered-9.9.9"
+    : > "$ext_root/.obsolete"
+    mkdir -p "$HOME/Library/Application Support/Code/User/profiles"
+
+    run_editor_extension_cleanup
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"CLEAN:$ext_root/pkief.material-icon-theme-5.38.0"* ]] || return 1
+    [[ "$output" == *"CLEAN:$ext_root/anthropic.claude-code-2.1.241-darwin-arm64"* ]] || return 1
+}
+
+@test "a directory named by .obsolete is not offered twice (#1461)" {
+    rm -rf "$HOME/.vscode" "$HOME/.vscode-insiders" "$HOME/.cursor" "$HOME/Library/Application Support/Code"
+    local ext_root="$HOME/.vscode/extensions"
+    make_extension_dir "$ext_root" "pub.ext-1.0.0" "Pub" "ext" "1.0.0"
+    write_extension_registry "$ext_root/extensions.json" "pub.registered-9.9.9"
+    cat > "$ext_root/.obsolete" << 'JSON'
+{
+  "pub.ext-1.0.0": true
+}
+JSON
+    mkdir -p "$HOME/Library/Application Support/Code/User/profiles"
+
+    run_editor_extension_cleanup
+
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    local hits
+    hits=$(printf '%s\n' "$output" | grep -c "CLEAN:$ext_root/pub.ext-1.0.0" || true)
+    [ "$hits" -eq 1 ] || { echo "expected 1 offer, got $hits"; echo "$output"; return 1; }
+    [[ "$output" == *"Obsolete VS Code extension"* ]] || [[ "$output" == *"CLEAN:"* ]]
+}
+
 @test "clean_code_editors includes CodeBuddy Extension caches when directory exists" {
     mkdir -p "$HOME/Library/Application Support/CodeBuddyExtension"
 
