@@ -1145,26 +1145,30 @@ SCRIPT
     run env PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
-# `remaining` is `deadline - SECONDS`, and SECONDS keeps ticking in real
-# time, so one shared `SECONDS=100` before four forks means the last call
-# sees a smaller window than the first. On a slow runner the window reached
-# zero, the helper returned 124 with no output, and the case failed for
-# reasons that had nothing to do with clamping. Re-pin the clock per call.
+# `remaining` is `deadline - SECONDS`, and SECONDS keeps ticking in real time.
+# Re-pinning the clock per call narrowed the race but did not close it: with a
+# deadline one second out, a command-substitution fork that straddles a second
+# boundary leaves remaining at zero, and the helper returns 124 with no output.
+# That is what reddened this case twice on loaded runners. A five-second window
+# gives each fork five times the slack while every assertion below keeps its
+# exact meaning: 30.5 and 08.5 still clamp because their whole parts are >= 5,
+# 0.5 still passes through because its whole part is not, and 0 still reports
+# the remaining window.
 SECONDS=100
-printf 'CLAMPED=%s\n' "$(_mole_timeout_with_deadline 30.5 101)"
+printf 'CLAMPED=%s\n' "$(_mole_timeout_with_deadline 30.5 105)"
 SECONDS=100
-printf 'SHORT=%s\n' "$(_mole_timeout_with_deadline 0.5 101)"
+printf 'SHORT=%s\n' "$(_mole_timeout_with_deadline 0.5 105)"
 SECONDS=100
-printf 'ZERO=%s\n' "$(_mole_timeout_with_deadline 0 101)"
+printf 'ZERO=%s\n' "$(_mole_timeout_with_deadline 0 105)"
 SECONDS=100
-printf 'LEADING=%s\n' "$(_mole_timeout_with_deadline 08.5 101)"
+printf 'LEADING=%s\n' "$(_mole_timeout_with_deadline 08.5 105)"
 SCRIPT
 
     [ "$status" -eq 0 ] || return 1
-    [[ "$output" == *"CLAMPED=1"* ]] || return 1
+    [[ "$output" == *"CLAMPED=5"* ]] || return 1
     [[ "$output" == *"SHORT=0.5"* ]] || return 1
-    [[ "$output" == *"ZERO=1"* ]] || return 1
-    [[ "$output" == *"LEADING=1"* ]]
+    [[ "$output" == *"ZERO=5"* ]] || return 1
+    [[ "$output" == *"LEADING=5"* ]]
 }
 
 @test "get_path_size_kb bounds the app metadata fast path" {
