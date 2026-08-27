@@ -16,7 +16,7 @@
   <img src="https://gw.alipayobjects.com/zos/k/ro/ZzF8e8.png" alt="Mole - 95.50GB freed" width="1000" />
 </p>
 
-> Prefer a native app? [Mole for Mac](https://mole.fit) brings cleanup, app management, maintenance, disk maps, and live status into one lightweight, VoiceOver-ready app. It is $19 once and covers 2 Macs, with lifetime updates and a 14-day refund. The license moves with you when you replace a Mac. [Download and try it](https://mole.fit/download). The CLI stays free and open source.
+> Prefer a native app? [Buy Mole for Mac for $19](https://mole.fit/#pricing): cleanup, app management, maintenance, disk maps, and live status in one lightweight, VoiceOver-ready app. One license covers 2 Macs with lifetime updates and a 14-day refund. The CLI stays free and open source.
 
 ## Features
 
