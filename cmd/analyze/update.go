@@ -67,7 +67,7 @@ func (m *model) scheduleOverviewScans() tea.Cmd {
 
 func (m model) Init() tea.Cmd {
 	if m.inOverviewMode() {
-		return m.scheduleOverviewScans()
+		return tea.Batch(m.scheduleOverviewScans(), detectLocalSnapshotsCmd())
 	}
 	return tea.Batch(m.scanCmd(m.path), tickCmd())
 }
@@ -486,6 +486,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			cmd := m.scheduleOverviewScans()
 			return m, cmd
+		}
+		return m, nil
+	case localSnapshotMsg:
+		if m.inOverviewMode() && msg.err == nil {
+			m.localSnapshotCount = msg.count
 		}
 		return m, nil
 	case tickMsg:
