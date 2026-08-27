@@ -239,10 +239,15 @@ _mole_sqlite_family_base_path() {
 _MOLE_PROCESS_TABLE=""
 _MOLE_PROCESS_TABLE_STATE=""
 
-_mole_process_table() {
+_mole_reset_process_snapshot() {
+    _MOLE_PROCESS_TABLE=""
+    _MOLE_PROCESS_TABLE_STATE=""
+    _MOLE_USER_CACHE_OWNER_STATE_CACHE=""
+}
+
+_mole_load_process_table() {
     if [[ -n "${_MOLE_PROCESS_TABLE_STATE:-}" ]]; then
         [[ "$_MOLE_PROCESS_TABLE_STATE" == "ok" ]] || return 1
-        printf '%s\n' "$_MOLE_PROCESS_TABLE"
         return 0
     fi
 
@@ -310,7 +315,6 @@ _mole_process_table() {
 
     _MOLE_PROCESS_TABLE="$filtered"
     _MOLE_PROCESS_TABLE_STATE="ok"
-    printf '%s\n' "$_MOLE_PROCESS_TABLE"
     return 0
 }
 
@@ -346,11 +350,11 @@ _mole_user_cache_owner_process_state() {
         *"${cache_token}2|"*) return 2 ;;
     esac
 
-    local table=""
-    if ! table=$(_mole_process_table); then
+    if ! _mole_load_process_table; then
         # An unreadable process table is not proof the owner is idle.
         return 2
     fi
+    local table="$_MOLE_PROCESS_TABLE"
 
     # Feed the table by here-string, never through a pipe. `grep -q` exits on
     # its first match, and the printf still writing into that closed pipe takes
@@ -956,14 +960,6 @@ safe_remove() {
         return 1
     fi
 
-    # Live reverse-DNS caches under ~/Library/Caches (#1390): refuse while the
-    # owning process is running or an open SQLite handle is proven. Final sink
-    # so both safe_clean and direct safe_remove callers are covered.
-    if _mole_should_refuse_live_user_cache_path "$path"; then
-        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "live user cache"
-        return 1
-    fi
-
     # Dry-run mode: log but don't delete
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         local dry_record_rc=0
@@ -1065,6 +1061,7 @@ safe_remove() {
     # Recheck live-owner / open-SQLite state after size probing: a helper can
     # launch while du is walking the tree (same race class as the compiled
     # model cache check above).
+    _mole_reset_process_snapshot
     if _mole_should_refuse_live_user_cache_path "$path"; then
         debug_log "Skipped removal after live user cache appeared: $path"
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "live user cache"
@@ -1868,6 +1865,27 @@ _mole_path_requires_direct_trash() {
     return 1
 }
 
+# Refresh the process evidence for one Trash target, then rebind its physical
+# identity. The process table may be reused during discovery, but a distinct app
+# can start before a later item reaches the move sink; stale evidence must never
+# authorize that move.
+_mole_trash_target_still_safe() {
+    local path="$1"
+    local expected_parent="${2:-}"
+    local expected_parent_id="${3:-}"
+    local expected_target_id="${4:-}"
+
+    _mole_reset_process_snapshot
+    if _mole_should_refuse_live_user_cache_path "$path"; then
+        debug_log "Skipped Trash move after live user cache appeared: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "live user cache"
+        return 1
+    fi
+
+    _mole_bound_path_matches "$path" "$expected_parent" \
+        "$expected_parent_id" "$expected_target_id"
+}
+
 # Finder's Trash API can move package-installed app bundles that macOS App
 # Management blocks from a direct mv. Run it only as the invoking user and only
 # for an exact one-level /Applications/*.app target selected above.
@@ -1879,7 +1897,7 @@ _mole_move_app_to_trash_via_finder() {
     local finder_rc=0
 
     _mole_path_is_application_bundle "$path" || return 1
-    _mole_bound_path_matches "$path" "$expected_parent" \
+    _mole_trash_target_still_safe "$path" "$expected_parent" \
         "$expected_parent_id" "$expected_target_id" || return 1
 
     run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT' || finder_rc=$?
@@ -1914,7 +1932,7 @@ _mole_move_to_trash() {
     if [[ -n "${MOLE_TEST_TRASH_DIR:-}" ]]; then
         mkdir -p "$MOLE_TEST_TRASH_DIR" 2> /dev/null || return 1
         local dest="$MOLE_TEST_TRASH_DIR/$(basename "$path").$$.$(date +%s 2> /dev/null || echo 0)"
-        _mole_bound_path_matches "$path" "$expected_parent" \
+        _mole_trash_target_still_safe "$path" "$expected_parent" \
             "$expected_parent_id" "$expected_target_id" || return 1
         mv "$path" "$dest" 2> /dev/null
         return $?
@@ -1952,7 +1970,7 @@ _mole_move_to_trash() {
     # Prefer the `trash` CLI (Homebrew formula) for normal user-owned paths.
     if command -v trash > /dev/null 2>&1; then
         local trash_rc=0
-        _mole_bound_path_matches "$path" "$expected_parent" \
+        _mole_trash_target_still_safe "$path" "$expected_parent" \
             "$expected_parent_id" "$expected_target_id" || return 1
         run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
             trash "$path" > /dev/null 2>&1 || trash_rc=$?
@@ -1962,7 +1980,7 @@ _mole_move_to_trash() {
 
     # AppleScript fallback. Pass the path via argv so special chars (quotes,
     # backslashes) cannot break out of the quoted string.
-    _mole_bound_path_matches "$path" "$expected_parent" \
+    _mole_trash_target_still_safe "$path" "$expected_parent" \
         "$expected_parent_id" "$expected_target_id" || return 1
     run_with_timeout "$MOLE_TIMEOUT_DISK_VERIFY_SEC" \
         osascript - "$path" > /dev/null 2>&1 << 'APPLESCRIPT'
@@ -2182,7 +2200,7 @@ _mole_move_path_to_user_trash() {
         fi
 
         local stage_move_rc=0
-        _mole_bound_path_matches "$path" "$expected_parent" \
+        _mole_trash_target_still_safe "$path" "$expected_parent" \
             "$expected_parent_id" "$expected_target_id" || return 1
         sudo -n /bin/mv "$path" "$stage_path" 2> /dev/null || stage_move_rc=$?
         if [[ $stage_move_rc -ne 0 ]]; then
@@ -2251,7 +2269,7 @@ _mole_move_path_to_user_trash() {
             sudo -n /bin/rmdir "$stage_dir" 2> /dev/null || true
         fi
     else
-        _mole_bound_path_matches "$path" "$expected_parent" \
+        _mole_trash_target_still_safe "$path" "$expected_parent" \
             "$expected_parent_id" "$expected_target_id" || return 1
         move_output=$(mv -n "$path" "$dest" 2>&1) || move_rc=$?
     fi
@@ -2377,7 +2395,7 @@ _mole_move_to_trash_batch() {
         local dest
         for ((index = 0; index < ${#paths[@]}; index++)); do
             p="${paths[$index]}"
-            _mole_path_matches_identity \
+            _mole_trash_target_still_safe \
                 "$p" \
                 "${expected_parents[$index]}" \
                 "${expected_parent_ids[$index]}" \
@@ -2411,7 +2429,10 @@ _mole_move_to_trash_batch() {
         _MOLE_TRASH_MOVE_EXPECTED_PARENT="${expected_parents[$index]}"
         _MOLE_TRASH_MOVE_EXPECTED_PARENT_ID="${expected_parent_ids[$index]}"
         _MOLE_TRASH_MOVE_EXPECTED_TARGET_ID="${expected_target_ids[$index]}"
-        if _mole_move_path_to_user_trash "$p" false; then
+        if _mole_move_path_to_user_trash "$p" false \
+            "${expected_parents[$index]}" \
+            "${expected_parent_ids[$index]}" \
+            "${expected_target_ids[$index]}"; then
             _MOLE_TRASH_BATCH_MOVED_PATHS+=("$p")
         else
             failed=1

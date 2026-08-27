@@ -61,6 +61,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 DRY_RUN=false
 run_with_timeout() { shift; "$@"; }
+github_cli_process_state() { return 1; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
 clean_tool_cache() {
@@ -91,6 +92,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 DRY_RUN=true
 run_with_timeout() { shift; "$@"; }
+github_cli_process_state() { return 1; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
 start_section_spinner() { :; }
@@ -172,6 +174,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 DRY_RUN=false
+github_cli_process_state() { return 1; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
 note_activity() { :; }
@@ -206,6 +209,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 DRY_RUN=false
+github_cli_process_state() { return 1; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
 note_activity() { :; }
@@ -314,6 +318,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 DRY_RUN=false
 run_with_timeout() { shift; "$@"; }
+github_cli_process_state() { return 1; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
 start_section_spinner() { :; }
@@ -356,6 +361,7 @@ source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
 DRY_RUN=false
 run_with_timeout() { shift; "$@"; }
+github_cli_process_state() { return 1; }
 is_path_whitelisted() { return 1; }
 should_protect_path() { return 1; }
 start_section_spinner() { :; }

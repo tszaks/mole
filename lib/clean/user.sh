@@ -1301,7 +1301,7 @@ clean_group_container_caches() {
                         candidate_size_kb=$((candidate_size_kb + item_size))
                         continue
                     fi
-                    if safe_remove "$item" true 2> /dev/null; then
+                    if safe_remove "$item" true "$item_size" 2> /dev/null; then
                         candidate_changed=true
                         candidate_size_kb=$((candidate_size_kb + item_size))
                     fi
@@ -2183,7 +2183,11 @@ clean_application_support_logs() {
                         fi
                     fi
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        safe_remove "$item" true > /dev/null 2>&1 || true
+                        if [[ "$item_size_known" == "true" ]]; then
+                            safe_remove "$item" true "$item_size_kb" > /dev/null 2>&1 || true
+                        else
+                            safe_remove "$item" true > /dev/null 2>&1 || true
+                        fi
                     fi
                 done < <(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
                 if [[ "$item_found" == "true" ]]; then
@@ -2270,7 +2274,11 @@ clean_application_support_logs() {
                         fi
                     fi
                     if [[ "$DRY_RUN" != "true" ]]; then
-                        safe_remove "$item" true > /dev/null 2>&1 || true
+                        if [[ "$item_size_known" == "true" ]]; then
+                            safe_remove "$item" true "$item_size_kb" > /dev/null 2>&1 || true
+                        else
+                            safe_remove "$item" true > /dev/null 2>&1 || true
+                        fi
                     fi
                 done < <(command find "$candidate" -mindepth 1 -maxdepth 1 -print0 2> /dev/null || true)
                 if [[ "$item_found" == "true" ]]; then

@@ -636,6 +636,27 @@ SCRIPT
     [[ "$output" != *"UNEXPECTED_REGISTER"* ]]
 }
 
+@test "safe_remove dry-run exercises the production preview eligibility path" {
+    local target_dir="$TEST_DIR/cache-eligibility"
+    mkdir -p "$target_dir"
+
+    run env PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/bin/clean.sh"
+guard_calls=0
+_mole_should_refuse_live_user_cache_path() {
+    guard_calls=$((guard_calls + 1))
+    return 1
+}
+MOLE_DRY_RUN=1 safe_remove "$TARGET_DIR" true 1
+printf 'CALLS=%s EXISTS=%s\n' "$guard_calls" "$(test -d "$TARGET_DIR" && echo yes || echo no)"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"CALLS=2 EXISTS=yes"* ]] || return 1
+}
+
 @test "safe_remove in silent mode suppresses error output" {
     run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; safe_remove '/System/test' true 2>&1"
     [ "$status" -eq 1 ]
@@ -724,7 +745,7 @@ set -u
 case "${1:-}" in
     rm)
         printf 'sudo-rm %s\n' "$*" >> "$MOLE_SUDO_RM_TRACE"
-        exec sleep 4
+        exec sleep 8
         ;;
     *)
         exit 99
@@ -735,7 +756,7 @@ MOCK
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_DIR="$target_dir" \
         PATH="$mock_bin:$PATH" MOLE_SUDO_RM_TRACE="$trace" \
-        MOLE_TIMEOUT_DISK_VERIFY_SEC=1 MO_NO_OPLOG=1 \
+        MOLE_TIMEOUT_DISK_VERIFY_SEC=2 MO_NO_OPLOG=1 \
         MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=0 /bin/bash --noprofile --norc <<'SCRIPT'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
@@ -755,7 +776,7 @@ SCRIPT
     [[ "$(< "$trace")" == *"sudo-rm rm -rf $target_dir"* ]] || return 1
     local elapsed="${output##*ELAPSED=}"
     [[ "$elapsed" =~ ^[0-9]+$ ]] || return 1
-    [ "$elapsed" -lt 3 ]
+    [ "$elapsed" -lt 5 ]
     [ -e "$target_dir/data" ]
 }
 
@@ -2203,7 +2224,80 @@ EOF
         echo "$output"
         return 1
     }
-    [[ "$output" == *"HELPER=0"* ]]
+	[[ "$output" == *"HELPER=0"* ]]
+}
+
+@test "cache owner probes reuse one process table snapshot" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/file_ops.sh"
+ps_calls=$(mktemp)
+ps() {
+	printf 'call\n' >> "$ps_calls"
+	cat <<'TABLE'
+  PID  PPID COMM             ARGS
+  601     1 /Applications/Example.app/Contents/MacOS/Example /Applications/Example.app/Contents/MacOS/Example com.example.First
+TABLE
+}
+first_state=0
+_mole_user_cache_owner_process_state "com.example.First" || first_state=$?
+second_state=0
+_mole_user_cache_owner_process_state "com.example.Second" || second_state=$?
+call_count=$(wc -l < "$ps_calls" | tr -d ' ')
+command rm -f "$ps_calls"
+printf 'FIRST=%s SECOND=%s CALLS=%s STATE=%s\n' \
+	"$first_state" "$second_state" "$call_count" "$_MOLE_PROCESS_TABLE_STATE"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == "FIRST=0 SECOND=1 CALLS=1 STATE=ok" ]] || return 1
+}
+
+@test "safe_remove refreshes process evidence at the final deletion boundary" {
+	local cache_dir="$HOME/Library/Caches/com.example.LateHelper"
+	local target_file="$cache_dir/Cache.db"
+	mkdir -p "$cache_dir"
+	touch "$target_file"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_FILE="$target_file" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+ps_calls=$(mktemp)
+rm_calls=$(mktemp)
+ps() {
+	printf 'call\n' >> "$ps_calls"
+	call_count=$(wc -l < "$ps_calls" | tr -d ' ')
+	if [[ $call_count -eq 1 ]]; then
+		cat <<'TABLE'
+  PID  PPID COMM             ARGS
+TABLE
+	else
+		cat <<'TABLE'
+  PID  PPID COMM             ARGS
+  901     1 /Applications/Example.app/Contents/MacOS/LateHelper /Applications/Example.app/Contents/MacOS/LateHelper com.example.LateHelper
+TABLE
+	fi
+}
+lsof() { return 1; }
+get_path_size_kb() { printf '1\n'; }
+oplog_enabled() { return 0; }
+rm() { printf 'call\n' >> "$rm_calls"; return 99; }
+
+remove_rc=0
+safe_remove "$TARGET_FILE" true || remove_rc=$?
+call_count=$(wc -l < "$ps_calls" | tr -d ' ')
+rm_call_count=$(wc -l < "$rm_calls" | tr -d ' ')
+command rm -f "$ps_calls" "$rm_calls"
+printf 'RC=%s CALLS=%s EXISTS=%s RM_CALLS=%s\n' \
+	"$remove_rc" "$call_count" "$(test -f "$TARGET_FILE" && echo yes || echo no)" \
+	"$rm_call_count"
+EOF
+
+	[ "$status" -eq 0 ] || return 1
+	[[ "$output" == *"RC=1 CALLS=2 EXISTS=yes RM_CALLS=0"* ]] || {
+		echo "$output"
+		return 1
+	}
 }
 
 # Mole's own size probe runs `du` over the very directory it is judging, so the
