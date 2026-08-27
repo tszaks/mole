@@ -67,7 +67,7 @@ func (m *model) scheduleOverviewScans() tea.Cmd {
 
 func (m model) Init() tea.Cmd {
 	if m.inOverviewMode() {
-		return tea.Batch(m.scheduleOverviewScans(), detectLocalSnapshotsCmd())
+		return tea.Batch(m.scheduleOverviewScans(), m.detectLocalSnapshotsCmd())
 	}
 	return tea.Batch(m.scanCmd(m.path), tickCmd())
 }
@@ -489,7 +489,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case localSnapshotMsg:
-		if m.inOverviewMode() && msg.err == nil {
+		if msg.probeID == m.snapshotProbeID && msg.err == nil {
 			m.localSnapshotCount = msg.count
 		}
 		return m, nil
@@ -681,7 +681,8 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			m.status = "Refreshing..."
 			m.overviewScanning = true
-			return m, tea.Batch(m.scheduleOverviewScans(), tickCmd())
+			m.snapshotProbeID++
+			return m, tea.Batch(m.scheduleOverviewScans(), m.detectLocalSnapshotsCmd(), tickCmd())
 		}
 
 		invalidateCacheTree(m.path)
@@ -1128,9 +1129,9 @@ func (m *model) switchToOverviewMode() tea.Cmd {
 	cmd := m.scheduleOverviewScans()
 	if cmd == nil {
 		m.status = "Ready"
-		return nil
+		return m.detectLocalSnapshotsCmd()
 	}
-	return tea.Batch(cmd, tickCmd())
+	return tea.Batch(cmd, m.detectLocalSnapshotsCmd(), tickCmd())
 }
 
 func (m model) enterSelectedDir() (tea.Model, tea.Cmd) {
