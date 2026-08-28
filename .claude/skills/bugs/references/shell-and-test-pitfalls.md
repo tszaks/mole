@@ -1,6 +1,62 @@
-# Shell and test pitfalls
+# Bounds, Shell, TTY, and parsing
 
 Read this reference when changing Shell code, Bats tests, update/install flows, timeout wrappers, TTY handling, plist fixtures, or macOS-version-specific CI behavior. The defect classes and repo-wide probes stay in the parent `bugs` skill.
+
+## 4. An external command or its consumer is unbounded
+
+`du`, `mdfind`, `find`, `xcrun simctl`, `system_profiler`, `ioreg`, and package tools can stall on a healthy but slow machine. Every production `du -s` route stays behind `run_with_timeout`; `tests/core_timeout.bats` pins the class.
+
+Check more than the obvious command:
+
+- Put checkpoints in every nested loop, not just each outer root (`edb214c0`).
+- Tune against the slowest healthy case. CoreSimulatorService needed a warm-up retry after a two-second bound falsely reported it unavailable (`35d856f1`).
+- Materialize a bounded producer completely and discard its output on nonzero status. Process substitution plus `|| true` must not feed a partial `find` prefix into deletion.
+- Keep probe and action pattern, type, age, and depth identical.
+- Time producer and consumer separately before raising a timeout. A 2.3-second `lsregister` dump followed by one command substitution per input line still becomes minutes.
+- Bound installed-binary `--version` and `--help` verification. Broken executables are the ones most likely to hang.
+- Keep install and update single-flight per target directory so one process cannot verify another generation.
+
+```bash
+for command_name in 'du -s' mdfind xcrun system_profiler ioreg brew; do
+    printf '%-16s total=%-4s wrapped=%s\n' "$command_name" \
+        "$(command grep -rn -- "$command_name" lib/ bin/ | wc -l | tr -d ' ')" \
+        "$(command grep -rn -- "$command_name" lib/ bin/ | command grep -c run_with_timeout)"
+done
+```
+
+## 5. Bash 3.2, errexit, and pipefail change meaning
+
+macOS ships Bash 3.2 and Mole runs with nounset.
+
+- Guard empty array expansion before `"${arr[@]}"`; an empty array under `set -u` can abort a scan and orphan its spinner (`893b4e6f`, `2c06cb91`).
+- `fn || handler` disables errexit inside `fn` for the whole function. Safety-critical steps use explicit `if ! command; then return 1; fi` (`a33a0b51`).
+- Do not rely on a caller's temporary `set +e` window for graceful degradation. Capture the status where the command runs.
+- Optional `[[ -n "$value" ]] && action` returns 1 when absent. Use `if/fi` inside status-sensitive blocks.
+
+```bash
+command grep -rn '\$\{[a-z_]*\[@\]\}' lib/ bin/
+```
+
+## 6. Background work steals TTY, stdin, or process groups
+
+The Perl timeout fallback can hand the controlling terminal to its child. A background metadata worker then stopped the foreground uninstall prompt with SIGTTIN (`c93afca3`). BSD `mv` and `cp` can also prompt on stderr and read stdin when a destination is unwritable (`63030e3a`).
+
+Every background worker that calls `run_with_timeout` closes stdin with `< /dev/null`. Commands that can prompt also use their noninteractive or force option. Menu and scan traps save and restore the caller's traps; `lib/ui/menu_paginated.sh` is the reference.
+
+## 7. System command output is treated as an API
+
+macOS command output is localized, drifts between releases, and can print errors where data is expected.
+
+- Force `LC_ALL=C` for parsed metric subprocesses (`51b352a2`, `fa05b8cc`, `4e83743b`).
+- Validate field shape before trusting it: absolute path, numeric value, expected key, or exact enum.
+- Keep `DTSDKBuild` build identifiers separate from `DTPlatformVersion` versions (`f0896d03`).
+- Reject PlistBuddy's missing-file prose as data.
+- Use stock macOS semantics when checking flags. BSD `grep -Z` means `--decompress`; a developer alias may hide that.
+- Prefer exit codes, plist keys, and machine-readable output over prose matching.
+
+Use `command grep` when flag behavior matters, because the interactive environment may alias it.
+
+## Focused pitfalls
 
 - **`BASH_SOURCE` / `$0` change meaning when a function moves files**: they name the file the code lives in, so copy-paste extraction is not behavior-preserving. `mole` captures `MOLE_ENTRY_SCRIPT="${BASH_SOURCE[0]}"` before sourcing anything, and update code reads that stable entrypoint. Before extracting a function, grep it for `BASH_SOURCE`, `$0`, and `FUNCNAME`. Regression coverage lives in `tests/update.bats`.
 - **Every `du -s` must run under `run_with_timeout`**: one stalled mount can wedge the whole scan. Use `MOLE_TIMEOUT_DISK_VERIFY_SEC`. `tests/core_timeout.bats` pins the source invariant across `lib/` and `bin/`.
