@@ -320,6 +320,37 @@ EOF
     [[ "$output" != *"UNEXPECTED_REMOVE"* ]]
 }
 
+@test "safe_clean skips missing targets before expensive policy probes" {
+    local base="$HOME/safe_clean_missing_fast_path"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_MODE=1 /bin/bash --noprofile --norc << EOF
+set -euo pipefail
+source "\$PROJECT_ROOT/lib/core/common.sh"
+source "\$PROJECT_ROOT/bin/clean.sh"
+DRY_RUN=true
+files_cleaned=0
+total_size_cleaned=0
+total_items=0
+start_section_spinner() { :; }
+stop_section_spinner() { :; }
+note_activity() { :; }
+should_protect_path() { echo "UNEXPECTED_PROTECT:\$1"; return 1; }
+is_path_whitelisted() { echo "UNEXPECTED_WHITELIST:\$1"; return 1; }
+holds_compiled_model_cache() { echo "UNEXPECTED_MODEL:\$1"; return 1; }
+delete_guard() { echo "UNEXPECTED_GUARD:\$1"; return 1; }
+register_dry_run_cleanup_target() { echo "UNEXPECTED_REGISTER:\$1"; }
+safe_remove() { echo "UNEXPECTED_REMOVE:\$1"; }
+
+safe_clean_guarded delete_guard "$base/missing" "Missing cache"
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" != *"UNEXPECTED_"* ]] || return 1
+}
+
 @test "safe_clean propagates an interrupted parallel size worker before deletion" {
     local base="$HOME/safe_clean_parallel_interrupt"
     mkdir -p "$base/a" "$base/b" "$base/c" "$base/d"

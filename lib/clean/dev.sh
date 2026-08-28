@@ -2396,21 +2396,22 @@ clean_xcode_simulator_runtime_volumes() {
 
     if [[ "$DRY_RUN" == "true" ]]; then
         local -a size_values=()
-        local in_use_kb=0
         local unused_kb=0
         local cleanable_unused_count=0
         local preview_in_use_count=0
         local dry_stop_reason=""
         local i=0
         for candidate in "${sorted_candidates[@]}"; do
-            local size_kb
-            size_kb=$(_sim_runtime_size_kb "$candidate")
             local status="${entry_statuses[$i]:-UNUSED}"
             if [[ "$status" == "IN_USE" ]]; then
-                size_values+=("$size_kb")
-                in_use_kb=$((in_use_kb + size_kb))
+                # Mounted runtimes cannot be removed by this run. Walking a
+                # multi-GB mounted image only to report a non-reclaimable size
+                # dominated dry-run latency, so keep the state and skip du.
+                size_values+=("-1")
                 preview_in_use_count=$((preview_in_use_count + 1))
             else
+                local size_kb
+                size_kb=$(_sim_runtime_size_kb "$candidate")
                 local -a current_mount_points=()
                 while IFS= read -r line; do
                     [[ -n "$line" ]] && current_mount_points+=("$line")
@@ -2444,14 +2445,13 @@ clean_xcode_simulator_runtime_volumes() {
         fi
 
         echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Xcode runtime volumes · ${cleanable_unused_count} unused, ${preview_in_use_count} in use"
-        local dryrun_total_kb=$((unused_kb + in_use_kb))
-        local dryrun_total_human
-        dryrun_total_human=$(bytes_to_human "$((dryrun_total_kb * 1024))")
         local dryrun_unused_human
         dryrun_unused_human=$(bytes_to_human "$((unused_kb * 1024))")
-        local dryrun_in_use_human
-        dryrun_in_use_human=$(bytes_to_human "$((in_use_kb * 1024))")
-        echo -e "  ${GRAY}${ICON_LIST}${NC} Runtime volumes total: ${dryrun_total_human} (unused ${dryrun_unused_human}, in-use ${dryrun_in_use_human})"
+        local in_use_size_note=""
+        if [[ $preview_in_use_count -gt 0 ]]; then
+            in_use_size_note=" (in-use not scanned)"
+        fi
+        echo -e "  ${GRAY}${ICON_LIST}${NC} Runtime volume size: unused ${dryrun_unused_human}${in_use_size_note}"
 
         local dryrun_max_items="${MOLE_SIM_RUNTIME_DRYRUN_MAX_ITEMS:-20}"
         [[ "$dryrun_max_items" =~ ^[0-9]+$ ]] || dryrun_max_items=20
@@ -2464,7 +2464,11 @@ clean_xcode_simulator_runtime_volumes() {
         while IFS=$'\t' read -r line_size_kb line_status line_path; do
             [[ -z "${line_path:-}" ]] && continue
             local line_human
-            line_human=$(bytes_to_human "$((line_size_kb * 1024))")
+            if [[ "$line_size_kb" == "-1" ]]; then
+                line_human="not scanned"
+            else
+                line_human=$(bytes_to_human "$((line_size_kb * 1024))")
+            fi
             echo -e "    ${GRAY}${line_status}${NC} ${line_human} · ${line_path}"
             shown=$((shown + 1))
             if [[ "$shown" -ge "$dryrun_max_items" ]]; then
@@ -2758,10 +2762,12 @@ clean_dev_mobile() {
             local unavailable_size_human="0B"
             local -a unavailable_udids=()
             local unavailable_udid=""
+            local unavailable_devices_output=""
 
-            # Check if simctl is accessible and working; timeout prevents hang when CLT-only.
-            # CoreSimulatorService may need >2s to warm up on cold boot, so we retry once
-            # with a longer timeout. See #890.
+            # The unavailable-device listing is both the capability probe and
+            # the data this cleanup needs. A separate `list devices` launch
+            # made every successful clean wait for CoreSimulator twice.
+            # CoreSimulatorService can still need a warm-up retry (#890).
             local simctl_available=true
             local simctl_probe_ok=false
             local simctl_probe_first_status=0
@@ -2779,20 +2785,26 @@ clean_dev_mobile() {
                 debug_log "Unable to create simctl probe stderr capture file"
             fi
 
-            if _run_simctl "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" list devices > /dev/null 2> "$simctl_probe_stderr_target"; then
+            if unavailable_devices_output=$(_run_simctl \
+                "$MOLE_TIMEOUT_MEDIUM_PROBE_SEC" list devices unavailable \
+                2> "$simctl_probe_stderr_target"); then
                 simctl_probe_ok=true
             else
                 simctl_probe_first_status=$?
+                unavailable_devices_output=""
                 if [[ -n "$simctl_probe_stderr_file" ]]; then
                     simctl_probe_first_stderr=$(< "$simctl_probe_stderr_file")
                     : > "$simctl_probe_stderr_file"
                 fi
-                if _run_simctl 8 list devices > /dev/null 2> "$simctl_probe_stderr_target"; then # 8s: simctl retry after warmup, see lib/core/timeouts.sh
+                if unavailable_devices_output=$(_run_simctl \
+                    "$MOLE_TIMEOUT_PKG_LIST_SEC" list devices unavailable \
+                    2> "$simctl_probe_stderr_target"); then
                     simctl_probe_ok=true
                     simctl_probe_retry_status=0
                     debug_log "simctl probe succeeded on retry (CoreSimulatorService warmup)"
                 else
                     simctl_probe_retry_status=$?
+                    unavailable_devices_output=""
                 fi
                 if [[ -n "$simctl_probe_stderr_file" ]]; then
                     simctl_probe_retry_stderr=$(< "$simctl_probe_stderr_file")
@@ -2816,18 +2828,6 @@ clean_dev_mobile() {
                 fi
                 note_activity
                 simctl_available=false
-            fi
-
-            if [[ "$simctl_available" == "true" ]]; then
-                local unavailable_devices_output=""
-                local unavailable_list_exit_code=0
-                unavailable_devices_output=$(_run_simctl "$MOLE_TIMEOUT_PKG_LIST_SEC" list devices unavailable 2> /dev/null) || unavailable_list_exit_code=$?
-                if [[ $unavailable_list_exit_code -ne 0 ]]; then
-                    echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl list failed (exit=${unavailable_list_exit_code})"
-                    debug_log "simctl list devices unavailable returned $unavailable_list_exit_code"
-                    note_activity
-                    simctl_available=false
-                fi
             fi
 
             if [[ "$simctl_available" == "true" ]]; then
@@ -5087,8 +5087,12 @@ _run_developer_cleanup_step() {
         return "$pending_clean_cancel"
     fi
 
+    local step_name="${1:-developer cleanup step}"
+    local _perf_step_start
+    debug_timer_start _perf_step_start
     local step_rc=0
     "$@" || step_rc=$?
+    debug_timer_end "developer cleanup step: $step_name" _perf_step_start
     if [[ $step_rc -eq 124 || $step_rc -ge 128 ]]; then
         _mole_record_clean_cancellation "$step_rc"
         return "$step_rc"
