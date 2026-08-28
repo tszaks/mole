@@ -17,6 +17,8 @@
 </p>
 
 > Prefer a native app? [Mole for Mac](https://mole.fit/) brings cleanup, app management, maintenance, disk maps, and live status into one lightweight, VoiceOver-ready app. One license covers 2 Macs with lifetime updates and a 14-day refund. The CLI stays free and open source.
+>
+> Mac app details: [Cleaner](https://mole.fit/mac-cleaner), [App Uninstaller](https://mole.fit/mac-app-uninstaller), [Optimizer](https://mole.fit/mac-optimizer), [Disk Analyzer](https://mole.fit/mac-disk-analyzer), and [System Monitor](https://mole.fit/mac-system-monitor).
 
 ## Features
 
