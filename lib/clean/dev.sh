@@ -4091,7 +4091,12 @@ codex_sparkle_updater_running() {
 
 codex_sparkle_staging_has_open_files() {
     local staging_root="$1"
-    command -v lsof > /dev/null 2>&1 || return 2
+    local visibility_rc=0
+    _mole_complete_lsof_mode || visibility_rc=$?
+    if [[ $visibility_rc -eq 124 || $visibility_rc -ge 128 ]]; then
+        return "$visibility_rc"
+    fi
+    [[ $visibility_rc -eq 0 ]] || return 2
 
     local lsof_output=""
     local lsof_error_file=""
@@ -4099,11 +4104,16 @@ codex_sparkle_staging_has_open_files() {
     lsof_error_file=$(create_temp_file 2> /dev/null || true)
     [[ -n "$lsof_error_file" && -f "$lsof_error_file" && ! -L "$lsof_error_file" ]] || return 2
 
-    if lsof_output=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" lsof -Fn +D "$staging_root" 2> "$lsof_error_file"); then
+    if lsof_output=$(_mole_run_complete_lsof "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        -Fn +D "$staging_root" 2> "$lsof_error_file"); then
         [[ -n "$lsof_output" ]]
         return
     else
         lsof_rc=$?
+    fi
+
+    if [[ $lsof_rc -eq 124 || $lsof_rc -ge 128 ]]; then
+        return "$lsof_rc"
     fi
 
     # `lsof +D` returns 1 when no open files match. Timeouts or other failures
@@ -4230,6 +4240,11 @@ _codex_staging_delete_guard_allows() {
         return 1
     else
         open_file_state=$?
+    fi
+    if [[ $open_file_state -eq 124 || $open_file_state -ge 128 ]]; then
+        _mole_record_clean_cancellation "$open_file_state"
+        _MOLE_CLEAN_GUARD_REASON="open-file check unavailable"
+        return 1
     fi
     if [[ $open_file_state -eq 2 ]]; then
         _MOLE_CLEAN_GUARD_REASON="open-file check unavailable"
@@ -4436,6 +4451,12 @@ clean_codex_desktop_staging() {
         return 0
     else
         open_file_state=$?
+    fi
+    if [[ $open_file_state -eq 124 || $open_file_state -ge 128 ]]; then
+        _mole_record_clean_cancellation "$open_file_state"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (open-file check unavailable)"
+        note_activity
+        return 0
     fi
     if [[ "$open_file_state" -eq 2 ]]; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex Desktop update staging · skipped (open-file check unavailable)"
@@ -4679,6 +4700,11 @@ _codex_marketplace_staging_delete_guard_allows() {
         return 1
     else
         local open_file_state=$?
+        if [[ "$open_file_state" -eq 124 || "$open_file_state" -ge 128 ]]; then
+            _mole_record_clean_cancellation "$open_file_state"
+            _MOLE_CLEAN_GUARD_REASON="open-file check unavailable"
+            return 1
+        fi
         if [[ "$open_file_state" -eq 2 ]]; then
             _MOLE_CLEAN_GUARD_REASON="open-file check unavailable"
             return 1
@@ -4802,6 +4828,12 @@ clean_codex_marketplace_staging() {
             return 0
         else
             open_file_state=$?
+        fi
+        if [[ "$open_file_state" -eq 124 || "$open_file_state" -ge 128 ]]; then
+            _mole_record_clean_cancellation "$open_file_state"
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex marketplace staging · skipped (open-file check unavailable)"
+            note_activity
+            return 0
         fi
         if [[ "$open_file_state" -eq 2 ]]; then
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Codex marketplace staging · skipped (open-file check unavailable)"

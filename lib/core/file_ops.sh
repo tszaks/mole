@@ -241,6 +241,20 @@ _mole_is_user_cache_sqlite_family_path() {
     _mole_is_sqlite_database_path "$1"
 }
 
+# Exact browser partial-download files directly under Downloads. These may be
+# actively written even when their browser process name is unavailable, so the
+# final deletion gate must recheck the file handle itself.
+_mole_is_incomplete_download_path() {
+    local downloads_root="${HOME%/}/Downloads"
+    local path="$1"
+    case "$path" in
+        "$downloads_root"/*.download | "$downloads_root"/*.crdownload | "$downloads_root"/*.part)
+            [[ "${path#"$downloads_root"/}" != */* ]]
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 _mole_user_cache_sqlite_main_path() {
     local path="$1"
     case "$path" in
@@ -450,8 +464,6 @@ _mole_sqlite_database_in_use() {
     local base
     base=$(_mole_sqlite_family_base_path "$path")
 
-    command -v lsof > /dev/null 2>&1 || return 2
-
     # Check every family member, including a stale -shm. If any process has a
     # handle open the database is live; if none do, the -shm is orphaned and
     # deletion is safe. One lsof call covers the whole family: forking it per
@@ -467,29 +479,7 @@ _mole_sqlite_database_in_use() {
     # empty array is an unbound-variable error under set -u.
     [[ ${#family[@]} -gt 0 ]] || return 1
 
-    # Exit status cannot carry the answer here. lsof returns 1 whenever it fails
-    # to locate ANY requested name, so a family with one open member and one
-    # closed member still exits 1. Its stdout can: a record is printed only for
-    # a name some process holds open. Read the records, not the status.
-    local lsof_rc=0
-    local open_records=""
-    if declare -f run_with_timeout > /dev/null 2>&1; then
-        open_records=$(run_with_timeout "$MOLE_TIMEOUT_QUICK_DETECT_SEC" lsof -F n -- \
-            "${family[@]}" 2> /dev/null) || lsof_rc=$?
-    else
-        open_records=$(lsof -F n -- "${family[@]}" 2> /dev/null) || lsof_rc=$?
-    fi
-    # Status 0 means lsof located every name it was given, which for this query
-    # can only happen when some process holds them. Take either signal: a record
-    # on stdout, or a clean exit. Requiring both would read a mocked or
-    # output-suppressed lsof as idle, and "idle" is the answer that deletes.
-    if [[ -n "$open_records" || $lsof_rc -eq 0 ]]; then
-        return 0
-    fi
-    # Exactly status 1 with no records means every member is idle. Anything else
-    # (timeout, signal, lsof error) is not evidence of idleness.
-    [[ $lsof_rc -eq 1 ]] || return 2
-    return 1
+    _mole_paths_have_open_handle "${family[@]}"
 }
 
 _mole_user_cache_sqlite_has_open_handle() {
@@ -506,6 +496,7 @@ _mole_user_cache_sqlite_has_open_handle() {
 _MOLE_CONTAINER_CACHE_PROBE_PARENT=""
 _MOLE_CONTAINER_CACHE_PROBE_PARENT_ID=""
 _MOLE_CONTAINER_CACHE_PROBE_TARGET_ID=""
+_MOLE_COMPLETE_LSOF_MODE=""
 
 _mole_container_cache_probe_deadline() {
     local timeout_seconds="${MOLE_TIMEOUT_MEDIUM_PROBE_SEC:-5}"
@@ -520,6 +511,120 @@ _mole_container_cache_probe_deadline() {
     fi
     [[ $timeout_budget -ge 2 ]] || timeout_budget=2
     printf '%s\n' "$((SECONDS + timeout_budget))"
+}
+
+_mole_lsof_records_include_root_process() {
+    local records="$1"
+    local padded=$'\n'"$records"$'\n'
+    [[ "$padded" == *$'\np1\n'* && "$padded" == *$'\nu0\n'* ]]
+}
+
+# Choose an lsof invocation that can see root-owned processes. macOS may return
+# status 1 with no diagnostics when an unprivileged lsof silently omits those
+# processes, which is not proof that a cache has no privileged open handles.
+# Prefer direct visibility; use only an already-authorized non-interactive sudo
+# session as a fallback. Tests and no-auth probes never attempt sudo.
+_mole_complete_lsof_mode() {
+    local probe_deadline="${1:-}"
+    case "${_MOLE_COMPLETE_LSOF_MODE:-}" in
+        direct | sudo) return 0 ;;
+        unknown) return 2 ;;
+    esac
+
+    command -v lsof > /dev/null 2>&1 || {
+        _MOLE_COMPLETE_LSOF_MODE="unknown"
+        return 2
+    }
+    declare -f run_with_timeout > /dev/null 2>&1 || {
+        _MOLE_COMPLETE_LSOF_MODE="unknown"
+        return 2
+    }
+
+    local probe_timeout=""
+    if ! probe_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        "$probe_deadline"); then
+        _MOLE_COMPLETE_LSOF_MODE="unknown"
+        return 2
+    fi
+
+    local records=""
+    local probe_rc=0
+    records=$(run_with_timeout "$probe_timeout" lsof -F pu -p 1 < /dev/null 2>&1) || probe_rc=$?
+    if [[ $probe_rc -eq 124 || $probe_rc -ge 128 ]]; then
+        return "$probe_rc"
+    fi
+    if [[ $probe_rc -eq 0 ]] && _mole_lsof_records_include_root_process "$records"; then
+        _MOLE_COMPLETE_LSOF_MODE="direct"
+        return 0
+    fi
+
+    if [[ "${MOLE_TEST_MODE:-0}" == "1" || "${MOLE_TEST_NO_AUTH:-0}" == "1" ]] ||
+        ! command -v sudo > /dev/null 2>&1; then
+        _MOLE_COMPLETE_LSOF_MODE="unknown"
+        return 2
+    fi
+
+    if ! probe_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        "$probe_deadline"); then
+        _MOLE_COMPLETE_LSOF_MODE="unknown"
+        return 2
+    fi
+    records=""
+    probe_rc=0
+    records=$(run_with_timeout "$probe_timeout" sudo -n lsof -F pu -p 1 < /dev/null 2>&1) || probe_rc=$?
+    if [[ $probe_rc -eq 124 || $probe_rc -ge 128 ]]; then
+        return "$probe_rc"
+    fi
+    if [[ $probe_rc -eq 0 ]] && _mole_lsof_records_include_root_process "$records"; then
+        _MOLE_COMPLETE_LSOF_MODE="sudo"
+        return 0
+    fi
+
+    _MOLE_COMPLETE_LSOF_MODE="unknown"
+    return 2
+}
+
+_mole_run_complete_lsof() {
+    local probe_timeout="$1"
+    shift
+    case "${_MOLE_COMPLETE_LSOF_MODE:-}" in
+        direct) run_with_timeout "$probe_timeout" lsof "$@" < /dev/null ;;
+        sudo) run_with_timeout "$probe_timeout" sudo -n lsof "$@" < /dev/null ;;
+        *) return 2 ;;
+    esac
+}
+
+# Is any exact path open? 0 = in use, 1 = idle, 2 = could not tell. A complete
+# process view is required before an empty lsof result can authorize deletion.
+_mole_paths_have_open_handle() {
+    [[ $# -gt 0 ]] || return 1
+
+    local visibility_rc=0
+    _mole_complete_lsof_mode || visibility_rc=$?
+    if [[ $visibility_rc -eq 124 || $visibility_rc -ge 128 ]]; then
+        return "$visibility_rc"
+    fi
+    [[ $visibility_rc -eq 0 ]] || return 2
+
+    local lsof_rc=0
+    local open_records=""
+    open_records=$(_mole_run_complete_lsof "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
+        -F n -- "$@" 2>&1) || lsof_rc=$?
+    if [[ $lsof_rc -eq 124 || $lsof_rc -ge 128 ]]; then
+        return "$lsof_rc"
+    fi
+    if [[ $lsof_rc -eq 0 ]]; then
+        return 0
+    fi
+    # lsof may return 1 when only some requested family members are open. A
+    # field record is still positive evidence of use, while diagnostics are an
+    # unknown result and must never be discarded as a reliable no-match.
+    local padded_records=$'\n'"$open_records"$'\n'
+    if [[ "$padded_records" == *$'\nn'* ]]; then
+        return 0
+    fi
+    [[ $lsof_rc -eq 1 && -z "$open_records" ]] || return 2
+    return 1
 }
 
 # Is any process holding the exact container-cache file, or a descendant of
@@ -539,6 +644,13 @@ _mole_container_cache_has_open_handle() {
         -z "$_MOLE_CONTAINER_CACHE_PROBE_DEADLINE" ]]; then
         _MOLE_CONTAINER_CACHE_PROBE_DEADLINE=$(_mole_container_cache_probe_deadline)
     fi
+    local visibility_rc=0
+    _mole_complete_lsof_mode "${_MOLE_CONTAINER_CACHE_PROBE_DEADLINE:-}" || visibility_rc=$?
+    if [[ $visibility_rc -eq 124 || $visibility_rc -ge 128 ]]; then
+        return "$visibility_rc"
+    fi
+    [[ $visibility_rc -eq 0 ]] || return 2
+
     local probe_timeout=""
     if ! probe_timeout=$(_mole_timeout_with_deadline "$MOLE_TIMEOUT_QUICK_DETECT_SEC" \
         "${_MOLE_CONTAINER_CACHE_PROBE_DEADLINE:-}"); then
@@ -555,14 +667,14 @@ _mole_container_cache_has_open_handle() {
     local lsof_rc=0
     local records=""
     if [[ -d "$path" ]]; then
-        records=$(run_with_timeout "$probe_timeout" \
-            lsof -F pfn +D "$path" < /dev/null 2>&1) || lsof_rc=$?
+        records=$(_mole_run_complete_lsof "$probe_timeout" \
+            -F pfn +D "$path" 2>&1) || lsof_rc=$?
     else
-        records=$(run_with_timeout "$probe_timeout" \
-            lsof -F pfn -- "$path" < /dev/null 2>&1) || lsof_rc=$?
+        records=$(_mole_run_complete_lsof "$probe_timeout" \
+            -F pfn -- "$path" 2>&1) || lsof_rc=$?
     fi
 
-    if [[ $lsof_rc -ge 128 ]]; then
+    if [[ $lsof_rc -eq 124 || $lsof_rc -ge 128 ]]; then
         return "$lsof_rc"
     fi
     if [[ $lsof_rc -eq 0 ]]; then
@@ -625,7 +737,7 @@ _mole_should_refuse_live_user_cache_path() {
         fi
         local container_open_state=0
         _mole_container_cache_has_open_handle "$path" || container_open_state=$?
-        if [[ $container_open_state -ge 128 ]]; then
+        if [[ $container_open_state -eq 124 || $container_open_state -ge 128 ]]; then
             return "$container_open_state"
         fi
         if [[ $container_open_state -eq 0 || $container_open_state -eq 2 ]]; then
@@ -636,6 +748,9 @@ _mole_should_refuse_live_user_cache_path() {
     elif _mole_is_user_cache_sqlite_family_path "$path"; then
         local open_state=0
         _mole_user_cache_sqlite_has_open_handle "$path" || open_state=$?
+        if [[ $open_state -eq 124 || $open_state -ge 128 ]]; then
+            return "$open_state"
+        fi
         if [[ $open_state -eq 0 || $open_state -eq 2 ]]; then
             debug_log "SQLite user cache handle not conclusively idle, keep: $path"
             return 0
@@ -690,6 +805,9 @@ _mole_should_refuse_live_user_cache_path() {
 
                 open_state=0
                 _mole_user_cache_sqlite_has_open_handle "$family_base" || open_state=$?
+                if [[ $open_state -eq 124 || $open_state -ge 128 ]]; then
+                    return "$open_state"
+                fi
                 if [[ $open_state -eq 0 || $open_state -eq 2 ]]; then
                     debug_log "SQLite under user cache dir not conclusively idle, keep: $path ($family_base)"
                     return 0
@@ -942,7 +1060,7 @@ validate_path_for_deletion() {
         debug_log "Path validation: live user cache kept: $policy_path"
         return 1
     fi
-    if [[ $live_cache_guard_rc -ge 128 ]]; then
+    if [[ $live_cache_guard_rc -eq 124 || $live_cache_guard_rc -ge 128 ]]; then
         _mole_record_clean_cancellation "$live_cache_guard_rc"
         return "$live_cache_guard_rc"
     fi
@@ -952,8 +1070,28 @@ validate_path_for_deletion() {
     if _mole_is_sqlite_database_path "$policy_path"; then
         local sqlite_state=0
         _mole_sqlite_database_in_use "$policy_path" || sqlite_state=$?
+        if [[ $sqlite_state -eq 124 || $sqlite_state -ge 128 ]]; then
+            _mole_record_clean_cancellation "$sqlite_state"
+            return "$sqlite_state"
+        fi
         if [[ $sqlite_state -eq 0 || $sqlite_state -eq 2 ]]; then
             debug_log "Path validation: in-use SQLite database kept: $policy_path"
+            return 1
+        fi
+    fi
+
+    # Browser partial downloads are mutable user files, not ordinary caches.
+    # Recheck them here so safe_remove binds the open-handle evidence at the
+    # final deletion boundary instead of trusting an earlier cleanup scan.
+    if _mole_is_incomplete_download_path "$policy_path"; then
+        local download_open_state=0
+        _mole_paths_have_open_handle "$policy_path" || download_open_state=$?
+        if [[ $download_open_state -eq 124 || $download_open_state -ge 128 ]]; then
+            _mole_record_clean_cancellation "$download_open_state"
+            return "$download_open_state"
+        fi
+        if [[ $download_open_state -eq 0 || $download_open_state -eq 2 ]]; then
+            debug_log "Path validation: incomplete download not conclusively idle, keep: $policy_path"
             return 1
         fi
     fi
@@ -1039,6 +1177,18 @@ _record_file_ops_dry_run_target() {
         fi
     fi
 
+    # A browser can reopen a partial download while the size probe runs. Keep
+    # dry-run eligibility aligned with the real final sink instead of listing a
+    # file that real cleanup would now refuse.
+    if _mole_is_incomplete_download_path "$path"; then
+        local download_open_state=0
+        _mole_paths_have_open_handle "$path" || download_open_state=$?
+        if [[ $download_open_state -eq 124 || $download_open_state -ge 128 ]]; then
+            return "$download_open_state"
+        fi
+        [[ $download_open_state -eq 1 ]] || return 1
+    fi
+
     # A precomputed size means validate_path_for_deletion was the last
     # meaningful probe. If this helper measured after validation, rerun the
     # recorder guards: an owner can open the cache while du is walking it.
@@ -1078,6 +1228,9 @@ safe_remove() {
     local container_probe_parent=""
     local container_probe_parent_id=""
     local container_probe_target_id=""
+    local exact_probe_parent=""
+    local exact_probe_parent_id=""
+    local exact_probe_target_id=""
 
     local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
     if [[ "${MOLE_CURRENT_COMMAND:-}" == "clean" &&
@@ -1107,7 +1260,7 @@ safe_remove() {
         validate_path_for_deletion "$path" || validation_rc=$?
     fi
     if [[ $validation_rc -ne 0 ]]; then
-        if [[ $validation_rc -ge 128 ]]; then
+        if [[ $validation_rc -eq 124 || $validation_rc -ge 128 ]]; then
             _mole_record_clean_cancellation "$validation_rc"
             return "$validation_rc"
         fi
@@ -1250,13 +1403,73 @@ safe_remove() {
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "live user cache"
         return 1
     fi
-    if [[ $live_cache_guard_rc -ge 128 ]]; then
+    if [[ $live_cache_guard_rc -eq 124 || $live_cache_guard_rc -ge 128 ]]; then
         _mole_record_clean_cancellation "$live_cache_guard_rc"
         return "$live_cache_guard_rc"
     fi
     container_probe_parent="$_MOLE_CONTAINER_CACHE_PROBE_PARENT"
     container_probe_parent_id="$_MOLE_CONTAINER_CACHE_PROBE_PARENT_ID"
     container_probe_target_id="$_MOLE_CONTAINER_CACHE_PROBE_TARGET_ID"
+
+    # Reverse-DNS and container caches were rechecked by the live-cache guard.
+    # SQLite files elsewhere still need their own post-size handle probe.
+    if _mole_is_sqlite_database_path "$path" &&
+        ! _mole_user_cache_scope "$path" > /dev/null 2>&1; then
+        _mole_snapshot_path_identity "$path" || return 1
+        local sqlite_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+        local sqlite_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+        local sqlite_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+        local sqlite_state=0
+        _mole_sqlite_database_in_use "$path" || sqlite_state=$?
+        if [[ $sqlite_state -eq 124 || $sqlite_state -ge 128 ]]; then
+            _mole_record_clean_cancellation "$sqlite_state"
+            return "$sqlite_state"
+        fi
+        if [[ $sqlite_state -ne 1 ]]; then
+            debug_log "Skipped SQLite file after final open-file recheck: $path"
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "active or unknown SQLite database"
+            return 1
+        fi
+        if ! _mole_path_matches_identity \
+            "$path" "$sqlite_parent" "$sqlite_parent_id" "$sqlite_target_id"; then
+            debug_log "Skipped SQLite file after identity changed during final open-file recheck: $path"
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "identity changed"
+            return 1
+        fi
+        exact_probe_parent="$sqlite_parent"
+        exact_probe_parent_id="$sqlite_parent_id"
+        exact_probe_target_id="$sqlite_target_id"
+    fi
+
+    # Downloads are outside the user-cache owner guard above. Recheck the exact
+    # file after sizing so a browser that resumed the transfer cannot race the
+    # earlier validation into the unlink.
+    if _mole_is_incomplete_download_path "$path"; then
+        _mole_snapshot_path_identity "$path" || return 1
+        local download_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+        local download_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+        local download_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+        local download_open_state=0
+        _mole_paths_have_open_handle "$path" || download_open_state=$?
+        if [[ $download_open_state -eq 124 || $download_open_state -ge 128 ]]; then
+            _mole_record_clean_cancellation "$download_open_state"
+            return "$download_open_state"
+        fi
+        if [[ $download_open_state -ne 1 ]]; then
+            debug_log "Skipped incomplete download after final open-file recheck: $path"
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "active or unknown download"
+            return 1
+        fi
+        if ! _mole_path_matches_identity \
+            "$path" "$download_parent" "$download_parent_id" "$download_target_id"; then
+            debug_log "Skipped incomplete download after identity changed during final open-file recheck: $path"
+            log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "identity changed"
+            return 1
+        fi
+        exact_probe_parent="$download_parent"
+        exact_probe_parent_id="$download_parent_id"
+        exact_probe_target_id="$download_target_id"
+    fi
 
     if [[ -n "$expected_parent" ]] && ! _mole_path_matches_identity \
         "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id"; then
@@ -1291,6 +1504,14 @@ safe_remove() {
         "$path" "$container_probe_parent" "$container_probe_parent_id" \
         "$container_probe_target_id"; then
         debug_log "Refusing removal after container cache identity changed: $path"
+        log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "identity changed"
+        return 1
+    fi
+
+    if [[ -n "$exact_probe_parent" ]] && ! _mole_path_matches_identity \
+        "$path" "$exact_probe_parent" "$exact_probe_parent_id" \
+        "$exact_probe_target_id"; then
+        debug_log "Refusing removal after final open-file target identity changed: $path"
         log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$path" "identity changed"
         return 1
     fi
@@ -2081,7 +2302,7 @@ _mole_trash_target_still_safe() {
         log_operation "${MOLE_CURRENT_COMMAND:-uninstall}" "SKIPPED" "$path" "live user cache"
         return 1
     fi
-    if [[ $live_cache_guard_rc -ge 128 ]]; then
+    if [[ $live_cache_guard_rc -eq 124 || $live_cache_guard_rc -ge 128 ]]; then
         _mole_record_clean_cancellation "$live_cache_guard_rc"
         return "$live_cache_guard_rc"
     fi

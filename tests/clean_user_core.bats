@@ -61,6 +61,81 @@ EOF
     [[ "$output" != *"Trash"* ]]
 }
 
+@test "incomplete downloads are kept when the open-file view is incomplete (#1471)" {
+    local partial="$HOME/Downloads/pending.crdownload"
+    mkdir -p "$(dirname "$partial")"
+    printf 'partial\n' > "$partial"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+trace_file=$(mktemp)
+lsof() {
+    case " $* " in
+        *" -p 1 "*) printf 'visibility\n' >> "$trace_file"; return 1 ;;
+        *) printf 'target\n' >> "$trace_file"; return 1 ;;
+    esac
+}
+run_with_timeout() { shift; "$@"; }
+safe_clean() { echo "UNEXPECTED_SAFE_CLEAN:$1"; }
+note_activity() { :; }
+_clean_incomplete_downloads
+printf 'TRACE=%s\n' "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"open-file check unavailable"* ]] || return 1
+    [[ "$output" == *"TRACE=visibility,"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_SAFE_CLEAN"* ]]
+}
+
+@test "incomplete download dry-run rechecks open handles after sizing (#1471)" {
+    local partial="$HOME/Downloads/pending.part"
+    mkdir -p "$(dirname "$partial")"
+    printf 'partial\n' > "$partial"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" partial="$partial" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/bin/clean.sh"
+source "$PROJECT_ROOT/lib/clean/user.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+trace_file=$(mktemp)
+size_marker=$(mktemp)
+command rm -f "$size_marker"
+lsof() {
+    printf 'LSOF:%s\n' "$(test -f "$size_marker" && echo live || echo idle)" >> "$trace_file"
+    if [[ -f "$size_marker" ]]; then
+        printf 'n%s\n' "$partial"
+        return 0
+    fi
+    return 1
+}
+run_with_timeout() { shift; "$@"; }
+get_cleanup_path_size_kb() {
+    printf 'SIZE\n' >> "$trace_file"
+    printf 'sized\n' > "$size_marker"
+    printf '1\n'
+}
+record_dry_run_cleanup_target() { printf 'UNEXPECTED_REGISTER:%s\n' "$1"; }
+note_activity() { :; }
+DRY_RUN=true
+MOLE_CURRENT_COMMAND=clean
+MOLE_CLEAN_CANCEL_STATUS=0
+_clean_incomplete_downloads
+printf 'EXISTS=%s ORDER=%s\n' "$(test -f "$partial" && echo yes || echo no)" \
+    "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file" "$size_marker"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"EXISTS=yes ORDER=LSOF:idle,SIZE,LSOF:live,"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REGISTER"* ]] || return 1
+}
+
 @test "clean_user_essentials avoids Darwin runtime probes and live-log truncation" {
     mkdir -p "$HOME/Library/Caches/ordinary-app"
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc << 'EOF'
@@ -1005,6 +1080,10 @@ start_section_spinner() { :; }
 stop_section_spinner() { :; }
 bytes_to_human() { echo "0B"; }
 note_activity() { :; }
+_mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
 files_cleaned=0
 total_size_cleaned=0
 total_items=0
@@ -1075,6 +1154,7 @@ should_protect_data() { return 1; }
 should_protect_path() { return 1; }
 is_path_whitelisted() { return 1; }
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() {
     printf '%s\n' "$*" >> "$lsof_trace"
     case "$*" in
@@ -1126,6 +1206,7 @@ should_protect_data() { return 1; }
 should_protect_path() { return 1; }
 is_path_whitelisted() { return 1; }
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 _mole_timeout_with_deadline() {
     [[ ! -f "$exhausted_marker" ]] || return 1
     printf '2\n'
@@ -1421,6 +1502,7 @@ stop_section_spinner() { :; }
 bytes_to_human() { echo "0B"; }
 note_activity() { :; }
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
 files_cleaned=0
@@ -1536,6 +1618,10 @@ start_section_spinner() { :; }
 stop_section_spinner() { :; }
 bytes_to_human() { echo "0B"; }
 note_activity() { :; }
+_mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
 get_path_size_kb() {
     echo "SHOULD_NOT_SIZE_SCAN"
     return 0
@@ -2093,6 +2179,10 @@ bytes_to_human() { echo "0B"; }
 note_activity() { :; }
 should_protect_data() { return 1; }
 is_critical_system_component() { return 1; }
+_mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
 files_cleaned=0
 total_size_cleaned=0
 total_items=0

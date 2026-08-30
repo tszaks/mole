@@ -762,7 +762,9 @@ EOF
 }
 
 @test "clean_conda_metadata_caches honors package cache whitelist before conda clean" {
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false \
+        MOLE_CURRENT_COMMAND=clean MOLE_CLEAN_CANCEL_STATUS=0 \
+        /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
@@ -1201,6 +1203,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { [[ "$1" == "-x" && "$2" == "ChatGPT" ]]; }
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
@@ -1420,6 +1423,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { return 1; }
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
@@ -1570,6 +1574,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { return 1; }
 lsof() { printf 'n%s\n' "$HOME/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Installation/stale/Codex.app"; }
 run_with_timeout() { shift; "$@"; }
@@ -1583,10 +1588,13 @@ EOF
     [[ "$output" != *"skipped (files in use)"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
 
-    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false /bin/bash --noprofile --norc << 'EOF'
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=false \
+        MOLE_CURRENT_COMMAND=clean MOLE_CLEAN_CANCEL_STATUS=0 \
+        /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { return 1; }
 lsof() { return 1; }
 run_with_timeout() { return 124; }
@@ -1594,10 +1602,12 @@ is_path_whitelisted() { return 1; }
 safe_clean() { echo "SAFE_CLEAN:$2|$1"; }
 note_activity() { :; }
 clean_codex_desktop_staging
+printf 'CANCEL=%s\n' "$MOLE_CLEAN_CANCEL_STATUS"
 EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"skipped (open-file check unavailable)"* ]] || return 1
+    [[ "$output" == *"CANCEL=124"* ]] || return 1
     [[ "$output" != *"SAFE_CLEAN:"* ]] || return 1
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" DRY_RUN=true /bin/bash --noprofile --norc << 'EOF'
@@ -1651,6 +1661,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 1; }
 run_with_timeout() {
     echo "lsof: cannot stat test path" >&2
@@ -1665,6 +1676,29 @@ EOF
         echo "$output"
         return 1
     }
+}
+
+@test "codex staging refuses an incomplete root-process lsof view (#1471)" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/clean/dev.sh"
+trace_file=$(mktemp)
+lsof() {
+    case " $* " in
+        *" -p 1 "*) printf 'visibility\n' >> "$trace_file"; return 1 ;;
+        *) printf 'target\n' >> "$trace_file"; return 1 ;;
+    esac
+}
+run_with_timeout() { shift; "$@"; }
+probe_rc=0
+codex_sparkle_staging_has_open_files "$HOME/missing" || probe_rc=$?
+printf 'RC=%s TRACE=%s\n' "$probe_rc" "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=2 TRACE=visibility,"* ]]
 }
 
 @test "clean_codex_desktop_staging rechecks Codex at the deletion boundary" {
@@ -1742,6 +1776,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { return 1; }
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
@@ -2978,6 +3013,7 @@ PLIST
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { return 1; }
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
@@ -3011,6 +3047,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { return 1; }
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
@@ -3040,6 +3077,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { return 1; }
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
@@ -3070,6 +3108,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/dev.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 pgrep() { return 1; }
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }

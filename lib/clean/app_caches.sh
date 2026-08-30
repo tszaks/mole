@@ -359,182 +359,21 @@ clean_xcode_tools() {
         fi
     fi
 }
-# Bundle-path pattern of the editor whose extension root is being reconciled.
-# mole_clean_process_guard takes a probe by name, so the probe reads the marker
-# from here rather than from an argument.
-_MOLE_EDITOR_BUNDLE_MARKER=""
-
-_editor_extensions_process_state() {
-    [[ -n "$_MOLE_EDITOR_BUNDLE_MARKER" ]] || return 2
-    # Match the bundle path, never the app name. `pgrep -f Cursor` also matches
-    # macOS's own CursorUIViewService text-input helper, which would pin the
-    # guard to "running" on every Mac; `/Cursor.app/` does not appear in that
-    # helper's command line.
-    mole_pgrep_any -f "$_MOLE_EDITOR_BUNDLE_MARKER"
-}
-
-# Directory names under an extensions root are lowercased by the editor while
-# package.json keeps the publisher's own casing (PKief, Anthropic,
-# shadesOfBuntu), so this comparison is case-insensitive. A case-sensitive one
-# rejected 9 of 14 real extensions as unidentifiable on the machine this was
-# written against, which fails safe but leaves the reconciliation doing almost
-# nothing.
-_editor_extension_dir_identity_matches() {
-    local dir="$1"
-    local dir_name="$2"
-    local manifest="$dir/package.json"
-
-    [[ -f "$manifest" ]] || return 1
-
-    local publisher name version
-    publisher=$(plutil -extract publisher raw "$manifest" 2> /dev/null) || return 1
-    name=$(plutil -extract name raw "$manifest" 2> /dev/null) || return 1
-    version=$(plutil -extract version raw "$manifest" 2> /dev/null) || return 1
-    [[ -n "$publisher" && -n "$name" && -n "$version" ]] || return 1
-
-    local expected lowered
-    expected=$(printf '%s.%s-%s' "$publisher" "$name" "$version" | LC_ALL=C tr '[:upper:]' '[:lower:]')
-    lowered=$(printf '%s' "$dir_name" | LC_ALL=C tr '[:upper:]' '[:lower:]')
-
-    # The optional trailing segment is the target platform (darwin-arm64).
-    [[ "$lowered" == "$expected" || "$lowered" == "$expected"-* ]]
-}
-
-# Emit every directory name the editor still registers, across the default
-# registry and every profile registry. Fails if any registry is missing or
-# unreadable: an incomplete keep-set turns live extensions into candidates.
-#
-# Over-collecting only preserves more, so both `relativeLocation` and the
-# basename of `location.path` are taken. Under-collecting is the direction that
-# deletes something in use, and every path that could under-collect fails.
-_editor_registered_extension_dirs() {
-    local ext_root="$1"
-    local profile_root="$2"
-    local -a registries=()
-
-    [[ -f "$ext_root/extensions.json" ]] || return 1
-    registries+=("$ext_root/extensions.json")
-
-    # A profile can pin a version the default profile never references, so its
-    # registry is part of the keep-set. A profiles directory that exists but
-    # cannot be enumerated leaves the set incomplete.
-    local profiles_dir="$profile_root/User/profiles"
-    if [[ -d "$profiles_dir" ]]; then
-        [[ -r "$profiles_dir" && -x "$profiles_dir" ]] || return 1
-        local profile_registry
-        for profile_registry in "$profiles_dir"/*/extensions.json; do
-            [[ -f "$profile_registry" ]] || continue
-            registries+=("$profile_registry")
-        done
-    fi
-
-    local registry json
-    for registry in "${registries[@]}"; do
-        json=$(plutil -convert json -o - "$registry" 2> /dev/null) || return 1
-        [[ -n "$json" ]] || return 1
-        printf '%s' "$json" | LC_ALL=C awk '
-            function emit(chunk,   value) {
-                value = chunk
-                sub(/".*/, "", value)
-                gsub(/\\\//, "/", value)
-                sub(/.*\//, "", value)
-                if (value != "") print value
-            }
-            {
-                n = split($0, parts, "\"relativeLocation\":\"")
-                for (i = 2; i <= n; i++) emit(parts[i])
-                n = split($0, parts, "\"path\":\"")
-                for (i = 2; i <= n; i++) emit(parts[i])
-            }
-        ' || return 1
-    done
-}
-
-# Offer extension directories no profile registers any more. VS Code writes
-# .obsolete as a removal journal rather than an inventory, so it can be
-# zero-byte or truncated while old versions remain on disk (#1461). This is a
-# second, independently fail-closed source of candidates for the same sink.
-_clean_editor_unregistered_extensions() {
-    local ext_root="$1"
-    local editor_label="$2"
-    local profile_root="$3"
-    local bundle_marker="$4"
-
-    [[ -d "$ext_root" && -d "$profile_root" ]] || return 0
-
-    # A running editor may be mid-install, and an unknown process state is not
-    # evidence of absence. Only a confirmed-stopped editor is reconciled.
-    _MOLE_EDITOR_BUNDLE_MARKER="$bundle_marker"
-    if ! mole_clean_process_guard _editor_extensions_process_state "$editor_label running"; then
-        _MOLE_EDITOR_BUNDLE_MARKER=""
-        mole_report_guard_stop "$editor_label extensions" mole_defer_cleanup_family "$editor_label"
-        return 0
-    fi
-    _MOLE_EDITOR_BUNDLE_MARKER=""
-
-    local keep_file
-    keep_file=$(mktemp_file "mole-ext-keep") || return 0
-
-    if ! _editor_registered_extension_dirs "$ext_root" "$profile_root" > "$keep_file"; then
-        rm -f "$keep_file" # SAFE: scratch file this function created via mktemp
-        return 0
-    fi
-
-    # Directories the .obsolete pass already offered are not re-offered here;
-    # without this a dry-run lists the same directory under both labels.
-    if [[ -f "$ext_root/.obsolete" ]]; then
-        plutil -p "$ext_root/.obsolete" 2> /dev/null |
-            sed -nE 's/^[[:space:]]*"([^"]+)"[[:space:]]*=>.*/\1/p' >> "$keep_file" || true
-    fi
-
-    # An empty keep-set would make every directory a candidate. That is the one
-    # state this must never act on.
-    if [[ ! -s "$keep_file" ]]; then
-        rm -f "$keep_file" # SAFE: scratch file this function created via mktemp
-        return 0
-    fi
-
-    local dir dir_name
-    for dir in "$ext_root"/*/; do
-        dir="${dir%/}"
-        [[ -d "$dir" ]] || continue
-        [[ -L "$dir" ]] && continue
-        dir_name=$(basename "$dir")
-        # Staging directories are hidden and already excluded by the glob; the
-        # suffix check covers a non-hidden leftover of an interrupted install.
-        case "$dir_name" in
-            *.vsctmp) continue ;;
-        esac
-        _editor_extension_dir_identity_matches "$dir" "$dir_name" || continue
-        LC_ALL=C grep -qxF "$dir_name" "$keep_file" && continue
-        safe_clean "$dir" "Unregistered $editor_label extension"
-    done
-
-    rm -f "$keep_file" # SAFE: scratch file this function created via mktemp
-}
-
 # Remove extension directories that VS Code / Cursor have marked obsolete.
 # Each editor writes a .obsolete JSON file under its extensions root whose keys
 # are stale extension directory names left behind after an extension update.
 clean_editor_obsolete_extensions() {
-    # extensions root | label | Application Support root holding the profile
-    # registries | bundle-path pattern identifying the editor process.
     local -a editor_roots=(
-        "$HOME/.vscode/extensions|VS Code|$HOME/Library/Application Support/Code|/Visual Studio Code.app/"
-        "$HOME/.vscode-insiders/extensions|VS Code Insiders|$HOME/Library/Application Support/Code - Insiders|/Visual Studio Code - Insiders.app/"
-        "$HOME/.cursor/extensions|Cursor|$HOME/Library/Application Support/Cursor|/Cursor.app/"
+        "$HOME/.vscode/extensions|VS Code"
+        "$HOME/.vscode-insiders/extensions|VS Code Insiders"
+        "$HOME/.cursor/extensions|Cursor"
     )
-    local entry ext_root editor_label profile_root bundle_marker obsolete_file key target
+    local entry ext_root editor_label obsolete_file key target
     for entry in "${editor_roots[@]}"; do
-        IFS='|' read -r ext_root editor_label profile_root bundle_marker <<< "$entry"
-        [[ -d "$ext_root" ]] || continue
-
+        ext_root="${entry%%|*}"
+        editor_label="${entry##*|}"
         obsolete_file="$ext_root/.obsolete"
-        if [[ ! -f "$obsolete_file" ]]; then
-            _clean_editor_unregistered_extensions \
-                "$ext_root" "$editor_label" "$profile_root" "$bundle_marker"
-            continue
-        fi
+        [[ -f "$obsolete_file" ]] || continue
 
         while IFS= read -r key; do
             # Each key must be a plain direct-child directory name; reject
@@ -547,12 +386,6 @@ clean_editor_obsolete_extensions() {
             safe_clean "$target" "Obsolete $editor_label extension"
         done < <(plutil -p "$obsolete_file" 2> /dev/null |
             sed -nE 's/^[[:space:]]*"([^"]+)"[[:space:]]*=>.*/\1/p')
-
-        # .obsolete is a journal, not an inventory, so run reconciliation even
-        # when it parsed: an incomplete or truncated marker still leaves
-        # unregistered directories behind (#1461).
-        _clean_editor_unregistered_extensions \
-            "$ext_root" "$editor_label" "$profile_root" "$bundle_marker"
     done
 }
 # Code editors.

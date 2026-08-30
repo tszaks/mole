@@ -121,7 +121,23 @@ MOCK
 exit 1
 MOCK
 
-    chmod +x "$MOCK_TOOLCHAIN_BIN/brew" "$MOCK_TOOLCHAIN_BIN/xcrun"
+    cat > "$MOCK_TOOLCHAIN_BIN/lsof" << 'MOCK'
+#!/bin/bash
+# Shim: expose a complete root-process view, then report cleanup targets idle.
+case " $* " in
+    *" -p 1 "*) printf 'p1\nu0\n'; exit 0 ;;
+    *) exit 1 ;;
+esac
+MOCK
+
+    cat > "$MOCK_TOOLCHAIN_BIN/ps" << 'MOCK'
+#!/bin/bash
+# Shim: a reliable empty process table keeps candidate ownership deterministic.
+printf '  PID  PPID COMM ARGS\n'
+MOCK
+
+    chmod +x "$MOCK_TOOLCHAIN_BIN/brew" "$MOCK_TOOLCHAIN_BIN/xcrun" \
+        "$MOCK_TOOLCHAIN_BIN/lsof" "$MOCK_TOOLCHAIN_BIN/ps"
 }
 
 @test "safe_clean item count reflects cleaned items, not raw target count" {
@@ -1030,6 +1046,7 @@ PLIST
     set_mock_sudo_uncached "$test_home"
     set_mock_host_toolchains "$test_home"
     run env HOME="$test_home" MOLE_TEST_MODE=0 MOLE_TEST_NO_AUTH=1 \
+        MOLE_TIMEOUT_MEDIUM_PROBE_SEC=30 \
         PATH="$TEST_MOCK_BIN:$MOCK_TOOLCHAIN_BIN:$PATH" \
         "$PROJECT_ROOT/mole" clean --dry-run
 
@@ -1098,7 +1115,10 @@ EOF
     cat > "$test_home/toolchain-bin/lsof" << 'MOCK'
 #!/bin/bash
 # Shim: pretend every SQLite family member is held open by a process.
-exit 0
+case " $* " in
+    *" -p 1 "*) printf 'p1\nu0\n'; exit 0 ;;
+    *) printf 'n%s\n' "$HOME/Library/Caches/com.autodesk.AcCoreConsole/Cache.db"; exit 0 ;;
+esac
 MOCK
     chmod +x "$test_home/toolchain-bin/lsof"
 
@@ -1534,6 +1554,7 @@ EOF
             # Set after sourcing: clean.sh assigns EXPORT_LIST_FILE at load time.
             EXPORT_LIST_FILE="$HOME/e5rt-list.txt"
             : > "$EXPORT_LIST_FILE"
+            _mole_user_cache_owner_process_state() { return 1; }
             e5rt_cache="$HOME/Library/Caches/com.example.ocr/com.apple.e5rt.e5bundlecache"
             mkdir -p "$e5rt_cache" "$HOME/Library/Caches/com.example.plain"
             # Both need real bytes: zero-sized entries never reach the export list.

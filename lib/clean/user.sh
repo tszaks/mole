@@ -237,7 +237,33 @@ _clean_recent_items() {
     safe_clean ~/Library/Preferences/com.apple.recentitems.plist "Recent items preferences" || true
 }
 
-# Internal: Clean incomplete browser downloads, skipping files currently open.
+_incomplete_download_delete_guard_allows() {
+    local path="$1"
+    _mole_snapshot_path_identity "$path" || return 2
+    local expected_parent="$_MOLE_PATH_SNAPSHOT_PARENT"
+    local expected_parent_id="$_MOLE_PATH_SNAPSHOT_PARENT_ID"
+    local expected_target_id="$_MOLE_PATH_SNAPSHOT_TARGET_ID"
+
+    local open_state=0
+    _mole_paths_have_open_handle "$path" || open_state=$?
+    if [[ $open_state -eq 124 || $open_state -ge 128 ]]; then
+        _mole_record_clean_cancellation "$open_state"
+        return "$open_state"
+    fi
+    [[ $open_state -eq 1 ]] || return 1
+    _mole_path_matches_identity \
+        "$path" "$expected_parent" "$expected_parent_id" "$expected_target_id" || return 2
+
+    _MOLE_SAFE_CLEAN_BOUND_PATH="$path"
+    _MOLE_SAFE_CLEAN_EXPECTED_PARENT="$expected_parent"
+    _MOLE_SAFE_CLEAN_EXPECTED_PARENT_ID="$expected_parent_id"
+    _MOLE_SAFE_CLEAN_EXPECTED_TARGET_ID="$expected_target_id"
+    return 0
+}
+
+# Internal: Clean incomplete browser downloads only after a complete open-file
+# view says the exact file is idle. The guarded cleanup repeats the probe after
+# sizing, and safe_remove repeats it again at the real deletion boundary.
 _clean_incomplete_downloads() {
     local -a patterns=(
         "$HOME/Downloads/*.download"
@@ -251,12 +277,33 @@ _clean_incomplete_downloads() {
         i=$((i + 1))
         for f in $pattern; do
             [[ -e "$f" ]] || continue
-            if lsof -F n -- "$f" > /dev/null 2>&1; then
+            local open_state=0
+            _mole_paths_have_open_handle "$f" || open_state=$?
+            if [[ $open_state -eq 124 || $open_state -ge 128 ]]; then
+                _mole_record_clean_cancellation "$open_state"
+                return 0
+            fi
+            if [[ $open_state -eq 0 ]]; then
                 echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipping active download: $(basename "$f")"
                 note_activity
                 continue
             fi
-            safe_clean "$f" "$label" || true
+            if [[ $open_state -eq 2 ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipping incomplete download (open-file check unavailable): $(basename "$f")"
+                note_activity
+                continue
+            fi
+            local guarded_rc=0
+            safe_clean_guarded _incomplete_download_delete_guard_allows \
+                "$f" "$label" || guarded_rc=$?
+            if [[ $guarded_rc -eq 124 || $guarded_rc -ge 128 ]]; then
+                _mole_record_clean_cancellation "$guarded_rc"
+                return 0
+            fi
+            if [[ $guarded_rc -eq 75 ]]; then
+                echo -e "  ${GRAY}${ICON_WARNING}${NC} Skipping incomplete download after final open-file check: $(basename "$f")"
+                note_activity
+            fi
         done
     done
 }

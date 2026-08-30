@@ -130,9 +130,9 @@ teardown() {
     # The ancestor guard is deny-only: it must not reject legitimate targets
     # whose ancestors merely resolve (e.g. /tmp -> /private/tmp on macOS).
     mkdir -p "$TEST_DIR/real/Caches"
-    : > "$TEST_DIR/real/Caches/cache.db"
+    : > "$TEST_DIR/real/Caches/cache.txt"
 
-    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/real/Caches/cache.db'"
+    run /bin/bash -c "source '$PROJECT_ROOT/lib/core/common.sh'; validate_path_for_deletion '$TEST_DIR/real/Caches/cache.txt'"
     [ "$status" -eq 0 ]
 }
 
@@ -241,6 +241,7 @@ teardown() {
         run env PROJECT_ROOT="$PROJECT_ROOT" path="$path" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 0; }
 run_with_timeout() { shift; "$@"; }
 validate_path_for_deletion "$path"
@@ -257,6 +258,7 @@ EOF
     run env PROJECT_ROOT="$PROJECT_ROOT" db="$db" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 0; }
 run_with_timeout() { shift; "$@"; }
 validate_path_for_deletion "$db"
@@ -273,6 +275,7 @@ EOF
     run env PROJECT_ROOT="$PROJECT_ROOT" db="$db" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
 validate_path_for_deletion "$db"
@@ -291,6 +294,7 @@ EOF
         run env PROJECT_ROOT="$PROJECT_ROOT" path="$path" /bin/bash --noprofile --norc << 'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
 validate_path_for_deletion "$path"
@@ -310,12 +314,16 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 1; }
 run_with_timeout() { return 124; }
-validate_path_for_deletion "$cache_dir"
+validation_rc=0
+validate_path_for_deletion "$cache_dir" || validation_rc=$?
+printf 'RC=%s\n' "$validation_rc"
 EOF
 
-    [ "$status" -eq 1 ]
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=124"* ]]
 }
 
 @test "validate_path_for_deletion checks every supported SQLite name inside a cache directory (#1439)" {
@@ -329,6 +337,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 0; }
 run_with_timeout() { shift; "$@"; }
 validate_path_for_deletion "$cache_dir"
@@ -364,6 +373,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 0; }
 run_with_timeout() { shift; "$@"; }
 export GLOBIGNORE='*.db'
@@ -393,6 +403,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 # Counted through a file, not a variable: the probe reads lsof's stdout, so it
 # runs inside a command substitution and a subshell counter never comes back.
 lsof_log=$(mktemp)
@@ -411,6 +422,343 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "validate_path_for_deletion requires complete lsof visibility for incomplete downloads (#1471)" {
+    local partial="$HOME/Downloads/session.crdownload"
+    mkdir -p "$(dirname "$partial")"
+    printf 'partial\n' > "$partial"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" partial="$partial" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+trace_file=$(mktemp)
+lsof() {
+    case " $* " in
+        *" -p 1 "*) printf 'visibility\n' >> "$trace_file"; return 1 ;;
+        *) printf 'target\n' >> "$trace_file"; return 1 ;;
+    esac
+}
+run_with_timeout() { shift; "$@"; }
+validation_rc=0
+validate_path_for_deletion "$partial" || validation_rc=$?
+printf 'RC=%s TRACE=%s\n' "$validation_rc" "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1 TRACE=visibility,"* ]]
+}
+
+@test "complete lsof mode accepts only a root-owned pid 1 record (#1471)" {
+    local record_state
+    for record_state in root nonroot; do
+        run env PROJECT_ROOT="$PROJECT_ROOT" record_state="$record_state" \
+            /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+lsof() {
+    printf 'p1\n'
+    if [[ "$record_state" == "root" ]]; then
+        printf 'u0\n'
+    else
+        printf 'u501\n'
+    fi
+}
+run_with_timeout() { shift; "$@"; }
+mode_rc=0
+_mole_complete_lsof_mode || mode_rc=$?
+printf 'RECORD=%s RC=%s MODE=%s\n' "$record_state" "$mode_rc" \
+    "${_MOLE_COMPLETE_LSOF_MODE:-unset}"
+EOF
+
+        [ "$status" -eq 0 ] || return 1
+        if [[ "$record_state" == "root" ]]; then
+            [[ "$output" == *"RECORD=root RC=0 MODE=direct"* ]] || return 1
+        else
+            [[ "$output" == *"RECORD=nonroot RC=2 MODE=unknown"* ]] || return 1
+        fi
+    done
+}
+
+@test "validate_path_for_deletion distinguishes idle and active incomplete downloads (#1471)" {
+    local partial="$HOME/Downloads/session.part"
+    mkdir -p "$(dirname "$partial")"
+    printf 'partial\n' > "$partial"
+
+    local lsof_state
+    for lsof_state in idle active; do
+        run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" partial="$partial" \
+            lsof_state="$lsof_state" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+lsof() {
+    [[ "$lsof_state" == "active" ]] && printf 'n%s\n' "$partial"
+    [[ "$lsof_state" == "active" ]]
+}
+run_with_timeout() { shift; "$@"; }
+validation_rc=0
+validate_path_for_deletion "$partial" || validation_rc=$?
+printf 'STATE=%s RC=%s\n' "$lsof_state" "$validation_rc"
+EOF
+
+        [ "$status" -eq 0 ] || return 1
+        if [[ "$lsof_state" == "idle" ]]; then
+            [[ "$output" == *"STATE=idle RC=0"* ]] || return 1
+        else
+            [[ "$output" == *"STATE=active RC=1"* ]] || return 1
+        fi
+    done
+}
+
+@test "incomplete-download lsof diagnostics are unknown, never idle (#1471)" {
+    local partial="$HOME/Downloads/session.crdownload"
+    mkdir -p "$(dirname "$partial")"
+    printf 'partial\n' > "$partial"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" partial="$partial" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+lsof() {
+    printf 'lsof: cannot stat requested path\n' >&2
+    return 1
+}
+run_with_timeout() { shift; "$@"; }
+open_state=0
+_mole_paths_have_open_handle "$partial" || open_state=$?
+printf 'STATE=%s\n' "$open_state"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"STATE=2"* ]] || return 1
+}
+
+@test "safe_remove rechecks incomplete downloads at the final deletion boundary (#1471)" {
+    local partial="$HOME/Downloads/session.part"
+    mkdir -p "$(dirname "$partial")"
+    printf 'partial\n' > "$partial"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" partial="$partial" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+trace_file=$(mktemp)
+size_marker=$(mktemp)
+command rm -f "$size_marker"
+lsof() {
+    printf 'LSOF:%s\n' "$(test -f "$size_marker" && echo live || echo idle)" >> "$trace_file"
+    if [[ -f "$size_marker" ]]; then
+        printf 'n%s\n' "$partial"
+        return 0
+    fi
+    return 1
+}
+run_with_timeout() { shift; "$@"; }
+get_path_size_kb() {
+    printf 'SIZE\n' >> "$trace_file"
+    printf 'sized\n' > "$size_marker"
+    printf '1\n'
+}
+oplog_enabled() { return 0; }
+rm() { printf 'UNEXPECTED_REMOVE:%s\n' "$*"; return 99; }
+remove_rc=0
+safe_remove "$partial" true || remove_rc=$?
+printf 'RC=%s EXISTS=%s ORDER=%s\n' "$remove_rc" \
+    "$(test -f "$partial" && echo yes || echo no)" "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file" "$size_marker"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1 EXISTS=yes ORDER=LSOF:idle,SIZE,LSOF:live,"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]] || return 1
+}
+
+@test "safe_remove dry-run rechecks incomplete downloads after sizing (#1471)" {
+    local partial="$HOME/Downloads/session.download"
+    mkdir -p "$(dirname "$partial")"
+    printf 'partial\n' > "$partial"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" partial="$partial" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+trace_file=$(mktemp)
+size_marker=$(mktemp)
+command rm -f "$size_marker"
+lsof() {
+    printf 'LSOF:%s\n' "$(test -f "$size_marker" && echo live || echo idle)" >> "$trace_file"
+    if [[ -f "$size_marker" ]]; then
+        printf 'n%s\n' "$partial"
+        return 0
+    fi
+    return 1
+}
+run_with_timeout() { shift; "$@"; }
+get_path_size_kb() {
+    printf 'SIZE\n' >> "$trace_file"
+    printf 'sized\n' > "$size_marker"
+    printf '1\n'
+}
+record_dry_run_cleanup_target() { printf 'UNEXPECTED_REGISTER:%s\n' "$1"; }
+MOLE_DRY_RUN=1
+remove_rc=0
+safe_remove "$partial" true || remove_rc=$?
+printf 'RC=%s EXISTS=%s ORDER=%s\n' "$remove_rc" \
+    "$(test -f "$partial" && echo yes || echo no)" "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file" "$size_marker"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1 EXISTS=yes ORDER=LSOF:idle,SIZE,LSOF:live,"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REGISTER"* ]] || return 1
+}
+
+@test "safe_remove rechecks non-cache SQLite files at the final deletion boundary (#1471)" {
+    local database="$TEST_DIR/state.sqlite"
+    printf 'db\n' > "$database"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" database="$database" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+trace_file=$(mktemp)
+size_marker=$(mktemp)
+command rm -f "$size_marker"
+lsof() {
+    printf 'LSOF:%s\n' "$(test -f "$size_marker" && echo live || echo idle)" >> "$trace_file"
+    if [[ -f "$size_marker" ]]; then
+        printf 'n%s\n' "$database"
+        return 0
+    fi
+    return 1
+}
+run_with_timeout() { shift; "$@"; }
+get_path_size_kb() {
+    printf 'SIZE\n' >> "$trace_file"
+    printf 'sized\n' > "$size_marker"
+    printf '1\n'
+}
+oplog_enabled() { return 0; }
+rm() { printf 'UNEXPECTED_REMOVE:%s\n' "$*"; return 99; }
+remove_rc=0
+safe_remove "$database" true || remove_rc=$?
+printf 'RC=%s EXISTS=%s ORDER=%s\n' "$remove_rc" \
+    "$(test -f "$database" && echo yes || echo no)" "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file" "$size_marker"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1 EXISTS=yes ORDER=LSOF:idle,SIZE,LSOF:live,"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_REMOVE"* ]] || return 1
+}
+
+@test "safe_remove binds an incomplete download identity around the final lsof probe (#1471)" {
+    local partial="$HOME/Downloads/replaced.part"
+    mkdir -p "$(dirname "$partial")"
+    printf 'original\n' > "$partial"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" partial="$partial" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+probe_count_file=$(mktemp)
+rm_calls=$(mktemp)
+: > "$probe_count_file"
+: > "$rm_calls"
+lsof() {
+    printf 'call\n' >> "$probe_count_file"
+    probe_count=$(wc -l < "$probe_count_file" | tr -d ' ')
+    if [[ $probe_count -eq 2 ]]; then
+        mv "$partial" "$partial-original"
+        printf 'replacement\n' > "$partial"
+    fi
+    return 1
+}
+run_with_timeout() { shift; "$@"; }
+oplog_enabled() { return 1; }
+rm() { printf 'call\n' >> "$rm_calls"; return 99; }
+remove_rc=0
+safe_remove "$partial" true || remove_rc=$?
+printf 'RC=%s NEW=%s OLD=%s CALLS=%s RM_CALLS=%s\n' "$remove_rc" \
+    "$(cat "$partial")" "$(cat "$partial-original")" \
+    "$(wc -l < "$probe_count_file" | tr -d ' ')" \
+    "$(wc -l < "$rm_calls" | tr -d ' ')"
+command rm -f "$probe_count_file" "$rm_calls"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1 NEW=replacement OLD=original CALLS=2 RM_CALLS=0"* ]] || return 1
+}
+
+@test "safe_remove binds a SQLite identity around the final lsof probe (#1471)" {
+    local database="$TEST_DIR/replaced.sqlite"
+    printf 'original\n' > "$database"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" database="$database" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+probe_count_file=$(mktemp)
+rm_calls=$(mktemp)
+: > "$probe_count_file"
+: > "$rm_calls"
+lsof() {
+    printf 'call\n' >> "$probe_count_file"
+    probe_count=$(wc -l < "$probe_count_file" | tr -d ' ')
+    if [[ $probe_count -eq 2 ]]; then
+        mv "$database" "$database-original"
+        printf 'replacement\n' > "$database"
+    fi
+    return 1
+}
+run_with_timeout() { shift; "$@"; }
+oplog_enabled() { return 1; }
+rm() { printf 'call\n' >> "$rm_calls"; return 99; }
+remove_rc=0
+safe_remove "$database" true || remove_rc=$?
+printf 'RC=%s NEW=%s OLD=%s CALLS=%s RM_CALLS=%s\n' "$remove_rc" \
+    "$(cat "$database")" "$(cat "$database-original")" \
+    "$(wc -l < "$probe_count_file" | tr -d ' ')" \
+    "$(wc -l < "$rm_calls" | tr -d ' ')"
+command rm -f "$probe_count_file" "$rm_calls"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1 NEW=replacement OLD=original CALLS=2 RM_CALLS=0"* ]] || return 1
+}
+
+@test "safe_remove deletes conclusively idle exact-handle targets (#1471)" {
+    local partial="$HOME/Downloads/idle.crdownload"
+    local database="$TEST_DIR/idle.sqlite3"
+    mkdir -p "$(dirname "$partial")"
+    printf 'partial\n' > "$partial"
+    printf 'db\n' > "$database"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" partial="$partial" database="$database" \
+        /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
+lsof() { return 1; }
+run_with_timeout() { shift; "$@"; }
+oplog_enabled() { return 1; }
+safe_remove "$partial" true
+safe_remove "$database" true
+printf 'PARTIAL=%s DATABASE=%s\n' \
+    "$(test -e "$partial" && echo present || echo removed)" \
+    "$(test -e "$database" && echo present || echo removed)"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"PARTIAL=removed DATABASE=removed"* ]] || return 1
+}
+
 @test "validate_path_for_deletion refuses open descendants in app and group container caches (#1471)" {
     local app_cache="$HOME/Library/Containers/com.example.Editor/Data/Library/Caches/LiveState"
     local group_cache="$HOME/Library/Group Containers/TEAM.com.example.shared/Library/Caches/History"
@@ -424,6 +772,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() {
     [[ "$*" == *"+D $path"* ]] || return 2
     printf 'p901\nf5\nn%s/nested/open.jsonl\n' "$path"
@@ -447,15 +796,23 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return "$probe_rc"; }
 run_with_timeout() {
     [[ "$1" == "$MOLE_TIMEOUT_QUICK_DETECT_SEC" ]] || return 99
     shift
     "$@"
 }
-validate_path_for_deletion "$cache_dir"
+validation_rc=0
+validate_path_for_deletion "$cache_dir" || validation_rc=$?
+printf 'PROBE=%s RC=%s\n' "$probe_rc" "$validation_rc"
 EOF
-        [ "$status" -eq 1 ] || return 1
+        [ "$status" -eq 0 ] || return 1
+        if [[ "$probe_rc" -eq 124 ]]; then
+            [[ "$output" == *"PROBE=124 RC=124"* ]] || return 1
+        else
+            [[ "$output" == *"PROBE=2 RC=1"* ]] || return 1
+        fi
     done
 
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" cache_dir="$cache_dir" /bin/bash --noprofile --norc <<'EOF'
@@ -480,6 +837,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() {
     printf 'lsof: WARNING: cannot stat a descendant\n' >&2
     return 1
@@ -493,6 +851,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { printf 'UNEXPECTED_LSOF\n'; return 0; }
 run_with_timeout() { printf 'UNEXPECTED_TIMEOUT\n'; return 0; }
 _MOLE_CONTAINER_CACHE_PROBE_DEADLINE=$SECONDS
@@ -514,6 +873,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { printf 'call\n' >> "$lsof_trace"; return 1; }
 run_with_timeout() { shift; "$@"; }
 _MOLE_CONTAINER_CACHE_PROBE_DEADLINE=""
@@ -540,6 +900,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof_trace=$(mktemp)
 lsof() { printf 'call\n' >> "$lsof_trace"; return 130; }
 run_with_timeout() { shift; "$@"; }
@@ -573,6 +934,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() {
     mv "$cache_dir" "$cache_dir-old"
     mkdir -p "$cache_dir"
@@ -600,12 +962,88 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof() { return 1; }
 run_with_timeout() { shift; "$@"; }
 validate_path_for_deletion "$cache_dir"
 EOF
 
     [ "$status" -eq 0 ] || return 1
+}
+
+@test "container cache probe fails closed when lsof cannot see root processes (#1471)" {
+    local cache_dir="$HOME/Library/Group Containers/TEAM.com.example.shared/Library/Caches/InvisibleHelper"
+    mkdir -p "$cache_dir"
+    printf 'active\n' > "$cache_dir/events.jsonl"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" cache_dir="$cache_dir" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+_mole_user_cache_owner_process_state() { return 1; }
+trace_file=$(mktemp)
+lsof() {
+    case " $* " in
+        *" -p 1 "*)
+            printf 'visibility\n' >> "$trace_file"
+            return 1
+            ;;
+        *)
+            printf 'target\n' >> "$trace_file"
+            return 1
+            ;;
+    esac
+}
+run_with_timeout() { shift; "$@"; }
+probe_rc=0
+validate_path_for_deletion "$cache_dir" || probe_rc=$?
+printf 'RC=%s TRACE=%s\n' "$probe_rc" "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=1 TRACE=visibility,"* ]] || return 1
+}
+
+@test "container cache probe uses only an already-authorized sudo lsof fallback (#1471)" {
+    local cache_dir="$HOME/Library/Group Containers/TEAM.com.example.shared/Library/Caches/PrivilegedHelper"
+    mkdir -p "$cache_dir"
+    printf 'idle\n' > "$cache_dir/state.json"
+
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" cache_dir="$cache_dir" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+MOLE_TEST_MODE=0
+MOLE_TEST_NO_AUTH=0
+_mole_user_cache_owner_process_state() { return 1; }
+trace_file=$(mktemp)
+lsof() {
+    printf 'direct:%s\n' "$*" >> "$trace_file"
+    return 1
+}
+sudo() {
+    printf 'sudo:%s\n' "$*" >> "$trace_file"
+    case " $* " in
+        *" -p 1 "*)
+            printf 'p1\nu0\n'
+            return 0
+            ;;
+        *" +D $cache_dir "*) return 1 ;;
+        *) return 2 ;;
+    esac
+}
+run_with_timeout() { shift; "$@"; }
+probe_rc=0
+validate_path_for_deletion "$cache_dir" || probe_rc=$?
+printf 'RC=%s MODE=%s TRACE=%s\n' "$probe_rc" "$_MOLE_COMPLETE_LSOF_MODE" \
+    "$(tr '\n' ',' < "$trace_file")"
+command rm -f "$trace_file"
+EOF
+
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"RC=0 MODE=sudo"* ]] || return 1
+    [[ "$output" == *"direct:-F pu -p 1"* ]] || return 1
+    [[ "$output" == *"sudo:-n lsof -F pu -p 1"* ]] || return 1
+    [[ "$output" == *"sudo:-n lsof -F pfn +D $cache_dir"* ]] || return 1
 }
 
 @test "container cache probe budget stops later recursive lsof calls fail closed (#1471)" {
@@ -616,6 +1054,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 timeout_calls=$(mktemp)
 lsof_calls=$(mktemp)
 _mole_timeout_with_deadline() {
@@ -658,6 +1097,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 validate_path_for_deletion "$cache_dir"
 EOF
     exec 9>&-
@@ -674,6 +1114,7 @@ EOF
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 _mole_user_cache_owner_process_state() { return 1; }
+_MOLE_COMPLETE_LSOF_MODE=direct
 lsof_calls=$(mktemp)
 rm_calls=$(mktemp)
 size_marker=$(mktemp)
@@ -2596,6 +3037,7 @@ EOF
 	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" TARGET_FILE="$target_file" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
+_MOLE_COMPLETE_LSOF_MODE=direct
 owner_calls=$(mktemp)
 rm_calls=$(mktemp)
 owner_live="$TARGET_FILE.owner-live"
