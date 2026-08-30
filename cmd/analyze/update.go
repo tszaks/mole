@@ -489,8 +489,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case localSnapshotMsg:
-		if msg.probeID == m.snapshotProbeID && msg.err == nil {
-			m.localSnapshotCount = msg.count
+		if msg.probeID == m.snapshotProbeID {
+			if msg.err == nil {
+				m.localSnapshotCount = msg.count
+				m.localSnapshotFresh = true
+			} else {
+				m.localSnapshotFresh = false
+			}
 		}
 		return m, nil
 	case tickMsg:
@@ -1126,6 +1131,7 @@ func (m *model) switchToOverviewMode() tea.Cmd {
 	m.selected = 0
 	m.offset = 0
 	m.hydrateOverviewEntries()
+	m.snapshotProbeID++
 	cmd := m.scheduleOverviewScans()
 	if cmd == nil {
 		m.status = "Ready"

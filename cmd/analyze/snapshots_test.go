@@ -98,10 +98,17 @@ func TestOverviewStoresSuccessfulLocalSnapshotCount(t *testing.T) {
 	if got.localSnapshotCount != 3 {
 		t.Fatalf("snapshot count = %d, want 3", got.localSnapshotCount)
 	}
+	if !got.localSnapshotFresh {
+		t.Fatal("successful snapshot probe was not marked fresh")
+	}
 
 	updated, _ = got.Update(localSnapshotMsg{count: 9, err: errors.New("bad output")})
-	if got := updated.(model).localSnapshotCount; got != 3 {
-		t.Fatalf("failed refresh changed snapshot count to %d, want 3", got)
+	failed := updated.(model)
+	if failed.localSnapshotCount != 3 {
+		t.Fatalf("failed refresh changed snapshot count to %d, want 3", failed.localSnapshotCount)
+	}
+	if failed.localSnapshotFresh {
+		t.Fatal("failed refresh left the previous snapshot count marked fresh")
 	}
 }
 
@@ -183,12 +190,40 @@ func TestEnteringOverviewProbesLocalSnapshots(t *testing.T) {
 	}
 }
 
+func TestSwitchingToOverviewAdvancesSnapshotProbeGeneration(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	m := newModel(t.TempDir(), false)
+	m.snapshotRunner = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("Snapshot dates:\n2026-08-29-101500\n"), nil
+	}
+	firstMsg := localSnapshotMsgFromBatch(t, m.switchToOverviewMode())
+	m.isOverview = false
+	m.path = t.TempDir()
+	secondMsg := localSnapshotMsgFromBatch(t, m.switchToOverviewMode())
+
+	if firstMsg.probeID == secondMsg.probeID {
+		t.Fatalf("switching to overview reused snapshot probe ID %d", secondMsg.probeID)
+	}
+	staleModel, _ := m.Update(localSnapshotMsg{probeID: firstMsg.probeID, count: 9})
+	if got := staleModel.(model).localSnapshotCount; got != 0 {
+		t.Fatalf("older overview probe changed snapshot count to %d, want 0", got)
+	}
+	currentModel, _ := staleModel.(model).Update(localSnapshotMsg{probeID: secondMsg.probeID, count: 1})
+	if got := currentModel.(model).localSnapshotCount; got != 1 {
+		t.Fatalf("current overview probe stored snapshot count %d, want 1", got)
+	}
+}
+
 func localSnapshotMsgFromBatch(t *testing.T, cmd tea.Cmd) localSnapshotMsg {
 	t.Helper()
 	if cmd == nil {
 		t.Fatalf("overview refresh command = nil, want a command batch")
 	}
 	msg := cmd()
+	if snapshotMsg, ok := msg.(localSnapshotMsg); ok {
+		return snapshotMsg
+	}
 	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
 		t.Fatalf("overview refresh command returned %T, want tea.BatchMsg", msg)
@@ -210,6 +245,7 @@ func TestOverviewViewExplainsLocalSnapshotOnlySpace(t *testing.T) {
 		path:               "/",
 		isOverview:         true,
 		localSnapshotCount: 2,
+		localSnapshotFresh: true,
 		entries:            []dirEntry{{Name: "Home", Path: "/tmp/home", Size: 1, IsDir: true}},
 	}
 
@@ -226,12 +262,27 @@ func TestOverviewViewUsesSingularSnapshotLabel(t *testing.T) {
 		path:               "/",
 		isOverview:         true,
 		localSnapshotCount: 1,
+		localSnapshotFresh: true,
 		entries:            []dirEntry{{Name: "Home", Path: "/tmp/home", Size: 1, IsDir: true}},
 	}
 
 	view := m.View()
 	if !strings.Contains(view, "1 Time Machine local snapshot") || strings.Contains(view, "1 Time Machine local snapshots") {
 		t.Fatalf("expected singular snapshot notice, got:\n%s", view)
+	}
+}
+
+func TestOverviewViewMarksSnapshotCountStaleAfterProbeFailure(t *testing.T) {
+	m := model{
+		path:               "/",
+		isOverview:         true,
+		localSnapshotCount: 2,
+		localSnapshotFresh: false,
+		entries:            []dirEntry{{Name: "Home", Path: "/tmp/home", Size: 1, IsDir: true}},
+	}
+
+	if view := m.View(); !strings.Contains(view, "last successful check") {
+		t.Fatalf("expected stale snapshot notice, got:\n%s", view)
 	}
 }
 
