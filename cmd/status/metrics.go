@@ -450,6 +450,9 @@ func (c *Collector) collectFull() (MetricsSnapshot, error) {
 	mergeErr := collectConcurrently(tasks...)
 
 	snapshot := c.snapshotFromMetrics(now, hostInfo, collected, true)
+	if !collected.hasProcesses && c.hasProcessData {
+		c.processEnrichment.apply(&snapshot)
+	}
 	if collected.hasProcesses {
 		c.cacheProcessEnrichment(snapshot)
 	}

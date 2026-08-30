@@ -215,3 +215,45 @@ func TestCachedProcessSummaryKeepsOwnTimestampAndIsMarkedStale(t *testing.T) {
 		t.Fatalf("cached process summary was not marked stale: %s", payload)
 	}
 }
+
+func TestCollectFullKeepsCachedProcessSummaryWhenProcessCollectionFails(t *testing.T) {
+	origCollectProcesses := collectProcessesFunc
+	t.Cleanup(func() {
+		collectProcessesFunc = origCollectProcesses
+	})
+	collectProcessesFunc = func() (processSample, error) {
+		return processSample{}, errors.New("transient process collection failure")
+	}
+
+	collector := NewCollector(ProcessWatchOptions{})
+	sampledAt := time.Date(2026, time.August, 29, 14, 0, 0, 0, time.UTC)
+	count := 2
+	complete := true
+	collector.cacheProcessEnrichment(MetricsSnapshot{
+		CollectedAt: sampledAt,
+		TopProcesses: []ProcessInfo{
+			{PID: 42, Name: "cached-process", CPU: 12},
+		},
+		ZombieCount: &count,
+		ZombieParents: []ZombieParent{
+			{PID: 42, Name: "cached-process", Count: 2},
+		},
+		ZombieParentsComplete: &complete,
+	})
+
+	snapshot, err := collector.Collect()
+	if err == nil {
+		t.Fatal("Collect() error = nil, want process collection failure")
+	}
+	if len(snapshot.TopProcesses) != 1 || snapshot.TopProcesses[0].Name != "cached-process" {
+		t.Fatalf("cached top processes were not preserved: %#v", snapshot.TopProcesses)
+	}
+	if snapshot.ZombieCount == nil || *snapshot.ZombieCount != 2 ||
+		len(snapshot.ZombieParents) != 1 || snapshot.ZombieParents[0].PID != 42 {
+		t.Fatalf("cached zombie summary was not preserved: count=%v parents=%#v", snapshot.ZombieCount, snapshot.ZombieParents)
+	}
+	if snapshot.ProcessCollectedAt == nil || !snapshot.ProcessCollectedAt.Equal(sampledAt) ||
+		snapshot.ProcessStale == nil || !*snapshot.ProcessStale {
+		t.Fatalf("cached process freshness = collected_at %v stale %v", snapshot.ProcessCollectedAt, snapshot.ProcessStale)
+	}
+}
