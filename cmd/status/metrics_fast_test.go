@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/disk"
 	gopsutilnet "github.com/shirou/gopsutil/v4/net"
@@ -102,8 +105,9 @@ func TestCollectProcessesKeepsLiveProcessesWithCachedEnrichment(t *testing.T) {
 	cachedZombieCount := 7
 	cachedParentsComplete := true
 	cached := MetricsSnapshot{
-		Hardware:  HardwareInfo{Model: "MacBook Pro"},
-		TrashSize: 99,
+		CollectedAt: time.Now(),
+		Hardware:    HardwareInfo{Model: "MacBook Pro"},
+		TrashSize:   99,
 		TopProcesses: []ProcessInfo{
 			{PID: 100, Name: "old-process", CPU: 10},
 		},
@@ -139,6 +143,10 @@ func TestCollectProcessesKeepsLiveProcessesWithCachedEnrichment(t *testing.T) {
 	if snapshot.ZombieParentsComplete == nil || !*snapshot.ZombieParentsComplete {
 		t.Fatalf("expected complete live parent attribution, got %v", snapshot.ZombieParentsComplete)
 	}
+	if snapshot.ProcessCollectedAt == nil || snapshot.ProcessStale == nil || *snapshot.ProcessStale {
+		t.Fatalf("live process freshness = collected_at %v stale %v", snapshot.ProcessCollectedAt, snapshot.ProcessStale)
+	}
+	processCollectedAt := *snapshot.ProcessCollectedAt
 
 	fastSnapshot, err := collector.CollectFast()
 	if err != nil {
@@ -148,6 +156,10 @@ func TestCollectProcessesKeepsLiveProcessesWithCachedEnrichment(t *testing.T) {
 		len(fastSnapshot.ZombieParents) != 1 || fastSnapshot.ZombieParents[0].PID != 200 {
 		t.Fatalf("fast refresh restored stale zombies: count=%v parents=%#v", fastSnapshot.ZombieCount, fastSnapshot.ZombieParents)
 	}
+	if fastSnapshot.ProcessCollectedAt == nil || !fastSnapshot.ProcessCollectedAt.Equal(processCollectedAt) ||
+		fastSnapshot.ProcessStale == nil || !*fastSnapshot.ProcessStale {
+		t.Fatalf("cached process freshness = collected_at %v stale %v", fastSnapshot.ProcessCollectedAt, fastSnapshot.ProcessStale)
+	}
 }
 
 func TestSlowEnrichmentDoesNotReplaceLatestProcessSummary(t *testing.T) {
@@ -155,6 +167,7 @@ func TestSlowEnrichmentDoesNotReplaceLatestProcessSummary(t *testing.T) {
 	measured := 3
 	complete := true
 	collector.cacheProcessEnrichment(MetricsSnapshot{
+		CollectedAt: time.Now(),
 		ZombieCount: &measured,
 		ZombieParents: []ZombieParent{
 			{PID: 42, Name: "Chrome", Count: 3},
@@ -174,5 +187,31 @@ func TestSlowEnrichmentDoesNotReplaceLatestProcessSummary(t *testing.T) {
 	}
 	if snapshot.ZombieParentsComplete == nil || !*snapshot.ZombieParentsComplete {
 		t.Fatalf("latest parent completeness was not preserved: %v", snapshot.ZombieParentsComplete)
+	}
+}
+
+func TestCachedProcessSummaryKeepsOwnTimestampAndIsMarkedStale(t *testing.T) {
+	collector := NewCollector(ProcessWatchOptions{})
+	sampledAt := time.Date(2026, time.August, 29, 12, 30, 0, 0, time.UTC)
+	count := 2
+	complete := true
+	collector.cacheProcessEnrichment(MetricsSnapshot{
+		CollectedAt:           sampledAt,
+		ZombieCount:           &count,
+		ZombieParentsComplete: &complete,
+	})
+
+	next := MetricsSnapshot{CollectedAt: sampledAt.Add(5 * time.Minute)}
+	collector.applyEnrichment(&next, false)
+	payload, err := json.Marshal(next)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	wantTime, _ := json.Marshal(sampledAt)
+	if !strings.Contains(string(payload), `"process_collected_at":`+string(wantTime)) {
+		t.Fatalf("cached process timestamp missing from snapshot: %s", payload)
+	}
+	if !strings.Contains(string(payload), `"process_stale":true`) {
+		t.Fatalf("cached process summary was not marked stale: %s", payload)
 	}
 }

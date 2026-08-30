@@ -231,6 +231,7 @@ func TestCollectorAppliesCachedEnrichmentToFastSnapshot(t *testing.T) {
 	zeroZombies := 0
 	parentsComplete := true
 	previous := MetricsSnapshot{
+		CollectedAt: time.Now(),
 		CPU:         CPUStatus{PCoreCount: 8, ECoreCount: 4},
 		Memory:      MemoryStatus{Cached: 512, Pressure: "warn"},
 		Hardware:    HardwareInfo{Model: "MacBook Pro", CPUModel: "M3", OSVersion: "macOS 15", RefreshRate: "120Hz"},
@@ -379,6 +380,7 @@ func TestCollectorKeepsLiveProcessDataWhenApplyingEnrichment(t *testing.T) {
 	zeroZombies := 0
 	parentsComplete := true
 	collector.cacheProcessEnrichment(MetricsSnapshot{
+		CollectedAt:           time.Now(),
 		TopProcesses:          []ProcessInfo{{PID: 1, Name: "old", CPU: 10}},
 		ZombieCount:           &zeroZombies,
 		ZombieParentsComplete: &parentsComplete,
@@ -430,6 +432,8 @@ func TestMetricsSnapshotFieldsHaveCollectionClassifications(t *testing.T) {
 		"Sensors":               "enrichment",
 		"Bluetooth":             "enrichment",
 		"TopProcesses":          "live-or-enrichment",
+		"ProcessCollectedAt":    "live-or-enrichment",
+		"ProcessStale":          "live-or-enrichment",
 		"ZombieCount":           "live-or-enrichment",
 		"ZombieParents":         "live-or-enrichment",
 		"ZombieParentsComplete": "live-or-enrichment",

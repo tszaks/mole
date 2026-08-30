@@ -404,8 +404,12 @@ func TestRenderProcessAlertBar(t *testing.T) {
 func TestMetricsSnapshotJSONIncludesProcessWatch(t *testing.T) {
 	zombieCount := 2
 	zombieParentsComplete := true
+	processCollectedAt := time.Date(2026, time.August, 29, 12, 30, 0, 0, time.UTC)
+	processStale := false
 	snapshot := MetricsSnapshot{
-		ZombieCount: &zombieCount,
+		ProcessCollectedAt: &processCollectedAt,
+		ProcessStale:       &processStale,
+		ZombieCount:        &zombieCount,
 		ZombieParents: []ZombieParent{{
 			PID:   42,
 			Name:  "Chrome",
@@ -438,6 +442,10 @@ func TestMetricsSnapshotJSONIncludesProcessWatch(t *testing.T) {
 	if !strings.Contains(out, "\"process_alerts\"") {
 		t.Fatalf("missing process_alerts in json: %s", out)
 	}
+	if !strings.Contains(out, "\"process_collected_at\":\"2026-08-29T12:30:00Z\"") ||
+		!strings.Contains(out, "\"process_stale\":false") {
+		t.Fatalf("missing process freshness in json: %s", out)
+	}
 	if !strings.Contains(out, "\"zombie_count\":2") || !strings.Contains(out, "\"zombie_parents\"") ||
 		!strings.Contains(out, "\"zombie_parents_complete\":true") {
 		t.Fatalf("missing zombie summary in json: %s", out)
@@ -450,18 +458,28 @@ func TestMetricsSnapshotJSONDistinguishesUnmeasuredFromZeroZombies(t *testing.T)
 		t.Fatalf("json.Marshal(unmeasured) error = %v", err)
 	}
 	if strings.Contains(string(unmeasured), "\"zombie_count\"") ||
-		strings.Contains(string(unmeasured), "\"zombie_parents_complete\"") {
+		strings.Contains(string(unmeasured), "\"zombie_parents_complete\"") ||
+		strings.Contains(string(unmeasured), "\"process_collected_at\"") ||
+		strings.Contains(string(unmeasured), "\"process_stale\"") {
 		t.Fatalf("unmeasured snapshot should omit zombie measurements: %s", unmeasured)
 	}
 
 	zero := 0
 	complete := true
-	measured, err := json.Marshal(MetricsSnapshot{ZombieCount: &zero, ZombieParentsComplete: &complete})
+	processCollectedAt := time.Date(2026, time.August, 29, 12, 30, 0, 0, time.UTC)
+	processStale := false
+	measured, err := json.Marshal(MetricsSnapshot{
+		ProcessCollectedAt:    &processCollectedAt,
+		ProcessStale:          &processStale,
+		ZombieCount:           &zero,
+		ZombieParentsComplete: &complete,
+	})
 	if err != nil {
 		t.Fatalf("json.Marshal(measured) error = %v", err)
 	}
 	if !strings.Contains(string(measured), "\"zombie_count\":0") ||
-		!strings.Contains(string(measured), "\"zombie_parents_complete\":true") {
+		!strings.Contains(string(measured), "\"zombie_parents_complete\":true") ||
+		!strings.Contains(string(measured), "\"process_stale\":false") {
 		t.Fatalf("measured zero snapshot should include zombie_count: %s", measured)
 	}
 }

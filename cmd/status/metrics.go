@@ -85,6 +85,8 @@ type MetricsSnapshot struct {
 	Sensors               []SensorReading    `json:"sensors"`
 	Bluetooth             []BluetoothDevice  `json:"bluetooth"`
 	TopProcesses          []ProcessInfo      `json:"top_processes"`
+	ProcessCollectedAt    *time.Time         `json:"process_collected_at,omitempty"`
+	ProcessStale          *bool              `json:"process_stale,omitempty"`
 	ZombieCount           *int               `json:"zombie_count,omitempty"`
 	ZombieParents         []ZombieParent     `json:"zombie_parents"`
 	ZombieParentsComplete *bool              `json:"zombie_parents_complete,omitempty"`
@@ -303,6 +305,7 @@ type snapshotEnrichment struct {
 
 type processEnrichment struct {
 	topProcesses          []ProcessInfo
+	collectedAt           time.Time
 	zombieCount           int
 	zombieParents         []ZombieParent
 	zombieParentsComplete bool
@@ -487,11 +490,17 @@ func (c *Collector) snapshotFromMetrics(now time.Time, hostInfo *host.InfoStat, 
 		hostInfo.Uptime,
 	)
 	var topProcs []ProcessInfo
+	var processCollectedAt *time.Time
+	var processStale *bool
 	var zombieCount *int
 	var zombieParents []ZombieParent
 	var zombieParentsComplete *bool
 	if collected.hasProcesses {
 		topProcs = topProcesses(collected.allProcs, 5)
+		processTime := now
+		stale := false
+		processCollectedAt = &processTime
+		processStale = &stale
 		count, parents, complete := summarizeZombies(
 			collected.allProcs,
 			zombieParentLimit,
@@ -541,6 +550,8 @@ func (c *Collector) snapshotFromMetrics(now time.Time, hostInfo *host.InfoStat, 
 		Sensors:               collected.sensorStats,
 		Bluetooth:             collected.btStats,
 		TopProcesses:          topProcs,
+		ProcessCollectedAt:    processCollectedAt,
+		ProcessStale:          processStale,
 		ZombieCount:           zombieCount,
 		ZombieParents:         zombieParents,
 		ZombieParentsComplete: zombieParentsComplete,
@@ -582,12 +593,20 @@ func (c *Collector) cacheProcessEnrichment(snapshot MetricsSnapshot) {
 	if snapshot.ZombieCount == nil {
 		return
 	}
+	collectedAt := snapshot.CollectedAt
+	if snapshot.ProcessCollectedAt != nil {
+		collectedAt = *snapshot.ProcessCollectedAt
+	}
+	if collectedAt.IsZero() {
+		return
+	}
 	complete := false
 	if snapshot.ZombieParentsComplete != nil {
 		complete = *snapshot.ZombieParentsComplete
 	}
 	c.processEnrichment = processEnrichment{
 		topProcesses:          slices.Clone(snapshot.TopProcesses),
+		collectedAt:           collectedAt,
 		zombieCount:           *snapshot.ZombieCount,
 		zombieParents:         slices.Clone(snapshot.ZombieParents),
 		zombieParentsComplete: complete,
@@ -643,6 +662,10 @@ func (e snapshotEnrichment) apply(snapshot *MetricsSnapshot) {
 
 func (e processEnrichment) apply(snapshot *MetricsSnapshot) {
 	snapshot.TopProcesses = slices.Clone(e.topProcesses)
+	collectedAt := e.collectedAt
+	stale := true
+	snapshot.ProcessCollectedAt = &collectedAt
+	snapshot.ProcessStale = &stale
 	count := e.zombieCount
 	complete := e.zombieParentsComplete
 	snapshot.ZombieCount = &count
