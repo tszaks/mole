@@ -258,6 +258,11 @@ append_dry_run_cleanup_target() {
 # prepared ledger retain the legacy in-memory duplicate check.
 record_dry_run_cleanup_target() {
     local path="$1"
+    local pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ "${MOLE_CURRENT_COMMAND:-}" == "clean" &&
+        ("$pending_clean_cancel" -eq 124 || "$pending_clean_cancel" -ge 128) ]]; then
+        return "$pending_clean_cancel"
+    fi
     if [[ "${_MOLE_DRY_RUN_TARGET_PREVALIDATED:-false}" != "true" ]]; then
         if declare -f should_protect_path > /dev/null 2>&1 && should_protect_path "$path" 2> /dev/null; then
             return 1
@@ -275,7 +280,10 @@ record_dry_run_cleanup_target() {
             if [[ $live_cache_state -eq 0 || $live_cache_state -eq 2 ]]; then
                 return 1
             fi
-            [[ $live_cache_state -ge 128 ]] && return "$live_cache_state"
+            if [[ $live_cache_state -eq 124 || $live_cache_state -ge 128 ]]; then
+                _mole_record_clean_cancellation "$live_cache_state"
+                return "$live_cache_state"
+            fi
         fi
         if declare -f _mole_is_sqlite_database_path > /dev/null 2>&1 &&
             _mole_is_sqlite_database_path "$path" &&
@@ -285,7 +293,10 @@ record_dry_run_cleanup_target() {
             if [[ $sqlite_state -eq 0 || $sqlite_state -eq 2 ]]; then
                 return 1
             fi
-            [[ $sqlite_state -ge 128 ]] && return "$sqlite_state"
+            if [[ $sqlite_state -eq 124 || $sqlite_state -ge 128 ]]; then
+                _mole_record_clean_cancellation "$sqlite_state"
+                return "$sqlite_state"
+            fi
         fi
     fi
 
@@ -1716,9 +1727,8 @@ perform_cleanup() {
                 _perf_cloud_office_start
             if [[ $cloud_office_rc -ne 0 ]]; then
                 local ret=$cloud_office_rc
-                if [[ $ret -eq 124 ]]; then
-                    log_warning "Cloud & Office cleanup timed out after 5 minutes, skipping remaining items"
-                elif [[ $ret -ge 128 ]]; then
+                if [[ $ret -eq 124 || $ret -ge 128 ]]; then
+                    _mole_record_clean_cancellation "$ret"
                     return "$ret"
                 else
                     log_warning "Cloud & Office cleanup failed with exit code $ret"
@@ -1980,8 +1990,28 @@ run_with_shell_timeout() {
 
 # shellcheck disable=SC2329  # Invoked indirectly via run_with_timeout fallback.
 run_cloud_and_office_cleanup() {
-    clean_cloud_storage
-    clean_office_applications
+    local cleanup_rc=0
+    local pending_clean_cancel=0
+
+    clean_cloud_storage || cleanup_rc=$?
+    pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ $cleanup_rc -eq 124 || $cleanup_rc -ge 128 ]]; then
+        return "$cleanup_rc"
+    fi
+    if [[ $pending_clean_cancel -eq 124 || $pending_clean_cancel -ge 128 ]]; then
+        return "$pending_clean_cancel"
+    fi
+
+    cleanup_rc=0
+    clean_office_applications || cleanup_rc=$?
+    pending_clean_cancel="${MOLE_CLEAN_CANCEL_STATUS:-0}"
+    if [[ $cleanup_rc -eq 124 || $cleanup_rc -ge 128 ]]; then
+        return "$cleanup_rc"
+    fi
+    if [[ $pending_clean_cancel -eq 124 || $pending_clean_cancel -ge 128 ]]; then
+        return "$pending_clean_cancel"
+    fi
+    return 0
 }
 
 main() {

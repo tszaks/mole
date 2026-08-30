@@ -1100,6 +1100,65 @@ EOF
     [[ "$output" == *"cache.bin  # size unknown"* ]] || return 1
 }
 
+@test "dry-run preview propagates live-cache and SQLite safety timeouts" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+        bash --noprofile --norc << 'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/bin/clean.sh"
+
+DRY_RUN=true
+MOLE_CURRENT_COMMAND=clean
+CLEAN_PREVIEW_LEDGER_FILE=""
+should_protect_path() { return 1; }
+is_path_whitelisted() { return 1; }
+holds_compiled_model_cache() { return 1; }
+register_dry_run_cleanup_target() { printf 'UNEXPECTED_REGISTER:%s\n' "$1"; }
+append_dry_run_cleanup_target() { printf 'UNEXPECTED_APPEND:%s\n' "$1"; }
+_mole_should_refuse_live_user_cache_path() {
+    printf 'PROBE:live-cache:%s\n' "$probe_mode"
+    [[ "$probe_mode" == "live-cache" && "$1" == "$HOME/live-cache.db" ]] && return 124
+    return 1
+}
+_mole_is_sqlite_database_path() {
+    [[ "$probe_mode" == "sqlite" ]]
+}
+_mole_sqlite_database_in_use() {
+    printf 'PROBE:sqlite:%s\n' "$probe_mode"
+    [[ "$1" == "$HOME/sqlite.db" ]] && return 124
+    return 1
+}
+
+for probe_mode in live-cache sqlite; do
+    candidate="$HOME/$probe_mode.db"
+    touch "$candidate"
+    MOLE_CLEAN_CANCEL_STATUS=0
+    rc=0
+    record_dry_run_cleanup_target "$candidate" 1 1 true || rc=$?
+    printf 'RESULT:%s:rc=%s:cancel=%s\n' \
+        "$probe_mode" "$rc" "$MOLE_CLEAN_CANCEL_STATUS"
+
+    later_candidate="$HOME/$probe_mode-later.db"
+    touch "$later_candidate"
+    later_rc=0
+    record_dry_run_cleanup_target "$later_candidate" 1 1 true || later_rc=$?
+    printf 'LATER:%s:rc=%s:cancel=%s\n' \
+        "$probe_mode" "$later_rc" "$MOLE_CLEAN_CANCEL_STATUS"
+done
+EOF
+
+    [ "$status" -eq 0 ] || {
+        echo "$output"
+        return 1
+    }
+    [[ "$output" == *"PROBE:live-cache:live-cache"* ]] || return 1
+    [[ "$output" == *"PROBE:sqlite:sqlite"* ]] || return 1
+    [[ "$output" == *"RESULT:live-cache:rc=124:cancel=124"* ]] || return 1
+    [[ "$output" == *"RESULT:sqlite:rc=124:cancel=124"* ]] || return 1
+    [[ "$output" == *"LATER:live-cache:rc=124:cancel=124"* ]] || return 1
+    [[ "$output" == *"LATER:sqlite:rc=124:cancel=124"* ]] || return 1
+    [[ "$output" != *"UNEXPECTED_"* ]]
+}
+
 @test "mo clean --dry-run never previews a live SQLite database family (#1390)" {
     local test_home
     test_home="$(mktemp -d "${BATS_TEST_TMPDIR}/clean-1390-home.XXXXXX")"
