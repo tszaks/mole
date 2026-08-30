@@ -57,3 +57,19 @@ Performance work needs two receipts:
 2. an end-to-end command timing under the same mode and machine conditions.
 
 Do not optimize by caching directory sizes: APFS does not propagate descendant mtime to a parent. Optimize absent targets, duplicated owner-tool launches, report-only sizing, and wrong-scope scans. For destructive work, keep final owner probes and identity rebinding even if they are the expensive part.
+
+## 16. Async generations and sample freshness are one contract
+
+An asynchronous result can be valid when it is produced and stale when it arrives. Tag every request with a monotonically changing generation or probe ID, carry it in the result message, and apply the result only to the matching generation. Increment the generation when a refresh or navigation transition creates a new request, not merely when a view repaints.
+
+Test the lifecycle in both directions. An older result must not overwrite a newer refresh. A matching result that arrives while the user is in drill-down may still be worth retaining, and returning to Overview must schedule a new probe rather than displaying the old result as freshly measured. This is why an async Time Machine count needs refresh, leave, return, and out-of-order cases rather than one happy-path command test.
+
+Cached metrics use a parallel contract. Treat related fields as one atomic sample:
+
+```text
+value group + collected_at + stale + completeness
+```
+
+On a transient refresh failure, return the error but keep the last successful group visible with its original collection time and `stale=true`. Do not combine old values with the new refresh time, clear only half the group, or turn unmeasured data into a measured zero. A later successful sample replaces the whole group and resets stale to false. Status process rows, zombie count, parent attribution, and parent completeness are one such group.
+
+Every serializer and fast/full/watch path must preserve the same distinction among fresh data, stale last-known-good data, measured zero, and never measured. A cache test is incomplete if it checks only the first collection and not the next frame or failed refresh that consumes it.

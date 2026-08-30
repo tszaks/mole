@@ -56,6 +56,20 @@ macOS command output is localized, drifts between releases, and can print errors
 
 Use `command grep` when flag behavior matters, because the interactive environment may alias it.
 
+## 15. Cancellation is local unless orchestration makes it sticky
+
+For a destructive command, timeout `124` and signal-derived statuses `>=128` cancel the remaining command, not merely the current helper. Carry that decision through every boundary:
+
+- A best-effort loop must check a pending cancellation before probing or registering the next candidate.
+- A helper that reports ordinary misses as success must return a pending cancellation before starting the next family.
+- Command substitution, subshells, and background workers do not mutate the parent's shell variables. Return the status, or use an explicit parent-readable channel, then record it again in the parent.
+- A parallel coordinator stops and reaps peer workers, preserves cancellation over ordinary failures, and prevents the next rendered section from starting.
+- Dry-run uses the same cancellation contract as real cleanup. A preview ledger is still downstream work and must not continue after safety evidence becomes unavailable.
+
+The regression shape matters. Make the first candidate return 124 or 130 and make the second candidate succeed if reached. Assert the exact top-level status plus the absence of a positive trace from the second probe, preview registration, sink, and later section. If both candidates independently time out, the test cannot prove cancellation was sticky.
+
+Do not hide a cancelled safety probe behind `|| true`, a warning plus `return 0`, or a worker-local exported variable. Those shapes turn a global stop into a local skip.
+
 ## Focused pitfalls
 
 - **`BASH_SOURCE` / `$0` change meaning when a function moves files**: they name the file the code lives in, so copy-paste extraction is not behavior-preserving. `mole` captures `MOLE_ENTRY_SCRIPT="${BASH_SOURCE[0]}"` before sourcing anything, and update code reads that stable entrypoint. Before extracting a function, grep it for `BASH_SOURCE`, `$0`, and `FUNCNAME`. Regression coverage lives in `tests/update.bats`.
@@ -74,3 +88,5 @@ Use `command grep` when flag behavior matters, because the interactive environme
 - **BSD grep has no GNU null-output `-Z` contract**: on stock macOS it means `--decompress`. Enumerate files with `find ... -print0`, then probe each file with `grep -qF`.
 - **PlistBuddy reports missing-file creation on stdout**: redirect both stdout and stderr when creating plist fixtures so diagnostic prose does not pollute Bats `$output`.
 - **macOS 14 Bash can fire errexit through an if-guarded exported mock**: a failing exported `sudo` function inside an `if fn; then` path may terminate a `set -e` script on that runner while passing locally. Around the first sudo probe, disable errexit only for the probe and restore it before validation-gate returns. CI-only failures must print exit status, output, and a mock call trace rather than a bare return-code assertion.
+- **Expected capability absence is not probe failure**: keep `ready`, `not applicable`, and `misconfigured or unknown` distinct. A Mac with standalone Command Line Tools and no Xcode app has no simulator surface, so missing `simctl` is a quiet skip; an explicit invalid `DEVELOPER_DIR` remains actionable. Tests prove the not-applicable path does not invoke the unavailable owner command or emit warning activity.
+- **Fixed-width prefixes may have a free-form remainder**: after validating numeric and enum columns, join the remaining fields instead of assigning semantic meaning to one whitespace token. Darwin process `comm` values can contain spaces; trimming them to the first word destroyed zombie-parent attribution for helper apps. Keep primary and fallback formats separate when their fields carry different semantics.

@@ -69,3 +69,27 @@ For each destructive family, fill this matrix from live code:
 Container, SQLite, helper-app, and privileged paths require the final re-probe and identity rebind immediately before the sink. A discovery snapshot is not an ownership lease.
 
 Signals and cancellations are part of the evidence chain. Preserve statuses `>=128`, keep cancellation sticky across best-effort callers, and prevent any later sink from running after cancellation.
+
+## 13. A mutation target is accepted as a discovery container
+
+Recursive discovery must not descend through the artifact it is meant to offer. If `node_modules`, `vendor`, or `Pods` is accepted as a project container, package-internal manifests become false project roots, the scan starts below the real target, and nested `dist` or `build` directories reach the delete list. The parent artifact is never available for nested-target collapsing, so removing the children can leave the package manager believing the incomplete tree is installed (#1459).
+
+Treat the target list itself as the excluded-container namespace instead of maintaining a second hand-written denylist. Review every scan-root entry point separately: maintainer defaults, user-configured roots, automatic discovery, and the consumer of discovery may intentionally have different trust contracts. Mole's explicit `purge_paths` is the escape hatch for a real project whose basename happens to match a target; do not weaken automatic discovery to support it.
+
+A regression needs a package-shaped descendant whose internal artifact would be offered before the fix. Assert that the parent container is not entered and that the explicit configured-root path remains reachable.
+
+## 14. Owner metadata is not automatically deletion authority
+
+A journal records events, a registry records one current view, and a cache records a previous observation. None is a complete deletion inventory unless the owner documents that contract and coordinates concurrent mutation.
+
+The editor-extension cycle showed both halves of the trap. `.obsolete` is a removal journal, so its emptiness does not prove every on-disk extension is live. But reconciling the directory against profile registries was still unsafe: a union keep-set can miss an unknown profile, newly written registration, or owner mutation between the scan and sink. A stopped-process probe narrows activity; it does not create a shared lock or an atomic owner snapshot. The safe product boundary returned to exact owner-written obsolete markers rather than treating absence from a reconstructed inventory as permission to delete.
+
+Before deriving deletion from owner metadata, answer:
+
+- Does the owner call the data an inventory, journal, cache, or best-effort index?
+- Can every supported profile, installation, and concurrent writer be enumerated?
+- Does Mole share the owner's lock, generation, or machine-readable garbage-collection command?
+- Can a new owner reference appear after the keep-set is built but before the sink?
+- Is interruption equivalent to a cache miss, or can it leave installed/session/authored state incomplete?
+
+If completeness or synchronization is not guaranteed, use only exact owner-authored removal markers, call an owner-supported cleanup command, offer a documented whole-cache reset when its recovery contract permits it, or leave the target alone. Adding more inferred keep sources does not turn an incomplete universe into authority.

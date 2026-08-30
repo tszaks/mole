@@ -1,6 +1,6 @@
 ---
 name: bugs
-description: "Mole incident catalog for destructive cleanup safety, bounded Shell/macOS probes, dry-run/real parity, cache and accounting consistency, Bats validity, and refusal diagnostics. Use for a Mole bug or safety-sensitive diff involving deletion evidence, unknown process state, timeouts or signals, system parsing, persisted derivations, totals, progress, or tests. Not for docs, releases, generic review, or other repositories."
+description: "Mole incident catalog for destructive cleanup safety, bounded Shell/macOS probes, cancellation and concurrency, dry-run/real parity, async freshness, cache and accounting consistency, Bats validity, and actionable gates. Use for a Mole bug or safety-sensitive diff involving deletion evidence, owner metadata, unknown process state, timeouts or signals, parallel workers, stale results, system parsing, persisted derivations, totals, progress, publication gates, or tests. Not for docs, release planning or notes, generic review, or other repositories."
 ---
 
 # Mole bug patterns
@@ -25,6 +25,11 @@ Choose only the reference families touched by the evidence. A whole-project audi
 | 10 | Slow work looks frozen | Find operations over roughly one second outside feedback | [State, accounting, and progress](references/state-accounting-and-progress.md) |
 | 11 | Regression test cannot fail | Prove positive control and pre-fix red state | [Test validity and refusal diagnostics](references/test-validity-and-refusal-diagnostics.md) |
 | 12 | Gate cannot explain why it refused | Map each reason code to one cause and next action | [Test validity and refusal diagnostics](references/test-validity-and-refusal-diagnostics.md) |
+| 13 | Mutation target is also accepted as a discovery container | Compare the recursive scan-root namespace with every purge target basename | [Deletion evidence and final sink](references/deletion-evidence-and-final-sink.md) |
+| 14 | Owner metadata is treated as a complete, atomic inventory | Identify who writes it, whether absence is authoritative, and what locks mutation | [Deletion evidence and final sink](references/deletion-evidence-and-final-sink.md) |
+| 15 | Cancellation stops one helper but later work continues | Trace 124 and signal statuses across loops, subshells, workers, and section orchestration | [Bounds, Shell, TTY, and parsing](references/shell-and-test-pitfalls.md) |
+| 16 | Async or cached data has no generation or freshness contract | Bind results to a request epoch and keep each sample's time, stale, and completeness fields together | [State, accounting, and progress](references/state-accounting-and-progress.md) |
+| 17 | Publication gate trusts ambiguous or pre-existing state | Require exact source/tag equality, one generated target, and an expected-absence ref lease | [Test validity and refusal diagnostics](references/test-validity-and-refusal-diagnostics.md) |
 
 ## Trace the complete mutation lifecycle
 
@@ -59,6 +64,7 @@ Do not trade final-sink rebinding or fail-closed owner checks for speed. Optimiz
 - Sweep siblings by call-site shape, not filename or helper name. Report `checked N / defective M / not applicable K`.
 - A recurring fix ships with a regression or source invariant that fails against the pre-fix code.
 - Treat tests as production consumers only after proving the production helper ran. Negative assertions require a positive trace.
+- A cancellation regression makes the next candidate otherwise eligible, then proves its probe and sink never run. Making every candidate fail for the same reason is a false sticky-cancellation test.
 - Absence-sensitive tests use an isolated `HOME` or fixture root; a shared `setup_file` home is not isolation.
 - Reproduce CI through `MOLE_TEST_NO_AUTH=1 ./scripts/test.sh` when possible. If invoking Bats directly with jobs, preserve `--no-parallelize-within-files`; files share state and raw `bats --jobs 6 file.bats` changes semantics.
 - Treat specialist or AI reports as leads. Read the implementation, callers, fallback branches, and final sink yourself.

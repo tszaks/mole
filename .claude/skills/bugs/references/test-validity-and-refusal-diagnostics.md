@@ -40,6 +40,8 @@ Known examples include a stale cache inherited through shared `HOME`, an `xcrun`
 
 The acceptance bar is red-green: run the new test against the pre-fix code, see the intended assertion fail, then restore the fix and see it pass.
 
+A cancellation test has one extra positive-control requirement: a later candidate must be eligible without the sticky stop. If every candidate independently returns the same timeout, the negative assertion for the later sink passes both before and after the fix.
+
 ## 12. A gate that cannot explain refusal
 
 A gate with several independent causes and one catch-all message forces the reporter to reverse-engineer the source and causes maintainers to fix whichever wording was quoted.
@@ -69,3 +71,17 @@ command grep -rn 'sudo .*2> */dev/null' install.sh lib/
 ```
 
 Pin reason-code routing and next-step branches in tests. Do not pin the catch-all prose.
+
+## 17. A publication gate trusts ambiguous or pre-existing state
+
+Publication turns parsed source and remote names into immutable public state, so loose matching and check-then-create races must fail closed.
+
+Use three exact contracts:
+
+1. Extract one non-empty source version and require the triggering tag to equal `V<source-version>` exactly. A prefix match or best-effort fallback can publish the wrong commit under a plausible tag.
+2. When rewriting a generated package formula, require exactly one intended top-level source URL and one paired source checksum. Zero matches means the layout drifted; multiple matches means the rewrite target is ambiguous. Do not count bottle checksums as source fields.
+3. Refuse to overwrite a pre-existing release branch, then close the race between that read and push with an expected-absence lease such as `--force-with-lease=refs/heads/<branch>:`. A read-only precheck alone is not concurrency control.
+
+The gate's failure should name the mismatched value or occupied ref and tell the maintainer what to inspect before rerunning. Tests should falsify empty, mismatched, duplicate, and pre-existing cases against an isolated fixture. A grep proving guard text exists is useful as a source invariant, but it does not prove the shell branch rejects the bad state.
+
+This pattern applies to publication safety defects in workflows and scripts. Release planning, version naming, notes, and announcement copy remain outside the `bugs` skill.
