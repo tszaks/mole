@@ -3818,6 +3818,64 @@ clean_claude_desktop_bundled_versions() {
     done
 }
 
+# Headless browser trees leaked by dead Playwright/agent automation sessions.
+# When an MCP server or agent harness dies without cleanup, its browser
+# daemons reparent to launchd (ppid 1) and the Chrome tree keeps running
+# headless, holding RSS; the ephemeral temp profiles keep disk. Only
+# processes tied to playwright_chromiumdev_profile-* automation profiles are
+# ever touched, never a user's real browser: orphaned Playwright daemons at
+# any age, browser processes only after a full day (a younger one may belong
+# to a live automation session).
+clean_dev_automation_browsers() {
+    local -a leaked_pids=()
+    local pid
+    while IFS= read -r pid; do
+        [[ -n "$pid" ]] && leaked_pids+=("$pid")
+    done < <(ps -Ao pid=,ppid=,etime=,command= 2> /dev/null | awk '
+        /playwright-core\/lib\/entry\/cliDaemon\.js/ && $2 == 1 { print $1; next }
+        /playwright_chromiumdev_profile/ && $3 ~ /-/ { print $1 }' | sort -un)
+
+    # Ephemeral automation profiles: stale after 2h, and never one that a
+    # live process still references.
+    local -a stale_profiles=()
+    local tmpdir
+    tmpdir=$(getconf DARWIN_USER_TEMP_DIR 2> /dev/null) || tmpdir=""
+    if [[ -n "$tmpdir" ]]; then
+        local d now age_hours
+        now=$(date +%s)
+        for d in "$tmpdir"playwright_chromiumdev_profile-*; do
+            [[ -d "$d" ]] || continue
+            age_hours=$(((now - $(stat -f %m "$d" 2> /dev/null || echo "$now")) / 3600))
+            [[ "$age_hours" -ge 2 ]] || continue
+            pgrep -qf "$d" 2> /dev/null && continue
+            stale_profiles+=("$d")
+        done
+    fi
+
+    if [[ ${#leaked_pids[@]} -gt 0 ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "  ${YELLOW}${ICON_DRY_RUN}${NC} Leaked automation browsers · would stop ${#leaked_pids[@]} processes ${YELLOW}dry${NC}"
+        else
+            local stopped=0
+            for pid in "${leaked_pids[@]}"; do
+                kill -TERM "$pid" 2> /dev/null && stopped=$((stopped + 1))
+            done
+            sleep 1
+            # Escalate for anything that ignored SIGTERM.
+            for pid in "${leaked_pids[@]}"; do
+                kill -0 "$pid" 2> /dev/null && kill -9 "$pid" 2> /dev/null || true
+            done
+            echo -e "  ${GREEN}${ICON_SUCCESS}${NC} Leaked automation browsers · stopped ${stopped} processes"
+        fi
+        note_activity
+    fi
+
+    if [[ ${#stale_profiles[@]} -gt 0 ]]; then
+        safe_clean "${stale_profiles[@]}" "Leaked browser profiles" || return $?
+    fi
+    return 0
+}
+
 clean_dev_ai_agents() {
     local keep_previous="${MOLE_AI_AGENTS_KEEP:-1}"
     [[ "$keep_previous" =~ ^[0-9]+$ ]] || keep_previous=1
@@ -5162,6 +5220,7 @@ clean_developer_tools() {
     _run_developer_cleanup_step clean_dev_jetbrains_toolbox || return $?
     _run_developer_cleanup_step clean_dev_jetbrains_logs || return $?
     _run_developer_cleanup_step --strict clean_dev_ai_agents || return $?
+    _run_developer_cleanup_step clean_dev_automation_browsers || return $?
     _run_developer_cleanup_step clean_dev_other_langs || return $?
     _run_developer_cleanup_step clean_dev_cicd || return $?
     _run_developer_cleanup_step clean_dev_database || return $?
