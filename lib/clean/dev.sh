@@ -2735,6 +2735,95 @@ _debug_simctl_probe_stderr() {
     debug_log "simctl probe $attempt stderr: $excerpt"
 }
 
+# Installed simulator runtimes that no device uses. Distinct from
+# clean_xcode_simulator_runtime_volumes (stale mount points) and from
+# unavailable-simulator cleanup (devices orphaned by a removed runtime):
+# this is the inverse, a runtime left behind after its last device went
+# away. Nothing in macOS or Xcode reports it, so an 8GB download can sit
+# unreferenced indefinitely.
+#
+# Review-only by design. A runtime is a toolchain payload that only Apple
+# can serve again, so it stays off the blanket delete path the same way
+# other downloaded toolchain roots do; the value here is naming the exact
+# orphan and the owner command, which is information the user cannot get
+# from simctl directly.
+check_orphaned_simulator_runtimes() {
+    command -v xcrun > /dev/null 2>&1 || return 0
+    [[ "${_MOLE_SIMCTL_RESOLUTION_STATUS:-}" == "ready" ]] || return 0
+
+    local runtime_list="" device_list="" probe_status=0
+    runtime_list=$(run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" \
+        env DEVELOPER_DIR="$_MOLE_SIMCTL_DEVELOPER_DIR" xcrun simctl runtime list -v 2> /dev/null) || probe_status=$?
+    if [[ $probe_status -ne 0 ]]; then
+        [[ $probe_status -eq 124 || $probe_status -ge 128 ]] && return "$probe_status"
+        debug_log "Orphaned runtime probe failed (exit=$probe_status)"
+        return 0
+    fi
+
+    probe_status=0
+    device_list=$(run_with_timeout "$MOLE_TIMEOUT_PKG_LIST_SEC" \
+        env DEVELOPER_DIR="$_MOLE_SIMCTL_DEVELOPER_DIR" xcrun simctl list devices 2> /dev/null) || probe_status=$?
+    if [[ $probe_status -ne 0 ]]; then
+        [[ $probe_status -eq 124 || $probe_status -ge 128 ]] && return "$probe_status"
+        debug_log "Orphaned runtime device probe failed (exit=$probe_status)"
+        return 0
+    fi
+
+    # `simctl runtime list -v` prints a header line per runtime followed by
+    # indented detail lines, one of which carries the on-disk size:
+    #   iOS 18.4 (22E238) - 70DF9A83-... (Ready)
+    #       Size: 8.2G
+    local current_name="" current_id="" current_size=""
+    local -a orphan_lines=()
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^([A-Za-z]+[[:space:]][0-9.]+)[[:space:]]\(.*\)[[:space:]]-[[:space:]]([0-9A-F-]{36}) ]]; then
+            # Flush the previous runtime before starting a new one.
+            _flush_orphan_runtime_candidate
+            current_name="${BASH_REMATCH[1]}"
+            current_id="${BASH_REMATCH[2]}"
+            current_size=""
+        elif [[ -n "$current_id" && "$line" =~ ^[[:space:]]+Size:[[:space:]]+(.+)$ ]]; then
+            current_size="${BASH_REMATCH[1]}"
+        fi
+    done <<< "$runtime_list"
+    _flush_orphan_runtime_candidate
+
+    # Expanding an empty array under `set -u` is an unbound-variable error on
+    # the bash 3.2 macOS ships, and "no orphans" is the common path.
+    [[ ${#orphan_lines[@]} -gt 0 ]] || return 0
+
+    local orphan
+    for orphan in "${orphan_lines[@]}"; do
+        echo -e "  ${GRAY}${ICON_REVIEW}${NC} Orphaned simulator runtime · ${orphan}"
+        note_activity
+    done
+    return 0
+}
+
+# Helper for check_orphaned_simulator_runtimes' parse loop: decide whether
+# the runtime just parsed has zero devices, and if so queue a review line.
+# Reads/writes the caller's locals by design (bash 3.2 has no namerefs).
+_flush_orphan_runtime_candidate() {
+    [[ -n "$current_id" && -n "$current_name" ]] || return 0
+
+    # Devices are grouped under a "-- <runtime name> --" header. Count the
+    # non-empty lines in this runtime's group; zero means orphaned.
+    local device_count
+    device_count=$(printf '%s\n' "$device_list" | awk -v want="-- ${current_name} --" '
+        index($0, want) == 1 { f = 1; next }
+        /^-- / { f = 0 }
+        f && NF { c++ }
+        END { print c + 0 }')
+
+    if [[ "$device_count" -eq 0 ]]; then
+        local size_note="${current_size:+, $current_size}"
+        orphan_lines+=("${current_name}${size_note} · no devices · remove with ${GRAY}xcrun simctl runtime delete ${current_id}${NC}")
+    fi
+    current_id=""
+    current_name=""
+    current_size=""
+}
+
 clean_dev_mobile() {
     check_android_ndk
     clean_xcode_documentation_cache || return $?
@@ -2946,6 +3035,7 @@ clean_dev_mobile() {
             echo -e "  ${GRAY}${ICON_WARNING}${NC} Xcode unavailable simulators · simctl could not be resolved"
             note_activity
         fi
+        check_orphaned_simulator_runtimes || return $?
     fi
     # Old iOS/watchOS/tvOS DeviceSupport versions (debug symbols for connected devices).
     # Each iOS version creates a 1-3 GB folder of debug symbols. Only the versions
