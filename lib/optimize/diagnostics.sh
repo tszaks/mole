@@ -567,17 +567,29 @@ opt_diag_memory_pressure() {
         [[ -n "$line" ]] || continue
         echo -e "    ${GRAY}${line}${NC}"
         shown=$((shown + 1))
-        # Strip the ps header BEFORE sorting. Sorting first pushes the
-        # non-numeric header row to the end, so an NR>1 filter would silently
-        # discard the LARGEST process instead — the exact row that matters most.
+        # The ps header is stripped inside opt_diag_get_rss_sample, BEFORE the
+        # sort here. Filtering it afterwards with NR>1 would discard the
+        # LARGEST process instead, since the non-numeric header sorts last.
+        #
+        # 256MB floor rather than 1GB: when pressure is spread across several
+        # mid-size processes there is no single 1GB offender, and a 1GB cutoff
+        # then prints nothing actionable at exactly the moment the user most
+        # needs a name. Observed live at 97% swap with no 1GB process.
     done < <(opt_diag_get_rss_sample |
         sort -rn |
-        awk '$1 > 1048576 {
-                gsub(/^.*\//, "", $2)
-                printf "  %-34s %.1f GB\n", $2, $1/1048576
+        awk '$1 > 262144 {
+                kb = $1
+                # comm can contain spaces ("Claude Helper (Renderer)"), so take
+                # every remaining field. Reading $2 alone printed fragments like
+                # "(2.1.223)" - a version string, not a process name.
+                name = ""
+                for (i = 2; i <= NF; i++) name = name (i > 2 ? " " : "") $i
+                sub(/^.*\//, "", name)
+                if (length(name) > 26) name = substr(name, 1, 25) "\xe2\x80\xa6"
+                printf "%-28s %5.1f GB\n", name, kb/1048576
              }' |
         head -4)
-    [[ "$shown" -gt 0 ]] || echo -e "    ${GRAY}(no single process over 1GB; pressure is spread across many)${NC}"
+    [[ "$shown" -gt 0 ]] || echo -e "    ${GRAY}pressure is spread across many small processes${NC}"
     return 0
 }
 
