@@ -585,7 +585,12 @@ opt_diag_memory_pressure() {
                 name = ""
                 for (i = 2; i <= NF; i++) name = name (i > 2 ? " " : "") $i
                 sub(/^.*\//, "", name)
-                if (length(name) > 26) name = substr(name, 1, 25) "\xe2\x80\xa6"
+                # Truncate from the LEFT. These are often reverse-DNS names
+                # where the tail identifies the process
+                # ("com.apple.Virtualization.VirtualMachine"); keeping the head
+                # would print "com.apple.Virtualization.…" and hide which
+                # service it actually is.
+                if (length(name) > 26) name = "\xe2\x80\xa6" substr(name, length(name) - 24)
                 printf "%-28s %5.1f GB\n", name, kb/1048576
              }' |
         head -4)
