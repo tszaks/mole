@@ -392,8 +392,20 @@ run_optimize_diagnostics() {
         fi
     done
 
-    if [[ -z "$primary_family" ]]; then
+    # Memory and stuck-process checks run alongside the family CPU scan. They
+    # cover the two shapes the family list cannot see, and each stays silent
+    # when healthy, so a clean machine still prints one reassuring line below.
+    local extra_findings=0
+    local mem_out runaway_out vm_out
+    mem_out=$(opt_diag_memory_pressure) || true
+    vm_out=$(opt_diag_idle_vm) || true
+    runaway_out=$(opt_diag_runaway_process) || true
+    [[ -n "$mem_out" || -n "$vm_out" || -n "$runaway_out" ]] && extra_findings=1
+
+    if [[ -z "$primary_family" && "$extra_findings" -eq 0 ]]; then
         echo -e "  ${GREEN}${ICON_SUCCESS}${NC} No sustained high-CPU bottleneck detected"
+    elif [[ -z "$primary_family" ]]; then
+        : # extra findings print below; no CPU-family bottleneck to headline
     else
         label=$(opt_diag_family_label "$primary_family")
         echo -e "  ${YELLOW}${ICON_WARNING}${NC} Likely bottleneck: ${label} (~${primary_avg}% CPU sustained)"
@@ -407,6 +419,10 @@ run_optimize_diagnostics() {
             done <<< "$sustained_details"
         fi
     fi
+
+    [[ -n "$runaway_out" ]] && printf '%s\n' "$runaway_out"
+    [[ -n "$mem_out" ]] && printf '%s\n' "$mem_out"
+    [[ -n "$vm_out" ]] && printf '%s\n' "$vm_out"
 
     # Mounted-image checks are scoped to sustained syspolicyd pressure: a
     # mounted DMG on an otherwise healthy system is not a diagnosis finding,
@@ -431,4 +447,209 @@ run_optimize_diagnostics() {
 
         opt_diag_offer_detach_candidates "$detach_candidates"
     fi
+}
+
+# ============================================================================
+# Memory and runaway-process diagnosis
+#
+# The family-based CPU checks above only look at five known process families,
+# so they miss the two failure shapes that actually make a Mac feel slow:
+#   1. memory exhaustion (swap thrash), where load is high but nothing is busy
+#   2. a single process stuck in a run loop that is not in the family list
+# Both are read-only diagnosis. Nothing here kills or changes anything.
+# ============================================================================
+
+readonly MOLE_OPTIMIZE_SWAP_PCT_DEFAULT=50
+readonly MOLE_OPTIMIZE_FREE_PCT_DEFAULT=15
+readonly MOLE_OPTIMIZE_IDLE_VM_GB_DEFAULT=2
+readonly MOLE_OPTIMIZE_RUNAWAY_PCT_DEFAULT=25
+readonly MOLE_OPTIMIZE_RUNAWAY_MIN_HOURS_DEFAULT=12
+
+# Injection seams so diagnosis is deterministic under test, matching the
+# existing MOLE_OPTIMIZE_PS_SAMPLE_* convention above. Without these, the
+# memory and runaway checks read live system state and any assertion about a
+# "quiet" run depends on whatever the test host happens to be doing.
+opt_diag_get_swapusage() {
+    if [[ -n "${MOLE_OPTIMIZE_SWAPUSAGE:-}" ]]; then
+        printf '%s\n' "$MOLE_OPTIMIZE_SWAPUSAGE"
+        return 0
+    fi
+    sysctl -n vm.swapusage 2> /dev/null || true
+}
+
+opt_diag_get_mem_free_pct() {
+    if [[ -n "${MOLE_OPTIMIZE_MEM_FREE_PCT:-}" ]]; then
+        printf '%s\n' "$MOLE_OPTIMIZE_MEM_FREE_PCT"
+        return 0
+    fi
+    memory_pressure 2> /dev/null | awk -F': ' '/free percentage/ {gsub(/%/,"",$2); print int($2)}' | tail -1
+}
+
+# shellcheck disable=SC2009  # pgrep cannot report RSS; the column is the point.
+opt_diag_get_rss_sample() {
+    if [[ -n "${MOLE_OPTIMIZE_RSS_SAMPLE:-}" ]]; then
+        printf '%s\n' "$MOLE_OPTIMIZE_RSS_SAMPLE"
+        return 0
+    fi
+    ps -Ao rss,comm 2> /dev/null | tail -n +2 | grep -v CoreSimulator || true
+}
+
+# shellcheck disable=SC2009  # pgrep cannot report TIME/ELAPSED; both are required.
+opt_diag_get_proctime_sample() {
+    if [[ -n "${MOLE_OPTIMIZE_PROCTIME_SAMPLE:-}" ]]; then
+        printf '%s\n' "$MOLE_OPTIMIZE_PROCTIME_SAMPLE"
+        return 0
+    fi
+    ps -Ao pid,time,etime,comm 2> /dev/null | tail -n +2 | grep -v CoreSimulator || true
+}
+
+# shellcheck disable=SC2009  # needs full COMMAND path to match the VM binary.
+opt_diag_get_vm_sample() {
+    if [[ -n "${MOLE_OPTIMIZE_VM_SAMPLE:-}" ]]; then
+        printf '%s\n' "$MOLE_OPTIMIZE_VM_SAMPLE"
+        return 0
+    fi
+    ps -Ao rss,command 2> /dev/null | tail -n +2 | grep -v CoreSimulator || true
+}
+
+opt_diag_int_env() {
+    local value="${1:-}" fallback="${2:-0}"
+    [[ "$value" =~ ^[0-9]+$ ]] || value="$fallback"
+    printf '%s\n' "$value"
+}
+
+# Convert ps time/etime ([[dd-]hh:]mm:ss) to seconds. Returns 0 on garbage so a
+# malformed row can never inflate a ratio into a false runaway report.
+opt_diag_time_to_seconds() {
+    printf '%s\n' "${1:-}" | awk -F: '
+        BEGIN { d = 0 }
+        {
+            n = NF
+            if (n < 2 || n > 3) { print 0; exit }
+            first = $1
+            if (first ~ /-/) { split(first, p, "-"); d = p[1]; first = p[2] }
+            if (n == 3) { h = first; m = $2; s = $3 }
+            else        { h = 0;     m = first; s = $2 }
+            if (h !~ /^[0-9]+$/ || m !~ /^[0-9]+$/ || s !~ /^[0-9.]+$/) { print 0; exit }
+            printf "%d\n", d * 86400 + h * 3600 + m * 60 + s
+        }'
+}
+
+# Swap pressure, and the processes actually responsible for it. Silent when
+# memory is healthy.
+opt_diag_memory_pressure() {
+    local swap_line swap_total swap_used swap_pct free_pct warn_swap warn_free
+    warn_swap=$(opt_diag_int_env "${MOLE_OPTIMIZE_SWAP_PCT:-}" "$MOLE_OPTIMIZE_SWAP_PCT_DEFAULT")
+    warn_free=$(opt_diag_int_env "${MOLE_OPTIMIZE_FREE_PCT:-}" "$MOLE_OPTIMIZE_FREE_PCT_DEFAULT")
+
+    swap_line=$(opt_diag_get_swapusage)
+    [[ -n "$swap_line" ]] || return 0
+    swap_total=$(printf '%s\n' "$swap_line" | awk '{gsub(/M/,"",$3); print int($3)}')
+    swap_used=$(printf '%s\n' "$swap_line" | awk '{gsub(/M/,"",$6); print int($6)}')
+    [[ "$swap_total" =~ ^[0-9]+$ && "$swap_used" =~ ^[0-9]+$ ]] || return 0
+
+    swap_pct=0
+    [[ "$swap_total" -gt 0 ]] && swap_pct=$((swap_used * 100 / swap_total))
+    free_pct=$(opt_diag_get_mem_free_pct)
+    [[ "$free_pct" =~ ^[0-9]+$ ]] || free_pct=100
+
+    if [[ "$swap_pct" -lt "$warn_swap" && "$free_pct" -ge "$warn_free" ]]; then
+        return 0
+    fi
+
+    echo -e "  ${YELLOW}${ICON_WARNING}${NC} Memory pressure: swap $((swap_used / 1024))GB of $((swap_total / 1024))GB used (${swap_pct}%), ${free_pct}% free"
+    echo -e "  ${GRAY}${ICON_REVIEW}${NC} High load with little CPU activity is usually this, not compute"
+
+    # Name the actual holders. Simulator runtimes ship duplicate daemons whose
+    # rows would otherwise crowd out the real offenders.
+    local shown=0
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        echo -e "    ${GRAY}${line}${NC}"
+        shown=$((shown + 1))
+        # Strip the ps header BEFORE sorting. Sorting first pushes the
+        # non-numeric header row to the end, so an NR>1 filter would silently
+        # discard the LARGEST process instead — the exact row that matters most.
+    done < <(opt_diag_get_rss_sample |
+        sort -rn |
+        awk '$1 > 1048576 {
+                gsub(/^.*\//, "", $2)
+                printf "  %-34s %.1f GB\n", $2, $1/1048576
+             }' |
+        head -4)
+    [[ "$shown" -gt 0 ]] || echo -e "    ${GRAY}(no single process over 1GB; pressure is spread across many)${NC}"
+    return 0
+}
+
+# A virtual machine holding gigabytes while doing no work. Docker Desktop is
+# the common case: its Linux VM claims its full memory reservation even with
+# zero containers running, which is invisible to disk-oriented checks.
+opt_diag_idle_vm() {
+    local min_gb vm_kb vm_gb
+    min_gb=$(opt_diag_int_env "${MOLE_OPTIMIZE_IDLE_VM_GB:-}" "$MOLE_OPTIMIZE_IDLE_VM_GB_DEFAULT")
+
+    vm_kb=$(opt_diag_get_vm_sample |
+        awk '/Virtualization.framework.*VirtualMachine/ {s += $1} END {print s + 0}')
+    [[ "$vm_kb" =~ ^[0-9]+$ ]] || return 0
+    [[ "$vm_kb" -gt $((min_gb * 1048576)) ]] || return 0
+    vm_gb=$(awk -v k="$vm_kb" 'BEGIN {printf "%.1f", k/1048576}')
+
+    # Only claim it is idle if the owner agrees. A probe that cannot answer
+    # must not produce a "safe to quit" recommendation.
+    local running=""
+    if command -v docker > /dev/null 2>&1; then
+        running=$(run_with_timeout "$MOLE_TIMEOUT_SHORT_QUERY_SEC" docker ps -q 2> /dev/null | grep -c . || true)
+    fi
+
+    if [[ "$running" == "0" ]]; then
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} Docker Desktop VM holding ${vm_gb}GB with no running containers"
+        echo -e "  ${GRAY}${ICON_REVIEW}${NC} Quitting Docker Desktop reclaims all of it; it reserves memory even when idle"
+    else
+        echo -e "  ${GRAY}${ICON_LIST}${NC} Virtual machine using ${vm_gb}GB${running:+ (${running} containers running)}"
+    fi
+    return 0
+}
+
+# A process stuck in a run loop: high CPU averaged over its entire lifetime,
+# which is what `ps` TIME/ELAPSED actually measures. A momentary spike cannot
+# trip this, and neither can a short-lived process.
+opt_diag_runaway_process() {
+    local pct_floor min_hours
+    pct_floor=$(opt_diag_int_env "${MOLE_OPTIMIZE_RUNAWAY_PCT:-}" "$MOLE_OPTIMIZE_RUNAWAY_PCT_DEFAULT")
+    min_hours=$(opt_diag_int_env "${MOLE_OPTIMIZE_RUNAWAY_MIN_HOURS:-}" "$MOLE_OPTIMIZE_RUNAWAY_MIN_HOURS_DEFAULT")
+
+    local found=1 pid comm cputime etime cpu_s el_s pct hours
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        pid=$(printf '%s\n' "$line" | awk '{print $1}')
+        cputime=$(printf '%s\n' "$line" | awk '{print $2}')
+        etime=$(printf '%s\n' "$line" | awk '{print $3}')
+        comm=$(printf '%s\n' "$line" | awk '{for (i=4; i<=NF; i++) printf "%s%s", $i, (i<NF?" ":"")}')
+        comm="${comm##*/}"
+
+        # kernel_task is expected to accumulate CPU; it is thermal management,
+        # not a stuck process, and reporting it would be noise every run.
+        [[ "$comm" == "kernel_task" ]] && continue
+        # WindowServer and the other scanned families are already headlined by
+        # the family CPU check above; repeating them here would double-report
+        # a single problem under two different names.
+        case "$comm" in
+            WindowServer | mds | mds_stores | mdworker* | syspolicyd) continue ;;
+        esac
+
+        cpu_s=$(opt_diag_time_to_seconds "$cputime")
+        el_s=$(opt_diag_time_to_seconds "$etime")
+        [[ "$el_s" -gt $((min_hours * 3600)) ]] || continue
+        [[ "$cpu_s" -gt 0 ]] || continue
+
+        pct=$((cpu_s * 100 / el_s))
+        [[ "$pct" -ge "$pct_floor" ]] || continue
+
+        hours=$((cpu_s / 3600))
+        echo -e "  ${YELLOW}${ICON_WARNING}${NC} ${comm} has burned ${hours}h CPU over $((el_s / 3600))h of runtime (~${pct}% sustained)"
+        echo -e "  ${GRAY}${ICON_REVIEW}${NC} A stuck run loop. Restarting it usually clears it: ${NC}kill -TERM ${pid}${GRAY} (launchd respawns system daemons)${NC}"
+        found=0
+    done < <(opt_diag_get_proctime_sample | head -400)
+
+    return "$found"
 }
